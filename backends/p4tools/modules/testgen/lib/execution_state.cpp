@@ -99,7 +99,7 @@ boost::optional<const Continuation::Command> ExecutionState::getNextCmd() const 
     return body.next();
 }
 
-const IR::Expression* ExecutionState::get(const StateVariable& var) const {
+const IR::Expression* ExecutionState::get(const IR::StateVariable& var) const {
     const auto* expr = env.get(var);
     if (var->expr->type->is<IR::Type_Header>() && var->member != Utils::Valid) {
         // If we are setting the member of a header, we need to check whether the
@@ -133,9 +133,9 @@ bool ExecutionState::hasTaint(const IR::Expression* expr) const {
     return Taint::hasTaint(env.getInternalMap(), expr);
 }
 
-bool ExecutionState::exists(const StateVariable& var) const { return env.exists(var); }
+bool ExecutionState::exists(const IR::StateVariable& var) const { return env.exists(var); }
 
-void ExecutionState::set(const StateVariable& var, const IR::Expression* value) {
+void ExecutionState::set(const IR::StateVariable& var, const IR::Expression* value) {
     if (getProperty<bool>("inUndefinedState")) {
         // If we are in an undefined state, the variable we set is tainted.
         value = Utils::getTaintExpression(value->type);
@@ -329,7 +329,7 @@ void ExecutionState::pushBranchDecision(uint64_t bIdx) { selectedBranches.push_b
 
 const IR::Type_Bits* ExecutionState::getPacketSizeVarType() { return &packetSizeVarType; }
 
-const StateVariable& ExecutionState::getInputPacketSizeVar() {
+const IR::StateVariable& ExecutionState::getInputPacketSizeVar() {
     return Utils::getZombieConst(getPacketSizeVarType(), 0, "*packetLen_bits");
 }
 
@@ -507,10 +507,10 @@ const IR::Member* ExecutionState::getCurrentParserErrorLabel() const {
  *  Variables and symbolic constants
  * ============================================================================================= */
 
-const std::set<StateVariable>& ExecutionState::getZombies() const { return allocatedZombies; }
+const std::set<IR::StateVariable>& ExecutionState::getZombies() const { return allocatedZombies; }
 
-const StateVariable& ExecutionState::createZombieConst(const IR::Type* type, cstring name,
-                                                       uint64_t instanceId) {
+const IR::StateVariable& ExecutionState::createZombieConst(const IR::Type* type, cstring name,
+                                                           uint64_t instanceId) {
     const auto& zombie = Utils::getZombieConst(type, instanceId, name);
     const auto& result = allocatedZombies.insert(zombie);
     // The zombie already existed, check its type.
@@ -588,7 +588,7 @@ const IR::P4Action* ExecutionState::getActionDecl(const IR::Expression* expressi
     return expression->to<IR::P4Action>();
 }
 
-const StateVariable& ExecutionState::convertPathExpr(const IR::PathExpression* path) const {
+const IR::StateVariable& ExecutionState::convertPathExpr(const IR::PathExpression* path) const {
     const auto* decl = findDecl(path)->getNode();
     // Local variable.
     if (const auto* declVar = decl->to<IR::Declaration_Variable>()) {

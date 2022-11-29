@@ -48,7 +48,6 @@ set(
   core/z3_solver.cpp
 
   lib/format_int.cpp
-  lib/formulae.cpp
   lib/model.cpp
   lib/symbolic_env.cpp
   lib/taint.cpp

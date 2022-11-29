@@ -69,7 +69,7 @@ const Model* TestBackEnd::computeConcolicVariables(const ExecutionState* executi
             // We need to differentiate between state variables and expressions here.
             auto concolicType = concolicVariable.which();
             if (concolicType == 0) {
-                pathConstraint = new IR::Equ(boost::get<const StateVariable>(concolicVariable),
+                pathConstraint = new IR::Equ(boost::get<const IR::StateVariable>(concolicVariable),
                                              concolicAssignment);
             } else if (concolicType == 1) {
                 pathConstraint = new IR::Equ(boost::get<const IR::Expression*>(concolicVariable),

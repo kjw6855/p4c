@@ -190,7 +190,7 @@ bool AbstractStepper::stepGetHeaderValidity(const IR::Expression* headerRef) {
     if (const auto* headerUnion = headerRef->type->to<IR::Type_HeaderUnion>()) {
         for (const auto* field : headerUnion->fields) {
             auto* fieldRef = new IR::Member(field->type, headerRef, field->name);
-            auto variable = Utils::getHeaderValidity(fieldRef);
+            const auto& variable = Utils::getHeaderValidity(fieldRef);
             BUG_CHECK(state.exists(variable),
                       "At this point, the header validity bit should be initialized.");
             const auto* value = state.getSymbolicEnv().get(variable);
@@ -208,9 +208,9 @@ bool AbstractStepper::stepGetHeaderValidity(const IR::Expression* headerRef) {
         result->emplace_back(&state);
         return false;
     }
-    auto variable = Utils::getHeaderValidity(headerRef);
+    const auto& variable = Utils::getHeaderValidity(headerRef);
     BUG_CHECK(state.exists(variable),
-              "At this point, the header validity bit should be initialized.");
+              "At this point, the header validity bit %1% should be initialized.", variable);
     state.replaceTopBody(Continuation::Return(variable));
     result->emplace_back(&state);
     return false;
@@ -218,7 +218,7 @@ bool AbstractStepper::stepGetHeaderValidity(const IR::Expression* headerRef) {
 
 void AbstractStepper::setHeaderValidity(const IR::Expression* expr, bool validity,
                                         ExecutionState* nextState) {
-    auto headerRefValidity = Utils::getHeaderValidity(expr);
+    const auto& headerRefValidity = Utils::getHeaderValidity(expr);
     nextState->set(headerRefValidity, IR::getBoolLiteral(validity));
 
     // In some cases, the header may be part of a union.
@@ -391,7 +391,7 @@ void AbstractStepper::declareStructLike(ExecutionState* nextState, const IR::Exp
     }
 }
 
-void AbstractStepper::declareBaseType(ExecutionState* nextState, const StateVariable& paramPath,
+void AbstractStepper::declareBaseType(ExecutionState* nextState, const IR::StateVariable& paramPath,
                                       const IR::Type_Base* baseType) const {
     nextState->set(paramPath, programInfo.createTargetUninitialized(baseType, false));
 }

@@ -275,6 +275,8 @@ methodName
     | OPERATOR '<' '<'          { $$ = "operator<<"; }
     | OPERATOR '>'              { $$ = "operator>"; }
     | OPERATOR '>' '>'          { $$ = "operator>>"; }
+    | OPERATOR '*'              { $$ = "operator*"; }
+    | OPERATOR '-' '>'          { $$ = "operator->"; }
     ;
 
 optArgList : argList | ;
