@@ -12,7 +12,7 @@
 namespace P4Tools {
 
 /// Provides a higher-level interface for an SMT solver.
-class AbstractSolver {
+class AbstractSolver : public ICastable {
  public:
     /// Adds a comment to any log file that might be produced. Useful for understanding the
     /// sequence of calls made to the solver when debugging.
@@ -45,14 +45,6 @@ class AbstractSolver {
 
     /// @returns whether this solver is incremental.
     virtual bool isInIncrementalMode() const = 0;
-
-    /// Cast an abstract solver to its specific sub type.
-    /// Casts involving "const" have to explicit in this case. This is necessary because abstract
-    /// solvers have no straightforward mechanism to support clone operations.
-    template <typename T>
-    T* to() {
-        return dynamic_cast<T*>(this);
-    }
 };
 
 }  // namespace P4Tools

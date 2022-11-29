@@ -391,7 +391,7 @@ void AbstractStepper::declareStructLike(ExecutionState* nextState, const IR::Exp
     }
 }
 
-void AbstractStepper::declareBaseType(ExecutionState* nextState, const IR::Expression* paramPath,
+void AbstractStepper::declareBaseType(ExecutionState* nextState, const StateVariable& paramPath,
                                       const IR::Type_Base* baseType) const {
     nextState->set(paramPath, programInfo.createTargetUninitialized(baseType, false));
 }
