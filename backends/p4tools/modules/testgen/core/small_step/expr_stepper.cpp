@@ -6,7 +6,6 @@
 #include <utility>
 #include <vector>
 
-#include "backends/p4tools/common/lib/formulae.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/declaration.h"

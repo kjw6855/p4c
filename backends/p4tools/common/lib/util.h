@@ -11,7 +11,6 @@
 #include <boost/optional/optional.hpp>
 #include <boost/random/mersenne_twister.hpp>
 
-#include "backends/p4tools/common/lib/formulae.h"
 #include "ir/ir.h"
 #include "lib/big_int_util.h"
 #include "lib/cstring.h"

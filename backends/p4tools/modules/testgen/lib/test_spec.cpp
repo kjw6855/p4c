@@ -7,7 +7,6 @@
 #include <boost/none.hpp>
 #include <boost/variant/apply_visitor.hpp>
 
-#include "backends/p4tools/common/lib/formulae.h"
 #include "ir/irutils.h"
 #include "lib/exceptions.h"
 #include "p4tools/common/lib/model.h"

@@ -10,7 +10,6 @@
 #include <boost/none.hpp>
 #include <boost/optional/optional.hpp>
 
-#include "backends/p4tools/common/lib/formulae.h"
 #include "backends/p4tools/common/lib/trace_events.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/declaration.h"

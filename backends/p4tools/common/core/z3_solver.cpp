@@ -351,7 +351,7 @@ const Model* Z3Solver::getModel() const {
             BUG_CHECK(declaredVars.count(exprId) > 0, "Z3Solver: unknown variable declaration: %1%",
                       z3Expr);
             const auto stateVar = declaredVars.at(exprId);
-            const auto* value = toValue(z3Value, stateVar->type);
+            const auto* value = toLiteral(z3Value, stateVar->type);
             result->emplace(stateVar, value);
         }
     } catch (z3::exception& e) {
@@ -364,7 +364,7 @@ const Model* Z3Solver::getModel() const {
     return result;
 }
 
-const Value* Z3Solver::toValue(const z3::expr& e, const IR::Type* type) {
+const IR::Literal* Z3Solver::toLiteral(const z3::expr& e, const IR::Type* type) {
     // Handle booleans.
     if (type->is<IR::Type::Boolean>()) {
         BUG_CHECK(e.is_bool(), "Expected a boolean value: %1%", e);

@@ -9,7 +9,6 @@
 #include <boost/none.hpp>
 
 #include "backends/p4tools/common/core/solver.h"
-#include "backends/p4tools/common/lib/formulae.h"
 #include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"

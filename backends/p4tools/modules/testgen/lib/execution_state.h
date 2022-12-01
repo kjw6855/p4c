@@ -15,7 +15,6 @@
 #include <boost/variant/get.hpp>
 
 #include "backends/p4tools/common/compiler/reachability.h"
-#include "backends/p4tools/common/lib/formulae.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_events.h"
 #include "gsl/gsl-lite.hpp"

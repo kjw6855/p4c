@@ -12,7 +12,6 @@
 
 #include <boost/variant/variant.hpp>
 
-#include "backends/p4tools/common/lib/formulae.h"
 #include "backends/p4tools/common/lib/model.h"
 #include "gsl/gsl-lite.hpp"
 #include "ir/ir.h"

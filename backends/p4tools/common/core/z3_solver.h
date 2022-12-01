@@ -13,7 +13,6 @@
 #include <boost/optional/optional.hpp>
 
 #include "backends/p4tools/common/core/solver.h"
-#include "backends/p4tools/common/lib/formulae.h"
 #include "backends/p4tools/common/lib/model.h"
 #include "ir/ir.h"
 #include "ir/json_generator.h"
@@ -92,8 +91,8 @@ class Z3Solver : public AbstractSolver {
     /// output stream.
     void generateName(std::ostringstream& ostr, const IR::StateVariable& var) const;
 
-    /// Converts a Z3 expression to a value with the given type.
-    static const Value* toValue(const z3::expr& e, const IR::Type* type);
+    /// Converts a Z3 expression to an IR::Literal with the given type.
+    static const IR::Literal* toLiteral(const z3::expr& e, const IR::Type* type);
 
     /// Adds pushes for incremental solver.
     /// Increments @a chkIndex and calls push for each occurrence

@@ -9,7 +9,6 @@
 #include <boost/optional/optional.hpp>
 
 #include "backends/p4tools/common/core/z3_solver.h"
-#include "backends/p4tools/common/lib/formulae.h"
 #include "backends/p4tools/common/lib/model.h"
 #include "gsl/gsl-lite.hpp"
 #include "gtest/gtest-message.h"

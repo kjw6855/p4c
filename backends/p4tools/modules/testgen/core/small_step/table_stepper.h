@@ -7,7 +7,6 @@
 
 #include <boost/optional/optional.hpp>
 
-#include "backends/p4tools/common/lib/formulae.h"
 #include "ir/ir.h"
 #include "lib/cstring.h"
 
