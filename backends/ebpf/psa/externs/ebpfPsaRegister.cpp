@@ -17,7 +17,20 @@ limitations under the License.
 
 #include "ebpfPsaRegister.h"
 
+#include <boost/format.hpp>
+
+#include "backends/ebpf/ebpfTable.h"
+#include "backends/ebpf/ebpfType.h"
 #include "backends/ebpf/psa/ebpfPsaControl.h"
+#include "backends/ebpf/target.h"
+#include "frontends/common/resolveReferences/referenceMap.h"
+#include "ir/vector.h"
+#include "lib/big_int_util.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/null.h"
+#include "lib/stringify.h"
 
 namespace EBPF {
 

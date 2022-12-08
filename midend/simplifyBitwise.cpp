@@ -1,6 +1,17 @@
 #include "simplifyBitwise.h"
 
+#include <string>
+#include <vector>
+
+#include <boost/core/enable_if.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+#include <boost/multiprecision/detail/et_ops.hpp>
+#include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/traits/explicit_conversion.hpp>
+
 #include "ir/pattern.h"
+#include "lib/cstring.h"
+#include "lib/safe_vector.h"
 
 namespace P4 {
 

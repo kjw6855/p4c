@@ -14,11 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include "lib/source_file.h"
+
 #include "gtest/gtest.h"
+#include "lib/compile_context.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
-#include "lib/source_file.h"
-#include "lib/compile_context.h"
 
 namespace Util {
 

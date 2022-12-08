@@ -18,12 +18,15 @@
 #ifndef _BACKENDS_GRAPHS_PARSERS_H_
 #define _BACKENDS_GRAPHS_PARSERS_H_
 
+#include <map>
+#include <vector>
+
+#include <boost/optional/optional.hpp>
+
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "graphs.h"
 #include "ir/ir.h"
 #include "lib/cstring.h"
-#include "lib/nullstream.h"
-#include "lib/path.h"
 #include "lib/safe_vector.h"
 
 namespace graphs {

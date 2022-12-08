@@ -17,6 +17,9 @@ limitations under the License.
 #include "big_int_util.h"
 
 #include <stdexcept>
+#include <string>
+
+#include <boost/multiprecision/cpp_int/bitwise.hpp>
 
 namespace Util {
 

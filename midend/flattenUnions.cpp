@@ -16,6 +16,16 @@ limitations under the License.
 
 #include "flattenUnions.h"
 
+#include <algorithm>
+#include <iostream>
+#include <list>
+#include <utility>
+
+#include "frontends/p4/methodInstance.h"
+#include "ir/id.h"
+#include "lib/big_int_util.h"
+#include "lib/log.h"
+
 namespace P4 {
 const IR::MethodCallStatement *HandleValidityHeaderUnion::processValidityForStr(
     const IR::Statement *s, const IR::Member *m, cstring headerElement, cstring setValid) {

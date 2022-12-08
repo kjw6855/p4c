@@ -16,6 +16,21 @@ limitations under the License.
 
 #include "parserControlFlow.h"
 
+#include <list>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/log.h"
+#include "lib/ordered_map.h"
+
 namespace P4 {
 
 const IR::Node *DoRemoveParserControlFlow::postorder(IR::ParserState *state) {

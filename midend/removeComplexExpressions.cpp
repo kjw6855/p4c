@@ -16,9 +16,14 @@ limitations under the License.
 
 #include "removeComplexExpressions.h"
 
+#include <iosfwd>
+#include <list>
+
+#include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"
-#include "frontends/p4/fromv1.0/v1model.h"
 #include "frontends/p4/methodInstance.h"
+#include "ir/id.h"
+#include "lib/log.h"
 
 namespace P4 {
 

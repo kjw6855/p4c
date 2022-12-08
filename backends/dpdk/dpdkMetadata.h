@@ -17,9 +17,24 @@ limitations under the License.
 #ifndef BACKENDS_DPDK_DPDKMETADATA_H_
 #define BACKENDS_DPDK_DPDKMETADATA_H_
 
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include <boost/format.hpp>
+
 #include "dpdkUtils.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
+#include "ir/indexed_vector.h"
 #include "ir/ir.h"
+#include "ir/node.h"
+#include "ir/vector.h"
+#include "ir/visitor.h"
+#include "lib/cstring.h"
+#include "lib/ordered_map.h"
+#include "lib/ordered_set.h"
+#include "lib/safe_vector.h"
 
 namespace DPDK {
 

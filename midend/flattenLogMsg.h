@@ -1,8 +1,28 @@
 #ifndef MIDEND_FLATTENLOGMSG_H_
 #define MIDEND_FLATTENLOGMSG_H_
 
+#include <stddef.h>
+
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
+#include "frontends/p4/typeMap.h"
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
 #include "ir/ir.h"
+#include "ir/node.h"
+#include "ir/pass_manager.h"
+#include "ir/vector.h"
+#include "ir/visitor.h"
+#include "lib/cstring.h"
+#include "lib/null.h"
+#include "lib/ordered_map.h"
+#include "lib/safe_vector.h"
 
 namespace P4 {
 

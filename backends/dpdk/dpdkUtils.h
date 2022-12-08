@@ -18,6 +18,7 @@ limitations under the License.
 
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "ir/ir.h"
+#include "lib/cstring.h"
 
 namespace DPDK {
 bool isSimpleExpression(const IR::Expression *e);

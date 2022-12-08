@@ -16,6 +16,13 @@ limitations under the License.
 
 #include "resetHeaders.h"
 
+#include <iosfwd>
+
+#include "ir/id.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/log.h"
+
 namespace P4 {
 
 void DoResetHeaders::generateResets(const TypeMap *typeMap, const IR::Type *type,

@@ -15,7 +15,17 @@ limitations under the License.
 */
 #include "predication.h"
 
+#include <algorithm>
+#include <ostream>
+#include <string>
+#include <utility>
+
 #include "frontends/p4/cloner.h"
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "lib/big_int_util.h"
+#include "lib/log.h"
+
 namespace P4 {
 
 namespace Pred {

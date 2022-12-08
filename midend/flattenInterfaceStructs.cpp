@@ -16,6 +16,10 @@ limitations under the License.
 
 #include "flattenInterfaceStructs.h"
 
+#include "ir/declaration.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+
 namespace P4 {
 
 namespace {

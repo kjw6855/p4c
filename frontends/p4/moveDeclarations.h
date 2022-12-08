@@ -17,8 +17,22 @@ limitations under the License.
 #ifndef _FRONTENDS_P4_MOVEDECLARATIONS_H_
 #define _FRONTENDS_P4_MOVEDECLARATIONS_H_
 
+#include <string>
+#include <vector>
+
+#include <boost/format.hpp>
+
 #include "frontends/common/resolveReferences/referenceMap.h"
+#include "ir/indexed_vector.h"
 #include "ir/ir.h"
+#include "ir/node.h"
+#include "ir/vector.h"
+#include "ir/visitor.h"
+#include "lib/cstring.h"
+#include "lib/exceptions.h"
+#include "lib/null.h"
+#include "lib/ordered_map.h"
+#include "lib/safe_vector.h"
 
 namespace P4 {
 

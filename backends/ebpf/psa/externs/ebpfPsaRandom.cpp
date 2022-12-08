@@ -13,6 +13,15 @@ limitations under the License.
 */
 #include "ebpfPsaRandom.h"
 
+#include <boost/format.hpp>
+
+#include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/null.h"
+
 namespace EBPF {
 
 EBPFRandomPSA::EBPFRandomPSA(const IR::Declaration_Instance *di)

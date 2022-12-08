@@ -16,7 +16,10 @@ limitations under the License.
 
 #include "tableHit.h"
 
+#include <iosfwd>
+
 #include "frontends/p4/tableApply.h"
+#include "lib/log.h"
 
 namespace P4 {
 

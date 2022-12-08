@@ -19,11 +19,10 @@ limitations under the License.
 
 #include <vector>
 
-#include <boost/optional.hpp>
+#include <boost/optional/optional.hpp>
 
 #include "ir/ir.h"
 #include "ir/visitor.h"
-#include "lib/cstring.h"
 
 namespace P4 {
 

@@ -16,6 +16,22 @@ limitations under the License.
 
 #include "strengthReduction.h"
 
+#include <stddef.h>
+
+#include <ostream>
+
+#include <boost/core/enable_if.hpp>
+#include <boost/format.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+#include <boost/multiprecision/detail/et_ops.hpp>
+#include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/traits/explicit_conversion.hpp>
+
+#include "lib/big_int_util.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/log.h"
+
 namespace P4 {
 
 /// @section Helper methods

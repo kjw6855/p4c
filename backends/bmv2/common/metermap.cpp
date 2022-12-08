@@ -16,6 +16,15 @@ limitations under the License.
 
 #include "metermap.h"
 
+#include <boost/format.hpp>
+
+#include "ir/id.h"
+#include "lib/cstring.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/map.h"
+
 namespace BMV2 {
 
 /**

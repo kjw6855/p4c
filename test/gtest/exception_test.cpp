@@ -15,7 +15,12 @@ limitations under the License.
 */
 
 #include <exception>
+#include <string>
 
+#include <boost/format.hpp>
+
+#include "gtest/gtest-message.h"
+#include "gtest/gtest-test-part.h"
 #include "gtest/gtest.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
@@ -26,10 +31,10 @@ TEST(UtilException, Messages) {
     // Check that exception message formatting works as expected.
     try {
         throw CompilerBug("test");
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         cstring err(ex.what());
         cstring redir_msg("Compiler Bug:\ntest\n");
-        cstring no_redir_msg = cstring(ANSI_RED) + "Compiler Bug" + ANSI_CLR +":\ntest\n";
+        cstring no_redir_msg = cstring(ANSI_RED) + "Compiler Bug" + ANSI_CLR + ":\ntest\n";
         // The error message might or might not be colorized based on if the test are redirected
         // or not, to make sure both options are valid an array is used.
         bool is_content_correct = (err == redir_msg) || (err == no_redir_msg);
@@ -38,7 +43,7 @@ TEST(UtilException, Messages) {
 
     try {
         throw CompilationError("Testing error %1%", 1);
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         cstring err(ex.what());
         EXPECT_EQ(err, "Testing error 1\n");
     }

@@ -17,8 +17,13 @@ limitations under the License.
 #ifndef FRONTENDS_P4_14_HEADER_TYPE_H_
 #define FRONTENDS_P4_14_HEADER_TYPE_H_
 
+#include <boost/format.hpp>
+
+#include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/visitor.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
 
 class CheckHeaderTypes : public Modifier {
     const IR::V1Program *global = nullptr;

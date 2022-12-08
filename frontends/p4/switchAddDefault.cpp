@@ -16,6 +16,12 @@ limitations under the License.
 
 #include "switchAddDefault.h"
 
+#include <vector>
+
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
 #include "lib/ordered_set.h"
 
 namespace P4 {

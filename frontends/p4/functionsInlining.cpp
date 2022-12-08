@@ -16,11 +16,25 @@ limitations under the License.
 
 #include "functionsInlining.h"
 
+#include <list>
+#include <ostream>
+#include <string>
+#include <utility>
+
+#include <boost/format.hpp>
+
 #include "frontends/common/resolveReferences/resolveReferences.h"
-#include "frontends/p4/callGraph.h"
+#include "frontends/p4/commonInlining.h"
 #include "frontends/p4/evaluator/substituteParameters.h"
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/parameterSubstitution.h"
+#include "frontends/p4/typeChecking/typeSubstitution.h"
+#include "ir/id.h"
+#include "ir/vector.h"
+#include "lib/error.h"
+#include "lib/exceptions.h"
+#include "lib/map.h"
+#include "lib/ordered_map.h"
 
 namespace P4 {
 

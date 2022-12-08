@@ -12,7 +12,6 @@
 #include "backends/p4tools/common/lib/zombie.h"
 #include "frontends/p4/optimizeExpressions.h"
 #include "ir/indexed_vector.h"
-#include "ir/irutils.h"
 #include "ir/vector.h"
 #include "ir/visitor.h"
 #include "lib/exceptions.h"

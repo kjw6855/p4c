@@ -16,10 +16,26 @@ limitations under the License.
 
 #include "lower.h"
 
-#include "frontends/p4/coreLibrary.h"
+#include <ostream>
+#include <string>
+#include <vector>
+
+#include <boost/format.hpp>
+#include <boost/multiprecision/number.hpp>
+
 #include "frontends/p4/fromv1.0/v1model.h"
 #include "frontends/p4/methodInstance.h"
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
 #include "lib/big_int_util.h"
+#include "lib/cstring.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/log.h"
+#include "lib/ordered_map.h"
+#include "lib/safe_vector.h"
 
 namespace BMV2 {
 

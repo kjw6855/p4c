@@ -16,6 +16,19 @@ limitations under the License.
 
 #include "setHeaders.h"
 
+#include <iosfwd>
+#include <list>
+#include <string>
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "lib/cstring.h"
+#include "lib/log.h"
+#include "lib/ordered_map.h"
+
 namespace P4 {
 
 void DoSetHeaders::generateSetValid(const IR::Expression *dest, const IR::Expression *src,

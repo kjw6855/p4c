@@ -6,7 +6,6 @@
 #include <iostream>
 #include <string>
 
-#include <boost/cstdint.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 #include <boost/none.hpp>

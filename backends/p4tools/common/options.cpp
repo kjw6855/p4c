@@ -1,12 +1,14 @@
 #include "backends/p4tools/common/options.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
+
+#include <boost/format.hpp>
 
 #include "backends/p4tools/common/compiler/compiler_target.h"
 #include "backends/p4tools/common/core/target.h"

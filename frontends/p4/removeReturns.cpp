@@ -16,7 +16,16 @@ limitations under the License.
 
 #include "removeReturns.h"
 
-#include "frontends/p4/methodInstance.h"
+#include <iosfwd>
+#include <list>
+#include <string>
+
+#include <boost/format.hpp>
+
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "lib/log.h"
+#include "lib/ordered_map.h"
 
 namespace P4 {
 

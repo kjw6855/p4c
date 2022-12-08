@@ -1,6 +1,5 @@
 #include "backends/p4tools/common/lib/model.h"
 
-#include <list>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -10,9 +9,7 @@
 
 #include "backends/p4tools/common/lib/formulae.h"
 #include "frontends/p4/optimizeExpressions.h"
-#include "ir/id.h"
 #include "ir/indexed_vector.h"
-#include "ir/ir-inline.h"
 #include "ir/irutils.h"
 #include "ir/vector.h"
 #include "ir/visitor.h"

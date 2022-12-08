@@ -16,6 +16,25 @@ limitations under the License.
 
 #include "structInitializers.h"
 
+#include <stddef.h>
+
+#include <iosfwd>
+#include <string>
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "frontends/p4/methodInstance.h"
+#include "frontends/p4/parameterSubstitution.h"
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/enumerator.h"
+#include "lib/exceptions.h"
+#include "lib/log.h"
+#include "lib/ordered_map.h"
+
 namespace P4 {
 
 /// Given an expression and a destination type, convert ListExpressions

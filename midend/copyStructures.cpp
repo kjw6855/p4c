@@ -16,7 +16,18 @@ limitations under the License.
 
 #include "copyStructures.h"
 
+#include <list>
+#include <ostream>
+
+#include <boost/multiprecision/number.hpp>
+
 #include "frontends/p4/alias.h"
+#include "ir/id.h"
+#include "lib/big_int_util.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/log.h"
 
 namespace P4 {
 

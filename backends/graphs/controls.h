@@ -17,7 +17,15 @@ limitations under the License.
 #ifndef _BACKENDS_GRAPHS_CONTROLS_H_
 #define _BACKENDS_GRAPHS_CONTROLS_H_
 
+#include <vector>
+
+#include <boost/optional/optional.hpp>
+
+#include "frontends/common/resolveReferences/referenceMap.h"
+#include "frontends/p4/typeMap.h"
 #include "graphs.h"
+#include "ir/ir.h"
+#include "lib/cstring.h"
 
 namespace graphs {
 

@@ -17,6 +17,7 @@ limitations under the License.
 #include "removeMiss.h"
 
 #include "frontends/p4/tableApply.h"
+#include "lib/log.h"
 
 namespace P4 {
 

@@ -16,6 +16,7 @@
 #include "lib/bitvec.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
+#include "lib/log.h"
 #include "lib/null.h"
 
 namespace P4Tools {

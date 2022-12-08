@@ -1,5 +1,5 @@
 /*
-Copyright 2013-present Barefoot Networks, Inc. 
+Copyright 2013-present Barefoot Networks, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,58 +14,71 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "gtest/gtest-message.h"
+#include "gtest/gtest-test-part.h"
 #include "gtest/gtest.h"
+#include "ir/indexed_vector.h"
 #include "ir/ir.h"
-#include "ir/visitor.h"
-#include "lib/exceptions.h"
+#include "ir/node.h"
+#include "ir/vector.h"
+#include "lib/big_int_util.h"
+#include "lib/cstring.h"
+#include "lib/ordered_map.h"
+#include "lib/safe_vector.h"
 
 TEST(IR, OperatorEq) {
-    auto *t = IR::Type::Bits::get(16);
-    IR::Constant *a = new IR::Constant(t, 10);
-    IR::Constant *b = new IR::Constant(t, 10);
-    IR::Constant *c = new IR::Constant(t, 20);
+    auto* t = IR::Type::Bits::get(16);
+    IR::Constant* a = new IR::Constant(t, 10);
+    IR::Constant* b = new IR::Constant(t, 10);
+    IR::Constant* c = new IR::Constant(t, 20);
 
     EXPECT_EQ(*a, *b);
-    EXPECT_EQ(*a, *static_cast<IR::Expression *>(b));
-    EXPECT_EQ(*a, *static_cast<IR::Node *>(b));
-    EXPECT_EQ(*static_cast<IR::Expression *>(a), *b);
-    EXPECT_EQ(*static_cast<IR::Expression *>(a), *static_cast<IR::Expression *>(b));
-    EXPECT_EQ(*static_cast<IR::Expression *>(a), *static_cast<IR::Node *>(b));
-    EXPECT_EQ(*static_cast<IR::Node *>(a), *b);
-    EXPECT_EQ(*static_cast<IR::Node *>(a), *static_cast<IR::Expression *>(b));
-    EXPECT_EQ(*static_cast<IR::Node *>(a), *static_cast<IR::Node *>(b));
+    EXPECT_EQ(*a, *static_cast<IR::Expression*>(b));
+    EXPECT_EQ(*a, *static_cast<IR::Node*>(b));
+    EXPECT_EQ(*static_cast<IR::Expression*>(a), *b);
+    EXPECT_EQ(*static_cast<IR::Expression*>(a), *static_cast<IR::Expression*>(b));
+    EXPECT_EQ(*static_cast<IR::Expression*>(a), *static_cast<IR::Node*>(b));
+    EXPECT_EQ(*static_cast<IR::Node*>(a), *b);
+    EXPECT_EQ(*static_cast<IR::Node*>(a), *static_cast<IR::Expression*>(b));
+    EXPECT_EQ(*static_cast<IR::Node*>(a), *static_cast<IR::Node*>(b));
 
     EXPECT_NE(*a, *c);
-    EXPECT_NE(*a, *static_cast<IR::Expression *>(c));
-    EXPECT_NE(*a, *static_cast<IR::Node *>(c));
-    EXPECT_NE(*static_cast<IR::Expression *>(a), *c);
-    EXPECT_NE(*static_cast<IR::Expression *>(a), *static_cast<IR::Expression *>(c));
-    EXPECT_NE(*static_cast<IR::Expression *>(a), *static_cast<IR::Node *>(c));
-    EXPECT_NE(*static_cast<IR::Node *>(a), *c);
-    EXPECT_NE(*static_cast<IR::Node *>(a), *static_cast<IR::Expression *>(c));
-    EXPECT_NE(*static_cast<IR::Node *>(a), *static_cast<IR::Node *>(c));
+    EXPECT_NE(*a, *static_cast<IR::Expression*>(c));
+    EXPECT_NE(*a, *static_cast<IR::Node*>(c));
+    EXPECT_NE(*static_cast<IR::Expression*>(a), *c);
+    EXPECT_NE(*static_cast<IR::Expression*>(a), *static_cast<IR::Expression*>(c));
+    EXPECT_NE(*static_cast<IR::Expression*>(a), *static_cast<IR::Node*>(c));
+    EXPECT_NE(*static_cast<IR::Node*>(a), *c);
+    EXPECT_NE(*static_cast<IR::Node*>(a), *static_cast<IR::Expression*>(c));
+    EXPECT_NE(*static_cast<IR::Node*>(a), *static_cast<IR::Node*>(c));
 
-    auto *p1 = new IR::IndexedVector<IR::Node>(a);
-    auto *p2 = p1->clone();
-    auto *p3 = new IR::IndexedVector<IR::Node>(c);
+    auto* p1 = new IR::IndexedVector<IR::Node>(a);
+    auto* p2 = p1->clone();
+    auto* p3 = new IR::IndexedVector<IR::Node>(c);
 
     EXPECT_EQ(*p1, *p2);
-    EXPECT_EQ(*p1, *static_cast<IR::Vector<IR::Node> *>(p2));
-    EXPECT_EQ(*p1, *static_cast<IR::Node *>(p2));
-    EXPECT_EQ(*static_cast<IR::Vector<IR::Node> *>(p1), *p2);
-    EXPECT_EQ(*static_cast<IR::Vector<IR::Node> *>(p1), *static_cast<IR::Vector<IR::Node> *>(p2));
-    EXPECT_EQ(*static_cast<IR::Vector<IR::Node> *>(p1), *static_cast<IR::Node *>(p2));
-    EXPECT_EQ(*static_cast<IR::Node *>(p1), *p2);
-    EXPECT_EQ(*static_cast<IR::Node *>(p1), *static_cast<IR::Vector<IR::Node> *>(p2));
-    EXPECT_EQ(*static_cast<IR::Node *>(p1), *static_cast<IR::Node *>(p2));
+    EXPECT_EQ(*p1, *static_cast<IR::Vector<IR::Node>*>(p2));
+    EXPECT_EQ(*p1, *static_cast<IR::Node*>(p2));
+    EXPECT_EQ(*static_cast<IR::Vector<IR::Node>*>(p1), *p2);
+    EXPECT_EQ(*static_cast<IR::Vector<IR::Node>*>(p1), *static_cast<IR::Vector<IR::Node>*>(p2));
+    EXPECT_EQ(*static_cast<IR::Vector<IR::Node>*>(p1), *static_cast<IR::Node*>(p2));
+    EXPECT_EQ(*static_cast<IR::Node*>(p1), *p2);
+    EXPECT_EQ(*static_cast<IR::Node*>(p1), *static_cast<IR::Vector<IR::Node>*>(p2));
+    EXPECT_EQ(*static_cast<IR::Node*>(p1), *static_cast<IR::Node*>(p2));
 
     EXPECT_NE(*p1, *p3);
-    EXPECT_NE(*p1, *static_cast<IR::Vector<IR::Node> *>(p3));
-    EXPECT_NE(*p1, *static_cast<IR::Node *>(p3));
-    EXPECT_NE(*static_cast<IR::Vector<IR::Node> *>(p1), *p3);
-    EXPECT_NE(*static_cast<IR::Vector<IR::Node> *>(p1), *static_cast<IR::Vector<IR::Node> *>(p3));
-    EXPECT_NE(*static_cast<IR::Vector<IR::Node> *>(p1), *static_cast<IR::Node *>(p3));
-    EXPECT_NE(*static_cast<IR::Node *>(p1), *p3);
-    EXPECT_NE(*static_cast<IR::Node *>(p1), *static_cast<IR::Vector<IR::Node> *>(p3));
-    EXPECT_NE(*static_cast<IR::Node *>(p1), *static_cast<IR::Node *>(p3));
+    EXPECT_NE(*p1, *static_cast<IR::Vector<IR::Node>*>(p3));
+    EXPECT_NE(*p1, *static_cast<IR::Node*>(p3));
+    EXPECT_NE(*static_cast<IR::Vector<IR::Node>*>(p1), *p3);
+    EXPECT_NE(*static_cast<IR::Vector<IR::Node>*>(p1), *static_cast<IR::Vector<IR::Node>*>(p3));
+    EXPECT_NE(*static_cast<IR::Vector<IR::Node>*>(p1), *static_cast<IR::Node*>(p3));
+    EXPECT_NE(*static_cast<IR::Node*>(p1), *p3);
+    EXPECT_NE(*static_cast<IR::Node*>(p1), *static_cast<IR::Vector<IR::Node>*>(p3));
+    EXPECT_NE(*static_cast<IR::Node*>(p1), *static_cast<IR::Node*>(p3));
 }

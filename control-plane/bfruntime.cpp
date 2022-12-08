@@ -14,6 +14,21 @@ limitations under the License.
 */
 #include "bfruntime.h"
 
+#include <google/protobuf/stubs/common.h>
+#include <google/protobuf/stubs/port.h>
+
+#include <limits>
+#include <memory>
+#include <regex>
+#include <set>
+#include <sstream>
+
+#include <boost/format.hpp>
+#include <boost/multiprecision/number.hpp>
+
+#include "lib/exceptions.h"
+#include "lib/null.h"
+
 namespace P4 {
 
 namespace BFRT {

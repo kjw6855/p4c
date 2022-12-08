@@ -1,5 +1,7 @@
 #include "options.h"
 
+#include <string>
+
 #include "frontends/common/parser_options.h"
 #include "lib/exename.h"
 

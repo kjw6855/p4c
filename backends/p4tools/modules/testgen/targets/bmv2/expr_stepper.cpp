@@ -1,12 +1,11 @@
 #include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <list>
 #include <ostream>
 #include <vector>
 
-#include <boost/cstdint.hpp>
 #include <boost/format.hpp>
 #include <boost/multiprecision/number.hpp>
 #include <boost/none.hpp>
@@ -20,7 +19,6 @@
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/declaration.h"
 #include "ir/indexed_vector.h"
-#include "ir/ir-inline.h"
 #include "ir/irutils.h"
 #include "ir/node.h"
 #include "lib/big_int_util.h"

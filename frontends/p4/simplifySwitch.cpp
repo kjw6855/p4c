@@ -16,6 +16,14 @@ limitations under the License.
 
 #include "frontends/p4/simplifySwitch.h"
 
+#include <vector>
+
+#include <boost/multiprecision/number.hpp>
+
+#include "ir/vector.h"
+#include "lib/big_int_util.h"
+#include "lib/exceptions.h"
+
 namespace P4 {
 
 bool DoSimplifySwitch::matches(const IR::Expression *left, const IR::Expression *right) const {

@@ -14,6 +14,7 @@
 #include "ir/irutils.h"
 #include "ir/node.h"
 #include "lib/exceptions.h"
+#include "lib/log.h"
 #include "lib/null.h"
 #include "lib/safe_vector.h"
 #include "midend/saturationElim.h"

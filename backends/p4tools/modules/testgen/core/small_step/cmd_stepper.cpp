@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-#include <boost/format.hpp>
 #include <boost/none.hpp>
 #include <boost/variant/get.hpp>
 #include <boost/variant/variant.hpp>
@@ -24,8 +23,8 @@
 #include "ir/node.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"
-#include "lib/error.h"
 #include "lib/exceptions.h"
+#include "lib/log.h"
 #include "lib/null.h"
 #include "lib/safe_vector.h"
 #include "midend/coverage.h"

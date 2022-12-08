@@ -19,13 +19,12 @@ limitations under the License.
 #include <set>
 #include <unordered_map>
 
-#include <boost/optional.hpp>
-
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/fromv1.0/v1model.h"
 #include "frontends/p4/typeMap.h"
+#include "ir/id.h"
 #include "ir/ir.h"
-#include "lib/log.h"
+#include "lib/ordered_map.h"
 #include "p4RuntimeArchHandler.h"
 #include "typeSpecConverter.h"
 

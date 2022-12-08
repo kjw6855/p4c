@@ -16,7 +16,20 @@ limitations under the License.
 
 #include "eliminateSwitch.h"
 
+#include <list>
+#include <string>
+
+#include <boost/format.hpp>
+
+#include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/ordered_map.h"
 
 namespace P4 {
 

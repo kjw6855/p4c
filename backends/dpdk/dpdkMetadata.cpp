@@ -16,7 +16,11 @@ limitations under the License.
 
 #include "dpdkMetadata.h"
 
-#include "dpdkUtils.h"
+#include <list>
+
+#include "ir/id.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
 
 namespace DPDK {
 

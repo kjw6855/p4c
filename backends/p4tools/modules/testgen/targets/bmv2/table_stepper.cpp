@@ -18,6 +18,7 @@
 #include "ir/irutils.h"
 #include "ir/vector.h"
 #include "lib/error.h"
+#include "lib/log.h"
 #include "lib/null.h"
 #include "lib/safe_vector.h"
 

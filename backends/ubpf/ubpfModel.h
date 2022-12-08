@@ -19,8 +19,11 @@ limitations under the License.
 
 #include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"
+#include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/pass_manager.h"
+#include "ir/visitor.h"
+#include "lib/big_int_util.h"
 #include "lib/cstring.h"
 
 namespace UBPF {

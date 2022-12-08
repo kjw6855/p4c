@@ -1,4 +1,11 @@
+#include <ostream>
+#include <vector>
+
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
 #include "ir/ir.h"
+#include "lib/cstring.h"
+#include "lib/log.h"
 
 void IR::DpdkJmpLabelStatement::dbprint(std::ostream &out) const {
     out << "jmp " << label << std::endl;

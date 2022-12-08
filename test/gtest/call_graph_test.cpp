@@ -1,5 +1,5 @@
 /*
-Copyright 2013-present Barefoot Networks, Inc. 
+Copyright 2013-present Barefoot Networks, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,25 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <algorithm>
+#include <list>
+#include <set>
+#include <unordered_set>
 #include <vector>
 
-#include "gtest/gtest.h"
 #include "frontends/p4/callGraph.h"
+#include "gtest/gtest-message.h"
+#include "gtest/gtest-test-part.h"
+#include "gtest/gtest.h"
+#include "lib/cstring.h"
+#include "lib/ordered_set.h"
 
 namespace Test {
 
 template <class T>
-static void sameSet(std::unordered_set<T> &set, std::vector<T> vector) {
+static void sameSet(std::unordered_set<T>& set, std::vector<T> vector) {
     EXPECT_EQ(vector.size(), set.size());
-    for (T v : vector)
-        EXPECT_NEQ(set.end(), set.find(v));
+    for (T v : vector) EXPECT_NEQ(set.end(), set.find(v));
 }
 
 template <class T>
-static void sameSet(std::set<T> &set, std::vector<T> vector) {
+static void sameSet(std::set<T>& set, std::vector<T> vector) {
     EXPECT_EQ(vector.size(), set.size());
-    for (T v : vector)
-        EXPECT_NEQ(set.end(), set.find(v));
+    for (T v : vector) EXPECT_NEQ(set.end(), set.find(v));
 }
 
 TEST(CallGraph, Acyclic) {

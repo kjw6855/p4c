@@ -28,7 +28,6 @@ limitations under the License.
 #include "ir/namemap.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"
-#include "lib/hex.h"
 #include "lib/indent.h"
 #include "lib/log.h"
 #include "lib/safe_vector.h"

@@ -1,5 +1,12 @@
 #include "bindVariables.h"
 
+#include <ostream>
+
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/log.h"
+
 namespace P4 {
 
 namespace {

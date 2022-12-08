@@ -14,10 +14,15 @@
  * limitations under the License.
  */
 
+#include <vector>
+
 #include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/copy.hpp>
+#include <boost/graph/properties.hpp>
+#include <boost/graph/subgraph.hpp>
+#include <boost/property_map/property_map.hpp>
 
 #include "graphs.h"
+#include "lib/cstring.h"
 #include "lib/json.h"
 
 #ifndef _BACKENDS_GRAPHS_GRAPH_VISITOR_H_

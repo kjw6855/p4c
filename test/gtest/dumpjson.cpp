@@ -1,5 +1,5 @@
 /*
-Copyright 2013-present Barefoot Networks, Inc. 
+Copyright 2013-present Barefoot Networks, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,11 +15,15 @@ limitations under the License.
 */
 
 #include <iostream>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "ir/ir.h"
+#include "ir/json_generator.h"
 #include "ir/json_loader.h"
-#include "ir/visitor.h"
+#include "ir/json_parser.h"
+#include "ir/node.h"
+#include "lib/source_file.h"
 
 TEST(IR, DumpJSON) {
     auto c = new IR::Constant(2);

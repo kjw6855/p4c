@@ -17,21 +17,13 @@ limitations under the License.
 #ifndef _FRONTENDS_P4_EXTERNINSTANCE_H_
 #define _FRONTENDS_P4_EXTERNINSTANCE_H_
 
-#include <boost/optional.hpp>
+#include <boost/none.hpp>
+#include <boost/optional/optional.hpp>
 
 #include "frontends/p4/parameterSubstitution.h"
+#include "ir/ir.h"
+#include "ir/vector.h"
 #include "lib/cstring.h"
-
-namespace IR {
-class ConstructorCallExpression;
-class Expression;
-class IAnnotated;
-class PathExpression;
-class Type_Extern;
-class TypeMap;
-template <typename T>
-class Vector;
-}  // namespace IR
 
 namespace P4 {
 

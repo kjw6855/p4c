@@ -16,9 +16,18 @@ limitations under the License.
 
 #include "frontends/common/applyOptionsPragmas.h"
 
-#include "frontends/common/options.h"
+#include <iosfwd>
+
+#include <boost/format.hpp>
+#include <boost/none.hpp>
+
+#include "frontends/common/parser_options.h"
 #include "frontends/parsers/parserDriver.h"
+#include "ir/id.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
 #include "lib/error.h"
+#include "lib/error_catalog.h"
 #include "lib/log.h"
 
 namespace P4 {

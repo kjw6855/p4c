@@ -1,6 +1,11 @@
 #include "midend/removeAssertAssume.h"
 
+#include <iosfwd>
+
 #include "frontends/p4/methodInstance.h"
+#include "ir/id.h"
+#include "lib/cstring.h"
+#include "lib/log.h"
 
 namespace P4 {
 

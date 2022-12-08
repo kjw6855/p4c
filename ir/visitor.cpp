@@ -617,6 +617,10 @@ std::ostream &operator<<(std::ostream &out, const IR::Vector<IR::Expression> *v)
 }
 
 #include <config.h>
+
+#include <iostream>
+#include <tuple>
+#include <vector>
 #if HAVE_CXXABI_H
 #include <cxxabi.h>
 

@@ -16,7 +16,14 @@ limitations under the License.
 */
 #include "ebpfPsaChecksum.h"
 
+#include <boost/format.hpp>
+
 #include "ebpfPsaHashAlgorithm.h"
+#include "ir/vector.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/log.h"
 
 namespace EBPF {
 

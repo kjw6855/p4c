@@ -16,13 +16,20 @@ limitations under the License.
 
 #include "dpdkProgram.h"
 
-#include <unordered_map>
+#include <map>
+#include <ostream>
+#include <utility>
 
-#include "backend.h"
+#include <boost/none.hpp>
+
+#include "backends/dpdk/dpdkProgramStructure.h"
+#include "backends/dpdk/options.h"
 #include "dpdkHelpers.h"
-#include "ir/dbprint.h"
 #include "ir/ir.h"
-#include "lib/stringify.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/log.h"
 
 namespace DPDK {
 /* Insert the metadata structure updated with tmp variables created during parser conversion

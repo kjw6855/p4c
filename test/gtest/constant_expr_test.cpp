@@ -14,13 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <limits.h>
+#include <stdint.h>
+
+#include <memory>
+
+#include "gtest/gtest-message.h"
+#include "gtest/gtest-test-part.h"
 #include "gtest/gtest.h"
 #include "helpers.h"
 #include "ir/ir.h"
 
 namespace Test {
 
-class ConstantExpr : public P4CTest { };
+class ConstantExpr : public P4CTest {};
 
 TEST_F(ConstantExpr, TestInt) {
     int val = 0x1;

@@ -16,7 +16,24 @@ limitations under the License.
 
 #include "removeExits.h"
 
+#include <list>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <boost/format.hpp>
+
 #include "frontends/p4/methodInstance.h"
+#include "frontends/p4/ternaryBool.h"
+#include "ir/declaration.h"
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "ir/visitor.h"
+#include "lib/exceptions.h"
+#include "lib/log.h"
+#include "lib/ordered_map.h"
 
 namespace P4 {
 

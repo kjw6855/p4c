@@ -1,8 +1,24 @@
 #include "addMissingIds.h"
 
+#include <stddef.h>
+
+#include <list>
+#include <string>
+#include <vector>
+
+#include <boost/format.hpp>
+#include <boost/optional/optional.hpp>
+
 #include "frontends/p4/evaluator/evaluator.h"
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "lib/big_int_util.h"
+#include "lib/cstring.h"
+#include "lib/log.h"
+#include "lib/null.h"
+#include "lib/safe_vector.h"
 #include "p4RuntimeAnnotations.h"
-#include "p4RuntimeArchStandard.h"
 
 namespace P4 {
 

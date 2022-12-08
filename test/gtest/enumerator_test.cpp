@@ -14,11 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <exception>
+#include "lib/enumerator.h"
+
+#include <stdint.h>
+
+#include <algorithm>
+#include <functional>
+#include <iterator>
+#include <stdexcept>
 #include <vector>
 
+#include "gtest/gtest-message.h"
+#include "gtest/gtest-test-part.h"
 #include "gtest/gtest.h"
-#include "lib/enumerator.h"
 
 namespace Util {
 
@@ -35,7 +43,7 @@ class UtilEnumerator : public ::testing::Test {
         explicit B(int b) : A(b) {}
     };
 
-    std::vector<int> vec{ 1, 2, 3 };
+    std::vector<int> vec{1, 2, 3};
 };
 
 TEST_F(UtilEnumerator, Simple) {
@@ -75,8 +83,7 @@ TEST_F(UtilEnumerator, Simple) {
 TEST_F(UtilEnumerator, Range) {
     Enumerator<int>* enumerator = Util::Enumerator<int>::createEnumerator(vec);
     int sum = 0;
-    for (auto a : *enumerator)
-        sum += a;
+    for (auto a : *enumerator) sum += a;
     EXPECT_EQ(6, sum);
 }
 
@@ -99,7 +106,7 @@ TEST_F(UtilEnumerator, Linq) {
     /// map
     {
         enumerator->reset();
-        std::function<int(const int&)> increment = [](int x) { return x+1; };
+        std::function<int(const int&)> increment = [](int x) { return x + 1; };
         auto inc = enumerator->map(increment);
         more = inc->moveNext();
         EXPECT_TRUE(more);
@@ -144,7 +151,7 @@ TEST_F(UtilEnumerator, Linq) {
         all.push_back(col3);
 
         Enumerator<Enumerator<int>*>* allEnums =
-                Enumerator<Enumerator<int>*>::createEnumerator(all);
+            Enumerator<Enumerator<int>*>::createEnumerator(all);
         Enumerator<int>* concat = Enumerator<int>::concatAll(allEnums);
         uint64_t count = concat->count();
         EXPECT_EQ(9u, count);
@@ -165,8 +172,8 @@ TEST_F(UtilEnumerator, Linq) {
         std::vector<B*> bs;
         bs.push_back(new B(1));
         bs.push_back(new B(2));
-        Enumerator<B*> *benum = Enumerator<B*>::createEnumerator(bs);
-        Enumerator<A*> *aenum = benum->as<A*>();
+        Enumerator<B*>* benum = Enumerator<B*>::createEnumerator(bs);
+        Enumerator<A*>* aenum = benum->as<A*>();
         more = aenum->moveNext();
         EXPECT_TRUE(more);
 

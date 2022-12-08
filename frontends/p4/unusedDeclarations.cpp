@@ -16,7 +16,15 @@ limitations under the License.
 
 #include "unusedDeclarations.h"
 
-#include "frontends/common/parser_options.h"
+#include <ostream>
+#include <utility>
+
+#include <boost/format.hpp>
+
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "lib/error_catalog.h"
+#include "lib/log.h"
 #include "sideEffects.h"
 
 namespace P4 {

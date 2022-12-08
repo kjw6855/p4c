@@ -19,7 +19,7 @@ limitations under the License.
 
 #include <string>
 
-#include <boost/optional.hpp>
+#include <boost/optional/optional.hpp>
 
 #include "lib/big_int_util.h"
 

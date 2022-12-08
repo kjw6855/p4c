@@ -17,7 +17,14 @@ limitations under the License.
 #ifndef _MIDEND_FILLENUMMAP_H_
 #define _MIDEND_FILLENUMMAP_H_
 
+#include <map>
+
 #include "convertEnums.h"
+#include "frontends/p4/typeMap.h"
+#include "ir/ir.h"
+#include "ir/node.h"
+#include "ir/visitor.h"
+#include "lib/null.h"
 
 namespace P4 {
 

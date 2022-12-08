@@ -16,6 +16,15 @@ limitations under the License.
 
 #include "complexComparison.h"
 
+#include <stddef.h>
+
+#include <vector>
+
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "ir/vector.h"
+#include "lib/exceptions.h"
+
 namespace P4 {
 
 const IR::Expression *RemoveComplexComparisons::explode(Util::SourceInfo srcInfo,

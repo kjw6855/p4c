@@ -16,6 +16,18 @@ limitations under the License.
 
 #include "tableKeyNames.h"
 
+#include <iosfwd>
+#include <string>
+
+#include <boost/format.hpp>
+
+#include "ir/id.h"
+#include "ir/vector.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/log.h"
+#include "lib/stringify.h"
+
 namespace P4 {
 
 void KeyNameGenerator::error(const IR::Expression *expression) {

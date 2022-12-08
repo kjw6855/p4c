@@ -14,11 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include "gtest/gtest.h"
-#include "ir/ir.h"
-#include "ir/visitor.h"
-#include "lib/exceptions.h"
 #include "midend/expr_uses.h"
+
+#include <memory>
+
+#include "gtest/gtest-message.h"
+#include "gtest/gtest-test-part.h"
+#include "gtest/gtest.h"
+#include "ir/id.h"
+#include "ir/ir.h"
+#include "lib/cstring.h"
 
 TEST(expr_uses, expr_uses) {
     auto obj1 = new IR::PathExpression("obj1");

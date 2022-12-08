@@ -17,8 +17,11 @@ limitations under the License.
 #ifndef BACKENDS_EBPF_PSA_EBPFPSADEPARSER_H_
 #define BACKENDS_EBPF_PSA_EBPFPSADEPARSER_H_
 
+#include <map>
+
+#include "backends/ebpf/codeGen.h"
 #include "backends/ebpf/ebpfDeparser.h"
-#include "backends/ebpf/psa/ebpfPsaParser.h"
+#include "backends/ebpf/ebpfProgram.h"
 #include "backends/ebpf/psa/externs/ebpfPsaChecksum.h"
 #include "backends/ebpf/psa/externs/ebpfPsaDigest.h"
 #include "ebpfPsaControl.h"

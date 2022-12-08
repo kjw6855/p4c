@@ -1,5 +1,5 @@
 /*
-Copyright 2013-present Barefoot Networks, Inc. 
+Copyright 2013-present Barefoot Networks, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,11 +22,11 @@ limitations under the License.
 
 namespace Test {
 
-class P4C_IR : public P4CTest { };
+class P4C_IR : public P4CTest {};
 
 TEST_F(P4C_IR, Transform) {
     struct TestTrans : public Transform {
-        explicit TestTrans(IR::Constant* c) : c(c) { }
+        explicit TestTrans(IR::Constant* c) : c(c) {}
 
         IR::Node* postorder(IR::Add* a) override {
             EXPECT_EQ(c, a->left);

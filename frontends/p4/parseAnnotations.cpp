@@ -16,6 +16,17 @@ limitations under the License.
 
 #include "parseAnnotations.h"
 
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "ir/id.h"
+#include "ir/indexed_vector.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/ordered_map.h"
+
 namespace P4 {
 
 ParseAnnotations::HandlerMap ParseAnnotations::standardHandlers() {

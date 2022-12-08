@@ -14,27 +14,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include "helpers.h"
+
 #include <cstdio>
-#include <fstream>
+#include <cstdlib>
+#include <fstream>  // IWYU pragma: keep
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
-#include "helpers.h"
+#include <boost/none.hpp>
 
 #include "frontends/common/applyOptionsPragmas.h"
 #include "frontends/common/parseInput.h"
 #include "frontends/p4/frontend.h"
 #include "frontends/p4/parseAnnotations.h"
+#include "lib/error.h"
 
 namespace detail {
 
-std::string makeP4Source(const char* file, unsigned line,
-                         P4Headers headers, const char* rawSource) {
+std::string makeP4Source(const char* file, unsigned line, P4Headers headers,
+                         const char* rawSource) {
     std::string headers_string;
 
     // Prepend any requested headers.
     switch (headers) {
-        case P4Headers::NONE: break;
+        case P4Headers::NONE:
+            break;
         case P4Headers::CORE:
             headers_string = P4CTestEnvironment::get()->coreP4();
             break;
@@ -42,15 +48,15 @@ std::string makeP4Source(const char* file, unsigned line,
             headers_string = P4CTestEnvironment::get()->v1Model();
             break;
         case P4Headers::PSA:
-            headers_string = P4CTestEnvironment::get()->coreP4()
-                           + P4CTestEnvironment::get()->psaP4();
+            headers_string =
+                P4CTestEnvironment::get()->coreP4() + P4CTestEnvironment::get()->psaP4();
             break;
     }
     return makeP4Source(file, line, headers_string.c_str(), rawSource);
 }
 
-std::string makeP4Source(const char* file, unsigned line,
-                         const char* headers, const char* rawSource) {
+std::string makeP4Source(const char* file, unsigned line, const char* headers,
+                         const char* rawSource) {
     std::stringstream source;
 
     // Prepend any requested headers.
@@ -71,7 +77,7 @@ std::string makeP4Source(const char* file, unsigned line,
     // to subtract the number of lines in the program to get the *first* line of
     // the macro, which is what we need to use in #line to get the correct
     // mapping to the unit test source.
-    source << "#line " << (line - lineCount)  << " \"" << file << "\"" << std::endl;
+    source << "#line " << (line - lineCount) << " \"" << file << "\"" << std::endl;
     source << rawSource;
 
     return source.str();
@@ -88,8 +94,8 @@ std::string makeP4Source(const char* file, unsigned line, const char* rawSource)
     return instance;
 }
 
-std::string P4CTestEnvironment::readHeader(const char* filename, bool preprocess,
-                                           const char *macro, int macro_val) {
+std::string P4CTestEnvironment::readHeader(const char* filename, bool preprocess, const char* macro,
+                                           int macro_val) {
     if (preprocess) {
         std::stringstream cmd;
 #ifdef __clang__
@@ -98,12 +104,10 @@ std::string P4CTestEnvironment::readHeader(const char* filename, bool preprocess
         cmd << "cpp";
 #endif
         cmd << " -C -undef -nostdinc -Ip4include";
-        if (macro)
-            cmd << " -D" << macro << "=" << macro_val;
-        cmd << " " <<  filename;
+        if (macro) cmd << " -D" << macro << "=" << macro_val;
+        cmd << " " << filename;
         FILE* in = popen(cmd.str().c_str(), "r");
-        if (in == nullptr)
-            throw std::runtime_error(std::string("Couldn't invoke preprocessor"));
+        if (in == nullptr) throw std::runtime_error(std::string("Couldn't invoke preprocessor"));
         std::stringstream buffer;
         char string[100];
         while (fgets(string, sizeof(string), in)) buffer << string;
@@ -111,23 +115,21 @@ std::string P4CTestEnvironment::readHeader(const char* filename, bool preprocess
         if (WIFEXITED(exitCode) && WEXITSTATUS(exitCode) == 4) {
             throw std::runtime_error(std::string("Couldn't find standard header ") + filename);
         } else if (exitCode != 0) {
-            throw std::runtime_error(std::string("Couldn't preprocess standard header ")
-                                     + filename);
+            throw std::runtime_error(std::string("Couldn't preprocess standard header ") +
+                                     filename);
         }
         return buffer.str();
     } else {
         std::ifstream input(filename);
         if (!input.good()) {
-            throw std::runtime_error(std::string("Couldn't read standard header ")
-                                     + filename);
+            throw std::runtime_error(std::string("Couldn't read standard header ") + filename);
         }
 
         // Initialize a buffer with a #line preprocessor directive. This
         // ensures that any errors we encounter in this header will
         // reference the correct file and line.
         std::stringstream buffer;
-        if (macro)
-            buffer << "#define " << macro << " " << macro_val << std::endl;
+        if (macro) buffer << "#define " << macro << " " << macro_val << std::endl;
         buffer << "#line 1 \"" << filename << "\"" << std::endl;
 
         // Read the header into the buffer and return it.
@@ -139,35 +141,34 @@ std::string P4CTestEnvironment::readHeader(const char* filename, bool preprocess
 P4CTestEnvironment::P4CTestEnvironment() {
     // XXX(seth): We should find a more robust way to locate these headers.
     _coreP4 = readHeader("p4include/core.p4");
-    _v1Model = readHeader("p4include/v1model.p4", true,
-                          "V1MODEL_VERSION", 20200408);
+    _v1Model = readHeader("p4include/v1model.p4", true, "V1MODEL_VERSION", 20200408);
     _psaP4 = readHeader("p4include/bmv2/psa.p4", true);
 }
 
 namespace Test {
 
-/* static */ boost::optional<FrontendTestCase>
-FrontendTestCase::create(const std::string& source,
-                         CompilerOptions::FrontendVersion langVersion
-                            /* = CompilerOptions::FrontendVersion::P4_16 */,
-                         P4::ParseAnnotations parseAnnotations
-                            /* = P4::ParseAnnotations() */) {
+/* static */ boost::optional<FrontendTestCase> FrontendTestCase::create(
+    const std::string& source,
+    CompilerOptions::FrontendVersion langVersion
+    /* = CompilerOptions::FrontendVersion::P4_16 */,
+    P4::ParseAnnotations parseAnnotations
+    /* = P4::ParseAnnotations() */) {
     auto* program = P4::parseP4String(source, langVersion);
     if (program == nullptr) {
         std::cerr << "Couldn't parse test case source" << std::endl;
         return boost::none;
     }
     if (::diagnosticCount() > 0) {
-        std::cerr << "Encountered " << ::diagnosticCount()
-                  << " errors while parsing test case" << std::endl;
+        std::cerr << "Encountered " << ::diagnosticCount() << " errors while parsing test case"
+                  << std::endl;
         return boost::none;
     }
 
     P4::P4COptionPragmaParser optionsPragmaParser;
     program->apply(P4::ApplyOptionsPragmas(optionsPragmaParser));
     if (::errorCount() > 0) {
-        std::cerr << "Encountered " << ::errorCount()
-                  << " errors while collecting options pragmas" << std::endl;
+        std::cerr << "Encountered " << ::errorCount() << " errors while collecting options pragmas"
+                  << std::endl;
         return boost::none;
     }
 
@@ -179,8 +180,8 @@ FrontendTestCase::create(const std::string& source,
         return boost::none;
     }
     if (::errorCount() > 0) {
-        std::cerr << "Encountered " << ::errorCount()
-                  << " errors while executing frontend" << std::endl;
+        std::cerr << "Encountered " << ::errorCount() << " errors while executing frontend"
+                  << std::endl;
         return boost::none;
     }
 

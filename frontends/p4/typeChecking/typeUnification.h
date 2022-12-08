@@ -18,7 +18,6 @@ limitations under the License.
 #define _TYPECHECKING_TYPEUNIFICATION_H_
 
 #include "frontends/p4/typeMap.h"
-#include "ir/ir.h"
 
 namespace P4 {
 

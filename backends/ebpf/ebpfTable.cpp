@@ -16,10 +16,34 @@ limitations under the License.
 
 #include "ebpfTable.h"
 
+#include <algorithm>
+#include <limits>
+#include <memory>
+#include <string>
+
+#include <boost/format.hpp>
+
+#include "backends/ebpf/ebpfModel.h"
+#include "backends/ebpf/ebpfObject.h"
+#include "backends/ebpf/ebpfOptions.h"
+#include "backends/ebpf/ebpfProgram.h"
 #include "ebpfType.h"
+#include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/coreLibrary.h"
 #include "frontends/p4/methodInstance.h"
+#include "frontends/p4/parameterSubstitution.h"
+#include "frontends/p4/typeMap.h"
+#include "ir/declaration.h"
+#include "ir/indexed_vector.h"
 #include "ir/ir.h"
+#include "ir/node.h"
+#include "ir/vector.h"
+#include "lib/enumerator.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/map.h"
+#include "lib/stringify.h"
 
 namespace EBPF {
 

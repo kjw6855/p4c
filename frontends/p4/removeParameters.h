@@ -17,10 +17,20 @@ limitations under the License.
 #ifndef _FRONTENDS_P4_REMOVEPARAMETERS_H_
 #define _FRONTENDS_P4_REMOVEPARAMETERS_H_
 
+#include <map>
+#include <set>
+
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "frontends/p4/typeMap.h"
 #include "ir/ir.h"
+#include "ir/node.h"
+#include "ir/pass_manager.h"
+#include "ir/vector.h"
+#include "ir/visitor.h"
+#include "lib/exceptions.h"
+#include "lib/map.h"
+#include "lib/null.h"
 
 namespace P4 {
 

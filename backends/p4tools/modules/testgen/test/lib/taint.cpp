@@ -1,6 +1,6 @@
 #include "backends/p4tools/modules/testgen/test/lib/taint.h"
 
-#include <memory>
+#include <string>
 
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/taint.h"

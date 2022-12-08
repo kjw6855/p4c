@@ -16,7 +16,23 @@ limitations under the License.
 
 #include "ubpfProgram.h"
 
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "backends/ebpf/ebpfType.h"
+#include "backends/ebpf/target.h"
+#include "backends/ubpf/target.h"
+#include "backends/ubpf/ubpfModel.h"
 #include "codeGen.h"
+#include "frontends/common/model.h"
+#include "ir/id.h"
+#include "ir/node.h"
+#include "ir/vector.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/exceptions.h"
+#include "lib/null.h"
 #include "ubpfControl.h"
 #include "ubpfDeparser.h"
 #include "ubpfParser.h"

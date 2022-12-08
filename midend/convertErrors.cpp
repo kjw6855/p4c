@@ -1,14 +1,19 @@
 #include "midend/convertErrors.h"
 
 #include <cstddef>
+#include <string>
 #include <vector>
+
+#include <boost/format.hpp>
 
 #include "frontends/p4/typeMap.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
+#include "ir/vector.h"
 #include "lib/big_int_util.h"
 #include "lib/exceptions.h"
 #include "lib/map.h"
+#include "lib/ordered_map.h"
 
 namespace P4 {
 

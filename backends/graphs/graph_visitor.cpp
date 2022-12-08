@@ -16,9 +16,25 @@
 
 #include "graph_visitor.h"
 
+#include <map>
+#include <ostream>
+#include <utility>
+
+#include <boost/graph/copy.hpp>
+#include <boost/graph/detail/adj_list_edge_iterator.hpp>
+#include <boost/graph/graph_traits.hpp>
+#include <boost/graph/graphviz.hpp>
+#include <boost/graph/named_function_params.hpp>
+#include <boost/iterator/iterator_facade.hpp>
+#include <boost/program_options.hpp>
+#include <boost/range/irange.hpp>
+
 #include "graphs.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
 #include "lib/nullstream.h"
 #include "lib/path.h"
+#include "lib/stringify.h"
 
 namespace graphs {
 

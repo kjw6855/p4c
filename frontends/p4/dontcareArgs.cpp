@@ -16,6 +16,13 @@ limitations under the License.
 
 #include "dontcareArgs.h"
 
+#include "frontends/p4/methodInstance.h"
+#include "frontends/p4/parameterSubstitution.h"
+#include "ir/id.h"
+#include "lib/enumerator.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+
 namespace P4 {
 
 const IR::Node *DontcareArgs::postorder(IR::MethodCallExpression *expression) {

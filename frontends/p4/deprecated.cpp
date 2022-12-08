@@ -16,7 +16,15 @@ limitations under the License.
 
 #include "deprecated.h"
 
-#include "frontends/common/resolveReferences/resolveReferences.h"
+#include <vector>
+
+#include <boost/format.hpp>
+
+#include "ir/declaration.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
 
 namespace P4 {
 

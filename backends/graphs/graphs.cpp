@@ -16,12 +16,12 @@ limitations under the License.
 
 #include "graphs.h"
 
-#include "lib/crash.h"
-#include "lib/error.h"
-#include "lib/exceptions.h"
-#include "lib/gc.h"
-#include "lib/log.h"
-#include "lib/nullstream.h"
+#include <ostream>
+#include <string>
+
+#include <boost/none.hpp>
+
+#include "lib/stringify.h"
 
 namespace graphs {
 

@@ -3,7 +3,6 @@
 #include <stdint.h>
 
 #include <iostream>
-#include <list>
 #include <memory>
 #include <string>
 #include <utility>
@@ -16,13 +15,11 @@
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
-#include "ir/ir-inline.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"
 #include "lib/big_int_util.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
-#include "lib/log.h"
 #include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
 

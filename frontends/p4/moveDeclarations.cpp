@@ -16,6 +16,13 @@ limitations under the License.
 
 #include "moveDeclarations.h"
 
+#include <list>
+#include <ostream>
+
+#include "ir/declaration.h"
+#include "ir/id.h"
+#include "lib/log.h"
+
 namespace P4 {
 
 const IR::Node *MoveDeclarations::postorder(IR::P4Action *action) {

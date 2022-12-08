@@ -16,6 +16,23 @@ limitations under the License.
 
 #include "validateParsedProgram.h"
 
+#include <map>
+#include <set>
+#include <string>
+#include <typeinfo>
+#include <utility>
+#include <vector>
+
+#include "ir/declaration.h"
+#include "ir/id.h"
+#include "ir/node.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/enumerator.h"
+#include "lib/exceptions.h"
+#include "lib/ordered_map.h"
+#include "lib/safe_vector.h"
+
 namespace P4 {
 
 /// Check that the type of a constant is either bit<>, int<> or int

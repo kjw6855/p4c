@@ -22,7 +22,6 @@ limitations under the License.
 #include <set>
 #include <vector>
 
-#include "config.h"
 #include "indent.h"
 
 #ifndef __GNUC__

@@ -1,5 +1,5 @@
 /*
-Copyright 2013-present Barefoot Networks, Inc. 
+Copyright 2013-present Barefoot Networks, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,9 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <string>
+
+#include <boost/format.hpp>
+
+#include "gtest/gtest-message.h"
+#include "gtest/gtest-test-part.h"
 #include "gtest/gtest.h"
-#include "lib/error.h"
+#include "lib/compile_context.h"
 #include "lib/cstring.h"
+#include "lib/error_reporter.h"
 #include "lib/stringify.h"
 
 namespace Util {
@@ -36,10 +43,8 @@ TEST(Util, Format) {
         int a, b, c;
 
         cstring toString() const {
-            return cstring("(") +
-                    Util::toString(this->a) + "," +
-                    Util::toString(this->b) + "," +
-                    Util::toString(this->c) + ")";
+            return cstring("(") + Util::toString(this->a) + "," + Util::toString(this->b) + "," +
+                   Util::toString(this->c) + ")";
         }
     };
 

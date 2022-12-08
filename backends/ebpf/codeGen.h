@@ -17,8 +17,21 @@ limitations under the License.
 #ifndef _BACKENDS_EBPF_CODEGEN_H_
 #define _BACKENDS_EBPF_CODEGEN_H_
 
+#include <map>
+#include <set>
+#include <utility>
+
+#include <boost/format.hpp>
+
 #include "frontends/p4/typeMap.h"
+#include "ir/dbprint.h"
 #include "ir/ir.h"
+#include "ir/node.h"
+#include "ir/visitor.h"
+#include "lib/cstring.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
+#include "lib/null.h"
 #include "lib/sourceCodeBuilder.h"
 #include "target.h"
 
