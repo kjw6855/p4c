@@ -359,19 +359,9 @@ if(ENABLE_IWYU)
     -Xiwyu
     --no_fwd_decls
     -Xiwyu
+    --cxx17ns
+    -Xiwyu
     --mapping_file=${P4C_SOURCE_DIR}/tools/iwyu_mappings/p4c.imp
-    -Xiwyu
-    --mapping_file=${P4C_SOURCE_DIR}/tools/iwyu_mappings/boost-1.75-all.imp
-    -Xiwyu
-    --mapping_file=${P4C_SOURCE_DIR}/tools/iwyu_mappings/libcxx.imp
-    -Xiwyu
-    --mapping_file=${P4C_SOURCE_DIR}/tools/iwyu_mappings/gcc.libc.imp
-    -Xiwyu
-    --mapping_file=${P4C_SOURCE_DIR}/tools/iwyu_mappings/gcc.symbols.imp
-    -Xiwyu
-    --mapping_file=${P4C_SOURCE_DIR}/tools/iwyu_mappings/gcc.stl.headers.imp
-    -Xiwyu
-    --mapping_file=${P4C_SOURCE_DIR}/tools/iwyu_mappings/stl.c.headers.imp
   )
   message("IWYU command: ${iwyu_path}")
 endif()
@@ -523,6 +513,8 @@ file(
   lib/*.h
   midend/*.cpp
   midend/*.h
+  test/*.cpp
+  test/*.h
   tools/*.cpp
   tools/*.h
 )
@@ -531,6 +523,7 @@ list(FILTER P4C_LINT_LIST EXCLUDE REGEX "backends/p4tools/submodules")
 list(FILTER P4C_LINT_LIST EXCLUDE REGEX "backends/ebpf/runtime")
 list(FILTER P4C_LINT_LIST EXCLUDE REGEX "backends/ubpf/runtime")
 list(FILTER P4C_LINT_LIST EXCLUDE REGEX "control-plane/p4runtime")
+list(FILTER P4C_LINT_LIST EXCLUDE REGEX "test/frameworks")
 
 # cpplint
 add_cpplint_files(${P4C_SOURCE_DIR} "${P4C_LINT_LIST}")
@@ -563,7 +556,6 @@ endif()
 
 # clang-format
 add_clang_format_files(${P4C_SOURCE_DIR} "${P4C_LINT_LIST}")
-
 find_program(CLANG_FORMAT_CMD clang-format)
 
 if(NOT ${CLANG_FORMAT_CMD})
@@ -591,6 +583,32 @@ if(NOT ${CLANG_FORMAT_CMD})
   endif()
 else()
   message(WARNING "clang-format executable not found. Disabling clang-format checks. clang-format can be installed with \"pip3 install --user --upgrade clang-format\"")
+endif()
+
+function(get_all_targets var)
+    set(targets)
+    get_all_targets_recursive(targets ${CMAKE_CURRENT_SOURCE_DIR})
+    set(${var} ${targets} PARENT_SCOPE)
+endfunction()
+
+macro(get_all_targets_recursive targets dir)
+    get_property(subdirectories DIRECTORY ${dir} PROPERTY SUBDIRECTORIES)
+    foreach(subdir ${subdirectories})
+        get_all_targets_recursive(${targets} ${subdir})
+    endforeach()
+
+    get_property(current_targets DIRECTORY ${dir} PROPERTY BUILDSYSTEM_TARGETS)
+    list(APPEND ${targets} ${current_targets})
+endmacro()
+
+# Apply IWYU to all targets.
+if(ENABLE_IWYU)
+  get_all_targets(all_targets)
+  list(FILTER all_targets EXCLUDE REGEX "genIR")
+  message("Applying IWYU to targets: ${all_targets}")
+  foreach(target ${all_targets})
+    set_property(TARGET ${target} PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_path})
+  endforeach()
 endif()
 
 ################################ Linters End ################################
