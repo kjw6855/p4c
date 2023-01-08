@@ -197,9 +197,9 @@ cc_library(
     textual_hdrs = glob([
         "ir/**/*.h",
         "frontends/**/*.h",
+        "control-plane/**/*.h",
         "frontends/**/*.hpp",
         "midend/**/*.h",
-        "control-plane/**/*.h",
         "backends/**/*.h",
     ]) + [
         ":p4_parser_yacc",
@@ -209,14 +209,14 @@ cc_library(
         ":ir_generated_files",
     ],
     deps = [
+        "@com_github_p4lang_p4runtime//:p4info_cc_proto",
+        "@com_github_p4lang_p4runtime//:p4runtime_cc_proto",
+        "@com_github_p4lang_p4runtime//:p4types_cc_proto",
         ":config_h",
         ":lib",
         "@boost//:algorithm",
         "@boost//:functional",
         "@boost//:iostreams",
-        "@com_github_p4lang_p4runtime//:p4info_cc_proto",
-        "@com_github_p4lang_p4runtime//:p4runtime_cc_proto",
-        "@com_github_p4lang_p4runtime//:p4types_cc_proto",
         "@com_google_protobuf//:protobuf",
     ],
     copts = [

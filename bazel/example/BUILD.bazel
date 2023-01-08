@@ -9,9 +9,9 @@ cc_binary(
   srcs = ["main.cc"],
   data = ["//p4:program.p4info.txt"],
   deps = [
-    "@com_github_p4lang_p4c//:ir_frontend_midend_control_plane",
     "@com_github_p4lang_p4runtime//:p4info_cc_proto",
     "@com_google_protobuf//:protobuf",
+    "@com_github_p4lang_p4c//:ir_frontend_midend_control_plane",
   ],
   linkopts = [
   ],
