@@ -681,12 +681,65 @@ void BMv2_V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpressio
         // TODO: Read currently has no effect in the symbolic interpreter.
         {"meter.execute_meter",
          {"index", "result"},
-         [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
-            IR::ID & /*methodName*/, const IR::Vector<IR::Argument> * /*args*/,
+         [](const IR::MethodCallExpression *call, const IR::Expression *receiver,
+            IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
-             ::warning("meter.execute_meter not fully implemented.");
+             // TODO: Frontload this in the expression stepper for method call expressions.
+             const auto *index = args->at(0)->expression;
+             if (!SymbolicEnv::isSymbolicValue(index)) {
+                 // Evaluate the condition.
+                 stepToSubexpr(index, result, state, [call](const Continuation::Parameter *v) {
+                     auto *clonedCall = call->clone();
+                     auto *arguments = clonedCall->arguments->clone();
+                     auto *arg = arguments->at(0)->clone();
+                     arg->expression = v->param;
+                     (*arguments)[0] = arg;
+                     clonedCall->arguments = arguments;
+                     return Continuation::Return(clonedCall);
+                 });
+                 return;
+             }
+             const auto *meterResult = args->at(1)->expression;
              auto *nextState = new ExecutionState(state);
-             nextState->popBody();
+             std::vector<Continuation::Command> replacements;
+
+             const auto *receiverPath = receiver->checkedTo<IR::PathExpression>();
+             const auto &externInstance = state.convertPathExpr(receiverPath);
+
+             // Retrieve the meter state from the object store. If it is already present, just
+             // cast the object to the correct class and retrieve the current value according to the
+             // index. If the meter has not been added had, create a new meter object.
+             const auto *meterState =
+                 state.getTestObject("metervalues", externInstance->toString(), false);
+             const Bmv2MeterValue *meterValue = nullptr;
+             if (meterState != nullptr) {
+                 meterValue = meterState->checkedTo<Bmv2MeterValue>();
+             } else {
+                 const auto &inputValue = nextState->createZombieConst(
+                     meterResult->type, "meter_value" + std::to_string(call->clone_id));
+                 meterValue = new Bmv2MeterValue(inputValue);
+                 nextState->addTestObject("metervalues", externInstance->toString(), meterValue);
+             }
+             const IR::Expression *baseExpr = meterValue->getCurrentValue(index);
+
+             if (meterResult->type->is<IR::Type_Bits>()) {
+                 // We need an assignment statement (and the inefficient copy) here because we need
+                 // to immediately resolve the generated mux into multiple branches.
+                 // This is only possible because meters do not return a value.
+                 replacements.emplace_back(new IR::AssignmentStatement(meterResult, baseExpr));
+
+             } else {
+                 TESTGEN_UNIMPLEMENTED("Read extern output %1% of type %2% not supported",
+                                       meterResult, meterResult->type);
+             }
+             // TODO: Find a better way to model a trace of this event.
+             std::stringstream meterStream;
+             meterStream << "MeterExecute: Index ";
+             index->dbprint(meterStream);
+             meterStream << " into field ";
+             meterResult->dbprint(meterStream);
+             nextState->add(new TraceEvent::Generic(meterStream.str()));
+             nextState->replaceTopBody(&replacements);
              result->emplace_back(nextState);
          }},
         /* ======================================================================================

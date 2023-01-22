@@ -81,11 +81,40 @@ const Bmv2RegisterCondition *Bmv2RegisterCondition::evaluate(const Model &model)
 cstring Bmv2RegisterCondition::getObjectName() const { return "Bmv2RegisterCondition"; }
 
 /* =========================================================================================
+ *  Bmv2Meter
+ * ========================================================================================= */
+
+Bmv2MeterValue::Bmv2MeterValue(const IR::Expression *initialValue) : initialValue(initialValue) {}
+
+const IR::Expression *Bmv2MeterValue::getInitialValue() const { return initialValue; }
+
+cstring Bmv2MeterValue::getObjectName() const { return "Bmv2MeterValue"; }
+
+const IR::Expression *Bmv2MeterValue::getCurrentValue(const IR::Expression *index) const {
+    const IR::Expression *baseExpr = initialValue;
+    return baseExpr;
+}
+
+const IR::Constant *Bmv2MeterValue::getEvaluatedValue() const {
+    const auto *constant = initialValue->to<IR::Constant>();
+    BUG_CHECK(constant, "Variable is not a constant, has the test object %1% been evaluated?",
+              getObjectName());
+    return constant;
+}
+
+const Bmv2MeterValue *Bmv2MeterValue::evaluate(const Model &model) const {
+    const auto *evaluatedValue = model.evaluate(initialValue);
+    auto *evaluatedRegisterValue = new Bmv2MeterValue(evaluatedValue);
+    const std::vector<ActionArg> evaluatedConditions;
+    return evaluatedRegisterValue;
+}
+
+/* =========================================================================================
  *  Bmv2_V1ModelActionProfile
  * ========================================================================================= */
 
-const std::vector<std::pair<cstring, std::vector<ActionArg>>>
-    *Bmv2_V1ModelActionProfile::getActions() const {
+const std::vector<std::pair<cstring, std::vector<ActionArg>>> *
+Bmv2_V1ModelActionProfile::getActions() const {
     return &actions;
 }
 

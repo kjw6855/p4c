@@ -84,6 +84,34 @@ class Bmv2RegisterValue : public TestObject {
 };
 
 /* =========================================================================================
+ *  BMv2Meter
+ * ========================================================================================= */
+
+class Bmv2MeterValue : public TestObject {
+ private:
+    /// A new Bmv2MeterValue always requires an initial value. This can be a constant or taint.
+    const IR::Expression *initialValue;
+
+ public:
+    explicit Bmv2MeterValue(const IR::Expression *initialValue);
+
+    cstring getObjectName() const override;
+
+    /// @returns the value with which this register has been initialized.
+    const IR::Expression *getInitialValue() const;
+
+    /// @returns the current value of this register after writes have been performed according to a
+    /// provided index.
+    const IR::Expression *getCurrentValue(const IR::Expression *index) const;
+
+    /// @returns the evaluated register value. This means it must be a constant.
+    /// The function will throw a bug if this is not the case.
+    const IR::Constant *getEvaluatedValue() const;
+
+    const Bmv2MeterValue *evaluate(const Model &model) const override;
+};
+
+/* =========================================================================================
  *  Bmv2_V1ModelActionProfile
  * ========================================================================================= */
 class Bmv2_V1ModelActionProfile : public TestObject {
