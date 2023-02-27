@@ -65,11 +65,24 @@ class EBPFTarget:
         """Constructs the pcap filename from the given interface and
         packet stream direction. For example "pcap1_out.pcap" implies
         that the given stream contains tx packets from interface 1"""
-        return self.tmpdir + "/" + PCAP_PREFIX + str(interface) + "_" + direction + PCAP_SUFFIX
+        return (
+            self.tmpdir
+            + "/"
+            + PCAP_PREFIX
+            + str(interface)
+            + "_"
+            + direction
+            + PCAP_SUFFIX
+        )
 
     def interface_of_filename(self, f):
         """Extracts the interface name out of a pcap filename"""
-        return int(os.path.basename(f).rstrip(PCAP_SUFFIX).lstrip(PCAP_PREFIX).rsplit("_", 1)[0])
+        return int(
+            os.path.basename(f)
+            .rstrip(PCAP_SUFFIX)
+            .lstrip(PCAP_PREFIX)
+            .rsplit("_", 1)[0]
+        )
 
     def compile_p4(self, argv):
         # To override
@@ -90,7 +103,7 @@ class EBPFTarget:
         p4_args = " ".join(map(str, argv))
         if p4_args:
             # Remaining arguments
-            args += f" P4ARGS=\"{p4_args}\" "
+            args += f' P4ARGS="{p4_args}" '
         out, returncode = testutils.exec_process(args)
         if returncode != testutils.SUCCESS:
             testutils.log.error("Failed to compile the P4 program.")
@@ -184,12 +197,20 @@ class EBPFTarget:
                 if self.expected[interface]["any"]:
                     if self.expected[interface]["pkts"]:
                         testutils.log.error(
-                            ("Interface %s has both expected with packets and without", interface))
+                            (
+                                "Interface %s has both expected with packets and without",
+                                interface,
+                            )
+                        )
                     continue
                 expected = self.expected[interface]["pkts"]
             if len(expected) != len(packets):
                 testutils.log.error(
-                    "Expected %s packets on port %s got %s", len(expected), interface, len(packets))
+                    "Expected %s packets on port %s got %s",
+                    len(expected),
+                    interface,
+                    len(packets),
+                )
                 return testutils.FAILURE
             for idx, expected_pkt in enumerate(expected):
                 cmp = testutils.compare_pkt(expected_pkt, packets[idx])
@@ -201,7 +222,9 @@ class EBPFTarget:
                 del self.expected[interface]
         if len(self.expected) != 0:
             # Didn't find all the expects we were expecting
-            testutils.log.error("Expected packets on port(s) %s not received", self.expected.keys())
+            testutils.log.error(
+                "Expected packets on port(s) %s not received", self.expected.keys()
+            )
             return testutils.FAILURE
         testutils.log.info("All went well.")
         return testutils.SUCCESS

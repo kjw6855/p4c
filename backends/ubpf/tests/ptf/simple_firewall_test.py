@@ -21,7 +21,6 @@ from ptf.testutils import send_packet, verify_packets, verify_no_packet
 
 
 class SimpleFirewallTest(P4rtOVSBaseTest):
-
     def setUp(self):
         P4rtOVSBaseTest.setUp(self)
 
@@ -54,18 +53,17 @@ class SimpleFirewallTest(P4rtOVSBaseTest):
         conn_state_key = conn_state_dump_map.split("\n")[2]
         conn_state_value = conn_state_dump_map.split("\n")[3]
 
-        assert ("172 192 20 5" in conn_state_key)
-        assert ("%s 0 0 0" % conn_state in conn_state_value)
+        assert "172 192 20 5" in conn_state_key
+        assert "%s 0 0 0" % conn_state in conn_state_value
 
         conn_srv_key = conn_srv_dump_map.split("\n")[2]
         conn_srv_value = conn_srv_dump_map.split("\n")[3]
 
-        assert ("172 192 20 5" in conn_srv_key)
-        assert (conn_srv in conn_srv_value)
+        assert "172 192 20 5" in conn_srv_key
+        assert conn_srv in conn_srv_value
 
 
 class TcpSynStateTest(SimpleFirewallTest):
-
     def setUp(self):
         SimpleFirewallTest.setUp(self)
 
@@ -83,7 +81,6 @@ class TcpSynStateTest(SimpleFirewallTest):
 
 
 class TcpSynAckStateTest(SimpleFirewallTest):
-
     def setUp(self):
         SimpleFirewallTest.setUp(self)
 
@@ -105,7 +102,6 @@ class TcpSynAckStateTest(SimpleFirewallTest):
 
 
 class TcpEstablishedStateTest(SimpleFirewallTest):
-
     def setUp(self):
         SimpleFirewallTest.setUp(self)
 
@@ -130,7 +126,6 @@ class TcpEstablishedStateTest(SimpleFirewallTest):
 
 
 class TcpServerFinAckStateTest(SimpleFirewallTest):
-
     def setUp(self):
         SimpleFirewallTest.setUp(self)
 
@@ -158,7 +153,6 @@ class TcpServerFinAckStateTest(SimpleFirewallTest):
 
 
 class SimpleTcpConnectionFlowTest(SimpleFirewallTest):
-
     def setUp(self):
         SimpleFirewallTest.setUp(self)
 
@@ -182,10 +176,18 @@ class SimpleTcpConnectionFlowTest(SimpleFirewallTest):
         self.send_client_packet(packet=pkt)
         self.verify_connection_state(conn_state=3)
         # TCP data client
-        pkt = client_packet / TCP(sport=55, dport=80, flags="A", chksum=0) / "Data data data"
+        pkt = (
+            client_packet
+            / TCP(sport=55, dport=80, flags="A", chksum=0)
+            / "Data data data"
+        )
         self.send_client_packet(packet=pkt)
         # TCP data server
-        pkt = server_packet / TCP(sport=55, dport=80, flags="A", chksum=0) / "Data data data"
+        pkt = (
+            server_packet
+            / TCP(sport=55, dport=80, flags="A", chksum=0)
+            / "Data data data"
+        )
         self.send_server_packet(packet=pkt)
         # TCP fin ack
         pkt = client_packet / TCP(sport=55, dport=80, flags="FA", chksum=0)
@@ -203,7 +205,6 @@ class SimpleTcpConnectionFlowTest(SimpleFirewallTest):
 
 
 class SimpleTcpAckAttackFlowTest(SimpleFirewallTest):
-
     def setUp(self):
         SimpleFirewallTest.setUp(self)
 
@@ -228,7 +229,6 @@ class SimpleTcpAckAttackFlowTest(SimpleFirewallTest):
 
 
 class SimpleTcpSynAttackFlowTest(SimpleFirewallTest):
-
     def setUp(self):
         SimpleFirewallTest.setUp(self)
 

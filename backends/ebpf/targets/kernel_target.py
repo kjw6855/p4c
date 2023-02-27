@@ -22,6 +22,7 @@ from pathlib import Path
 from glob import glob
 from .ebpfenv import Bridge
 from .target import EBPFTarget
+
 # path to the tools folder of the compiler
 # Append tools to the import path.
 FILE_DIR = Path(__file__).resolve().parent
@@ -117,8 +118,10 @@ class Target(EBPFTarget):
 
         # Add the qdisc. MUST be clsact layer.
         bridge.ns_exec(f"tc qdisc add dev {port_name} clsact")
-        cmd = (f"tc filter add dev {port_name} egress"
-               f" bpf da obj {self.template}.o section prog verbose")
+        cmd = (
+            f"tc filter add dev {port_name} egress"
+            f" bpf da obj {self.template}.o section prog verbose"
+        )
         return bridge.ns_proc_write(proc, cmd)
 
     def _attach_filters(self, bridge, proc):
@@ -176,7 +179,9 @@ class Target(EBPFTarget):
     def run(self):
         # Root is necessary to load ebpf into the kernel
         if not testutils.check_root():
-            testutils.log.warning("This test requires root privileges; skipping execution.")
+            testutils.log.warning(
+                "This test requires root privileges; skipping execution."
+            )
             return testutils.SKIPPED
         result = self._create_runtime()
         if result != testutils.SUCCESS:

@@ -29,7 +29,6 @@ import testutils
 
 
 class Bridge:
-
     def __init__(self, namespace: str):
         # Identifier of the namespace.
         self.ns_name: str = namespace
@@ -51,7 +50,9 @@ class Bridge:
 
     def ns_del(self) -> int:
         """Delete the namespace and with it all the process running in it."""
-        cmd = f"ip netns pids {self.ns_name} | xargs -r kill; ip netns del {self.ns_name}"
+        cmd = (
+            f"ip netns pids {self.ns_name} | xargs -r kill; ip netns del {self.ns_name}"
+        )
         result = testutils.exec_process(cmd, shell=True)
         if result.returncode != testutils.SUCCESS:
             testutils.log.error("Failed to delete namespace %s", self.ns_name)
@@ -96,8 +97,9 @@ class Bridge:
         testutils.log.info("Executing command.")
         result = testutils.run_process(proc, timeout=testutils.TIMEOUT)
         if result.returncode != testutils.SUCCESS:
-            testutils.log.error("Failed to execute the command sequence in namespace %s",
-                                self.ns_name)
+            testutils.log.error(
+                "Failed to execute the command sequence in namespace %s", self.ns_name
+            )
         return result.returncode
 
     def _configure_bridge(self, br_name: str) -> int:
@@ -135,7 +137,9 @@ class Bridge:
         for index in range(num_ifaces):
             edge_veth = str(index)
             bridge_veth = f"br_{index}"
-            result = self.ns_exec(f"ip link add {edge_veth} type veth peer name {bridge_veth}")
+            result = self.ns_exec(
+                f"ip link add {edge_veth} type veth peer name {bridge_veth}"
+            )
             if result != testutils.SUCCESS:
                 return result
             # result = self.ns_exec("ip link set %s master %s" %

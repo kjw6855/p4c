@@ -1,0 +1,7 @@
+[project]
+name = "p4c"
+requires-python = ">=3.8"
+
+[flake8]
+max-line-length = 100
+max-complexity = 10

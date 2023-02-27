@@ -57,28 +57,40 @@ def _generate_control_actions(cmds):
                 key_field_val = key_field[1]
                 # Support for LPM key
                 if isinstance(key_field_val, tuple):
-                    generated += ("%s.prefixlen = (offsetof(struct %s_key, %s) - 4) * 8 + %s;\n\t" %
-                                  (key_name, cmd.table, field, key_field_val[1]))
+                    generated += (
+                        "%s.prefixlen = (offsetof(struct %s_key, %s) - 4) * 8 + %s;\n\t"
+                        % (key_name, cmd.table, field, key_field_val[1])
+                    )
                     key_field_val = key_field_val[0]
                 generated += "%s.%s = %s;\n\t" % (key_name, field, key_field_val)
-        generated += "tableFileDescriptor = " 'BPF_OBJ_GET(MAP_PATH "/%s");\n\t' % tbl_name
-        generated += ("if (tableFileDescriptor < 0) {"
-                      'fprintf(stderr, "map %s not loaded");'
-                      " exit(1); }\n\t" % tbl_name)
+        generated += (
+            "tableFileDescriptor = " 'BPF_OBJ_GET(MAP_PATH "/%s");\n\t' % tbl_name
+        )
+        generated += (
+            "if (tableFileDescriptor < 0) {"
+            'fprintf(stderr, "map %s not loaded");'
+            " exit(1); }\n\t" % tbl_name
+        )
         generated += "struct %s_value %s = {\n\t\t" % (cmd.table, value_name)
         if cmd.action[0] == "_NoAction":
             generated += ".action = 0,\n\t\t"
         else:
-            action_full_name = "{}_ACT_{}".format(cmd.table.upper(), cmd.action[0].upper())
+            action_full_name = "{}_ACT_{}".format(
+                cmd.table.upper(), cmd.action[0].upper()
+            )
             generated += ".action = %s,\n\t\t" % action_full_name
         generated += ".u = {.%s = {" % cmd.action[0]
         for val_num, val_field in enumerate(cmd.action[1]):
             generated += "%s," % val_field[1]
         generated += "}},\n\t"
         generated += "};\n\t"
-        generated += ("ok = BPF_USER_MAP_UPDATE_ELEM"
-                      "(tableFileDescriptor, &%s, &%s, BPF_ANY);\n\t" % (key_name, value_name))
-        generated += 'if (ok != 0) { perror("Could not write in %s");' "exit(1); }\n" % tbl_name
+        generated += (
+            "ok = BPF_USER_MAP_UPDATE_ELEM"
+            "(tableFileDescriptor, &%s, &%s, BPF_ANY);\n\t" % (key_name, value_name)
+        )
+        generated += (
+            'if (ok != 0) { perror("Could not write in %s");' "exit(1); }\n" % tbl_name
+        )
     return generated
 
 
@@ -116,8 +128,9 @@ def parse_stf_file(raw_stf):
     expected = {}
     for stf_entry in stf_map:
         if stf_entry[0] == "packet":
-            input_pkts.setdefault(stf_entry[1],
-                                  []).append(bytes.fromhex("".join(stf_entry[2].split())))
+            input_pkts.setdefault(stf_entry[1], []).append(
+                bytes.fromhex("".join(stf_entry[2].split()))
+            )
         elif stf_entry[0] == "expect":
             interface = int(stf_entry[1])
             pkt_data = stf_entry[2]
@@ -138,6 +151,8 @@ def parse_stf_file(raw_stf):
             )
             cmds.append(cmd)
         elif stf_entry[0] == "setdefault":
-            cmd = eBPFCommand(a_type=stf_entry[0], table=stf_entry[1], action=stf_entry[2])
+            cmd = eBPFCommand(
+                a_type=stf_entry[0], table=stf_entry[1], action=stf_entry[2]
+            )
             cmds.append(cmd)
     return input_pkts, cmds, expected

@@ -315,7 +315,7 @@ def main(args, extra_args):
         "GREEDY_POTENTIAL": "",
     }
     p4_program = options.p4_programs[0]
-    p4_program =testutils.check_if_file(p4_program)
+    p4_program = testutils.check_if_file(p4_program)
     if not p4_program:
         return
     p4_program = Path(testutils.check_if_file(p4_program))
