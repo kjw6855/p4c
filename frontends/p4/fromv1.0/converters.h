@@ -26,8 +26,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/model.h"
 #include "frontends/p4/callGraph.h"
 #include "frontends/p4/coreLibrary.h"
@@ -50,7 +48,6 @@ limitations under the License.
 #include "lib/log.h"
 #include "lib/map.h"
 #include "lib/null.h"
-#include "lib/ordered_map.h"
 #include "lib/ordered_set.h"
 #include "lib/safe_vector.h"
 #include "lib/source_file.h"

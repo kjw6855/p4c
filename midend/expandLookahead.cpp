@@ -25,6 +25,7 @@ limitations under the License.
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/exceptions.h"
+#include "ir/vector.h"
 
 namespace P4 {
 

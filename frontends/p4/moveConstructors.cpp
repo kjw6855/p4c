@@ -21,8 +21,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
@@ -34,6 +32,7 @@ limitations under the License.
 #include "lib/null.h"
 #include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
+#include "lib/log.h"
 
 namespace P4 {
 

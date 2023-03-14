@@ -19,7 +19,6 @@ limitations under the License.
 #include "frontends/p4/typeChecking/typeSubstitution.h"
 #include "frontends/p4/typeChecking/typeSubstitutionVisitor.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
 #include "typeUnification.h"
 
 namespace P4 {

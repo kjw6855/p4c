@@ -19,14 +19,14 @@ limitations under the License.
 
 #include <stddef.h>
 #include <stdint.h>
-
+#include <boost/none.hpp>
+#include <boost/optional/optional.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <set>
 #include <unordered_map>
 #include <utility>
-
-#include <boost/format.hpp>
-#include <boost/none.hpp>
-#include <boost/optional/optional.hpp>
+#include <string>
+#include <vector>
 
 #include "frontends/common/model.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
@@ -37,7 +37,6 @@ limitations under the License.
 #include "ir/ir.h"
 #include "ir/node.h"
 #include "ir/vector.h"
-#include "lib/big_int_util.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
@@ -47,6 +46,8 @@ limitations under the License.
 #include "p4/config/v1/p4types.pb.h"
 #include "p4RuntimeArchHandler.h"
 #include "typeSpecConverter.h"
+#include "ir/id.h"
+#include "lib/log.h"
 
 namespace p4configv1 = ::p4::config::v1;
 

@@ -17,12 +17,9 @@ limitations under the License.
 #include "structInitializers.h"
 
 #include <stddef.h>
-
-#include <iosfwd>
 #include <string>
 #include <vector>
-
-#include <boost/format.hpp>
+#include <ostream>
 
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/parameterSubstitution.h"
@@ -33,7 +30,6 @@ limitations under the License.
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
 
 namespace P4 {
 

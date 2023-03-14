@@ -19,13 +19,13 @@ limitations under the License.
 #include <map>
 #include <utility>
 #include <vector>
-
-#include <boost/format.hpp>
+#include <string>
 
 #include "ir/id.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
+#include "ir/indexed_vector.h"
 
 namespace P4 {
 

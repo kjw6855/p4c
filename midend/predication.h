@@ -20,8 +20,6 @@ limitations under the License.
 #include <map>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "ir/ir.h"
 #include "ir/node.h"

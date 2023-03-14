@@ -18,6 +18,8 @@ limitations under the License.
 #define _FRONTENDS_P4_SIMPLIFYDEFUSE_H_
 
 #include <ostream>
+#include <string>
+#include <vector>
 
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/cloner.h"
@@ -31,6 +33,7 @@ limitations under the License.
 #include "lib/log.h"
 #include "lib/null.h"
 #include "lib/safe_vector.h"
+#include "lib/cstring.h"
 
 namespace P4 {
 

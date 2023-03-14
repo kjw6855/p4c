@@ -1,14 +1,11 @@
 #include "eliminateTuples.h"
 
 #include <stddef.h>
-
 #include <list>
 #include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <boost/format.hpp>
 
 #include "ir/id.h"
 #include "ir/vector.h"

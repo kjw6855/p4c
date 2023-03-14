@@ -32,6 +32,7 @@ limitations under the License.
 #include "ir/id.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
+#include "lib/safe_vector.h"
 
 namespace P4 {
 

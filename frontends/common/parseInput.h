@@ -18,13 +18,10 @@ limitations under the License.
 #define _FRONTENDS_COMMON_PARSEINPUT_H_
 
 #include <stdio.h>
-
-#include <iostream>
-#include <string>
-
-#include <boost/format.hpp>
 #include <boost/none.hpp>
 #include <boost/optional/optional.hpp>
+#include <iostream>
+#include <string>
 
 #include "frontends/common/options.h"
 #include "frontends/common/parser_options.h"

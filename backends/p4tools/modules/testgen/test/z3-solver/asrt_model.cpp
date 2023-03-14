@@ -23,6 +23,7 @@
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
+#include "lib/algorithm.h"
 #include "test/gtest/helpers.h"
 
 #include "backends/p4tools/modules/testgen/core/target.h"

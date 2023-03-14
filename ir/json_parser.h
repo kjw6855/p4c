@@ -1,6 +1,7 @@
 #ifndef IR_JSON_PARSER_H_
 #define IR_JSON_PARSER_H_
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <algorithm>
 #include <iosfwd>
 #include <string>

@@ -1,17 +1,13 @@
 #include "midend/hsIndexSimplify.h"
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "ir/id.h"
-#include "ir/vector.h"
-#include "lib/big_int_util.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
 #include "midend/simplifyKey.h"
 
 namespace P4 {

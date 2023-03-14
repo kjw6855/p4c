@@ -17,15 +17,13 @@ limitations under the License.
 #include "typeChecker.h"
 
 #include <stddef.h>
-
+#include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <list>
 #include <map>
 #include <ostream>
 #include <string>
 #include <vector>
-
-#include <boost/format.hpp>
-#include <boost/multiprecision/number.hpp>
 
 #include "frontends/common/constantFolding.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
@@ -37,12 +35,10 @@ limitations under the License.
 #include "ir/id.h"
 #include "ir/namemap.h"
 #include "lib/algorithm.h"
-#include "lib/big_int_util.h"
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
 #include "lib/ordered_map.h"
-#include "lib/safe_vector.h"
 #include "lib/source_file.h"
 #include "syntacticEquivalence.h"
 #include "typeConstraints.h"

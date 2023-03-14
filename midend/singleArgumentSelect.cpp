@@ -1,11 +1,9 @@
 #include "singleArgumentSelect.h"
 
 #include <stddef.h>
-
+#include <boost/multiprecision/cpp_int.hpp>
 #include <string>
 #include <vector>
-
-#include <boost/format.hpp>
 
 #include "ir/vector.h"
 #include "lib/big_int_util.h"

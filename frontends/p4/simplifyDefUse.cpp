@@ -23,8 +23,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/def_use.h"
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/parameterSubstitution.h"

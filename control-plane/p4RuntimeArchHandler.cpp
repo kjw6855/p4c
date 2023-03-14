@@ -16,8 +16,6 @@ limitations under the License.
 
 #include <sstream>  // for std::ostringstream
 
-#include <boost/format.hpp>
-
 #include "frontends/common/resolveReferences/referenceMap.h"
 // TODO(antonin): this include should go away when we cleanup getTableSize
 // implementation.
@@ -28,6 +26,7 @@ limitations under the License.
 #include "ir/indexed_vector.h"
 #include "ir/ir.h"
 #include "p4RuntimeArchHandler.h"
+#include "lib/log.h"
 
 namespace p4configv1 = ::p4::config::v1;
 

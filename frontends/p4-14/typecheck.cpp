@@ -17,23 +17,19 @@ limitations under the License.
 #include "typecheck.h"
 
 #include <stddef.h>
-
+#include <boost/multiprecision/cpp_int.hpp>
 #include <algorithm>
 #include <list>
-#include <memory>
 #include <ostream>
 #include <set>
 #include <string>
 #include <vector>
-
-#include <boost/format.hpp>
 
 #include "ir/dump.h"
 #include "ir/id.h"
 #include "ir/namemap.h"
 #include "ir/vector.h"
 #include "ir/visitor.h"
-#include "lib/big_int_util.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"

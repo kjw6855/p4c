@@ -19,6 +19,8 @@ limitations under the License.
 
 #include <iosfwd>
 #include <typeinfo>
+#include <string>
+#include <vector>
 
 #include "ir-tree-macros.h"
 #include "ir/gen-tree-macro.h"
@@ -26,6 +28,7 @@ limitations under the License.
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 #include "lib/source_file.h"
+#include "lib/log.h"
 
 class Visitor;
 struct Visitor_Context;

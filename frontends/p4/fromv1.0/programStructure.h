@@ -24,6 +24,7 @@ limitations under the License.
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <string>
 
 #include "frontends/p4/callGraph.h"
 #include "frontends/p4/coreLibrary.h"
@@ -34,7 +35,6 @@ limitations under the License.
 #include "ir/vector.h"
 #include "lib/cstring.h"
 #include "lib/log.h"
-#include "lib/map.h"
 #include "lib/ordered_set.h"
 #include "lib/source_file.h"
 #include "v1model.h"

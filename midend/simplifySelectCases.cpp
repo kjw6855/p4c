@@ -20,8 +20,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/enumInstance.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"

@@ -15,7 +15,6 @@ limitations under the License.
 */
 
 #include <functional>
-#include <iterator>
 #include <list>
 #include <ostream>
 #include <utility>

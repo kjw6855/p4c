@@ -29,7 +29,6 @@ limitations under the License.
 #include "ir/node.h"
 #include "lib/log.h"
 #include "lib/null.h"
-#include "lib/ordered_map.h"
 
 namespace P4 {
 

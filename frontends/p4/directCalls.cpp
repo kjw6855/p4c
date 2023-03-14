@@ -1,11 +1,12 @@
 #include "directCalls.h"
 
-#include <iosfwd>
 #include <list>
+#include <ostream>
 
 #include "ir/declaration.h"
 #include "ir/id.h"
 #include "lib/log.h"
+#include "ir/vector.h"
 
 namespace P4 {
 

@@ -1,9 +1,13 @@
 #include "midend/booleanKeys.h"
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <cstddef>
+#include <string>
+#include <vector>
 
 #include "ir/irutils.h"
 #include "ir/vector.h"
+#include "lib/cstring.h"
 
 namespace P4 {
 

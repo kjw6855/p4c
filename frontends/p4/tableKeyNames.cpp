@@ -16,10 +16,8 @@ limitations under the License.
 
 #include "tableKeyNames.h"
 
-#include <iosfwd>
 #include <string>
-
-#include <boost/format.hpp>
+#include <ostream>
 
 #include "ir/id.h"
 #include "ir/vector.h"

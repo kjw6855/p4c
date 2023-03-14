@@ -17,13 +17,15 @@ limitations under the License.
 #ifndef _P4_VALIDATEPARSEDPROGRAM_H_
 #define _P4_VALIDATEPARSEDPROGRAM_H_
 
-#include <boost/format.hpp>
+#include <string>
+#include <vector>
 
 #include "ir/indexed_vector.h"
 #include "ir/ir.h"
 #include "ir/visitor.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
+#include "lib/cstring.h"
 
 namespace P4 {
 

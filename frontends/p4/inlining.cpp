@@ -16,10 +16,9 @@ limitations under the License.
 
 #include "inlining.h"
 
+#include <ctype.h>
 #include <algorithm>
 #include <list>
-
-#include <boost/format.hpp>
 
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "frontends/p4/callGraph.h"
@@ -34,8 +33,6 @@ limitations under the License.
 #include "lib/enumerator.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
-#include "lib/ordered_set.h"
-#include "lib/safe_vector.h"
 
 namespace P4 {
 

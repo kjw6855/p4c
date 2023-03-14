@@ -30,8 +30,6 @@ limitations under the License.
 #include "lib/cstring.h"
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
-#include "lib/ordered_map.h"
-#include "lib/safe_vector.h"
 
 namespace P4 {
 

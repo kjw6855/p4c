@@ -1,6 +1,6 @@
 #include "midend/removeAssertAssume.h"
 
-#include <iosfwd>
+#include <ostream>
 
 #include "frontends/p4/methodInstance.h"
 #include "ir/id.h"

@@ -16,23 +16,19 @@ limitations under the License.
 
 #include "simplifyKey.h"
 
-#include <iosfwd>
 #include <list>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <boost/format.hpp>
+#include <ostream>
 
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/sideEffects.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
-#include "ir/vector.h"
 #include "lib/cstring.h"
 #include "lib/log.h"
 #include "lib/map.h"
-#include "lib/ordered_map.h"
 
 namespace P4 {
 

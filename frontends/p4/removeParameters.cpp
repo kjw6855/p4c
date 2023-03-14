@@ -21,8 +21,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/moveDeclarations.h"
 #include "frontends/p4/parameterSubstitution.h"
@@ -33,7 +31,6 @@ limitations under the License.
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
 
 namespace P4 {

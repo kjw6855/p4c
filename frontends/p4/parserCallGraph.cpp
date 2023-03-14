@@ -17,9 +17,11 @@ limitations under the License.
 #include "parserCallGraph.h"
 
 #include <vector>
+#include <string>
 
 #include "ir/declaration.h"
 #include "ir/vector.h"
+#include "lib/cstring.h"
 
 namespace P4 {
 

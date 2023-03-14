@@ -1,15 +1,16 @@
 #include "parserUnroll.h"
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <algorithm>
 #include <iterator>
 #include <ostream>
 #include <tuple>
+#include <iosfwd>
 
 #include "frontends/p4/coreLibrary.h"
 #include "interpreter.h"
 #include "ir/declaration.h"
 #include "ir/ir.h"
-#include "lib/big_int_util.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/hash.h"

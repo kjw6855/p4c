@@ -17,9 +17,9 @@ limitations under the License.
 #ifndef _FRONTENDS_P4_FUNCTIONSINLINING_H_
 #define _FRONTENDS_P4_FUNCTIONSINLINING_H_
 
-#include <iosfwd>
 #include <map>
 #include <vector>
+#include <ostream>
 
 #include "commonInlining.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
@@ -34,7 +34,6 @@ limitations under the License.
 #include "lib/cstring.h"
 #include "lib/log.h"
 #include "lib/null.h"
-#include "lib/ordered_set.h"
 #include "lib/safe_vector.h"
 
 namespace P4 {

@@ -18,13 +18,12 @@ limitations under the License.
 
 #include <ostream>
 #include <vector>
+#include <string>
 
 #include "frontends/p4/typeChecking/typeSubstitution.h"
 #include "ir/indexed_vector.h"
-#include "ir/vector.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
-#include "lib/safe_vector.h"
 
 namespace P4 {
 

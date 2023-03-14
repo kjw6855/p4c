@@ -16,7 +16,7 @@ limitations under the License.
 
 #include "resetHeaders.h"
 
-#include <iosfwd>
+#include <ostream>
 
 #include "ir/id.h"
 #include "lib/error.h"

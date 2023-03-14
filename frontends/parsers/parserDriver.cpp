@@ -1,16 +1,14 @@
 #include "parserDriver.h"
 
+#include <boost/format.hpp>
+#include <boost/iostreams/stream_buffer.hpp>
+#include <boost/range/algorithm/equal.hpp>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <utility>
-
-#include <boost/core/typeinfo.hpp>
-#include <boost/format.hpp>
-#include <boost/iostreams/stream_buffer.hpp>
-#include <boost/range/algorithm/equal.hpp>
 
 #include "config.h"
 #include "frontends/common/constantFolding.h"
@@ -23,7 +21,8 @@
 #include "lib/compile_context.h"
 #include "lib/error_reporter.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
+#include "ir/id.h"
+#include "lib/safe_vector.h"
 
 #ifdef HAVE_LIBBOOST_IOSTREAMS
 

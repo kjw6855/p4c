@@ -18,7 +18,6 @@ limitations under the License.
 #define FRONTENDS_P4_PARAMETERSUBSTITUTION_H_
 
 #include <iostream>
-#include <iterator>
 #include <map>
 #include <utility>
 #include <vector>

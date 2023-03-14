@@ -17,14 +17,11 @@ limitations under the License.
 #include "local_copyprop.h"
 
 #include <string.h>
-
 #include <ostream>
 #include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#include <boost/format.hpp>
 
 #include "expr_uses.h"
 #include "frontends/common/copySrcInfo.h"
@@ -36,7 +33,6 @@ limitations under the License.
 #include "lib/exceptions.h"
 #include "lib/log.h"
 #include "lib/map.h"
-#include "lib/ordered_map.h"
 
 namespace P4 {
 

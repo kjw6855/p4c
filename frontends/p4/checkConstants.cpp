@@ -16,8 +16,6 @@ limitations under the License.
 
 #include "checkConstants.h"
 
-#include <boost/format.hpp>
-
 #include "ir/id.h"
 #include "ir/vector.h"
 #include "lib/error.h"

@@ -16,8 +16,6 @@ limitations under the License.
 
 #include "parameterSubstitution.h"
 
-#include <boost/format.hpp>
-
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/exceptions.h"

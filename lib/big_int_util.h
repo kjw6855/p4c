@@ -17,7 +17,6 @@ limitations under the License.
 #ifndef LIB_BIG_INT_UTIL_H_
 #define LIB_BIG_INT_UTIL_H_
 
-#include <boost/core/enable_if.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/detail/et_ops.hpp>
 #include <boost/multiprecision/number.hpp>

@@ -17,9 +17,7 @@ limitations under the License.
 #include "source_file.h"
 
 #include <stddef.h>
-
 #include <algorithm>
-#include <memory>
 #include <utility>
 
 #include "exceptions.h"

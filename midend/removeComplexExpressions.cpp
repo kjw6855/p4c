@@ -16,8 +16,8 @@ limitations under the License.
 
 #include "removeComplexExpressions.h"
 
-#include <iosfwd>
 #include <list>
+#include <ostream>
 
 #include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"

@@ -16,14 +16,11 @@ limitations under the License.
 
 #include "typeSpecConverter.h"
 
-#include <google/protobuf/stubs/common.h>
-
+#include <boost/optional/optional.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <map>
 #include <string>
 #include <vector>
-
-#include <boost/format.hpp>
-#include <boost/optional/optional.hpp>
 
 #include "bytestrings.h"
 #include "flattenHeader.h"
@@ -34,12 +31,12 @@ limitations under the License.
 #include "ir/indexed_vector.h"
 #include "ir/ir.h"
 #include "ir/vector.h"
-#include "lib/big_int_util.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/exceptions.h"
 #include "lib/null.h"
 #include "p4/config/v1/p4types.pb.h"
+#include "lib/log.h"
 
 namespace p4configv1 = ::p4::config::v1;
 

@@ -16,7 +16,6 @@ limitations under the License.
 
 #include "ebpfPsaDigest.h"
 
-#include "backends/ebpf/ebpfType.h"
 #include "backends/ebpf/psa/ebpfPsaDeparser.h"
 
 namespace EBPF {

@@ -15,6 +15,7 @@ limitations under the License.
 */
 #include "predication.h"
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <algorithm>
 #include <ostream>
 #include <string>
@@ -23,7 +24,6 @@ limitations under the License.
 #include "frontends/p4/cloner.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
-#include "lib/big_int_util.h"
 #include "lib/log.h"
 
 namespace P4 {

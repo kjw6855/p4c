@@ -17,15 +17,12 @@ limitations under the License.
 #include "json.h"
 
 #include <limits.h>
-
-#include <list>
-#include <stdexcept>
-#include <utility>
-
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/detail/et_ops.hpp>
 #include <boost/multiprecision/number.hpp>
-#include <boost/multiprecision/traits/explicit_conversion.hpp>
+#include <list>
+#include <stdexcept>
+#include <utility>
 
 #include "indent.h"
 #include "lib/big_int_util.h"

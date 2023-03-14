@@ -24,8 +24,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "frontends/p4/typeMap.h"

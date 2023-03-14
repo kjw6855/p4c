@@ -20,8 +20,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "frontends/p4/typeMap.h"
@@ -33,8 +31,8 @@ limitations under the License.
 #include "ir/visitor.h"
 #include "lib/cstring.h"
 #include "lib/null.h"
-#include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
+#include "lib/log.h"
 
 namespace P4 {
 

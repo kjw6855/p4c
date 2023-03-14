@@ -17,12 +17,9 @@ limitations under the License.
 #include "actionSynthesis.h"
 
 #include <ctype.h>
-
-#include <iosfwd>
 #include <list>
 #include <string>
-
-#include <boost/format.hpp>
+#include <ostream>
 
 #include "frontends/p4/methodInstance.h"
 #include "ir/id.h"
@@ -31,7 +28,6 @@ limitations under the License.
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
 #include "lib/source_file.h"
 
 namespace P4 {

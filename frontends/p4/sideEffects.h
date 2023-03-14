@@ -25,8 +25,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
@@ -37,7 +35,6 @@ limitations under the License.
 #include "ir/ir.h"
 #include "ir/node.h"
 #include "ir/pass_manager.h"
-#include "ir/vector.h"
 #include "ir/visitor.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
@@ -45,7 +42,6 @@ limitations under the License.
 #include "lib/exceptions.h"
 #include "lib/log.h"
 #include "lib/null.h"
-#include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
 #include "lib/source_file.h"
 

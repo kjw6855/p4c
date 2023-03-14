@@ -1,6 +1,8 @@
 #include "interpreter.h"
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <algorithm>
+#include <string>
 
 #include "frontends/common/constantFolding.h"
 #include "frontends/common/model.h"
@@ -9,7 +11,6 @@
 #include "frontends/p4/parameterSubstitution.h"
 #include "ir/indexed_vector.h"
 #include "ir/vector.h"
-#include "lib/big_int_util.h"
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
 

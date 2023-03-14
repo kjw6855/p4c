@@ -18,8 +18,6 @@ limitations under the License.
 #ifndef _MIDEND_FLATTENHEADERS_H_
 #define _MIDEND_FLATTENHEADERS_H_
 
-#include <memory>
-
 #include "flattenInterfaceStructs.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeChecking/typeChecker.h"

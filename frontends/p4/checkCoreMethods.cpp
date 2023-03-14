@@ -17,8 +17,7 @@ limitations under the License.
 #include "frontends/p4/checkCoreMethods.h"
 
 #include <vector>
-
-#include <boost/format.hpp>
+#include <string>
 
 #include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"
@@ -26,6 +25,8 @@ limitations under the License.
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
 #include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/log.h"
 
 namespace P4 {
 

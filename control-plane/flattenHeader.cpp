@@ -22,7 +22,7 @@ limitations under the License.
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
 #include "ir/vector.h"
-#include "lib/safe_vector.h"
+#include "lib/log.h"
 
 namespace P4 {
 

@@ -18,8 +18,6 @@ limitations under the License.
 #define _MIDEND_PARSERUNROLL_H_
 
 #include <stddef.h>
-
-#include <iosfwd>
 #include <list>
 #include <map>
 #include <set>
@@ -28,8 +26,7 @@ limitations under the License.
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#include <boost/format.hpp>
+#include <ostream>
 
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/callGraph.h"
@@ -49,7 +46,6 @@ limitations under the License.
 #include "lib/log.h"
 #include "lib/map.h"
 #include "lib/null.h"
-#include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
 
 namespace P4 {

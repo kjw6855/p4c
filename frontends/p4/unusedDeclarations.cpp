@@ -18,8 +18,8 @@ limitations under the License.
 
 #include <ostream>
 #include <utility>
-
-#include <boost/format.hpp>
+#include <string>
+#include <vector>
 
 #include "ir/id.h"
 #include "ir/indexed_vector.h"

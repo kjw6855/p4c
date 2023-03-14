@@ -16,6 +16,7 @@ limitations under the License.
 
 #include <ostream>
 #include <vector>
+#include <string>
 
 #include "dbprint.h"
 #include "ir/indexed_vector.h"
@@ -23,6 +24,7 @@ limitations under the License.
 #include "ir/vector.h"
 #include "lib/indent.h"
 #include "lib/log.h"
+#include "lib/cstring.h"
 
 using namespace DBPrint;
 using namespace IndentCtl;

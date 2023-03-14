@@ -16,11 +16,8 @@ limitations under the License.
 
 #include "createBuiltins.h"
 
-#include <list>
 #include <string>
 #include <vector>
-
-#include <boost/format.hpp>
 
 #include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"
@@ -32,7 +29,6 @@ limitations under the License.
 #include "lib/enumerator.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
-#include "lib/safe_vector.h"
 
 namespace P4 {
 

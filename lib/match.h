@@ -17,8 +17,10 @@ limitations under the License.
 #ifndef _LIB_MATCH_H_
 #define _LIB_MATCH_H_
 
-#include <stdint.h>
-
+#include <boost/multiprecision/cpp_int.hpp>
+#include <boost/multiprecision/detail/et_ops.hpp>
+#include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/traits/explicit_conversion.hpp>
 #include <iostream>
 
 #include "big_int_util.h"

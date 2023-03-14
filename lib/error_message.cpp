@@ -1,7 +1,5 @@
 #include "error_message.h"
 
-#include <memory>
-
 std::string ErrorMessage::getPrefix() const {
     std::string p = prefix;
     if (type == MessageType::Error) {

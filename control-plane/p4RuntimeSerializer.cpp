@@ -20,11 +20,19 @@ limitations under the License.
 #include <google/protobuf/stubs/logging.h>
 #include <google/protobuf/stubs/status.h>
 #include <google/protobuf/text_format.h>
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <google/protobuf/util/json_util.h>
+
 #pragma GCC diagnostic pop
 
+#include <boost/multiprecision/cpp_int.hpp>
+#include <boost/multiprecision/detail/et_ops.hpp>
+#include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/traits/explicit_conversion.hpp>
+#include <boost/none.hpp>
+#include <boost/optional/optional.hpp>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -37,15 +45,6 @@ limitations under the License.
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#include <boost/core/enable_if.hpp>
-#include <boost/format.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
-#include <boost/multiprecision/detail/et_ops.hpp>
-#include <boost/multiprecision/number.hpp>
-#include <boost/multiprecision/traits/explicit_conversion.hpp>
-#include <boost/none.hpp>
-#include <boost/optional/optional.hpp>
 
 // TODO(antonin): this include should go away when we cleanup getMatchFields
 // and tableNeedsPriority implementations.
@@ -85,7 +84,6 @@ limitations under the License.
 #include "lib/log.h"
 #include "lib/null.h"
 #include "lib/nullstream.h"
-#include "lib/ordered_map.h"
 
 namespace p4v1 = ::p4::v1;
 namespace p4configv1 = ::p4::config::v1;

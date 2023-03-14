@@ -1,7 +1,5 @@
 #include "validateProperties.h"
 
-#include <boost/format.hpp>
-
 #include "ir/id.h"
 #include "lib/error_catalog.h"
 

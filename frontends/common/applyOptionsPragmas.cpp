@@ -16,10 +16,9 @@ limitations under the License.
 
 #include "frontends/common/applyOptionsPragmas.h"
 
-#include <iosfwd>
-
-#include <boost/format.hpp>
 #include <boost/none.hpp>
+#include <ostream>
+#include <string>
 
 #include "frontends/common/parser_options.h"
 #include "frontends/parsers/parserDriver.h"

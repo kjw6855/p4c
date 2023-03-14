@@ -18,19 +18,16 @@ limitations under the License.
 
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <boost/multiprecision/detail/et_ops.hpp>
+#include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/traits/explicit_conversion.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <algorithm>
 #include <list>
-#include <memory>
 #include <ostream>
 #include <set>
 #include <string>
 #include <typeinfo>
-
-#include <boost/format.hpp>
-#include <boost/multiprecision/detail/et_ops.hpp>
-#include <boost/multiprecision/number.hpp>
-#include <boost/multiprecision/traits/explicit_conversion.hpp>
 
 #include "converters.h"
 #include "frontends/common/model.h"
@@ -47,9 +44,9 @@ limitations under the License.
 #include "lib/error_catalog.h"
 #include "lib/exceptions.h"
 #include "lib/null.h"
-#include "lib/ordered_map.h"
 #include "lib/path.h"
 #include "lib/safe_vector.h"
+#include "lib/map.h"
 
 namespace P4V1 {
 

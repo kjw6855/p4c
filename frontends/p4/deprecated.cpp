@@ -17,8 +17,7 @@ limitations under the License.
 #include "deprecated.h"
 
 #include <vector>
-
-#include <boost/format.hpp>
+#include <string>
 
 #include "ir/declaration.h"
 #include "ir/vector.h"

@@ -14,12 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <list>
 #include <ostream>
 #include <utility>
 #include <vector>
-
-#include <boost/multiprecision/number.hpp>
+#include <string>
+#include <algorithm>
 
 #include "dbprint.h"
 #include "ir/id.h"
@@ -30,7 +32,6 @@ limitations under the License.
 #include "lib/cstring.h"
 #include "lib/indent.h"
 #include "lib/log.h"
-#include "lib/safe_vector.h"
 
 #define ALL_UNARY_OPS(M, ...)  \
     M(UPlus, +, ##__VA_ARGS__) \

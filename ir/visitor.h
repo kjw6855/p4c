@@ -17,7 +17,6 @@ limitations under the License.
 #ifndef _IR_VISITOR_H_
 #define _IR_VISITOR_H_
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -28,6 +27,8 @@ limitations under the License.
 #include <typeinfo>
 #include <unordered_map>
 #include <utility>
+#include <ostream>
+#include <vector>
 
 #include "ir/gen-tree-macro.h"
 #include "ir/ir-tree-macros.h"
@@ -54,8 +55,6 @@ struct Visitor_Context {
 };
 
 class SplitFlowVisit_base;
-
-class Inspector;
 
 class Visitor {
  public:
@@ -337,6 +336,7 @@ class Visitor {
 
     void visit_children(const IR::Node *, std::function<void()> fn) { fn(); }
     class ChangeTracker;  // used by Modifier and Transform -- private to them
+
     // This overrides visitDagOnce for a single node -- can only be called from
     // preorder and postorder functions
     void visitOnce() const { *visitCurrentOnce = true; }

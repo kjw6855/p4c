@@ -1,6 +1,6 @@
 #include "eliminateNewtype.h"
 
-#include <iosfwd>
+#include <ostream>
 
 #include "lib/log.h"
 

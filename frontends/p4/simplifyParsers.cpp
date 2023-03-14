@@ -24,8 +24,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/parserCallGraph.h"
 #include "ir/declaration.h"
 #include "ir/id.h"
@@ -36,7 +34,6 @@ limitations under the License.
 #include "lib/error_catalog.h"
 #include "lib/log.h"
 #include "lib/map.h"
-#include "lib/ordered_map.h"
 #include "lib/ordered_set.h"
 
 namespace P4 {

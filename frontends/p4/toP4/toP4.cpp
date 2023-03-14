@@ -17,13 +17,10 @@ limitations under the License.
 #include "toP4.h"
 
 #include <string.h>
-
 #include <map>
-#include <memory>
 #include <set>
 #include <string>
-
-#include <boost/format.hpp>
+#include <list>
 
 #include "frontends/common/model.h"
 #include "frontends/common/parser_options.h"

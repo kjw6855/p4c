@@ -20,8 +20,6 @@ limitations under the License.
 #include <ostream>
 #include <string>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "frontends/p4/commonInlining.h"
 #include "frontends/p4/evaluator/substituteParameters.h"
@@ -35,7 +33,6 @@ limitations under the License.
 #include "lib/error_catalog.h"
 #include "lib/log.h"
 #include "lib/map.h"
-#include "lib/ordered_map.h"
 
 namespace P4 {
 

@@ -1,12 +1,13 @@
 #include "convertEnums.h"
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <ostream>
 #include <vector>
+#include <string>
 
 #include "frontends/p4/enumInstance.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
-#include "lib/big_int_util.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
 

@@ -18,10 +18,8 @@ limitations under the License.
 
 #include <stdlib.h>
 #include <string.h>
-
+#include <boost/multiprecision/cpp_int.hpp>
 #include <ostream>
-
-#include <boost/format.hpp>
 
 #include "frontends/common/parser_options.h"
 #include "ir/configuration.h"

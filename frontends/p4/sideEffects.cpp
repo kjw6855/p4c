@@ -25,6 +25,7 @@ limitations under the License.
 #include "frontends/p4/tableApply.h"
 #include "lib/enumerator.h"
 #include "lib/map.h"
+#include "ir/vector.h"
 
 namespace P4 {
 

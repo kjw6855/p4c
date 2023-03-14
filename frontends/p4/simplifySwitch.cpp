@@ -16,13 +16,14 @@ limitations under the License.
 
 #include "frontends/p4/simplifySwitch.h"
 
-#include <vector>
-
 #include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+#include <vector>
+#include <string>
 
 #include "ir/vector.h"
-#include "lib/big_int_util.h"
 #include "lib/exceptions.h"
+#include "lib/cstring.h"
 
 namespace P4 {
 

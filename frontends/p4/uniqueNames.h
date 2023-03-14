@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <map>
 #include <vector>
+#include <string>
 
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeMap.h"
@@ -33,6 +34,7 @@ limitations under the License.
 #include "lib/exceptions.h"
 #include "lib/map.h"
 #include "lib/null.h"
+#include "lib/log.h"
 
 namespace P4 {
 

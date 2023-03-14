@@ -21,6 +21,7 @@ limitations under the License.
 #include <set>
 #include <utility>
 #include <vector>
+#include <string>
 
 #include "ir/declaration.h"
 #include "ir/id.h"

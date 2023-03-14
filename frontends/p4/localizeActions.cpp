@@ -20,13 +20,10 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/cloner.h"
 #include "ir/declaration.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
-#include "ir/vector.h"
 #include "lib/exceptions.h"
 
 namespace P4 {

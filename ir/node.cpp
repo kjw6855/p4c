@@ -19,7 +19,6 @@ limitations under the License.
 
 #include "node.h"
 
-#include <memory>
 #include <ostream>
 
 #include "ir/declaration.h"

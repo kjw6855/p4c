@@ -16,16 +16,17 @@ limitations under the License.
 
 #include "syntacticEquivalence.h"
 
-#include <vector>
-
 #include <boost/multiprecision/number.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+#include <vector>
+#include <string>
 
 #include "ir/declaration.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
-#include "lib/big_int_util.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
+#include "lib/log.h"
 
 namespace P4 {
 

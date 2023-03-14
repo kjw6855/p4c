@@ -20,6 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <map>
 #include <vector>
+#include <string>
 
 #include "commonInlining.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
@@ -33,8 +34,8 @@ limitations under the License.
 #include "ir/visitor.h"
 #include "lib/exceptions.h"
 #include "lib/null.h"
-#include "lib/ordered_set.h"
 #include "lib/safe_vector.h"
+#include "lib/cstring.h"
 
 namespace P4 {
 

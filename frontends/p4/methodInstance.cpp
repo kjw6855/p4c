@@ -18,8 +18,6 @@ limitations under the License.
 
 #include <string>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/evaluator/substituteParameters.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "ir/indexed_vector.h"
@@ -28,7 +26,7 @@ limitations under the License.
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
-#include "lib/safe_vector.h"
+#include "lib/log.h"
 
 namespace P4 {
 

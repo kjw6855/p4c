@@ -22,6 +22,7 @@ limitations under the License.
 #include "lib/enumerator.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
+#include "ir/vector.h"
 
 namespace P4 {
 

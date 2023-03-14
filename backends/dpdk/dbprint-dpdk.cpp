@@ -1,5 +1,6 @@
 #include <ostream>
 #include <vector>
+#include <string>
 
 #include "ir/id.h"
 #include "ir/indexed_vector.h"

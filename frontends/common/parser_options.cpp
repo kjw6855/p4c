@@ -19,16 +19,12 @@ limitations under the License.
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <sys/stat.h>
-
 #include <functional>
 #include <iostream>
 #include <regex>
 #include <string>
 #include <unordered_set>
-
-#include <boost/format.hpp>
 
 #include "frontends/p4/toP4/toP4.h"
 #include "ir/id.h"

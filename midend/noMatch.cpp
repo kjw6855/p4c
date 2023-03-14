@@ -21,8 +21,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/coreLibrary.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
@@ -32,7 +30,6 @@ limitations under the License.
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
 
 namespace P4 {
 

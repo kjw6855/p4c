@@ -20,8 +20,6 @@ limitations under the License.
 #include <string>
 #include <utility>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/constantFolding.h"
 #include "frontends/p4/parameterSubstitution.h"
 #include "frontends/p4/typeChecking/typeChecker.h"

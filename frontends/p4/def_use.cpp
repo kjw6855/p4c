@@ -16,10 +16,8 @@ limitations under the License.
 
 #include "def_use.h"
 
-#include <iostream>
-
 #include <boost/container_hash/hash.hpp>
-#include <boost/format.hpp>
+#include <iostream>
 
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/parameterSubstitution.h"
@@ -29,7 +27,6 @@ limitations under the License.
 #include "lib/enumerator.h"
 #include "lib/indent.h"
 #include "lib/ordered_set.h"
-#include "lib/safe_vector.h"
 #include "lib/stringify.h"
 #include "parserCallGraph.h"
 

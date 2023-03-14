@@ -16,7 +16,6 @@ limitations under the License.
 
 #include "p4RuntimeArchStandard.h"
 
-#include <set>
 #include <unordered_map>
 
 #include "frontends/common/resolveReferences/referenceMap.h"
@@ -24,7 +23,6 @@ limitations under the License.
 #include "frontends/p4/typeMap.h"
 #include "ir/id.h"
 #include "ir/ir.h"
-#include "lib/ordered_map.h"
 #include "p4RuntimeArchHandler.h"
 #include "typeSpecConverter.h"
 

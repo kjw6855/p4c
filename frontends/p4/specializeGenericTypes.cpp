@@ -18,8 +18,6 @@ limitations under the License.
 
 #include <stddef.h>
 
-#include <boost/format.hpp>
-
 #include "frontends/p4/typeChecking/typeSubstitution.h"
 #include "frontends/p4/typeChecking/typeSubstitutionVisitor.h"
 #include "ir/id.h"

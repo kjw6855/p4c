@@ -16,15 +16,13 @@ limitations under the License.
 
 #include "resolveReferences.h"
 
-#include <functional>
-#include <iterator>
-#include <map>
-#include <sstream>
-
-#include <boost/format.hpp>
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/iterator/reverse_iterator.hpp>
 #include <boost/range/adaptor/reversed.hpp>
+#include <functional>
+#include <map>
+#include <sstream>
+#include <string>
 
 #include "frontends/common/parser_options.h"
 #include "frontends/common/resolveReferences/referenceMap.h"

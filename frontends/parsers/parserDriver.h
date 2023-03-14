@@ -31,7 +31,6 @@ limitations under the License.
 #include "ir/node.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"
-#include "lib/safe_vector.h"
 #include "lib/source_file.h"
 
 namespace P4 {

@@ -1,19 +1,15 @@
 #include "addMissingIds.h"
 
 #include <stddef.h>
-
-#include <list>
+#include <boost/optional/optional.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <string>
 #include <vector>
-
-#include <boost/format.hpp>
-#include <boost/optional/optional.hpp>
 
 #include "frontends/p4/evaluator/evaluator.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
 #include "ir/vector.h"
-#include "lib/big_int_util.h"
 #include "lib/cstring.h"
 #include "lib/log.h"
 #include "lib/null.h"

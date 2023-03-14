@@ -17,14 +17,12 @@ limitations under the License.
 #include "typeUnification.h"
 
 #include <unistd.h>
-
 #include <map>
 #include <ostream>
 #include <typeinfo>
 #include <utility>
 #include <vector>
-
-#include <boost/format.hpp>
+#include <string>
 
 #include "frontends/p4/typeChecking/typeSubstitutionVisitor.h"
 #include "frontends/p4/typeMap.h"

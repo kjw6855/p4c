@@ -16,16 +16,12 @@ limitations under the License.
 
 #include "removeReturns.h"
 
-#include <iosfwd>
-#include <list>
 #include <string>
-
-#include <boost/format.hpp>
+#include <ostream>
 
 #include "ir/indexed_vector.h"
 #include "ir/vector.h"
 #include "lib/log.h"
-#include "lib/ordered_map.h"
 
 namespace P4 {
 

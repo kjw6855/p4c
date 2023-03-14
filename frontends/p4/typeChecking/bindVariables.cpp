@@ -6,6 +6,7 @@
 #include "lib/error_catalog.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
+#include "ir/vector.h"
 
 namespace P4 {
 

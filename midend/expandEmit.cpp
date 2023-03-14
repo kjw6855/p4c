@@ -17,11 +17,8 @@ limitations under the License.
 #include "expandEmit.h"
 
 #include <stddef.h>
-
 #include <list>
 #include <string>
-
-#include <boost/format.hpp>
 
 #include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"
@@ -33,7 +30,7 @@ limitations under the License.
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/exceptions.h"
-#include "lib/ordered_map.h"
+#include "lib/log.h"
 
 namespace P4 {
 

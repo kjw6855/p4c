@@ -17,7 +17,7 @@ limitations under the License.
 #ifndef _TYPECHECKING_TYPESUBSTITUTIONVISITOR_H_
 #define _TYPECHECKING_TYPESUBSTITUTIONVISITOR_H_
 
-#include <iosfwd>
+#include <ostream>
 
 #include "frontends/p4/typeMap.h"
 #include "ir/ir.h"

@@ -19,8 +19,6 @@ limitations under the License.
 #include <list>
 #include <string>
 
-#include <boost/format.hpp>
-
 #include "frontends/common/model.h"
 #include "frontends/p4/coreLibrary.h"
 #include "ir/id.h"
@@ -29,7 +27,7 @@ limitations under the License.
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
-#include "lib/ordered_map.h"
+#include "lib/log.h"
 
 namespace P4 {
 

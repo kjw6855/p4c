@@ -15,11 +15,8 @@ limitations under the License.
 
 #include "printUtils.h"
 
-#include <sstream>
-#include <string>
-
-#include <boost/format.hpp>
 #include <boost/multiprecision/number.hpp>
+#include <string>
 
 #include "ir/id.h"
 #include "lib/error.h"

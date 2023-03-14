@@ -16,8 +16,6 @@ limitations under the License.
 
 #include "irclass.h"
 
-#include <iterator>
-
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
 #include "tools/ir-generator/type.h"

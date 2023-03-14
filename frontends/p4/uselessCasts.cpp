@@ -16,7 +16,7 @@ limitations under the License.
 
 #include "uselessCasts.h"
 
-#include <iosfwd>
+#include <ostream>
 
 #include "lib/cstring.h"
 #include "lib/log.h"

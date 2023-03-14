@@ -16,7 +16,7 @@ limitations under the License.
 
 #include "tableHit.h"
 
-#include <iosfwd>
+#include <ostream>
 
 #include "frontends/p4/tableApply.h"
 #include "lib/log.h"

@@ -17,12 +17,14 @@ limitations under the License.
 #ifndef _LIB_JSON_H_
 #define _LIB_JSON_H_
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <initializer_list>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <algorithm>
 
 #include "gtest/gtest_prod.h"
 #include "lib/big_int_util.h"
