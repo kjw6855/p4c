@@ -93,15 +93,9 @@ SymbolicExecutor::Branch SymbolicExecutor::popRandomBranch(
 SymbolicExecutor::SymbolicExecutor(AbstractSolver &solver, const ProgramInfo &programInfo)
     : programInfo(programInfo),
       solver(solver),
+      executionState(new ExecutionState(programInfo.program)),
       allStatements(programInfo.getAllStatements()),
-      evaluator(solver, programInfo) {
-    // If there is no seed provided, do not randomize the solver.
-    auto seed = Utils::getCurrentSeed();
-    if (seed != boost::none) {
-        this->solver.seed(*seed);
-    }
-    executionState = new ExecutionState(programInfo.program);
-}
+      evaluator(solver, programInfo) {}
 
 void SymbolicExecutor::updateVisitedStatements(const P4::Coverage::CoverageSet &newStatements) {
     visitedStatements.insert(newStatements.begin(), newStatements.end());

@@ -41,14 +41,14 @@ p4tools_add_tests(
 )
 
 # These tests need special arguments.
-# TODO: This test is disabled because the z3 solver times out on it. Figure out why.
-# We can not use the solver timeout because it crashes, the solver does not interact well with GC.
-# p4tools_add_tests(
-#   TESTSUITES "${P4TESTDATA}/p4_16_samples/ebpf_checksum_extern.p4;"
-#   TAG "testgen-p4c-ebpf" DRIVER ${P4TESTGEN_DRIVER} TEMPLATE_FILE ${TEMPLATE_FILE}
-#   TARGET "ebpf" ARCH "ebpf" ENABLE_RUNNER RUNNER_ARGS "--extern-file ${P4C_SOURCE_DIR}/testdata/extern_modules/extern-checksum-ebpf.c"
-#   TEST_ARGS "-I${P4C_BINARY_DIR}/p4include --test-backend STF ${EXTRA_OPTS} "
-# )
+# TODO: This test has issues, the z3 solver times out on the checksum calculation.
+# Consider using a concolic model for the eBPF supplied checksum.
+p4tools_add_tests(
+  TESTSUITES "${P4TESTDATA}/p4_16_samples/ebpf_checksum_extern.p4;"
+  TAG "testgen-p4c-ebpf" DRIVER ${P4TESTGEN_DRIVER} TEMPLATE_FILE ${TEMPLATE_FILE}
+  TARGET "ebpf" ARCH "ebpf" ENABLE_RUNNER RUNNER_ARGS "--extern-file ${P4C_SOURCE_DIR}/testdata/extern_modules/extern-checksum-ebpf.c"
+  TEST_ARGS "-I${P4C_BINARY_DIR}/p4include --test-backend STF ${EXTRA_OPTS} "
+)
 
 p4tools_add_tests(
   TESTSUITES "${P4TESTDATA}/p4_16_samples/ebpf_conntrack_extern.p4;"

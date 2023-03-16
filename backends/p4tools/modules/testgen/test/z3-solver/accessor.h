@@ -18,7 +18,8 @@ class Z3SolverAccessor {
     z3::expr_vector getAssertions(boost::optional<bool> assertionType = boost::none) {
         if (!assertionType) {
             return solver->isIncremental ? solver->z3solver.assertions() : solver->z3Assertions;
-        } else if (assertionType.value()) {
+        }
+        if (assertionType.value()) {
             return solver->z3solver.assertions();
         }
         return solver->z3Assertions;

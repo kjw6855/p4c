@@ -76,13 +76,25 @@ int Testgen::mainImpl(const IR::P4Program *program) {
     // Print basic information for each test.
     enableInformationLogging();
 
-    auto const inputFile = P4CContext::get().options().file;
+    const auto &parserOptions = P4CContext::get().options();
     const auto &testgenOptions = TestgenOptions::get();
+    auto const inputFile = parserOptions.file;
     cstring testDirStr = testgenOptions.outputDir;
+
+    // Need to declare the solver here to ensure its lifetime.
+    Z3Solver solver;
+    // Configure the solver.
     auto seed = Utils::getCurrentSeed();
     if (seed) {
+        solver.seed(*seed);
         printFeature("test_info", 4, "============ Program seed %1% =============\n", *seed);
     }
+    if (testgenOptions.solverTimeout != 0) {
+        // Set the internal solver timeout.
+        solver.timeout(testgenOptions.solverTimeout);
+    }
+    // Allocate a symbolic execution engine.
+    auto *symExec = pickExecutionEngine(testgenOptions, programInfo, solver);
 
     // Get the basename of the input file and remove the extension
     // This assumes that inputFile is not null.
@@ -94,9 +106,6 @@ int Testgen::mainImpl(const IR::P4Program *program) {
         boost::filesystem::create_directories(testDir);
         testPath = boost::filesystem::path(testDir) / testPath;
     }
-    // Need to declare the solver here to ensure its lifetime.
-    Z3Solver solver;
-    auto *symExec = pickExecutionEngine(testgenOptions, programInfo, solver);
 
     // Define how to handle the final state for each test. This is target defined.
     auto *testBackend = TestgenTarget::getTestBackend(*programInfo, *symExec, testPath, seed);

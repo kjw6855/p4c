@@ -151,6 +151,8 @@ if (ENABLE_GC)
 endif ()
 if (ENABLE_MULTITHREAD)
   add_definitions(-DMULTITHREAD)
+  add_definitions(-DGC_THREADS=1)
+  add_definitions(-DGC_NO_THREAD_REDIRECTS=1)
 endif()
 # we require -pthread to make std::call_once work, even if we're not using threads...
 set(THREADS_PREFER_PTHREAD_FLAG ON)

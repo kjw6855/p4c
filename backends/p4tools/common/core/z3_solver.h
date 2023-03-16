@@ -5,6 +5,7 @@
 #include <z3++.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <iosfwd>
 #include <string>
 #include <vector>
@@ -102,6 +103,8 @@ class Z3Solver : public AbstractSolver {
     //             that is greater than or equal to @asrtIndex.
     /// Helps to restore a state of incremental solver in a constructor.
     void addZ3Pushes(size_t &chkIndex, size_t asrtIndex);
+
+    z3::check_result timedCheckSat();
 
     /// Main Z3 context.
     z3::context z3context;

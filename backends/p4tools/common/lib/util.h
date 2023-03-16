@@ -61,7 +61,7 @@ class Utils {
 
     /// Initialize the random generator with an integer seed. This also seeds @var currentSeed.
     /// Uses boost's mersenne twister.
-    static void setRandomSeed(int seed);
+    static void setRandomSeed(uint32_t seed);
 
     /// @returns currentSeed.
     static boost::optional<uint32_t> getCurrentSeed();
