@@ -3,8 +3,6 @@
 #include <z3++.h>
 #include <z3_api.h>
 
-#include <gc/gc.h>
-
 #include <cstdint>
 #include <exception>
 #include <future>
@@ -33,7 +31,7 @@
 namespace P4Tools {
 
 /// Converts a Z3 expression to a string.
-const char *toString(z3::expr e) { return Z3_ast_to_string(e.ctx(), e); }
+const char *toString(const z3::expr &e) { return Z3_ast_to_string(e.ctx(), e); }
 
 #ifndef NDEBUG
 template <typename... Args>
@@ -50,7 +48,7 @@ std::string stringFormat(const char *format, Args... args) {
                       __VA_ARGS__))
 
 /// Converts a Z3 model to a string.
-const char *toString(z3::model m) { return Z3_model_to_string(m.ctx(), m); }
+const char *toString(const z3::model &m) { return Z3_model_to_string(m.ctx(), m); }
 #else
 #define Z3_LOG(...)
 #endif  // NDEBUG

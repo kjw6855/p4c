@@ -38,7 +38,6 @@ OPTION (ENABLE_DPDK "Build the DPDK backend (required for the full test suite)" 
 OPTION (ENABLE_P4TEST "Build the P4Test backend (required for the full test suite)" ON)
 OPTION (ENABLE_TEST_TOOLS "Build the P4Tools development platform" OFF)
 OPTION (ENABLE_P4C_GRAPHS "Build the p4c-graphs backend" ON)
-OPTION (ENABLE_PROTOBUF_STATIC "Link against Protobuf statically" ON)
 OPTION (ENABLE_GC "Use libgc" ON)
 OPTION (ENABLE_MULTITHREAD "Use multithreading" OFF)
 OPTION (ENABLE_LTO "Enable Link Time Optimization (LTO)" OFF)
@@ -110,12 +109,12 @@ endif ()
 # set the required options for a static release build
 if (BUILD_STATIC_RELEASE)
   message(STATUS "Building static release binaries")
-  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_SHARED_LIBS OFF CACHE STRING "" FORCE)
   set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
   # Link Boost statically
   # See https://cmake.org/cmake/help/latest/module/FindBoost.html for details
-  set(Boost_USE_STATIC_LIBS ON)
-  set(Boost_USE_STATIC_RUNTIME OFF)
+  set(Boost_USE_STATIC_LIBS ON CACHE STRING "" FORCE)
+  set(Boost_USE_STATIC_RUNTIME OFF CACHE STRING "" FORCE)
   # Set the static variable
   set(P4C_STATIC_BUILD STATIC)
   # Do not bring in dynamic libstdcc and libgcc
@@ -127,14 +126,11 @@ endif ()
 find_package (PythonInterp 3 REQUIRED)
 find_package (FLEX 2.0 REQUIRED)
 find_package (BISON 3.0 REQUIRED)
-if (ENABLE_PROTOBUF_STATIC)
-  set(SAVED_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
-  set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
-endif ()
 find_package (Protobuf 3.0.0 REQUIRED)
-if (ENABLE_PROTOBUF_STATIC)
-  set(CMAKE_FIND_LIBRARY_SUFFIXES ${SAVED_CMAKE_FIND_LIBRARY_SUFFIXES})
-endif ()
+# we require -pthread to make std::call_once work, even if we're not using threads...
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 # The boost graph headers are optional and only required by the graphs backend
 find_package (Boost QUIET COMPONENTS graph)
 if (Boost_FOUND)
@@ -145,8 +141,30 @@ endif ()
 find_package (Boost REQUIRED COMPONENTS iostreams)
 # otherwise ordered_map code tries to use boost::get (graph)
 add_definitions ("-DBOOST_NO_ARGUMENT_DEPENDENT_LOOKUP")
+
+# Compile with the Boehm garbage collector (https://github.com/ivmai/bdwgc) if requested.
 if (ENABLE_GC)
-  find_package (LibGc 7.4.2 REQUIRED)
+  set(enable_cplusplus ON CACHE BOOL "C++ support")
+  # We redirect all malloc calls in the program.
+  set(enable_redirect_malloc ON CACHE BOOL "Redirect malloc and friends to GC routines.")
+  add_definitions("-DREDIRECT_MALLOC=GC_malloc")
+  add_definitions("-DREDIRECT_REALLOC=GC_realloc")
+  add_definitions("-DREDIRECT_FREE=GC_free")
+  # Disable a warning.
+  add_definitions("-DNO_PROC_FOR_LIBRARIES")
+  # We need to enable position independent code to make the malloc redirect work.
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  add_subdirectory(tools/bdwgc)
+  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/tools/bdwgc/include)
+  if (BUILD_STATIC_RELEASE)
+    set(LIBGC_LIBRARIES
+        ${CMAKE_BINARY_DIR}/tools/bdwgc/libgc.a
+        ${CMAKE_BINARY_DIR}/tools/bdwgc/libgccpp.a
+        ${CMAKE_BINARY_DIR}/tools/bdwgc/libcord.a
+    )
+  else()
+    set(LIBGC_LIBRARIES gc gccpp cord)
+  endif()
   set (HAVE_LIBGC 1)
 endif ()
 if (ENABLE_MULTITHREAD)
@@ -154,13 +172,11 @@ if (ENABLE_MULTITHREAD)
   add_definitions(-DGC_THREADS=1)
   add_definitions(-DGC_NO_THREAD_REDIRECTS=1)
 endif()
-# we require -pthread to make std::call_once work, even if we're not using threads...
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
+
 set (P4C_LIB_DEPS "${P4C_LIB_DEPS};${CMAKE_THREAD_LIBS_INIT}")
+
 include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIRS})
-include_directories(SYSTEM ${LIBGC_INCLUDE_DIR})
 set (HAVE_LIBBOOST_IOSTREAMS 1)
 set (P4C_LIB_DEPS "${P4C_LIB_DEPS};${Boost_LIBRARIES}")
 if (ENABLE_GC)
@@ -532,6 +548,7 @@ file(
 list(FILTER P4C_LINT_LIST EXCLUDE REGEX "backends/p4tools/submodules")
 list(FILTER P4C_LINT_LIST EXCLUDE REGEX "backends/ebpf/runtime")
 list(FILTER P4C_LINT_LIST EXCLUDE REGEX "backends/ubpf/runtime")
+list(FILTER P4C_LINT_LIST EXCLUDE REGEX "tools/bdwgc")
 list(FILTER P4C_LINT_LIST EXCLUDE REGEX "control-plane/p4runtime")
 
 # cpplint
