@@ -42,3 +42,5 @@ build/
 
 # Bazel files
 bazel-*
+
+*.idea

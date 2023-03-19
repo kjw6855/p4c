@@ -1,0 +1,20 @@
+"/Users/jiwonkim/Library/Application Support/JetBrains/Toolbox/apps/CLion/ch-0/223.8214.51/CLion.app/Contents/bin/cmake/mac/bin/cmake" -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_MAKE_PROGRAM=/Users/jiwonkim/Library/Application Support/JetBrains/Toolbox/apps/CLion/ch-0/223.8214.51/CLion.app/Contents/bin/ninja/mac/ninja" -G Ninja -S /Users/jiwonkim/Workspace-ubuntu/p4c/backends/p4tools/modules/fuzzer -B /Users/jiwonkim/Workspace-ubuntu/p4c/backends/p4tools/modules/fuzzer/cmake-build-debug
+CMake Error at CMakeLists.txt:4 (include):
+  include could not find requested file:
+
+    common
+
+
+-- Enabling target bmv2
+-- Enabling target ebpf
+CMake Warning (dev) at CMakeLists.txt:93 (set):
+  Cannot set "IR_DEF_FILES": current scope has no parent.
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Error at CMakeLists.txt:102 (add_p4tools_library):
+  Unknown CMake command "add_p4tools_library".
+
+
+-- Configuring incomplete, errors occurred!
+See also "/Users/jiwonkim/Workspace-ubuntu/p4c/backends/p4tools/modules/fuzzer/cmake-build-debug/CMakeFiles/CMakeOutput.log".
+See also "/Users/jiwonkim/Workspace-ubuntu/p4c/backends/p4tools/modules/fuzzer/cmake-build-debug/CMakeFiles/CMakeError.log".

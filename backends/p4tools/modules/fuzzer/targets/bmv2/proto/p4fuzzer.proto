@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+import "p4testgen.proto";
+
+service P4FuzzGuide {
+    rpc RecordP4Testgen(TestCase) returns (P4Coverage) {}
+    rpc GetP4Coverage() returns (P4Coverage) {}
+}
+
+message P4Coverage {
+    int32 hit_stmt_count = 1;
+    int32 total_stmt_count = 2;
+    int32 hit_action_count = 3;
+    int32 total_action_count = 4;
+}
