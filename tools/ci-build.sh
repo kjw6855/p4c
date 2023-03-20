@@ -255,6 +255,7 @@ cmake ${CMAKE_FLAGS} ..
 if [ "$CMAKE_ONLY" == "OFF" ]; then
   make
   sudo make install
+  sudo ldconfig
   # Print ccache statistics after building
   ccache -p -s
 fi
