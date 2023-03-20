@@ -68,7 +68,7 @@ class TestgenOptions : public AbstractP4cToolOptions {
     /// Enforces the test generation of tests with mandatory output packet.
     bool withOutputPacket = false;
 
-    bool interactive = false;
+    bool interactive = true;
 
     const char* getIncludePath() override;
 

@@ -5,12 +5,19 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <utility>
 
 #include <boost/cstdint.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 #include <boost/none.hpp>
 #include <boost/optional/optional.hpp>
+
+#include <grpc/grpc.h>
+#include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <grpcpp/server_context.h>
 
 #include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/common/lib/util.h"
@@ -32,16 +39,110 @@
 #include "backends/p4tools/modules/fuzzer/options.h"
 #include "backends/p4tools/modules/fuzzer/register.h"
 
+#include "backends/p4tools/modules/fuzzer/p4fuzzer.grpc.pb.h"
+
 namespace fs = boost::filesystem;
+
+using grpc::Server;
+using grpc::ServerBuilder;
+using grpc::ServerContext;
+using grpc::ServerReader;
+using grpc::ServerReaderWriter;
+using grpc::ServerWriter;
+using grpc::Status;
+using p4fuzzer::P4FuzzGuide;
+using p4fuzzer::P4CoverageRequest;
+using p4fuzzer::P4CoverageReply;
 
 namespace P4Tools {
 
 namespace P4Testgen {
 
+class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
+    private:
+        std::map<std::string, TestBackEnd*> coverage_map_;
+        const ProgramInfo* programInfo_;
+        ExplorationStrategy* symExec_;
+        const boost::filesystem::path* testPath_;
+        boost::optional<uint32_t> seed_;
+
+    public:
+        P4FuzzGuideImpl(const ProgramInfo* programInfo,
+                ExplorationStrategy* symExec,
+                const boost::filesystem::path* testPath,
+                boost::optional<uint32_t> seed) {
+            programInfo_ = programInfo;
+            symExec_ = symExec;
+            testPath_ = testPath;
+            seed_ = seed;
+        }
+
+        Status GetP4Coverage(ServerContext* context,
+                const P4CoverageRequest* req,
+                P4CoverageReply* rep) override {
+
+            auto devId = req->device_id();
+            std::cout << "Get P4 Coverage of device: " << devId << std::endl;
+
+            if (coverage_map_.count(req->device_id()) == 0) {
+                rep->set_hit_stmt_count(0);
+                rep->set_total_stmt_count(0);
+                rep->set_hit_action_count(0);
+                rep->set_total_action_count(0);
+            } else {
+                rep->set_hit_stmt_count(1);
+                rep->set_total_stmt_count(1);
+                rep->set_hit_action_count(1);
+                rep->set_total_action_count(1);
+            }
+            return Status::OK;
+        }
+
+        Status RecordP4Testgen(ServerContext* context,
+                const P4CoverageRequest* req,
+                P4CoverageReply* rep) override {
+
+            auto devId = req->device_id();
+            std::cout << "Record P4 Coverage of device: " << devId << std::endl;
+
+
+            if (coverage_map_.count(req->device_id()) == 0) {
+                auto* testBackend = TestgenTarget::getTestBackend(*programInfo_, *symExec_, *testPath_, seed_);
+                coverage_map_.insert(std::make_pair(devId, testBackend));
+
+                rep->set_hit_stmt_count(0);
+                rep->set_total_stmt_count(0);
+                rep->set_hit_action_count(0);
+                rep->set_total_action_count(0);
+            } else {
+                rep->set_hit_stmt_count(1);
+                rep->set_total_stmt_count(1);
+                rep->set_hit_action_count(1);
+                rep->set_total_action_count(1);
+            }
+
+            return Status::OK;
+        }
+};
+
 void Testgen::registerTarget() {
     // Register all available compiler targets.
     // These are discovered by CMAKE, which fills out the register.h.in file.
     registerCompilerTargets();
+}
+
+void runServer(const ProgramInfo* programInfo, ExplorationStrategy* symbex,
+                                       const boost::filesystem::path* testPath,
+                                       boost::optional<uint32_t> seed) {
+    std::string server_address("0.0.0.0:50051");
+    P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo, symbex, testPath, seed);
+
+    ServerBuilder builder;
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.RegisterService(&service);
+    std::unique_ptr<Server> server(builder.BuildAndStart());
+    std::cout << "Server listening on " << server_address << std::endl;
+    server->Wait();
 }
 
 int Testgen::mainImpl(const IR::P4Program* program) {
@@ -71,7 +172,9 @@ int Testgen::mainImpl(const IR::P4Program* program) {
     auto programName = fs::path(inputFile).filename().replace_extension("");
     // Create the directory, if the directory string is valid and if it does not exist.
     auto testPath = programName;
-    if (!testDirStr.isNullOrEmpty()) {
+    if (!testDirStr) {
+        testPath.clear();
+    } else if (!testDirStr.isNullOrEmpty()) {
         auto testDir = fs::path(testDirStr);
         fs::create_directories(testDir);
         testPath = fs::path(testDir) / testPath;
@@ -126,35 +229,36 @@ int Testgen::mainImpl(const IR::P4Program* program) {
         return new IncrementalStack(solver, *programInfo, seed);
     }();
 
-    // Define how to handle the final state for each test. This is target defined.
-    auto* testBackend = TestgenTarget::getTestBackend(*programInfo, *symExec, testPath, seed);
-    ExplorationStrategy::Callback callBack =
-        std::bind(&TestBackEnd::run, testBackend, std::placeholders::_1);
-
     if (TestgenOptions::get().interactive) {
-
+        runServer(programInfo, symExec, &testPath, seed);
         // Receive p4testgen.proto message
         // Measure p4 coverage
-    }
+    } else {
 
-    try {
-        // Run the symbolic executor with given exploration strategy.
-        symExec->run(callBack);
-    } catch (...) {
-        if (TestgenOptions::get().trackBranches) {
-            // Print list of the selected branches and store all information into
-            // dumpFolder/selectedBranches.txt file.
-            // This printed list could be used for repeat this bug in arguments of --input-branches
-            // command line. For example, --input-branches "1,1".
-            symExec->printCurrentTraceAndBranches(std::cerr);
+        // Define how to handle the final state for each test. This is target defined.
+        auto* testBackend = TestgenTarget::getTestBackend(*programInfo, *symExec, testPath, seed);
+        ExplorationStrategy::Callback callBack =
+            std::bind(&TestBackEnd::run, testBackend, std::placeholders::_1);
+
+        try {
+            // Run the symbolic executor with given exploration strategy.
+            symExec->run(callBack);
+        } catch (...) {
+            if (TestgenOptions::get().trackBranches) {
+                // Print list of the selected branches and store all information into
+                // dumpFolder/selectedBranches.txt file.
+                // This printed list could be used for repeat this bug in arguments of --input-branches
+                // command line. For example, --input-branches "1,1".
+                symExec->printCurrentTraceAndBranches(std::cerr);
+            }
+            throw;
         }
-        throw;
-    }
 
-    if (testBackend->getTestCount() == 0) {
-        ::warning(
-            "Unable to generate tests with given inputs. Double-check provided options and "
-            "parameters.\n");
+        if (testBackend->getTestCount() == 0) {
+            ::warning(
+                    "Unable to generate tests with given inputs. Double-check provided options and "
+                    "parameters.\n");
+        }
     }
 
     return ::errorCount() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

@@ -5,6 +5,51 @@ include(common)
 
 project(p4fuzzer)
 
+# Add p4fuzzer.proto grpc service
+get_filename_component(p4fuzzer_proto_path "./targets/bmv2/proto" ABSOLUTE)
+set(p4fuzzer_proto "${p4fuzzer_proto_path}/p4fuzzer.proto")
+set(p4testgen_proto "${p4fuzzer_proto_path}/p4testgen.proto")
+set(p4runtime_proto_path "${P4C_SOURCE_DIR}/control-plane/p4runtime/proto")
+set(p4runtime_cp_path "${P4C_SOURCE_DIR}/control-plane")
+
+# Generated sources from p4fuzzer.proto
+set(p4fuzzer_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4fuzzer.pb.cc")
+set(p4fuzzer_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4fuzzer.pb.h")
+set(p4fuzzer_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4fuzzer.grpc.pb.cc")
+set(p4fuzzer_grpc_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4fuzzer.grpc.pb.h")
+
+set(p4testgen_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4testgen.pb.cc")
+set(p4testgen_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4testgen.pb.h")
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/p4runtime")
+add_custom_target(link_target ALL
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+        "${P4C_BINARY_DIR}/control-plane"
+        "${CMAKE_CURRENT_BINARY_DIR}/p4runtime/proto")
+
+add_custom_command(
+      OUTPUT "${p4testgen_proto_srcs}" "${p4testgen_proto_hdrs}"
+      COMMAND "${PROTOBUF_PROTOC_EXECUTABLE}"
+      ARGS --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
+        -I "${p4fuzzer_proto_path}"
+        -I "${p4runtime_cp_path}"
+        -I "${p4runtime_proto_path}"
+        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+        "${p4testgen_proto}"
+      DEPENDS "${p4testgen_proto}")
+
+add_custom_command(
+      OUTPUT "${p4fuzzer_proto_srcs}" "${p4fuzzer_proto_hdrs}" "${p4fuzzer_grpc_srcs}" "${p4fuzzer_grpc_hdrs}"
+      COMMAND "${PROTOBUF_PROTOC_EXECUTABLE}"
+      ARGS --grpc_out "${CMAKE_CURRENT_BINARY_DIR}"
+        --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
+        -I "${p4fuzzer_proto_path}"
+        -I "${p4runtime_cp_path}"
+        -I "${p4runtime_proto_path}"
+        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+        "${p4fuzzer_proto}"
+      DEPENDS "${p4fuzzer_proto}")
+
 # Source files for p4fuzzer.
 set(
   FUZZER_SOURCES
@@ -39,6 +84,14 @@ set(
   lib/test_backend.cpp
   lib/test_spec.cpp
   lib/tf.cpp
+
+  ${p4testgen_proto_srcs}
+  ${p4testgen_proto_hdrs}
+
+  ${p4fuzzer_proto_srcs}
+  ${p4fuzzer_proto_hdrs}
+  ${p4fuzzer_grpc_srcs}
+  ${p4fuzzer_grpc_hdrs}
 )
 
 # GTest source files for p4fuzzer.
@@ -67,6 +120,8 @@ set(
   FUZZER_LIBS
   p4tools-common
   inja
+  grpc++
+  ${PROTOBUF_LIBRARY}
 )
 
 file(GLOB fuzzer_targets RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/targets ${CMAKE_CURRENT_SOURCE_DIR}/targets/*)

@@ -1,13 +1,20 @@
 syntax = "proto3";
 
+package p4fuzzer;
+
 import "p4testgen.proto";
 
 service P4FuzzGuide {
-    rpc RecordP4Testgen(TestCase) returns (P4Coverage) {}
-    rpc GetP4Coverage() returns (P4Coverage) {}
+    rpc GetP4Coverage(P4CoverageRequest) returns (P4CoverageReply) {}
+    rpc RecordP4Testgen(P4CoverageRequest) returns (P4CoverageReply) {}
 }
 
-message P4Coverage {
+message P4CoverageRequest {
+    string device_id = 1;
+    p4testgen.TestCase test_case = 2;
+}
+
+message P4CoverageReply {
     int32 hit_stmt_count = 1;
     int32 total_stmt_count = 2;
     int32 hit_action_count = 3;

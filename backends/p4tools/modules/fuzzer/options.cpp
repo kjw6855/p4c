@@ -59,6 +59,7 @@ TestgenOptions::TestgenOptions()
         "--out-dir", "outputDir",
         [this](const char* arg) {
             outputDir = arg;
+            interactive = false;
             return true;
         },
         "Directory for generated tests\n");
@@ -193,14 +194,6 @@ TestgenOptions::TestgenOptions()
             return true;
         },
         "List of the selected branches which should be chosen for selection.");
-
-    registerOption(
-        "--interactive", "interactive",
-        [this](const char*) {
-            interactive = true;
-            return true;
-        },
-        "Enable interactive mode");
 }
 
 }  // namespace P4Tools
