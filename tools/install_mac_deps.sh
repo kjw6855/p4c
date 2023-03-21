@@ -7,7 +7,7 @@ if [[ ! -x $BREW ]]; then
 fi
 
 $BREW update
-$BREW install autoconf automake bdw-gc bison boost ccache cmake \
+$BREW install autoconf automake bison boost ccache cmake \
       libtool openssl pkg-config python coreutils grep
 $BREW install protobuf
 
