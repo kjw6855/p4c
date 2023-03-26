@@ -36,6 +36,7 @@
 #include "backends/p4tools/modules/fuzzer/core/target.h"
 #include "backends/p4tools/modules/fuzzer/lib/logging.h"
 #include "backends/p4tools/modules/fuzzer/lib/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
 #include "backends/p4tools/modules/fuzzer/options.h"
 #include "backends/p4tools/modules/fuzzer/register.h"
 
@@ -53,6 +54,7 @@ using grpc::Status;
 using p4fuzzer::P4FuzzGuide;
 using p4fuzzer::P4CoverageRequest;
 using p4fuzzer::P4CoverageReply;
+using p4testgen::TestCase;
 
 namespace P4Tools {
 
@@ -60,19 +62,66 @@ namespace P4Testgen {
 
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
     private:
-        std::map<std::string, TestBackEnd*> coverage_map_;
+        std::map<std::string, ExecutionState*> coverage_map_;
+        AbstractSolver* solver_;
         const ProgramInfo* programInfo_;
-        ExplorationStrategy* symExec_;
         const boost::filesystem::path* testPath_;
         boost::optional<uint32_t> seed_;
+        template<typename Base, typename T>
+        inline bool instanceof(const T *ptr) {
+            return dynamic_cast<const Base*>(ptr) != nullptr;
+        }
+
+        void recordTestCase(ExecutionState* estate, const TestCase testCase) {
+
+            std::cout << "[ENTITY]" << std::endl;
+            for (const ::p4::v1::Entity &entity : testCase.entities()) {
+                // TODO: find IR::Statement from Entity
+                if (!entity.has_table_entry())
+                    continue;
+
+                auto entry = entity.table_entry();
+
+                // Matches
+                for  (const ::p4::v1::FieldMatch &match : entry.match()) {
+                    // TODO
+                }
+
+                // Actions
+                auto action = entry.action();
+                std::cout << "[" << entry.table_id() << "] "
+                    << entry.match_size() << " matches and action: "
+                    << action.action().action_id() << std::endl;
+
+                //estate->markVisited(stmt);
+            }
+
+            // IR::P4Program
+            auto cmds = {programInfo_->program};
+            std::cout << std::endl << "[PROGRAM INFO]" << std::endl;
+            int node_cnt = 0;
+            for (auto it = cmds.begin(); it != cmds.end(); ++it) {
+                auto node = *it;
+                if (instanceof<IR::Node>(node)) {
+                    node_cnt ++;
+                }
+            }
+            std::cout << "# nodes: "
+                << node_cnt << "/"
+                << cmds.size() << std::endl;
+
+            // step
+            auto* stepper = TestgenTarget::getCmdStepper(*estate, *solver_, *programInfo_);
+            auto* result = stepper->step(programInfo_->program);
+        }
 
     public:
-        P4FuzzGuideImpl(const ProgramInfo* programInfo,
-                ExplorationStrategy* symExec,
+        P4FuzzGuideImpl(AbstractSolver *solver,
+                const ProgramInfo* programInfo,
                 const boost::filesystem::path* testPath,
                 boost::optional<uint32_t> seed) {
+            solver_ = solver;
             programInfo_ = programInfo;
-            symExec_ = symExec;
             testPath_ = testPath;
             seed_ = seed;
         }
@@ -82,16 +131,28 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
                 P4CoverageReply* rep) override {
 
             auto devId = req->device_id();
-            std::cout << "Get P4 Coverage of device: " << devId << std::endl;
 
-            if (coverage_map_.count(req->device_id()) == 0) {
+            auto allStmts = programInfo_->getAllStatements();
+            std::cout << "Get P4 Coverage of device: " << devId << std::endl;
+            for (auto stmt : allStmts) {
+                /*
+                std::stringstream ss;
+                JSONGenerator jsonGen(ss);
+                //jsonGen << stmt;
+                stmt->toJSON(jsonGen);
+                std::cout << ss.str() << std::endl;
+                */
+            }
+
+            if (coverage_map_.count(devId) == 0) {
                 rep->set_hit_stmt_count(0);
-                rep->set_total_stmt_count(0);
+                rep->set_total_stmt_count(allStmts.size());
                 rep->set_hit_action_count(0);
                 rep->set_total_action_count(0);
             } else {
-                rep->set_hit_stmt_count(1);
-                rep->set_total_stmt_count(1);
+                auto* estate = coverage_map_.at(devId);
+                rep->set_hit_stmt_count(estate->getVisited().size());
+                rep->set_total_stmt_count(allStmts.size());
                 rep->set_hit_action_count(1);
                 rep->set_total_action_count(1);
             }
@@ -105,21 +166,20 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             auto devId = req->device_id();
             std::cout << "Record P4 Coverage of device: " << devId << std::endl;
 
+            auto allStmts = programInfo_->getAllStatements();
 
-            if (coverage_map_.count(req->device_id()) == 0) {
-                auto* testBackend = TestgenTarget::getTestBackend(*programInfo_, *symExec_, *testPath_, seed_);
-                coverage_map_.insert(std::make_pair(devId, testBackend));
-
-                rep->set_hit_stmt_count(0);
-                rep->set_total_stmt_count(0);
-                rep->set_hit_action_count(0);
-                rep->set_total_action_count(0);
-            } else {
-                rep->set_hit_stmt_count(1);
-                rep->set_total_stmt_count(1);
-                rep->set_hit_action_count(1);
-                rep->set_total_action_count(1);
+            if (coverage_map_.count(devId) == 0) {
+                // TODO: impl myExplorationStrategy
+                coverage_map_.insert(std::make_pair(devId,
+                            new ExecutionState(programInfo_->program)));
             }
+
+            auto* estate = coverage_map_.at(devId);
+            recordTestCase(estate, req->test_case());
+            rep->set_hit_stmt_count(estate->getVisited().size());
+            rep->set_total_stmt_count(allStmts.size());
+            rep->set_hit_action_count(1);
+            rep->set_total_action_count(1);
 
             return Status::OK;
         }
@@ -131,11 +191,12 @@ void Testgen::registerTarget() {
     registerCompilerTargets();
 }
 
-void runServer(const ProgramInfo* programInfo, ExplorationStrategy* symbex,
-                                       const boost::filesystem::path* testPath,
-                                       boost::optional<uint32_t> seed) {
+void runServer(AbstractSolver* solver,
+        const ProgramInfo* programInfo,
+        const boost::filesystem::path* testPath,
+        boost::optional<uint32_t> seed) {
     std::string server_address("0.0.0.0:50051");
-    P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo, symbex, testPath, seed);
+    P4FuzzGuideImpl service = P4FuzzGuideImpl(solver, programInfo, testPath, seed);
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -230,9 +291,10 @@ int Testgen::mainImpl(const IR::P4Program* program) {
     }();
 
     if (TestgenOptions::get().interactive) {
-        runServer(programInfo, symExec, &testPath, seed);
         // Receive p4testgen.proto message
         // Measure p4 coverage
+        runServer(&solver, programInfo, &testPath, seed);
+
     } else {
 
         // Define how to handle the final state for each test. This is target defined.
