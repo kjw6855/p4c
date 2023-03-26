@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/expr_stepper.h"
 
 #include <cstddef>
 #include <list>
@@ -17,13 +17,13 @@
 #include "lib/safe_vector.h"
 #include "midend/saturationElim.h"
 
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/abstract_stepper.h"
-#include "backends/p4tools/modules/testgen/core/small_step/table_stepper.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
-#include "backends/p4tools/modules/testgen/lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/gen_eq.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/abstract_stepper.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/table_stepper.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/gen_eq.h"
 
 namespace P4Tools {
 

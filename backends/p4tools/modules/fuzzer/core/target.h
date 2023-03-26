@@ -14,14 +14,14 @@
 #include "ir/ir.h"
 #include "ir/vector.h"
 
-#include "backends/p4tools/modules/testgen/core/arch_spec.h"
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/cmd_stepper.h"
-#include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/namespace_context.h"
-#include "backends/p4tools/modules/testgen/lib/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/cmd_stepper.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_backend.h"
 
 namespace P4Tools {
 

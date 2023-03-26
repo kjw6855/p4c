@@ -18,7 +18,7 @@
 #include "ir/node.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/lib/namespace_context.h"
+#include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 
 namespace Test {
 class SmallStepTest;
@@ -137,6 +137,7 @@ class Continuation {
         std::deque<Command> cmds;
 
      public:
+
         /// Determines whether this body is empty.
         bool empty() const;
 

@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/core/target.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
 
 #include <string>
 #include <utility>
@@ -10,8 +10,8 @@
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
 
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/namespace_context.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 
 namespace P4Tools {
 

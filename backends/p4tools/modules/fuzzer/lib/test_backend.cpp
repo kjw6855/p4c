@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/lib/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_backend.h"
 
 #include <iostream>
 #include <map>
@@ -27,15 +27,15 @@
 #include "lib/null.h"
 #include "midend/coverage.h"
 
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/concolic.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/final_state.h"
-#include "backends/p4tools/modules/testgen/lib/logging.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
-#include "backends/p4tools/modules/testgen/options.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/final_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/logging.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/tf.h"
+#include "backends/p4tools/modules/fuzzer/options.h"
 
 namespace P4Tools {
 

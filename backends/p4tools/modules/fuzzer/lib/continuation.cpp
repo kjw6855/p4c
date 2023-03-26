@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
 
 #include <vector>
 
@@ -10,7 +10,7 @@
 #include "ir/visitor.h"
 #include "lib/exceptions.h"
 
-#include "backends/p4tools/modules/testgen/lib/namespace_context.h"
+#include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 
 namespace P4Tools {
 

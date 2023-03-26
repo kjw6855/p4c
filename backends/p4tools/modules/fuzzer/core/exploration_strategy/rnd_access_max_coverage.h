@@ -12,9 +12,9 @@
 
 #include "backends/p4tools/common/core/solver.h"
 
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/inc_max_coverage_stack.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/inc_max_coverage_stack.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 

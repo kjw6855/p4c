@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
 
 #include <algorithm>
 #include <fstream>
@@ -22,11 +22,11 @@
 #include "lib/error.h"
 #include "midend/coverage.h"
 
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/small_step.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/final_state.h"
-#include "backends/p4tools/modules/testgen/lib/logging.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/small_step.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/final_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/logging.h"
 
 namespace P4Tools {
 

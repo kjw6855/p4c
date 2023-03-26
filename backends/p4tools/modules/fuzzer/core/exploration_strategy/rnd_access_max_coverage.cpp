@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/rnd_access_max_coverage.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/rnd_access_max_coverage.h"
 
 #include <ctime>
 #include <iterator>
@@ -15,12 +15,12 @@
 #include "lib/error.h"
 #include "midend/coverage.h"
 
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/inc_max_coverage_stack.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/small_step.h"
-#include "backends/p4tools/modules/testgen/lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/options.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/inc_max_coverage_stack.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/small_step.h"
+#include "backends/p4tools/modules/fuzzer/lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/options.h"
 
 namespace P4Tools {
 

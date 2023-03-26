@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/lib/namespace_context.h"
+#include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 
 #include <set>
 #include <vector>
