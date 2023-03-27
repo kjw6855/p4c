@@ -32,6 +32,7 @@
 #include "backends/p4tools/modules/fuzzer/core/exploration_strategy/random_access_stack.h"
 #include "backends/p4tools/modules/fuzzer/core/exploration_strategy/rnd_access_max_coverage.h"
 #include "backends/p4tools/modules/fuzzer/core/exploration_strategy/selected_branches.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/selected_test.h"
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
 #include "backends/p4tools/modules/fuzzer/core/target.h"
 #include "backends/p4tools/modules/fuzzer/lib/logging.h"
@@ -62,7 +63,7 @@ namespace P4Testgen {
 
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
     private:
-        std::map<std::string, ExecutionState*> coverage_map_;
+        std::map<std::string, ExplorationStrategy*> coverage_map_;
         AbstractSolver* solver_;
         const ProgramInfo* programInfo_;
         const boost::filesystem::path* testPath_;
@@ -126,6 +127,16 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             seed_ = seed;
         }
 
+        bool Callback_run(const FinalState& state) {
+            //const auto* execState = state.getExecutionState();
+            std::cout << std::endl << "[FINAL]" << std::endl;
+            for (auto* visited : state.getVisited()) {
+                std::cout << "[" << visited->node_type_name()
+                   << "] " << visited << std::endl;
+            }
+            return true;
+        }
+
         Status GetP4Coverage(ServerContext* context,
                 const P4CoverageRequest* req,
                 P4CoverageReply* rep) override {
@@ -150,8 +161,8 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
                 rep->set_hit_action_count(0);
                 rep->set_total_action_count(0);
             } else {
-                auto* estate = coverage_map_.at(devId);
-                rep->set_hit_stmt_count(estate->getVisited().size());
+                auto* symExec = coverage_map_.at(devId);
+                rep->set_hit_stmt_count(symExec->getVisitedStatements().size());
                 rep->set_total_stmt_count(allStmts.size());
                 rep->set_hit_action_count(1);
                 rep->set_total_action_count(1);
@@ -169,14 +180,21 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             auto allStmts = programInfo_->getAllStatements();
 
             if (coverage_map_.count(devId) == 0) {
-                // TODO: impl myExplorationStrategy
                 coverage_map_.insert(std::make_pair(devId,
-                            new ExecutionState(programInfo_->program)));
+                            new SelectedTest(*solver_, *programInfo_, seed_)));
+
+                            //new ExecutionState(programInfo_->program)));
             }
 
-            auto* estate = coverage_map_.at(devId);
-            recordTestCase(estate, req->test_case());
-            rep->set_hit_stmt_count(estate->getVisited().size());
+            auto* symExec = coverage_map_.at(devId);
+            ExplorationStrategy::Callback callBack =
+                std::bind(&P4FuzzGuideImpl::Callback_run, this, std::placeholders::_1);
+
+            // TODO: run once again
+            symExec->run(callBack);
+            //recordTestCase(estate, req->test_case());
+            //rep->set_hit_stmt_count(estate->getVisited().size());
+            rep->set_hit_stmt_count(symExec->getVisitedStatements().size());
             rep->set_total_stmt_count(allStmts.size());
             rep->set_hit_action_count(1);
             rep->set_total_action_count(1);

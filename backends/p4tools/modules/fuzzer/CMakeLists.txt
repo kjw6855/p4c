@@ -67,6 +67,7 @@ set(
   core/small_step/small_step.cpp
   core/exploration_strategy/incremental_stack.cpp
   core/exploration_strategy/selected_branches.cpp
+  core/exploration_strategy/selected_test.cpp
   core/exploration_strategy/random_access_stack.cpp
   core/exploration_strategy/linear_enumeration.cpp
   core/exploration_strategy/rnd_access_max_coverage.cpp
