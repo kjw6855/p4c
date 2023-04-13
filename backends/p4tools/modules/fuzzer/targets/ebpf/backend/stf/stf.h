@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_EBPF_BACKEND_STF_STF_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_EBPF_BACKEND_STF_STF_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_EBPF_BACKEND_STF_STF_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_EBPF_BACKEND_STF_STF_H_
 
 #include <cstddef>
 #include <fstream>
@@ -12,8 +12,8 @@
 
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/tf.h"
 
 namespace P4Tools {
 
@@ -41,7 +41,7 @@ class STF : public TF {
 
     /// Produce an STF test.
     void outputTest(const TestSpec* spec, cstring selectedBranches, size_t testIdx,
-                    float currentCoverage) override;
+                    float currentCoverage, unsigned long testCoverage) override;
 
  private:
     /// Emits a test case.
@@ -50,7 +50,7 @@ class STF : public TF {
     /// @param currentCoverage contains statistics  about the current coverage of this test and its
     /// preceding tests.
     void emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                      const std::string& testCase, float currentCoverage);
+                      const std::string& testCase, float currentCoverage, unsigned long testCoverage);
 
     /// Converts all the control plane objects into Inja format.
     static inja::json getControlPlane(const TestSpec* testSpec);
@@ -72,4 +72,4 @@ class STF : public TF {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_EBPF_BACKEND_STF_STF_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_EBPF_BACKEND_STF_STF_H_ */

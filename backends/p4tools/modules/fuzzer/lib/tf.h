@@ -135,7 +135,7 @@ class TF {
     /// @param currentCoverage current coverage ratio (between 0.0 and 1.0)
     // attaches arbitrary string data to the test preamble.
     virtual void outputTest(const TestSpec* spec, cstring selectedBranches, size_t testIdx,
-                            float currentCoverage) = 0;
+                            float currentCoverage, unsigned long testCoverage) = 0;
 };
 
 }  // namespace P4Testgen

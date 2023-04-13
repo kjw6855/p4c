@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/backend/ptf/ptf.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/backend/ptf/ptf.h"
 
 #include <iomanip>
 #include <map>
@@ -23,8 +23,8 @@
 #include "lib/log.h"
 #include "nlohmann/json.hpp"
 
-#include "backends/p4tools/modules/testgen/lib/tf.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/tf.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_spec.h"
 
 namespace P4Tools {
 
@@ -377,7 +377,7 @@ class Test{{test_id}}(AbstractTest):
 }
 
 void PTF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                       const std::string& testCase, float currentCoverage) {
+                       const std::string& testCase, float currentCoverage, unsigned long testCoverage) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -402,7 +402,7 @@ void PTF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_
 }
 
 void PTF::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t testIdx,
-                     float currentCoverage) {
+                     float currentCoverage, unsigned long testCoverage) {
     if (!preambleEmitted) {
         ptfFile = std::ofstream(testName + ".py");
         std::string preamble = getPreamble();
@@ -410,7 +410,7 @@ void PTF::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t 
         preambleEmitted = true;
     }
     std::string testCase = getTestCase();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage);
+    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage);
 }
 
 }  // namespace Bmv2

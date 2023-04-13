@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_BACKEND_PTF_PTF_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_BACKEND_PTF_PTF_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_BACKEND_PTF_PTF_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_BACKEND_PTF_PTF_H_
 
 #include <cstddef>
 #include <fstream>
@@ -15,8 +15,8 @@
 #include "ir/ir.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/tf.h"
 
 namespace P4Tools {
 
@@ -47,7 +47,7 @@ class PTF : public TF {
 
     /// Produce a PTF test.
     void outputTest(const TestSpec* spec, cstring selectedBranches, size_t testIdx,
-                    float currentCoverage) override;
+                    float currentCoverage, unsigned long testCoverage) override;
 
  private:
     /// Emits the test preamble. This is only done once for all generated tests.
@@ -60,7 +60,7 @@ class PTF : public TF {
     /// @param currentCoverage contains statistics  about the current coverage of this test and its
     /// preceding tests.
     void emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                      const std::string& testCase, float currentCoverage);
+                      const std::string& testCase, float currentCoverage, unsigned long testCoverage);
 
     /// Converts all the control plane objects into Inja format.
     static inja::json getControlPlane(const TestSpec* testSpec);
@@ -86,4 +86,4 @@ class PTF : public TF {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_BACKEND_PTF_PTF_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_BACKEND_PTF_PTF_H_ */

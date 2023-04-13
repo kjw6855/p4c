@@ -151,15 +151,31 @@ bool TestBackEnd::run(const FinalState& state) {
 
         const auto* testSpec = createTestSpec(executionState, completedModel, testInfo);
 
+        // TODO: change coverageMap as bitmaps
+        unsigned long testCoverageMap = 0;
+        int testCoverage = 0, i = 0;
+        auto& visitedStmtSet = executionState->getVisited();
+        for (auto& stmt : allStatements) {
+            if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
+                testCoverageMap |= (1UL << i);
+                testCoverage ++;
+            }
+            i++;
+        }
+
+        std::stringstream testCoverageMapStr;
+        testCoverageMapStr << "0x" << std::hex << testCoverageMap;
+
         float coverage = static_cast<float>(visitedStatements.size()) / allStatements.size();
         printFeature("test_info", 4,
-                     "============ Test %1%: Statements covered: %2% (%3%/%4%) ============",
-                     testCount, coverage, visitedStatements.size(), allStatements.size());
+                     "============ Test %1%: Statements covered: %2% (%3%/%4% .. %5%/%6%) ============",
+                     testCount, coverage, testCoverage, testCoverageMapStr.str(),
+                     visitedStatements.size(), allStatements.size());
         P4::Coverage::logCoverage(allStatements, visitedStatements, executionState->getVisited());
 
         // Output the test.
         withTimer("backend",
-                  [&] { testWriter->outputTest(testSpec, selectedBranches, testCount, coverage); });
+                  [&] { testWriter->outputTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap); });
 
         printTraces("============ End Test %1% ============\n", testCount);
         testCount++;

@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/backend/stf/stf.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/backend/stf/stf.h"
 
 #include <iomanip>
 #include <map>
@@ -28,9 +28,9 @@
 #include "lib/log.h"
 #include "nlohmann/json.hpp"
 
-#include "backends/p4tools/modules/testgen/lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/lib/tf.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_spec.h"
 
 namespace P4Tools {
 
@@ -290,7 +290,7 @@ expect {{verify.eg_port}} {{verify.exp_pkt}}$
 }
 
 void STF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                       const std::string& testCase, float currentCoverage) {
+                       const std::string& testCase, float currentCoverage, unsigned long testCoverage) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -324,12 +324,12 @@ void STF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_
 }
 
 void STF::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t testIdx,
-                     float currentCoverage) {
+                     float currentCoverage, unsigned long testCoverage) {
     auto incrementedTestName = testName + "_" + std::to_string(testIdx);
 
     stfFile = std::ofstream(incrementedTestName + ".stf");
     std::string testCase = getTestCase();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage);
+    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage);
 }
 
 }  // namespace Bmv2

@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/backend/protobuf/protobuf.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/backend/protobuf/protobuf.h"
 
 #include <iomanip>
 #include <map>
@@ -31,8 +31,8 @@
 #include "lib/null.h"
 #include "nlohmann/json.hpp"
 
-#include "backends/p4tools/modules/testgen/lib/tf.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/tf.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_spec.h"
 
 namespace P4Tools {
 
@@ -286,6 +286,7 @@ metadata: "Date generated: {{timestamp}}"
 metadata: "{{selected_branches}}"
 ## endif
 metadata: "Current statement coverage: {{coverage}}"
+stmt_coverage: "{{local_coverage}}"
 
 ## for trace_item in trace
 traces: "{{trace_item}}"
@@ -404,7 +405,7 @@ entities : [
 }
 
 void Protobuf::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                            const std::string& testCase, float currentCoverage) {
+                            const std::string& testCase, float currentCoverage, unsigned long testCoverage) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -423,9 +424,12 @@ void Protobuf::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, 
     dataJson["send"] = getSend(testSpec);
     dataJson["verify"] = getVerify(testSpec);
     dataJson["timestamp"] = Utils::getTimeStamp();
-    std::stringstream coverageStr;
+    std::stringstream coverageStr, localCoverageStr;
     coverageStr << std::setprecision(2) << currentCoverage;
     dataJson["coverage"] = coverageStr.str();
+    std::stringstream testCoverageMapStr;
+    localCoverageStr << "0x" << std::hex << testCoverage;
+    dataJson["local_coverage"] = localCoverageStr.str();
 
     LOG5("Protobuf backend: emitting testcase:" << std::setw(4) << dataJson);
 
@@ -434,12 +438,12 @@ void Protobuf::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, 
 }
 
 void Protobuf::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t testIdx,
-                          float currentCoverage) {
+                          float currentCoverage, unsigned long testCoverage) {
     auto incrementedTestName = testName + "_" + std::to_string(testIdx);
 
     protobufFile = std::ofstream(incrementedTestName + ".proto");
     std::string testCase = getTestCase();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage);
+    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage);
 }
 
 }  // namespace Bmv2
