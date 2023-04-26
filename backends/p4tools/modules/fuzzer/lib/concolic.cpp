@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/concolic.h"
 
 #include <utility>
 #include <vector>
@@ -11,7 +11,7 @@
 #include "lib/exceptions.h"
 #include "lib/null.h"
 
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 

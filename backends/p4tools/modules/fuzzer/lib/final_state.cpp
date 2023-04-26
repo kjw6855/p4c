@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/lib/final_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/final_state.h"
 
 #include <vector>
 
@@ -7,7 +7,7 @@
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_events.h"
 
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 

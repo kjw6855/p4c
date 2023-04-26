@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/test/small-step/util.h"
+#include "backends/p4tools/modules/fuzzer/test/small-step/util.h"
 
 #include <string>
 
@@ -6,7 +6,7 @@
 
 #include "test/gtest/helpers.h"
 
-#include "backends/p4tools/modules/testgen/test/gtest_utils.h"
+#include "backends/p4tools/modules/fuzzer/test/gtest_utils.h"
 
 namespace Test {
 

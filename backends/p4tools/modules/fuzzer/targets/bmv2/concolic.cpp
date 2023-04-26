@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/concolic.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/concolic.h"
 
 #include <algorithm>
 #include <iterator>
@@ -21,10 +21,10 @@
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 
-#include "backends/p4tools/modules/testgen/lib/concolic.h"
-#include "backends/p4tools/modules/testgen/lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/contrib/bmv2_hash/calculations.h"
+#include "backends/p4tools/modules/fuzzer/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/contrib/bmv2_hash/calculations.h"
 
 namespace P4Tools {
 

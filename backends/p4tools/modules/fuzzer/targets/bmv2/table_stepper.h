@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TABLE_STEPPER_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TABLE_STEPPER_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TABLE_STEPPER_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TABLE_STEPPER_H_
 
 #include <map>
 #include <vector>
@@ -7,11 +7,11 @@
 #include "ir/ir.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/core/small_step/table_stepper.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/table_stepper.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_spec.h"
 
 namespace P4Tools {
 
@@ -82,4 +82,4 @@ class BMv2_V1ModelTableStepper : public TableStepper {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TABLE_STEPPER_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TABLE_STEPPER_H_ */

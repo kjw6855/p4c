@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_REGISTER_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_REGISTER_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_REGISTER_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_REGISTER_H_
 
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/register.h"
 #include "backends/p4tools/modules/fuzzer/targets/ebpf/register.h"
@@ -23,4 +23,4 @@ void registerFuzzerTargets() {
 
 }  // namespace P4Testgen
 
-#endif  /* BACKENDS_P4TOOLS_MODULES_TESTGEN_REGISTER_H_ */
+#endif  /* BACKENDS_P4TOOLS_MODULES_FUZZER_REGISTER_H_ */

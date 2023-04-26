@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/table_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/table_stepper.h"
 
 #include <cstddef>
 #include <map>
@@ -21,15 +21,15 @@
 #include "lib/null.h"
 #include "lib/safe_vector.h"
 
-#include "backends/p4tools/modules/testgen/core/small_step/table_stepper.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
-#include "backends/p4tools/modules/testgen/lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/options.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/constants.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/table_stepper.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/options.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/constants.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_spec.h"
 
 namespace P4Tools {
 

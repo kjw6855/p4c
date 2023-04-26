@@ -290,7 +290,7 @@ expect {{verify.eg_port}} {{verify.exp_pkt}}$
 }
 
 void STF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                       const std::string& testCase, float currentCoverage, unsigned long testCoverage) {
+                       const std::string& testCase, float currentCoverage, unsigned char* testCoverage, int mapSize) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -324,12 +324,12 @@ void STF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_
 }
 
 void STF::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t testIdx,
-                     float currentCoverage, unsigned long testCoverage) {
+                     float currentCoverage, unsigned char* testCoverage, int mapSize) {
     auto incrementedTestName = testName + "_" + std::to_string(testIdx);
 
     stfFile = std::ofstream(incrementedTestName + ".stf");
     std::string testCase = getTestCase();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage);
+    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage, mapSize);
 }
 
 }  // namespace Bmv2

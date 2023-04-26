@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/ebpf/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/test_backend.h"
 
 #include <map>
 #include <ostream>
@@ -15,13 +15,13 @@
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/test_backend.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/options.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/backend/stf/stf.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/options.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/backend/stf/stf.h"
 
 namespace P4Tools {
 

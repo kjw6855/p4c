@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/test/lib/taint.h"
+#include "backends/p4tools/modules/fuzzer/test/lib/taint.h"
 
 #include <memory>
 
@@ -11,8 +11,8 @@
 #include "ir/ir.h"
 #include "ir/irutils.h"
 
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/test/small-step/util.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/test/small-step/util.h"
 
 namespace Test {
 

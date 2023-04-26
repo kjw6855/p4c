@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/ebpf/constants.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/constants.h"
 
 namespace P4Tools {
 

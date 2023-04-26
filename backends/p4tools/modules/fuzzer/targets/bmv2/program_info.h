@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_PROGRAM_INFO_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_PROGRAM_INFO_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_PROGRAM_INFO_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_PROGRAM_INFO_H_
 
 #include <stddef.h>
 
@@ -10,8 +10,8 @@
 #include "lib/cstring.h"
 #include "lib/ordered_map.h"
 
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
 
 namespace P4Tools {
 
@@ -72,4 +72,4 @@ class BMv2_V1ModelProgramInfo : public ProgramInfo {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_PROGRAM_INFO_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_PROGRAM_INFO_H_ */

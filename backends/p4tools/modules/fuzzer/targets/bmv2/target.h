@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TARGET_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TARGET_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TARGET_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TARGET_H_
 
 #include <stdint.h>
 
@@ -9,15 +9,15 @@
 #include "backends/p4tools/common/core/solver.h"
 #include "ir/ir.h"
 
-#include "backends/p4tools/modules/testgen/core/arch_spec.h"
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/target.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/cmd_stepper.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/program_info.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/cmd_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/program_info.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_backend.h"
 
 namespace P4Tools {
 
@@ -61,4 +61,4 @@ class BMv2_V1ModelTestgenTarget : public TestgenTarget {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TARGET_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TARGET_H_ */

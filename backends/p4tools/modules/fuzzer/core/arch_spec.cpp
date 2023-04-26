@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/core/arch_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
 
 #include <memory>
 #include <utility>

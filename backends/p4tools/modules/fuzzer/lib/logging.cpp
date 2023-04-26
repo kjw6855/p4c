@@ -1,5 +1,5 @@
 
-#include "backends/p4tools/modules/testgen/lib/logging.h"
+#include "backends/p4tools/modules/fuzzer/lib/logging.h"
 
 #include "lib/log.h"
 

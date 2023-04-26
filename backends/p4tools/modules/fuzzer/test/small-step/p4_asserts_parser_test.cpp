@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/p4_asserts_parser.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/p4_asserts_parser.h"
 
 #include <unistd.h>
 
@@ -25,8 +25,8 @@
 #include "lib/compile_context.h"
 #include "lib/null.h"
 
-#include "backends/p4tools/modules/testgen/targets/bmv2/p4_refers_to_parser.h"
-#include "backends/p4tools/modules/testgen/test/gtest_utils.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/p4_refers_to_parser.h"
+#include "backends/p4tools/modules/fuzzer/test/gtest_utils.h"
 
 /// Variables are declared in "test/gtest/env.h" which is already included in reachablity.cpp
 extern const char* sourcePath;
@@ -89,7 +89,7 @@ Restrictions loadExample(const char* curFile, bool flag) {
 
 TEST_F(P4AssertsParserTest, RestrictionCount) {
     Restrictions parsingResult = loadExample(
-        "backends/p4tools/modules/testgen/targets/bmv2/test/p4-programs/bmv2_restrictions_1.p4",
+        "backends/p4tools/modules/fuzzer/targets/bmv2/test/p4-programs/bmv2_restrictions_1.p4",
         true);
     ASSERT_EQ(parsingResult.size(), (unsigned long)1);
     ASSERT_EQ(parsingResult[0].size(), (unsigned long)3);
@@ -97,7 +97,7 @@ TEST_F(P4AssertsParserTest, RestrictionCount) {
 
 TEST_F(P4AssertsParserTest, Restrictions) {
     Restrictions parsingResult = loadExample(
-        "backends/p4tools/modules/testgen/targets/bmv2/test/p4-programs/bmv2_restrictions_1.p4",
+        "backends/p4tools/modules/fuzzer/targets/bmv2/test/p4-programs/bmv2_restrictions_1.p4",
         true);
     ASSERT_EQ(parsingResult.size(), (unsigned long)1);
     {
@@ -129,7 +129,7 @@ TEST_F(P4AssertsParserTest, Restrictions) {
 
 TEST_F(P4AssertsParserTest, RestrictionMiddleblockReferToInTable) {
     Restrictions parsingResult = loadExample(
-        "backends/p4tools/modules/testgen/targets/bmv2/test/p4-programs/bmv2_restrictions_2.p4",
+        "backends/p4tools/modules/fuzzer/targets/bmv2/test/p4-programs/bmv2_restrictions_2.p4",
         false);
     ASSERT_EQ(parsingResult.size(), (unsigned long)2);
     const auto& expr1 =
@@ -142,7 +142,7 @@ TEST_F(P4AssertsParserTest, RestrictionMiddleblockReferToInTable) {
 
 TEST_F(P4AssertsParserTest, RestrictionMiddleblockReferToInAction) {
     Restrictions parsingResult = loadExample(
-        "backends/p4tools/modules/testgen/targets/bmv2/test/p4-programs/bmv2_restrictions_2.p4",
+        "backends/p4tools/modules/fuzzer/targets/bmv2/test/p4-programs/bmv2_restrictions_2.p4",
         false);
     ASSERT_EQ(parsingResult.size(), (unsigned long)2);
     auto expr1 = P4Tools::Utils::getZombieConst(IR::Type_Bits::get(8), 0,

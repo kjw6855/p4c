@@ -151,36 +151,39 @@ bool TestBackEnd::run(const FinalState& state) {
 
         const auto* testSpec = createTestSpec(executionState, completedModel, testInfo);
 
-        // TODO: change coverageMap as bitmaps
-        unsigned long testCoverageMap = 0;
+        // coverageMap
+        int mapSize = allStatements.size();
+        auto* testCoverageMap = (unsigned char *)malloc(mapSize);
+        memset(testCoverageMap, 0, mapSize);
         int testCoverage = 0, i = 0;
         auto& visitedStmtSet = executionState->getVisited();
         for (auto& stmt : allStatements) {
             if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
-                testCoverageMap |= (1UL << i);
+                testCoverageMap[i] ++;
                 testCoverage ++;
             }
+
             i++;
         }
 
-        std::stringstream testCoverageMapStr;
-        testCoverageMapStr << "0x" << std::hex << testCoverageMap;
-
         float coverage = static_cast<float>(visitedStatements.size()) / allStatements.size();
         printFeature("test_info", 4,
-                     "============ Test %1%: Statements covered: %2% (%3%/%4% .. %5%/%6%) ============",
-                     testCount, coverage, testCoverage, testCoverageMapStr.str(),
+                     "============ Test %1%: Statements covered: %2% (%3% .. %4%/%5%) ============",
+                     testCount, coverage, testCoverage,
                      visitedStatements.size(), allStatements.size());
         P4::Coverage::logCoverage(allStatements, visitedStatements, executionState->getVisited());
 
         // Output the test.
         withTimer("backend",
-                  [&] { testWriter->outputTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap); });
+                  [&] { testWriter->outputTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap, mapSize); });
 
         printTraces("============ End Test %1% ============\n", testCount);
         testCount++;
         P4::Coverage::coverageReportFinal(allStatements, visitedStatements);
         printPerformanceReport();
+
+        free(testCoverageMap);
+
         return testCount > maxTests - 1;
     }
 }

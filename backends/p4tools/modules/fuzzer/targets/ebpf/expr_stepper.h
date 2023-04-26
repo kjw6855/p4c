@@ -8,9 +8,9 @@
 #include "ir/ir.h"
 #include "ir/vector.h"
 
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 

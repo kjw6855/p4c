@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/program_info.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/program_info.h"
 
 #include <list>
 #include <map>
@@ -17,16 +17,16 @@
 #include "lib/exceptions.h"
 #include "lib/null.h"
 
-#include "backends/p4tools/modules/testgen//lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/core/arch_spec.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/target.h"
-#include "backends/p4tools/modules/testgen/lib/concolic.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/concolic.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/p4_asserts_parser.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/p4_refers_to_parser.h"
+#include "backends/p4tools/modules/fuzzer//lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
+#include "backends/p4tools/modules/fuzzer/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/concolic.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/p4_asserts_parser.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/p4_refers_to_parser.h"
 
 namespace P4Tools {
 

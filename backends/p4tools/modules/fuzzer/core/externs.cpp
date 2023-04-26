@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/core/externs.h"
+#include "backends/p4tools/modules/fuzzer/core/externs.h"
 
 #include <list>
 #include <string>
@@ -11,8 +11,8 @@
 #include "lib/exceptions.h"
 #include "lib/null.h"
 
-#include "backends/p4tools/modules/testgen/core/small_step/small_step.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/small_step.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 

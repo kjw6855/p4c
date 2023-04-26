@@ -405,7 +405,7 @@ entities : [
 }
 
 void Protobuf::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                            const std::string& testCase, float currentCoverage, unsigned long testCoverage) {
+                            const std::string& testCase, float currentCoverage, unsigned char* testCoverage, int mapSize) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -427,9 +427,14 @@ void Protobuf::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, 
     std::stringstream coverageStr, localCoverageStr;
     coverageStr << std::setprecision(2) << currentCoverage;
     dataJson["coverage"] = coverageStr.str();
+
     std::stringstream testCoverageMapStr;
-    localCoverageStr << "0x" << std::hex << testCoverage;
-    dataJson["local_coverage"] = localCoverageStr.str();
+    int i;
+    for (i = 0; i < mapSize; i++) {
+        testCoverageMapStr << "\\x" << std::setw(2) << std::setfill('0')
+            << std::hex << (unsigned int)testCoverage[i];
+    }
+    dataJson["local_coverage"] = testCoverageMapStr.str();
 
     LOG5("Protobuf backend: emitting testcase:" << std::setw(4) << dataJson);
 
@@ -438,12 +443,12 @@ void Protobuf::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, 
 }
 
 void Protobuf::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t testIdx,
-                          float currentCoverage, unsigned long testCoverage) {
+                          float currentCoverage, unsigned char* testCoverage, int mapSize) {
     auto incrementedTestName = testName + "_" + std::to_string(testIdx);
 
     protobufFile = std::ofstream(incrementedTestName + ".proto");
     std::string testCase = getTestCase();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage);
+    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage, mapSize);
 }
 
 }  // namespace Bmv2

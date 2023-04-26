@@ -1,9 +1,9 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_spec.h"
 
 #include "backends/p4tools/common/lib/model.h"
 #include "lib/exceptions.h"
 
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
 
 namespace P4Tools {
 

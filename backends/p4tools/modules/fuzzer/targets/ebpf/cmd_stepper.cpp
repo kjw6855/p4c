@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/ebpf/cmd_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/cmd_stepper.h"
 
 #include <cstddef>
 #include <list>
@@ -15,13 +15,13 @@
 #include "ir/irutils.h"
 #include "lib/ordered_map.h"
 
-#include "backends/p4tools/modules/testgen/core/arch_spec.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/cmd_stepper.h"
-#include "backends/p4tools/modules/testgen/core/target.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/cmd_stepper.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/program_info.h"
 
 namespace P4Tools {
 

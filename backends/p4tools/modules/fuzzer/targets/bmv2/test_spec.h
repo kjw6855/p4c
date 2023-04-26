@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TEST_SPEC_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TEST_SPEC_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TEST_SPEC_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TEST_SPEC_H_
 
 #include <cstddef>
 #include <utility>
@@ -10,7 +10,7 @@
 #include "ir/ir.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
 
 namespace P4Tools {
 
@@ -187,4 +187,4 @@ class Bmv2_CloneInfo : public TestObject {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TEST_SPEC_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TEST_SPEC_H_ */

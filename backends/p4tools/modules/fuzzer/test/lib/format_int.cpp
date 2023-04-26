@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/test/lib/format_int.h"
+#include "backends/p4tools/modules/fuzzer/test/lib/format_int.h"
 
 #include <stdint.h>
 

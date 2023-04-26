@@ -63,8 +63,7 @@ namespace P4Testgen {
 
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
     private:
-        std::map<std::string, ExplorationStrategy*> coverage_map_;
-        AbstractSolver* solver_;
+        std::map<std::string, SelectedTest*> coverage_map_;
         const ProgramInfo* programInfo_;
         const boost::filesystem::path* testPath_;
         boost::optional<uint32_t> seed_;
@@ -112,21 +111,20 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
                 << cmds.size() << std::endl;
 
             // step
-            auto* stepper = TestgenTarget::getCmdStepper(*estate, *solver_, *programInfo_);
-            auto* result = stepper->step(programInfo_->program);
+            //auto* stepper = TestgenTarget::getCmdStepper(*estate, *programInfo_);
+            //auto* result = stepper->step(programInfo_->program);
         }
 
     public:
-        P4FuzzGuideImpl(AbstractSolver *solver,
-                const ProgramInfo* programInfo,
+        P4FuzzGuideImpl(const ProgramInfo* programInfo,
                 const boost::filesystem::path* testPath,
                 boost::optional<uint32_t> seed) {
-            solver_ = solver;
             programInfo_ = programInfo;
             testPath_ = testPath;
             seed_ = seed;
         }
 
+        /*
         bool Callback_run(const FinalState& state) {
             //const auto* execState = state.getExecutionState();
             std::cout << std::endl << "[FINAL]" << std::endl;
@@ -136,6 +134,7 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             }
             return true;
         }
+        */
 
         Status GetP4Coverage(ServerContext* context,
                 const P4CoverageRequest* req,
@@ -161,8 +160,8 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
                 rep->set_hit_action_count(0);
                 rep->set_total_action_count(0);
             } else {
-                auto* symExec = coverage_map_.at(devId);
-                rep->set_hit_stmt_count(symExec->getVisitedStatements().size());
+                auto* stateMgr = coverage_map_.at(devId);
+                rep->set_hit_stmt_count(stateMgr->getVisitedStatements().size());
                 rep->set_total_stmt_count(allStmts.size());
                 rep->set_hit_action_count(1);
                 rep->set_total_action_count(1);
@@ -181,20 +180,19 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
 
             if (coverage_map_.count(devId) == 0) {
                 coverage_map_.insert(std::make_pair(devId,
-                            new SelectedTest(*solver_, *programInfo_, seed_)));
+                            new SelectedTest(*programInfo_)));
 
                             //new ExecutionState(programInfo_->program)));
             }
 
-            auto* symExec = coverage_map_.at(devId);
-            ExplorationStrategy::Callback callBack =
-                std::bind(&P4FuzzGuideImpl::Callback_run, this, std::placeholders::_1);
+            auto* stateMgr = coverage_map_.at(devId);
+            //ExplorationStrategy::Callback callBack =
+            //    std::bind(&P4FuzzGuideImpl::Callback_run, this, std::placeholders::_1);
 
-            // TODO: run once again
-            symExec->run(callBack);
+            stateMgr->run(req->test_case());
             //recordTestCase(estate, req->test_case());
             //rep->set_hit_stmt_count(estate->getVisited().size());
-            rep->set_hit_stmt_count(symExec->getVisitedStatements().size());
+            rep->set_hit_stmt_count(stateMgr->getVisitedStatements().size());
             rep->set_total_stmt_count(allStmts.size());
             rep->set_hit_action_count(1);
             rep->set_total_action_count(1);
@@ -209,12 +207,11 @@ void Testgen::registerTarget() {
     registerCompilerTargets();
 }
 
-void runServer(AbstractSolver* solver,
-        const ProgramInfo* programInfo,
+void runServer(const ProgramInfo* programInfo,
         const boost::filesystem::path* testPath,
         boost::optional<uint32_t> seed) {
     std::string server_address("0.0.0.0:50051");
-    P4FuzzGuideImpl service = P4FuzzGuideImpl(solver, programInfo, testPath, seed);
+    P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo, testPath, seed);
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -311,7 +308,7 @@ int Testgen::mainImpl(const IR::P4Program* program) {
     if (TestgenOptions::get().interactive) {
         // Receive p4testgen.proto message
         // Measure p4 coverage
-        runServer(&solver, programInfo, &testPath, seed);
+        runServer(programInfo, &testPath, seed);
 
     } else {
 

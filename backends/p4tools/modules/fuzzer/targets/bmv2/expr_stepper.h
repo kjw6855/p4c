@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_EXPR_STEPPER_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_EXPR_STEPPER_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_EXPR_STEPPER_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_EXPR_STEPPER_H_
 
 #include <stdint.h>
 
@@ -10,9 +10,9 @@
 #include "ir/ir.h"
 #include "ir/vector.h"
 
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 
@@ -52,4 +52,4 @@ class BMv2_V1ModelExprStepper : public ExprStepper {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_EXPR_STEPPER_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_EXPR_STEPPER_H_ */

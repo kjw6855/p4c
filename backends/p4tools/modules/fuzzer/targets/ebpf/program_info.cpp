@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/ebpf/program_info.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/program_info.h"
 
 #include <list>
 #include <utility>
@@ -15,14 +15,14 @@
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 
-#include "backends/p4tools/modules/testgen//lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/core/arch_spec.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/target.h"
-#include "backends/p4tools/modules/testgen/lib/concolic.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/concolic.h"
+#include "backends/p4tools/modules/fuzzer//lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
+#include "backends/p4tools/modules/fuzzer/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/concolic.h"
 
 namespace P4Tools {
 

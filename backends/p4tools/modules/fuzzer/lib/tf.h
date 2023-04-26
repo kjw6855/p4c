@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_TF_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_TF_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_TF_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_TF_H_
 
 #include <cstddef>
 
@@ -9,7 +9,7 @@
 #include "backends/p4tools/common/lib/format_int.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
 
 namespace P4Tools {
 
@@ -135,11 +135,11 @@ class TF {
     /// @param currentCoverage current coverage ratio (between 0.0 and 1.0)
     // attaches arbitrary string data to the test preamble.
     virtual void outputTest(const TestSpec* spec, cstring selectedBranches, size_t testIdx,
-                            float currentCoverage, unsigned long testCoverage) = 0;
+                            float currentCoverage, unsigned char* testCoverage, int mapSize) = 0;
 };
 
 }  // namespace P4Testgen
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_TF_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_TF_H_ */

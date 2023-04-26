@@ -331,6 +331,7 @@ bool AbstractStepper::stepStackPushPopFront(const IR::Expression* stackRef,
 
 const Value* AbstractStepper::evaluateExpression(
     const IR::Expression* expr, boost::optional<const IR::Expression*> cond) const {
+
     BUG_CHECK(solver.isInIncrementalMode(),
               "Currently, expression valuation only supports an incremental solver.");
     auto constraints = state.getPathConstraint();

@@ -19,8 +19,8 @@
 #include "midend/saturationElim.h"
 #include "test/gtest/helpers.h"
 
-#include "backends/p4tools/modules/testgen/core/target.h"
-#include "backends/p4tools/modules/testgen/test/gtest_utils.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
+#include "backends/p4tools/modules/fuzzer/test/gtest_utils.h"
 
 namespace Test {
 

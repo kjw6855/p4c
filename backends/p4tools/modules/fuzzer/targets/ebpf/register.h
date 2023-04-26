@@ -3,10 +3,10 @@
 
 #include "backends/p4tools/common/p4ctool.h"
 
-#include "backends/p4tools/modules/testgen/options.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/ebpf.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/target.h"
-#include "backends/p4tools/modules/testgen/testgen.h"
+#include "backends/p4tools/modules/fuzzer/options.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/ebpf.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/target.h"
+#include "backends/p4tools/modules/fuzzer/fuzzer.h"
 
 namespace P4Tools {
 

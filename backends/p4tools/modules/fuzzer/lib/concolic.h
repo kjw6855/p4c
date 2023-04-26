@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_CONCOLIC_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_CONCOLIC_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_CONCOLIC_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_CONCOLIC_H_
 
 #include <sys/types.h>
 
@@ -20,7 +20,7 @@
 #include "ir/visitor.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 
@@ -96,4 +96,4 @@ class Concolic {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_CONCOLIC_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_CONCOLIC_H_ */

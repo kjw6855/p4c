@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TEST_BACKEND_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TEST_BACKEND_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TEST_BACKEND_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TEST_BACKEND_H_
 
 #include <cstdint>
 #include <string>
@@ -14,11 +14,11 @@
 #include "ir/ir.h"
 #include "lib/big_int_util.h"
 
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/test_backend.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
 
 namespace P4Tools {
 
@@ -58,4 +58,4 @@ class Bmv2TestBackend : public TestBackEnd {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TEST_BACKEND_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_TEST_BACKEND_H_ */

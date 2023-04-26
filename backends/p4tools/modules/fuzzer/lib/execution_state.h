@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_EXECUTION_STATE_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_EXECUTION_STATE_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_EXECUTION_STATE_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_EXECUTION_STATE_H_
 
 #include <cstdint>
 #include <initializer_list>
@@ -80,6 +80,9 @@ class ExecutionState {
               namespaces(namespaces) {}
     };
 
+    /// State that is needed to track reachability of statements given a query.
+    ReachabilityEngineState* reachabilityEngineState = nullptr;
+
  private:
     /// The namespace context in the IR for the current state. The innermost element is the P4
     /// program, representing the top-level namespace.
@@ -144,9 +147,6 @@ class ExecutionState {
 
     /// List of branch decisions leading into this state.
     std::vector<uint64_t> selectedBranches;
-
-    /// State that is needed to track reachability of statements given a query.
-    ReachabilityEngineState* reachabilityEngineState = nullptr;
 
     /* =========================================================================================
      *  Accessors
@@ -480,4 +480,4 @@ class ExecutionState {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_EXECUTION_STATE_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_EXECUTION_STATE_H_ */

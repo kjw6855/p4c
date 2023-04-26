@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/lib/gen_eq.h"
+#include "backends/p4tools/modules/fuzzer/lib/gen_eq.h"
 
 #include <cstddef>
 

@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/expr_stepper.h"
 
 #include <cstddef>
 #include <functional>
@@ -31,21 +31,21 @@
 #include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
 
-#include "backends/p4tools/modules/testgen/core/arch_spec.h"
-#include "backends/p4tools/modules/testgen/core/externs.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/core/small_step/small_step.h"
-#include "backends/p4tools/modules/testgen/core/target.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
-#include "backends/p4tools/modules/testgen/lib/exceptions.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/constants.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/program_info.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/table_stepper.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/target.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/externs.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/small_step.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/constants.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/program_info.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/table_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/target.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/test_spec.h"
 
 namespace P4Tools {
 

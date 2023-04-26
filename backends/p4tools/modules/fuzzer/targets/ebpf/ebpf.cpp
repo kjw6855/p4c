@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/ebpf/ebpf.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/ebpf.h"
 
 #include <string>
 

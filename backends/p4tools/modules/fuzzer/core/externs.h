@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_CORE_EXTERNS_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_CORE_EXTERNS_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_CORE_EXTERNS_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_CORE_EXTERNS_H_
 
 #include <sys/types.h>
 
@@ -15,8 +15,8 @@
 #include "ir/vector.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/core/small_step/small_step.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/small_step.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 
@@ -76,4 +76,4 @@ class ExternMethodImpls {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_CORE_EXTERNS_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_CORE_EXTERNS_H_ */

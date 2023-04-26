@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/bmv2.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/bmv2.h"
 
 #include <string>
 
@@ -10,7 +10,7 @@
 #include "frontends/common/options.h"
 #include "lib/cstring.h"
 
-#include "backends/p4tools/modules/testgen/options.h"
+#include "backends/p4tools/modules/fuzzer/options.h"
 
 namespace P4Tools {
 

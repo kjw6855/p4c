@@ -9,8 +9,8 @@
 #include "lib/cstring.h"
 #include "lib/ordered_map.h"
 
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/continuation.h"
 
 namespace P4Tools {
 

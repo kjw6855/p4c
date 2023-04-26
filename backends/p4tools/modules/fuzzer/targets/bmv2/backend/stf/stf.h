@@ -41,7 +41,7 @@ class STF : public TF {
 
     /// Produce an STF test.
     void outputTest(const TestSpec* spec, cstring selectedBranches, size_t testIdx,
-                    float currentCoverage, unsigned long testCoverage) override;
+                    float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
  private:
     /// Emits a test case.
@@ -50,7 +50,7 @@ class STF : public TF {
     /// @param currentCoverage contains statistics  about the current coverage of this test and its
     /// preceding tests.
     void emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                      const std::string& testCase, float currentCoverage, unsigned long testCoverage);
+                      const std::string& testCase, float currentCoverage, unsigned char* testCoverage, int mapSize);
 
     /// Converts all the control plane objects into Inja format.
     static inja::json getControlPlane(const TestSpec* testSpec);

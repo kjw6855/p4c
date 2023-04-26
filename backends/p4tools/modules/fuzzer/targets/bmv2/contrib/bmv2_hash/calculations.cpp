@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/bmv2/contrib/bmv2_hash/calculations.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/contrib/bmv2_hash/calculations.h"
 
 #include <netinet/in.h>
 

@@ -1,6 +1,6 @@
-#include "backends/p4tools/modules/testgen/targets/ebpf/concolic.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/concolic.h"
 
-#include "backends/p4tools/modules/testgen/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/concolic.h"
 
 namespace P4Tools {
 

@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
 
 #include <map>
 #include <utility>

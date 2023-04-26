@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/test/gtest_utils.h"
+#include "backends/p4tools/modules/fuzzer/test/gtest_utils.h"
 
 #include <boost/none.hpp>
 
@@ -9,7 +9,7 @@
 #include "lib/compile_context.h"
 #include "lib/exceptions.h"
 
-#include "backends/p4tools/modules/testgen/register.h"
+#include "backends/p4tools/modules/fuzzer/register.h"
 
 namespace Test {
 
@@ -53,7 +53,7 @@ void P4ToolsTestCase::ensureInit() {
     P4Tools::P4Testgen::registerCompilerTargets();
 
     // Register supported Testgen targets.
-    P4Tools::P4Testgen::registerTestgenTargets();
+    P4Tools::P4Testgen::registerFuzzerTargets();
 
     initialized = true;
 }

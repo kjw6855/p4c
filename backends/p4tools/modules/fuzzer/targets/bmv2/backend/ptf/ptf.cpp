@@ -377,7 +377,7 @@ class Test{{test_id}}(AbstractTest):
 }
 
 void PTF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_t testId,
-                       const std::string& testCase, float currentCoverage, unsigned long testCoverage) {
+                       const std::string& testCase, float currentCoverage, unsigned char* testCoverage, int mapSize) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -402,7 +402,7 @@ void PTF::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, size_
 }
 
 void PTF::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t testIdx,
-                     float currentCoverage, unsigned long testCoverage) {
+                     float currentCoverage, unsigned char* testCoverage, int mapSize) {
     if (!preambleEmitted) {
         ptfFile = std::ofstream(testName + ".py");
         std::string preamble = getPreamble();
@@ -410,7 +410,7 @@ void PTF::outputTest(const TestSpec* testSpec, cstring selectedBranches, size_t 
         preambleEmitted = true;
     }
     std::string testCase = getTestCase();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage);
+    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage, testCoverage, mapSize);
 }
 
 }  // namespace Bmv2

@@ -14,11 +14,11 @@
 #include "ir/ir.h"
 #include "lib/big_int_util.h"
 
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/test_backend.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
 
 namespace P4Tools {
 

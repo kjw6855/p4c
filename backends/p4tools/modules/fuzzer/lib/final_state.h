@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_FINAL_STATE_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_FINAL_STATE_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_FINAL_STATE_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_FINAL_STATE_H_
 
 #include <vector>
 
@@ -9,7 +9,7 @@
 #include "gsl/gsl-lite.hpp"
 #include "ir/ir.h"
 
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 
 namespace P4Tools {
 
@@ -58,4 +58,4 @@ class FinalState {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_LIB_FINAL_STATE_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_LIB_FINAL_STATE_H_ */

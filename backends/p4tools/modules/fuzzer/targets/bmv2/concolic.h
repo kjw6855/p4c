@@ -1,5 +1,5 @@
-#ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_CONCOLIC_H_
-#define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_CONCOLIC_H_
+#ifndef BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_CONCOLIC_H_
+#define BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_CONCOLIC_H_
 
 #include <cstddef>
 #include <functional>
@@ -9,7 +9,7 @@
 #include "ir/ir.h"
 #include "lib/big_int_util.h"
 
-#include "backends/p4tools/modules/testgen/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/concolic.h"
 
 namespace P4Tools {
 
@@ -74,4 +74,4 @@ class Bmv2Concolic : public Concolic {
 
 }  // namespace P4Tools
 
-#endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_CONCOLIC_H_ */
+#endif /* BACKENDS_P4TOOLS_MODULES_FUZZER_TARGETS_BMV2_CONCOLIC_H_ */

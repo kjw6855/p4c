@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/targets/ebpf/target.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/target.h"
 
 #include <stddef.h>
 
@@ -11,15 +11,15 @@
 #include "lib/exceptions.h"
 #include "lib/ordered_map.h"
 
-#include "backends/p4tools/modules/testgen/core/exploration_strategy/exploration_strategy.h"
-#include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/target.h"
-#include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/namespace_context.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/cmd_stepper.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/expr_stepper.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/program_info.h"
-#include "backends/p4tools/modules/testgen/targets/ebpf/test_backend.h"
+#include "backends/p4tools/modules/fuzzer/core/exploration_strategy/exploration_strategy.h"
+#include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/core/target.h"
+#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/cmd_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/program_info.h"
+#include "backends/p4tools/modules/fuzzer/targets/ebpf/test_backend.h"
 
 namespace P4Tools {
 
