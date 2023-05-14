@@ -189,7 +189,14 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             //ExplorationStrategy::Callback callBack =
             //    std::bind(&P4FuzzGuideImpl::Callback_run, this, std::placeholders::_1);
 
-            stateMgr->run(req->test_case());
+            try {
+                stateMgr->run(req->test_case());
+            } catch (const Util::CompilerBug& e) {
+                std::cerr << "Internal error: " << e.what() << std::endl;
+                std::cerr << "Please submit a bug report with your code." << std::endl;
+                return Status::CANCELLED;
+            }
+
             //recordTestCase(estate, req->test_case());
             //rep->set_hit_stmt_count(estate->getVisited().size());
             rep->set_hit_stmt_count(stateMgr->getVisitedStatements().size());

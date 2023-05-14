@@ -29,7 +29,7 @@
 #include "lib/null.h"
 #include "lib/safe_vector.h"
 
-#include "backends/p4tools/modules/fuzzer//lib/exceptions.h"
+#include "backends/p4tools/modules/fuzzer/lib/exceptions.h"
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
 #include "backends/p4tools/modules/fuzzer/core/small_step/abstract_stepper.h"
 #include "backends/p4tools/modules/fuzzer/core/small_step/table_stepper.h"

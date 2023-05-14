@@ -58,13 +58,18 @@ set(
 
   core/arch_spec.cpp
   core/externs.cpp
+  core/visit_externs.cpp
   core/program_info.cpp
   core/small_step/abstract_stepper.cpp
   core/small_step/cmd_stepper.cpp
   core/small_step/expr_stepper.cpp
   core/small_step/extern_stepper.cpp
+  core/small_step/extern_visitor.cpp
   core/small_step/table_stepper.cpp
+  core/small_step/table_visitor.cpp
   core/small_step/small_step.cpp
+  core/small_step/visit_stepper.cpp
+  core/small_step/visit_step_evaluator.cpp
   core/exploration_strategy/incremental_stack.cpp
   core/exploration_strategy/selected_branches.cpp
   core/exploration_strategy/selected_test.cpp
@@ -78,6 +83,7 @@ set(
   lib/concolic.cpp
   lib/continuation.cpp
   lib/execution_state.cpp
+  lib/visit_state.cpp
   lib/final_state.cpp
   lib/gen_eq.cpp
   lib/logging.cpp

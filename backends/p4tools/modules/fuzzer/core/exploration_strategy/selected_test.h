@@ -8,12 +8,12 @@
 
 #include <boost/optional/optional.hpp>
 
-#include "backends/p4tools/modules/fuzzer/core/small_step/small_step.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/visit_step_evaluator.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/visit_stepper.h"
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
-#include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_state.h"
 #include "backends/p4tools/modules/fuzzer/p4testgen.pb.h"
 
-using ExecutionState = P4Tools::P4Testgen::ExecutionState;
 using p4testgen::TestCase;
 
 namespace P4Tools {
@@ -23,18 +23,20 @@ namespace P4Testgen {
 /// Explores one path described by a list of branches.
 class SelectedTest {
  public:
+    virtual ~SelectedTest() = default;
+
+    /// Constructor for this strategy, considering inheritance
+    SelectedTest(const ProgramInfo& programInfo);
+
     /// Executes the P4 program along a randomly chosen path. When the program terminates, the
     /// given callback is invoked. If the callback returns true, then the executor terminates.
     /// Otherwise, execution of the P4 program continues on a different random path.
     void run(const TestCase& testCase);
 
-    /// Constructor for this strategy, considering inheritance
-    SelectedTest(const ProgramInfo& programInfo);
-
     const P4::Coverage::CoverageSet& getVisitedStatements();
 
-    using Branch = SmallStepEvaluator::Branch;
-    using Result = SmallStepEvaluator::Result;
+    using VisitBranch = VisitStepEvaluator::VisitBranch;
+    using VisitResult = VisitStepEvaluator::VisitResult;
 
  protected:
     /// Target-specific information about the P4 program.
@@ -42,16 +44,13 @@ class SelectedTest {
 
     /// Chooses a branch corresponding to a given branch identifier.
     ///
-    /// @returns next execution state to be examined, throws an exception on invalid nextBranch.
-    ExecutionState* chooseBranch(const std::vector<Branch>& branches, uint64_t nextBranch);
+    /// @returns next execution state to be examined, throws an exception on invalid nextVisitBranch.
+    VisitState* chooseVisitBranch(const std::vector<VisitBranch>& branches, uint64_t nextVisitBranch);
 
-    bool testHandleTerminalState(const ExecutionState& terminalState);
-
-    /// Take one step in the program and return list of possible branches.
-    Result step(ExecutionState& state, const TestCase& testCase);
+    bool testHandleTerminalState(const VisitState& terminalState);
 
     /// The current execution state.
-    ExecutionState* executionState = nullptr;
+    VisitState* executionState = nullptr;
 
     /// Set of all stetements, to be retrieved from programInfo.
     const P4::Coverage::CoverageSet& allStatements;
@@ -60,11 +59,7 @@ class SelectedTest {
     P4::Coverage::CoverageSet visitedStatements;
 
  private:
-    /// Reachability engine.
-    ReachabilityEngine* reachabilityEngine = nullptr;
-
-    /// The number of times a guard was not satisfiable.
-    uint64_t violatedGuardConditions = 0;
+    VisitStepEvaluator evaluator;
 };
 
 }  // namespace P4Testgen
