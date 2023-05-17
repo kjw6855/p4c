@@ -141,6 +141,8 @@ class Continuation {
         /// Determines whether this body is empty.
         bool empty() const;
 
+        size_t size();
+
         /// Returns the next command to be executed. This is the top of the command stack. A BUG
         /// occurs if this body is @empty.
         const Command next() const;

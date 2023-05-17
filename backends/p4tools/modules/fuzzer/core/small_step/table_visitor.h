@@ -28,6 +28,8 @@ class TableVisitor {
 
     const IR::P4Table* table;
 
+    const TestCase& testCase;
+
     /// KeyProperties define properties of table keys that are useful for execution.
     struct KeyProperties {
         /// The original key element
@@ -199,7 +201,7 @@ class TableVisitor {
     /// such as annotations, action profiles/selectors that may alter semantics, too.
     bool eval();
 
-    explicit TableVisitor(VisitStepper* stepper, const IR::P4Table* table);
+    explicit TableVisitor(VisitStepper* stepper, const IR::P4Table* table, const TestCase& testCase);
 
     virtual ~TableVisitor() = default;
 };

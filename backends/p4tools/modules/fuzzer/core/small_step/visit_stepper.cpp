@@ -26,6 +26,9 @@
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/constants.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/program_info.h"
 
+#include "backends/p4tools/modules/fuzzer/p4fuzzer.grpc.pb.h"
+#include "backends/p4tools/modules/fuzzer/p4testgen.pb.h"
+
 namespace P4Tools {
 
 namespace P4Testgen {
@@ -35,6 +38,14 @@ VisitStepper::VisitStepper(VisitState& state, const ProgramInfo& programInfo,
     : programInfo(programInfo), state(state), testCase(testCase), result(new std::vector<VisitBranch>()) {}
 
 VisitStepper::VisitResult VisitStepper::step(const IR::Node* node) {
+    std::cout << "[" << node->node_type_name() << "]";
+    if (dynamic_cast<const IR::P4Program*>(node) == nullptr &&
+            dynamic_cast<const IR::P4Control*>(node) == nullptr &&
+            dynamic_cast<const IR::P4Parser*>(node) == nullptr) {
+        std::cout << " " << node;
+    }
+    std::cout << std::endl;
+
     node->apply(*this);
     return result;
 }
@@ -76,6 +87,56 @@ const Value* VisitStepper::evaluateExpression(
 #endif
 }
 
+boost::optional<const Constraint*> VisitStepper::startParser_impl(
+    const IR::P4Parser* parser, VisitState* nextState) const {
+    // We need to explicitly map the parser error
+    const auto* errVar =
+        programInfo.getParserParamVar(parser, programInfo.getParserErrorType(), 3, "parser_error");
+    nextState->setParserErrorLabel(errVar);
+
+    return boost::none;
+}
+
+
+std::map<Continuation::Exception, Continuation> VisitStepper::getExceptionHandlers(
+    const IR::P4Parser* parser, Continuation::Body /*normalContinuation*/,
+    const VisitState* /*nextState*/) const {
+    std::map<Continuation::Exception, Continuation> result;
+    const auto targetProgramInfo = *programInfo.checkedTo<Bmv2::BMv2_V1ModelProgramInfo>();
+    auto gress = targetProgramInfo.getGress(parser);
+
+    const auto* errVar =
+        targetProgramInfo.getParserParamVar(parser, targetProgramInfo.getParserErrorType(), 3, "parser_error");
+
+    switch (gress) {
+        case Bmv2::BMV2_INGRESS:
+            // TODO: Implement the conditions above. Currently, this always drops the packet.
+            // Suggest refactoring `result` so that its values are lists of (path condition,
+            // continuation) pairs. This would allow us to branch on the value of parser_err.
+            // Would also need to augment ProgramInfo to detect whether the ingress MAU refers
+            // to parser_err.
+
+            ::warning("Ingress parser exception handler not fully implemented");
+            result.emplace(Continuation::Exception::Reject, Continuation::Body({}));
+            result.emplace(Continuation::Exception::PacketTooShort,
+                           Continuation::Body({new IR::AssignmentStatement(
+                               errVar, IR::getConstant(errVar->type, 1))}));
+            // NoMatch will transition to the next block.
+            result.emplace(Continuation::Exception::NoMatch, Continuation::Body({}));
+            break;
+
+        // The egress parser never drops the packet.
+        case Bmv2::BMV2_EGRESS:
+            // NoMatch will transition to the next block.
+            result.emplace(Continuation::Exception::NoMatch, Continuation::Body({}));
+            break;
+        default:
+            BUG("Unimplemented thread: %1%", gress);
+    }
+
+    return result;
+}
+
 void VisitStepper::initializeVariablesFromTestCase(VisitState* nextState, const TestCase& testCase) {
     /**
      * XXX: Target-aware initialization (BMv2-specific. Tofino?)
@@ -113,18 +174,8 @@ void VisitStepper::initializeVariablesFromTestCase(VisitState* nextState, const 
 
     nextState->setInputPacketSize(inputPacket.length() * 8);
 
-
-    // Set packet into buffer
-    for (size_t len = 0; len < inputPacket.length(); len += 4) {
-        int num = 0;
-        int pktLen = std::min(4, int(inputPacket.length() - len));
-        for (int i = 0; i < pktLen; i++) {
-            num |= int((unsigned char)(inputPacket[i + len]) << ((pktLen-i-1) * 8));
-        }
-        nextState->appendToPacketBuffer(IR::getConstant(
-                    IR::getBitType(pktLen * 8), (unsigned int)num));
-    }
-
+    // Set packet buffer
+    nextState->appendToPacketBuffer(Utils::getValExpr(inputPacket, inputPacket.length() * 8));
 
     // BMv2 implicitly sets the output port to 0.
     nextState->set(targetProgramInfo.getTargetOutputPortVar(), IR::getConstant(nineBitType, 0));
@@ -569,12 +620,8 @@ bool VisitStepper::preorder(const IR::P4Parser* p4parser) {
     // continuation onto the continuation stack.
     nextState->popBody();
 
-    /***************
-     * TODO: target-aware getExceptionHandlers?
-     ***************/
-
-    //auto handlers = getExceptionHandlers(p4parser, nextState->getBody(), nextState);
-    //nextState->pushCurrentContinuation(handlers);
+    auto handlers = getExceptionHandlers(p4parser, nextState->getBody(), nextState);
+    nextState->pushCurrentContinuation(handlers);
 
     // Obtain the parser's namespace.
     const auto* ns = p4parser->to<IR::INamespace>();
@@ -877,14 +924,11 @@ const Constraint* VisitStepper::startParser(const IR::P4Parser* parser, VisitSta
                                   IR::getConstant(parserCursorVarType, 0)),
                     IR::getConstant(threeBitType, 0)));
 
-    /***************
-     * TODO: target-aware startParser_impl?
-     ***************/
     // Call the implementation for the specific target.
     // If we get a constraint back, add it to the result.
-    //if (auto constraintOpt = startParser_impl(parser, nextState)) {
-    //    result = new IR::LAnd(boolType, result, *constraintOpt);
-    //}
+    if (auto constraintOpt = startParser_impl(parser, nextState)) {
+        result = new IR::LAnd(boolType, result, *constraintOpt);
+    }
 
     return result;
 }
@@ -1164,7 +1208,7 @@ bool VisitStepper::preorder(const IR::MethodCallExpression* call) {
 
 bool VisitStepper::preorder(const IR::P4Table* table) {
     // Delegate to the tableStepper.
-    TableVisitor tableVisitor(this, table);
+    TableVisitor tableVisitor(this, table, testCase);
 
     return tableVisitor.eval();
 }

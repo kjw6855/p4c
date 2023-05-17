@@ -167,6 +167,14 @@ const std::stack<gsl::not_null<const VisitState::StackFrame*>>& VisitState::getS
     return stack;
 }
 
+size_t VisitState::getStackSize() {
+    return stack.size();
+}
+
+size_t VisitState::getBodySize() {
+    return body.size();
+}
+
 void VisitState::setProperty(cstring propertyName, Continuation::PropertyValue property) {
     stateProperties[propertyName] = std::move(property);
 }

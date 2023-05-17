@@ -37,6 +37,10 @@ bool Continuation::Guard::operator==(const Continuation::Guard& other) const {
 
 bool Continuation::Body::empty() const { return cmds.empty(); }
 
+size_t Continuation::Body::size() {
+    return cmds.size();
+}
+
 const Continuation::Command Continuation::Body::next() const {
     if (!cmds.empty()) {
         return cmds.front();

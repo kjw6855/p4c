@@ -380,6 +380,146 @@ void TableVisitor::evalTableControlEntries(
     const auto* keys = table->getKey();
     BUG_CHECK(keys != nullptr, "An empty key list should have been handled earlier.");
 
+    // Referring to evalTableConstEntries()
+
+    const IR::Expression* hitCondition = IR::getBoolLiteral(true);
+
+    // TODO: sort entries in order of priority
+    for (const auto& entity : testCase.entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        const auto entry = entity.table_entry();
+        if (entry.table_name() != properties.tableName) {
+            std::cout << "Different table name: "
+                << entry.table_name() << " (testCase) vs. "
+                << properties.tableName << " (table)"
+                << std::endl;
+            continue;
+        }
+
+        /* XXX: NoAction? */
+        if (!entry.has_action())
+            continue;
+
+        auto* nextState = new VisitState(stepper->state);
+        bool found = false;
+        const auto& p4v1Action = entry.action().action();
+        for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+            const auto* action = tableActionList.at(idx);
+            const auto* tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+            const auto* actionType = stepper->state.getActionDecl(tableAction->method);
+            CHECK_NULL(actionType);
+            cstring actionName = actionType->controlPlaneName();
+
+            if (actionName != p4v1Action.action_name())
+                continue;
+
+            // FOUND!
+            found = true;
+            auto* arguments = new IR::Vector<IR::Argument>();
+            std::vector<ActionArg> ctrlPlaneArgs;
+            for (auto& param : p4v1Action.params()) {
+                size_t argIdx = (size_t)(param.param_id() - 1);
+                BUG_CHECK(argIdx < actionType->parameters->size(),
+                        "given argIdx %1% is out of size %2%",
+                        argIdx, actionType->parameters->size());
+                const auto* parameter = actionType->parameters->getParameter(argIdx);
+                const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+                auto paramWidth = paramType->width_bits();
+
+                // change to constant value
+                const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
+                const auto& actionDataVar =
+                    Utils::getZombieTableVar(parameter->type, table, "*actionData", idx, argIdx);
+                //cstring paramName =
+                //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
+                //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
+                //const auto* actionArgVar = new IR::Member(parameter->type, new IR::PathExpression("*"), paramName);
+                nextState->set(actionDataVar, paramExpr);
+                arguments->push_back(new IR::Argument(paramExpr));
+                ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+            }
+
+            auto* synthesizedAction = tableAction->clone();
+            synthesizedAction->arguments = arguments;
+            setTableAction(nextState, tableAction);
+
+            std::vector<Continuation::Command> replacements;
+            replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
+
+            // ??
+            nextState->set(getTableHitVar(table), IR::getBoolLiteral(true));
+            nextState->set(getTableReachedVar(table), IR::getBoolLiteral(true));
+            nextState->replaceTopBody(&replacements);
+            break;
+        }
+
+        BUG_CHECK(found, "P4 Action is not found!");
+
+        for (const auto& match : entry.match()) {
+            size_t idx = (size_t)(match.field_id() - 1);
+
+            BUG_CHECK(idx < keys->keyElements.size(),
+                    "given idx %1% is out of size %2%",
+                    idx, keys->keyElements.size());
+            const auto* key = keys->keyElements.at(idx);
+
+            const IR::Expression* keyExpr = key->expression;
+            const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+            auto keyWidth = keyType->width_bits();
+            if (match.has_range()) {
+                const auto& matchRange = match.range();
+                const auto* minExpr = Utils::getValExpr(matchRange.low(), keyWidth);
+                const auto* maxExpr = Utils::getValExpr(matchRange.high(), keyWidth);
+                hitCondition = new IR::LAnd(
+                        hitCondition,
+                        new IR::LAnd(new IR::Leq(minExpr, keyExpr), new IR::Leq(keyExpr, maxExpr)));
+
+            } else if (match.has_ternary()) {
+                const auto& matchTernary = match.ternary();
+                const auto* valExpr = Utils::getValExpr(matchTernary.value(), keyWidth);
+                const auto* maskExpr = Utils::getValExpr(matchTernary.mask(), keyWidth);
+
+                hitCondition = new IR::LAnd(
+                        hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
+                            new IR::BAnd(valExpr, maskExpr)));
+
+            } else if (match.has_lpm()) {
+                const auto& matchLpm = match.lpm();
+                const auto* valExpr = Utils::getValExpr(matchLpm.value(), keyWidth);
+                // get maxReturn
+                auto maxReturn = IR::getMaxBvVal(matchLpm.prefix_len());
+
+                // maskExpr = (maxReturn) (Shl; <<) (prefix_len:32)
+                auto* maskExpr = new IR::Shl(IR::getConstant(keyType, maxReturn),
+                        new IR::Sub(IR::getConstant(keyType, keyWidth),
+                            IR::getConstant(keyType, matchLpm.prefix_len())));
+
+                hitCondition = new IR::LAnd(
+                        hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
+                            new IR::BAnd(valExpr, maskExpr)));
+
+            } else if (match.has_exact()) {
+                const auto& matchExact = match.exact();
+                const auto* valExpr = Utils::getValExpr(matchExact.value(), keyWidth);
+
+                hitCondition = new IR::LAnd(hitCondition, new IR::Equ(keyExpr, valExpr));
+
+            } else {
+                //XXX: UNSUPPORTED;
+                BUG("Unknown type");
+            }
+        }
+
+        // XXX: should I put TraceEvent::Generic(tableStream.str())?
+        stepper->result->emplace_back(hitCondition, stepper->state, nextState);
+    }
+
+    return;
+
+    // XXX: reference
+
     for (size_t idx = 0; idx < tableActionList.size(); idx++) {
         const auto* action = tableActionList.at(idx);
         // Grab the path from the method call.
@@ -678,8 +818,8 @@ bool TableVisitor::eval() {
     return false;
 }
 
-TableVisitor::TableVisitor(VisitStepper* stepper, const IR::P4Table* table)
-    : stepper(stepper), table(table) {
+TableVisitor::TableVisitor(VisitStepper* stepper, const IR::P4Table* table, const TestCase& testCase)
+    : stepper(stepper), table(table), testCase(testCase) {
     properties.tableName = table->controlPlaneName();
 }
 

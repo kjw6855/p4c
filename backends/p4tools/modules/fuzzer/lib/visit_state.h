@@ -157,6 +157,10 @@ class VisitState {
     /// Determines whether this state represents the end of an execution.
     bool isTerminal() const;
 
+    size_t getStackSize();
+
+    size_t getBodySize();
+
     /// @returns list of paths constraints.
     const std::vector<const IR::Expression*>& getPathConstraint() const { return pathConstraint; }
 

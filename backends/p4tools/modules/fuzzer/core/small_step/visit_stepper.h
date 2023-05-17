@@ -94,6 +94,13 @@ class VisitStepper : public Inspector {
 
     const TestCase& testCase;
 
+    boost::optional<const Constraint*> startParser_impl(const IR::P4Parser* parser,
+                                                        VisitState* state) const;
+
+    std::map<Continuation::Exception, Continuation> getExceptionHandlers(
+        const IR::P4Parser* parser, Continuation::Body normalContinuation,
+        const VisitState* state) const;
+
     void initializeVariablesFromTestCase(VisitState* nextState, const TestCase& testCase);
 
     void initializeBlockParams(const IR::Type_Declaration* typeDecl,

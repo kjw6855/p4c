@@ -22,6 +22,7 @@
 
 #include "backends/p4tools/common/lib/formulae.h"
 #include "backends/p4tools/common/lib/zombie.h"
+#include "frontends/p4/optimizeExpressions.h"
 #include "ir/id.h"
 #include "ir/irutils.h"
 #include "ir/vector.h"
@@ -89,6 +90,34 @@ const IR::Constant* Utils::getRandConstantForType(const IR::Type_Bits* type) {
     auto randInt = Utils::getRandBigInt(maxVal);
     return IR::getConstant(type, randInt);
 }
+
+const IR::Expression* Utils::optimizeExpression(const IR::Expression* value) {
+    return P4::optimizeExpression(value);
+}
+
+const IR::Expression* Utils::getValExpr(const std::string& strVal, size_t bitWidth) {
+    const auto* baseVar = Utils::optimizeExpression(IR::getConstant(IR::getBitType(0), 0));
+    const auto* baseVarType = IR::getBitType(bitWidth);
+
+    // Int size
+    for (size_t w = 0; w < bitWidth; w += 32) {
+        int num = 0;
+        int subBitWidth = std::min(32, int(bitWidth - w));
+        int shl = (subBitWidth - 1) / 8;
+        for (int i = 0; i < subBitWidth; i+= 8) {
+            int idx = (i + w) / 8;
+            num |= int((unsigned char)(strVal[idx]) << (shl * 8 - i));
+        }
+
+        const auto* concat = new IR::Concat(baseVarType, baseVar,
+                IR::getConstant(IR::getBitType(subBitWidth), (unsigned int)num));
+
+        baseVar = Utils::optimizeExpression(concat);
+    }
+
+    return baseVar;
+}
+
 
 /* =========================================================================================
  *  Variables and symbolic constants.

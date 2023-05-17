@@ -31,6 +31,7 @@ namespace P4Testgen {
 void SelectedTest::run(const TestCase& testCase) {
     while (!executionState->isTerminal()) {
 
+        std::cout << " stack/body size: " << executionState->getStackSize() << "/" << executionState->getBodySize() << std::endl;
         VisitResult successors = evaluator.step(*executionState, testCase);
 
         /*
@@ -113,17 +114,15 @@ VisitState* SelectedTest::chooseVisitBranch(const std::vector<VisitBranch>& bran
                                                uint64_t nextVisitBranch) {
     VisitState* next = nullptr;
     for (const auto& branch : branches) {
-        const auto& selectedVisitBranches = branch.nextState->getSelectedBranches();
-        std::cout << "Branch Constraint: " << branch.constraint << std::endl;
-        BUG_CHECK(!selectedVisitBranches.empty(), "Corrupted selectedVisitBranches in a execution state");
-        // Find branch matching given branch identifier.
-        if (selectedVisitBranches.back() == nextVisitBranch) {
-            next = branch.nextState;
-            break;
-        }
+        const Constraint* constraint = branch.constraint;
+        std::cout << "Branch Constraint: " << constraint << std::endl;
 
-        if (next == nullptr) {
-            next = branch.nextState;
+        if (dynamic_cast<const IR::BoolLiteral*>(constraint) != nullptr) {
+            auto val = constraint->checkedTo<IR::BoolLiteral>()->value;
+            if (val) {
+                next = branch.nextState;
+                break;
+            }
         }
     }
 

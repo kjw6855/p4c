@@ -446,7 +446,10 @@ void VisitStepper::evalInternalExternMethodCall(const IR::MethodCallExpression* 
     // Provides implementations of extern calls internal to the interpreter.
     // These calls do not exist in P4.
     if (!INTERNAL_EXTERN_METHOD_IMPLS.exec(call, receiver, name, args, state, result)) {
-        BUG("Unknown or unimplemented extern method: %1%", name);
+        ::warning("Unknown or unimplemented extern method: %1% -> just skip", name);
+        auto* nextState = new VisitState(state);
+        nextState->popBody();
+        result->emplace_back(nextState);
     }
 }
 
