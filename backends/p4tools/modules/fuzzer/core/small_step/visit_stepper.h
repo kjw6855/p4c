@@ -94,6 +94,10 @@ class VisitStepper : public Inspector {
 
     const TestCase& testCase;
 
+    virtual std::string getClassName() = 0;
+
+    virtual const ProgramInfo& getProgramInfo() const;
+
     boost::optional<const Constraint*> startParser_impl(const IR::P4Parser* parser,
                                                         VisitState* state) const;
 
@@ -144,6 +148,9 @@ class VisitStepper : public Inspector {
     IR::SwitchStatement* replaceSwitchLabels(const IR::SwitchStatement* switchStatement);
 
     const Constraint* startParser(const IR::P4Parser* parser, VisitState* nextState);
+
+    void setTargetUninitialized(VisitState* nextState, const IR::Member* ref,
+                                bool forceTaint) const;
 
     void declareVariable(VisitState* nextState, const IR::Declaration_Variable* decl);
 

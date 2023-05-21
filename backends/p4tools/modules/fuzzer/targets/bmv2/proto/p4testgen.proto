@@ -33,5 +33,6 @@ message TestCase {
     repeated string traces = 4;
     // Additional metadata and information.
     repeated string metadata = 5;
-    bytes stmt_coverage = 6;
+    bytes stmt_cov_bitmap = 6;
+    int32 stmt_cov_size = 7;
 }

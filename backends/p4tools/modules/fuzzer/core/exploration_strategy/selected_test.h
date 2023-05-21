@@ -23,7 +23,7 @@ namespace P4Testgen {
 /// Explores one path described by a list of branches.
 class SelectedTest {
  public:
-    virtual ~SelectedTest() = default;
+    ~SelectedTest();
 
     /// Constructor for this strategy, considering inheritance
     SelectedTest(const ProgramInfo& programInfo);
@@ -34,6 +34,8 @@ class SelectedTest {
     void run(const TestCase& testCase);
 
     const P4::Coverage::CoverageSet& getVisitedStatements();
+
+    const std::string getStatementBitmapStr();
 
     using VisitBranch = VisitStepEvaluator::VisitBranch;
     using VisitResult = VisitStepEvaluator::VisitResult;
@@ -57,6 +59,10 @@ class SelectedTest {
 
     /// Set of all statements executed in any testcase that has been outputted.
     P4::Coverage::CoverageSet visitedStatements;
+
+ public:
+    const int statementBitmapSize;
+    unsigned char* statementBitmap;
 
  private:
     VisitStepEvaluator evaluator;

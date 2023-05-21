@@ -7,6 +7,8 @@ import "p4testgen.proto";
 service P4FuzzGuide {
     rpc GetP4Coverage(P4CoverageRequest) returns (P4CoverageReply) {}
     rpc RecordP4Testgen(P4CoverageRequest) returns (P4CoverageReply) {}
+
+    rpc GetP4Statement(P4StatementRequest) returns (P4StatementReply) {}
 }
 
 message P4CoverageRequest {
@@ -15,8 +17,16 @@ message P4CoverageRequest {
 }
 
 message P4CoverageReply {
-    int32 hit_stmt_count = 1;
-    int32 total_stmt_count = 2;
-    int32 hit_action_count = 3;
-    int32 total_action_count = 4;
+    bytes stmt_cov_bitmap = 1;
+    int32 stmt_cov_size = 2;
+    bytes action_cov_bitmap = 3;
+    int32 action_cov_size = 4;
+}
+
+message P4StatementRequest {
+    int32 idx = 1;
+}
+
+message P4StatementReply {
+    string statement = 1;
 }

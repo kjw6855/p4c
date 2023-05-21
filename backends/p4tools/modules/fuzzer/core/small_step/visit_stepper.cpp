@@ -50,6 +50,8 @@ VisitStepper::VisitResult VisitStepper::step(const IR::Node* node) {
     return result;
 }
 
+const ProgramInfo& VisitStepper::getProgramInfo() const { return programInfo; }
+
 /******* Protected inner functions *******/
 void VisitStepper::logStep(const IR::Node* node) {
     LOG_FEATURE("small_step", 4,
@@ -486,6 +488,30 @@ bool VisitStepper::stepSetHeaderValidity(const IR::Expression* headerRef, bool v
     state.replaceTopBody(Continuation::Return());
     result->emplace_back(&state);
     return false;
+}
+
+void VisitStepper::setTargetUninitialized(VisitState* nextState, const IR::Member* ref,
+                                             bool forceTaint) const {
+    // Resolve the type of the left-and assignment, if it is a type name.
+    const auto* refType = nextState->resolveType(ref->type);
+    if (const auto* structType = refType->to<const IR::Type_StructLike>()) {
+        std::vector<const IR::Member*> validFields;
+        auto fields = nextState->getFlatFields(ref, structType, &validFields);
+        // We also need to initialize the validity bits of the headers. These are false.
+        for (const auto* validField : validFields) {
+            nextState->set(validField, IR::getBoolLiteral(false));
+        }
+        // For each field in the undefined struct, we create a new zombie variable.
+        // If the variable does not have an initializer we need to create a new zombie for it.
+        // For now we just use the name directly.
+        for (const auto* field : fields) {
+            nextState->set(field, programInfo.createTargetUninitialized(field->type, forceTaint));
+        }
+    } else if (const auto* baseType = refType->to<const IR::Type_Base>()) {
+        nextState->set(ref, programInfo.createTargetUninitialized(baseType, forceTaint));
+    } else {
+        P4C_UNIMPLEMENTED("Unsupported uninitialization type %1%", refType->node_type_name());
+    }
 }
 
 void VisitStepper::declareStructLike(VisitState* nextState, const IR::Expression* parentExpr,

@@ -286,7 +286,8 @@ metadata: "Date generated: {{timestamp}}"
 metadata: "{{selected_branches}}"
 ## endif
 metadata: "Current statement coverage: {{coverage}}"
-stmt_coverage: "{{local_coverage}}"
+stmt_cov_bitmap: "{{local_coverage}}"
+stmt_cov_size: {{local_cov_size}}
 
 ## for trace_item in trace
 traces: "{{trace_item}}"
@@ -429,12 +430,13 @@ void Protobuf::emitTestcase(const TestSpec* testSpec, cstring selectedBranches, 
     dataJson["coverage"] = coverageStr.str();
 
     std::stringstream testCoverageMapStr;
-    int i;
-    for (i = 0; i < mapSize; i++) {
+    int allocLen = (mapSize / 8) + 1;
+    for (int i = 0; i < allocLen; i++) {
         testCoverageMapStr << "\\x" << std::setw(2) << std::setfill('0')
             << std::hex << (unsigned int)testCoverage[i];
     }
     dataJson["local_coverage"] = testCoverageMapStr.str();
+    dataJson["local_cov_size"] = mapSize;
 
     LOG5("Protobuf backend: emitting testcase:" << std::setw(4) << dataJson);
 

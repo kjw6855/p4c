@@ -88,7 +88,7 @@ ActionCall::ActionCall(cstring identifier, const IR::P4Action* action, std::vect
 ActionCall::ActionCall(const IR::P4Action* action, std::vector<ActionArg> args)
     : identifier(action->controlPlaneName()), action(action), args(std::move(args)) {}
 
-cstring ActionCall::getActionName() const { return identifier; }
+cstring ActionCall::getActionName() const { return action->controlPlaneName(); }
 
 const IR::P4Action* ActionCall::getAction() const { return action; }
 

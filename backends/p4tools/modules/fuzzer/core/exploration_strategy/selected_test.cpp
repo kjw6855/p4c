@@ -104,10 +104,19 @@ uint64_t getNumeric(const std::string& str) {
 SelectedTest::SelectedTest(const ProgramInfo& programInfo)
     : programInfo(programInfo),
       allStatements(programInfo.getAllStatements()),
-      evaluator(programInfo) {
+      evaluator(programInfo),
+      statementBitmapSize(allStatements.size()) {
 
     executionState = new VisitState(programInfo.program);
+
+    int allocLen = (statementBitmapSize / 8) + 1;
+    statementBitmap = (unsigned char *)malloc(allocLen);
+    memset(statementBitmap, 0, allocLen);
     //reachabilityEngine = new ReachabilityEngine(programInfo.dcg, "", true);
+}
+
+SelectedTest::~SelectedTest() {
+    free(statementBitmap);
 }
 
 VisitState* SelectedTest::chooseVisitBranch(const std::vector<VisitBranch>& branches,
@@ -123,6 +132,10 @@ VisitState* SelectedTest::chooseVisitBranch(const std::vector<VisitBranch>& bran
                 next = branch.nextState;
                 break;
             }
+
+        } else if (dynamic_cast<const IR::Neq*>(constraint) != nullptr) {
+            // Select the branch temporarily
+            next = branch.nextState;
         }
     }
 
@@ -135,20 +148,24 @@ VisitState* SelectedTest::chooseVisitBranch(const std::vector<VisitBranch>& bran
 }
 
 bool SelectedTest::testHandleTerminalState(const VisitState& terminalState) {
-
-    std::cout << std::endl << "[FINAL]" << std::endl;
-    for (const auto& stmt : terminalState.getVisited()) {
-        if (allStatements.count(stmt) != 0U) {
-            visitedStatements.insert(stmt);
-
-            std::cout << "[" << stmt->node_type_name() << "] " << stmt << std::endl;
+    int i = 0;
+    auto& visitedStmtSet = terminalState.getVisited();
+    for (auto& stmt : allStatements) {
+        if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
+            int idx = i / 8;
+            int shl = 7 - (i % 8);
+            statementBitmap[idx] |= 1 << shl;
         }
+
+        i++;
     }
 
-    //const FinalState finalState(&solver, terminalState);
-    //return callback(finalState);
-
     return true;
+}
+
+const std::string SelectedTest::getStatementBitmapStr() {
+    int allocLen = (statementBitmapSize / 8) + 1;
+    return std::string(reinterpret_cast<char*>(statementBitmap), allocLen);
 }
 
 const P4::Coverage::CoverageSet& SelectedTest::getVisitedStatements() {

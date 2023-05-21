@@ -16,10 +16,12 @@
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
 #include "backends/p4tools/modules/fuzzer/core/target.h"
 #include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_state.h"
 #include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/cmd_stepper.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/constants.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/visit_stepper.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/program_info.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/test_backend.h"
 
@@ -91,6 +93,11 @@ BMv2_V1ModelCmdStepper* BMv2_V1ModelTestgenTarget::getCmdStepper_impl(
 BMv2_V1ModelExprStepper* BMv2_V1ModelTestgenTarget::getExprStepper_impl(
     ExecutionState& state, AbstractSolver& solver, const ProgramInfo& programInfo) const {
     return new BMv2_V1ModelExprStepper(state, solver, programInfo);
+}
+
+BMv2_V1ModelVisitStepper* BMv2_V1ModelTestgenTarget::getVisitStepper_impl(
+    VisitState& state, const ProgramInfo& programInfo, const TestCase& testCase) const {
+    return new BMv2_V1ModelVisitStepper(state, programInfo, testCase);
 }
 
 const ArchSpec BMv2_V1ModelTestgenTarget::archSpec =

@@ -152,14 +152,17 @@ bool TestBackEnd::run(const FinalState& state) {
         const auto* testSpec = createTestSpec(executionState, completedModel, testInfo);
 
         // coverageMap
-        int mapSize = allStatements.size();
-        auto* testCoverageMap = (unsigned char *)malloc(mapSize);
-        memset(testCoverageMap, 0, mapSize);
+        int bitmapSize = allStatements.size();
+        int allocLen = (bitmapSize / 8) + 1;
+        auto* testCoverageMap = (unsigned char *)malloc(allocLen);
+        memset(testCoverageMap, 0, allocLen);
         int testCoverage = 0, i = 0;
         auto& visitedStmtSet = executionState->getVisited();
         for (auto& stmt : allStatements) {
             if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
-                testCoverageMap[i] ++;
+                int idx = i / 8;
+                int shl = 7 - (i % 8);
+                testCoverageMap[idx] |= 1 << shl;
                 testCoverage ++;
             }
 
@@ -175,7 +178,7 @@ bool TestBackEnd::run(const FinalState& state) {
 
         // Output the test.
         withTimer("backend",
-                  [&] { testWriter->outputTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap, mapSize); });
+                  [&] { testWriter->outputTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap, bitmapSize); });
 
         printTraces("============ End Test %1% ============\n", testCount);
         testCount++;

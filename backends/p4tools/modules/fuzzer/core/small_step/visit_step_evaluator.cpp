@@ -117,7 +117,7 @@ VisitStepEvaluator::VisitResult VisitStepEvaluator::step(VisitState& state, cons
                     }
                 }
 
-                auto* stepper = new VisitStepper(state, self.programInfo, testCase);
+                auto* stepper = TestgenTarget::getVisitStepper(state, self.programInfo, testCase);
                 auto* result = stepper->step(node);
                 if (self.reachabilityEngine != nullptr) {
                     renginePostprocessing(r.first, result);
@@ -146,7 +146,7 @@ VisitStepEvaluator::VisitResult VisitStepEvaluator::step(VisitState& state, cons
                         return new std::vector<VisitBranch>({VisitBranch(&state)});
                     }
 
-                    auto* stepper = new VisitStepper(state, self.programInfo, testCase);
+                    auto* stepper = TestgenTarget::getVisitStepper(state, self.programInfo, testCase);
                     auto* result = stepper->step(expr);
                     if (self.reachabilityEngine != nullptr) {
                         ReachabilityResult rresult = std::make_pair(true, nullptr);

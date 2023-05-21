@@ -19,7 +19,9 @@
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
 #include "backends/p4tools/modules/fuzzer/core/small_step/cmd_stepper.h"
 #include "backends/p4tools/modules/fuzzer/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/fuzzer/core/small_step/visit_stepper.h"
 #include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_state.h"
 #include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 #include "backends/p4tools/modules/fuzzer/lib/test_backend.h"
 
@@ -61,6 +63,11 @@ class TestgenTarget : public Target {
         return get().getExprStepper_impl(state, solver, programInfo);
     }
 
+    static VisitStepper* getVisitStepper(VisitState& state, const ProgramInfo& programInfo,
+                                       const TestCase& testCase) {
+        return get().getVisitStepper_impl(state, programInfo, testCase);
+    }
+
     /// A vector that maps the architecture parameters of each pipe to the corresponding
     /// global architecture variables. For example, this map specifies which parameter of each pipe
     /// refers to the input header.
@@ -92,6 +99,10 @@ class TestgenTarget : public Target {
     /// @see getExprStepper.
     virtual ExprStepper* getExprStepper_impl(ExecutionState& state, AbstractSolver& solver,
                                              const ProgramInfo& programInfo) const = 0;
+
+    /// @see getVisitStepper.
+    virtual VisitStepper* getVisitStepper_impl(VisitState& state, const ProgramInfo& programInfo,
+                                       const TestCase& testCase) const = 0;
 
     /// @see getArchSpec
     virtual const ArchSpec* getArchSpecImpl() const = 0;

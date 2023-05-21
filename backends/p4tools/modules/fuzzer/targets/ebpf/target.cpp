@@ -15,6 +15,7 @@
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
 #include "backends/p4tools/modules/fuzzer/core/target.h"
 #include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_state.h"
 #include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 #include "backends/p4tools/modules/fuzzer/targets/ebpf/cmd_stepper.h"
 #include "backends/p4tools/modules/fuzzer/targets/ebpf/expr_stepper.h"
@@ -90,6 +91,11 @@ EBPFExprStepper* EBPFTestgenTarget::getExprStepper_impl(ExecutionState& state,
                                                         AbstractSolver& solver,
                                                         const ProgramInfo& programInfo) const {
     return new EBPFExprStepper(state, solver, programInfo);
+}
+
+VisitStepper* EBPFTestgenTarget::getVisitStepper_impl(VisitState& state, const ProgramInfo& programInfo,
+                                       const TestCase& testCase) const {
+    return nullptr;
 }
 
 const ArchSpec EBPFTestgenTarget::archSpec =

@@ -55,6 +55,8 @@ using grpc::Status;
 using p4fuzzer::P4FuzzGuide;
 using p4fuzzer::P4CoverageRequest;
 using p4fuzzer::P4CoverageReply;
+using p4fuzzer::P4StatementRequest;
+using p4fuzzer::P4StatementReply;
 using p4testgen::TestCase;
 
 namespace P4Tools {
@@ -136,6 +138,26 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
         }
         */
 
+        Status GetP4Statement(ServerContext* context,
+                const P4StatementRequest* req,
+                P4StatementReply* rep) override {
+
+            auto allStmts = programInfo_->getAllStatements();
+
+            int i = 1, idx = req->idx();
+            for (auto stmt : allStmts) {
+                if (i++ != idx)
+                    continue;
+
+                std::stringstream ss;
+                ss << stmt;
+                rep->set_statement(ss.str());
+                break;
+            }
+
+            return Status::OK;
+        }
+
         Status GetP4Coverage(ServerContext* context,
                 const P4CoverageRequest* req,
                 P4CoverageReply* rep) override {
@@ -144,27 +166,18 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
 
             auto allStmts = programInfo_->getAllStatements();
             std::cout << "Get P4 Coverage of device: " << devId << std::endl;
-            for (auto stmt : allStmts) {
-                /*
-                std::stringstream ss;
-                JSONGenerator jsonGen(ss);
-                //jsonGen << stmt;
-                stmt->toJSON(jsonGen);
-                std::cout << ss.str() << std::endl;
-                */
-            }
 
             if (coverage_map_.count(devId) == 0) {
-                rep->set_hit_stmt_count(0);
-                rep->set_total_stmt_count(allStmts.size());
-                rep->set_hit_action_count(0);
-                rep->set_total_action_count(0);
+                rep->set_stmt_cov_bitmap("");
+                rep->set_stmt_cov_size(allStmts.size());
+                rep->set_action_cov_bitmap("");
+                rep->set_action_cov_size(0);
             } else {
                 auto* stateMgr = coverage_map_.at(devId);
-                rep->set_hit_stmt_count(stateMgr->getVisitedStatements().size());
-                rep->set_total_stmt_count(allStmts.size());
-                rep->set_hit_action_count(1);
-                rep->set_total_action_count(1);
+                rep->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
+                rep->set_stmt_cov_size(stateMgr->statementBitmapSize);
+                rep->set_action_cov_bitmap("");
+                rep->set_action_cov_size(1);
             }
             return Status::OK;
         }
@@ -197,12 +210,10 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
                 return Status::CANCELLED;
             }
 
-            //recordTestCase(estate, req->test_case());
-            //rep->set_hit_stmt_count(estate->getVisited().size());
-            rep->set_hit_stmt_count(stateMgr->getVisitedStatements().size());
-            rep->set_total_stmt_count(allStmts.size());
-            rep->set_hit_action_count(1);
-            rep->set_total_action_count(1);
+            rep->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
+            rep->set_stmt_cov_size(stateMgr->statementBitmapSize);
+            rep->set_action_cov_bitmap("");
+            rep->set_action_cov_size(1);
 
             return Status::OK;
         }
