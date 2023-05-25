@@ -12,6 +12,7 @@
 
 #include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
 #include "backends/p4tools/modules/fuzzer/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_concolic.h"
 #include "backends/p4tools/modules/fuzzer/lib/continuation.h"
 #include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 #include "backends/p4tools/modules/fuzzer/options.h"
@@ -23,8 +24,10 @@ namespace P4Testgen {
 ProgramInfo::ProgramInfo(const IR::P4Program* program)
     : globalNameSpaceContext(NamespaceContext::Empty->push(program)),
       concolicMethodImpls({}),
+      visitConcolicMethodImpls({}),
       program(program) {
     concolicMethodImpls.add(*Concolic::getCoreConcolicMethodImpls());
+    visitConcolicMethodImpls.add(*VisitConcolic::getCoreVisitConcolicMethodImpls());
     if (TestgenOptions::get().dcg || !TestgenOptions::get().pattern.empty()) {
         // Create DCG.
         P4::ReferenceMap refMap;
@@ -64,6 +67,10 @@ const P4::Coverage::CoverageSet& ProgramInfo::getAllStatements() const { return 
 
 const ConcolicMethodImpls* ProgramInfo::getConcolicMethodImpls() const {
     return &concolicMethodImpls;
+}
+
+const VisitConcolicMethodImpls* ProgramInfo::getVisitConcolicMethodImpls() const {
+    return &visitConcolicMethodImpls;
 }
 
 const std::vector<Continuation::Command>* ProgramInfo::getPipelineSequence() const {

@@ -14,6 +14,7 @@ set(
   ${CMAKE_CURRENT_SOURCE_DIR}/bmv2.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cmd_stepper.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/concolic.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/visit_concolic.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/constants.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bmv2_hash/calculations.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/expr_stepper.cpp

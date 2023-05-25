@@ -173,6 +173,68 @@ const IR::Expression* TableVisitor::computeHit(VisitState* nextState,
     return hitCondition;
 }
 
+const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::TableEntry& entry) {
+    const auto* keys = table->getKey();
+    const IR::Expression* hitCondition = IR::getBoolLiteral(true);
+
+    for (const auto& match : entry.match()) {
+        size_t idx = (size_t)(match.field_id() - 1);
+
+        BUG_CHECK(idx < keys->keyElements.size(),
+                "given idx %1% is out of size %2%",
+                idx, keys->keyElements.size());
+        const auto* key = keys->keyElements.at(idx);
+
+        const IR::Expression* keyExpr = key->expression;
+        const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+        auto keyWidth = keyType->width_bits();
+        if (match.has_range()) {
+            const auto& matchRange = match.range();
+            const auto* minExpr = Utils::getValExpr(matchRange.low(), keyWidth);
+            const auto* maxExpr = Utils::getValExpr(matchRange.high(), keyWidth);
+            hitCondition = new IR::LAnd(
+                    hitCondition,
+                    new IR::LAnd(new IR::Leq(minExpr, keyExpr), new IR::Leq(keyExpr, maxExpr)));
+
+        } else if (match.has_ternary()) {
+            const auto& matchTernary = match.ternary();
+            const auto* valExpr = Utils::getValExpr(matchTernary.value(), keyWidth);
+            const auto* maskExpr = Utils::getValExpr(matchTernary.mask(), keyWidth);
+
+            hitCondition = new IR::LAnd(
+                    hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
+                        new IR::BAnd(valExpr, maskExpr)));
+
+        } else if (match.has_lpm()) {
+            const auto& matchLpm = match.lpm();
+            const auto* valExpr = Utils::getValExpr(matchLpm.value(), keyWidth);
+            // get maxReturn
+            auto maxReturn = IR::getMaxBvVal(matchLpm.prefix_len());
+
+            // maskExpr = (maxReturn) (Shl; <<) (prefix_len:32)
+            auto* maskExpr = new IR::Shl(IR::getConstant(keyType, maxReturn),
+                    new IR::Sub(IR::getConstant(keyType, keyWidth),
+                        IR::getConstant(keyType, matchLpm.prefix_len())));
+
+            hitCondition = new IR::LAnd(
+                    hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
+                        new IR::BAnd(valExpr, maskExpr)));
+
+        } else if (match.has_exact()) {
+            const auto& matchExact = match.exact();
+            const auto* valExpr = Utils::getValExpr(matchExact.value(), keyWidth);
+
+            hitCondition = new IR::LAnd(hitCondition, new IR::Equ(keyExpr, valExpr));
+
+        } else {
+            //XXX: UNSUPPORTED;
+            BUG("Unknown type");
+        }
+    }
+
+    return hitCondition;
+}
+
 void TableVisitor::setTableAction(VisitState* nextState,
                                   const IR::MethodCallExpression* actionCall) {
     // Figure out the index of the selected action within the table's action list.
@@ -382,8 +444,6 @@ void TableVisitor::evalTableControlEntries(
 
     // Referring to evalTableConstEntries()
 
-    const IR::Expression* hitCondition = IR::getBoolLiteral(true);
-
     // TODO: sort entries in order of priority
     for (const auto& entity : testCase.entities()) {
         if (!entity.has_table_entry())
@@ -457,62 +517,8 @@ void TableVisitor::evalTableControlEntries(
 
         BUG_CHECK(found, "P4 Action is not found!");
 
-        for (const auto& match : entry.match()) {
-            size_t idx = (size_t)(match.field_id() - 1);
-
-            BUG_CHECK(idx < keys->keyElements.size(),
-                    "given idx %1% is out of size %2%",
-                    idx, keys->keyElements.size());
-            const auto* key = keys->keyElements.at(idx);
-
-            const IR::Expression* keyExpr = key->expression;
-            const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
-            auto keyWidth = keyType->width_bits();
-            if (match.has_range()) {
-                const auto& matchRange = match.range();
-                const auto* minExpr = Utils::getValExpr(matchRange.low(), keyWidth);
-                const auto* maxExpr = Utils::getValExpr(matchRange.high(), keyWidth);
-                hitCondition = new IR::LAnd(
-                        hitCondition,
-                        new IR::LAnd(new IR::Leq(minExpr, keyExpr), new IR::Leq(keyExpr, maxExpr)));
-
-            } else if (match.has_ternary()) {
-                const auto& matchTernary = match.ternary();
-                const auto* valExpr = Utils::getValExpr(matchTernary.value(), keyWidth);
-                const auto* maskExpr = Utils::getValExpr(matchTernary.mask(), keyWidth);
-
-                hitCondition = new IR::LAnd(
-                        hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
-                            new IR::BAnd(valExpr, maskExpr)));
-
-            } else if (match.has_lpm()) {
-                const auto& matchLpm = match.lpm();
-                const auto* valExpr = Utils::getValExpr(matchLpm.value(), keyWidth);
-                // get maxReturn
-                auto maxReturn = IR::getMaxBvVal(matchLpm.prefix_len());
-
-                // maskExpr = (maxReturn) (Shl; <<) (prefix_len:32)
-                auto* maskExpr = new IR::Shl(IR::getConstant(keyType, maxReturn),
-                        new IR::Sub(IR::getConstant(keyType, keyWidth),
-                            IR::getConstant(keyType, matchLpm.prefix_len())));
-
-                hitCondition = new IR::LAnd(
-                        hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
-                            new IR::BAnd(valExpr, maskExpr)));
-
-            } else if (match.has_exact()) {
-                const auto& matchExact = match.exact();
-                const auto* valExpr = Utils::getValExpr(matchExact.value(), keyWidth);
-
-                hitCondition = new IR::LAnd(hitCondition, new IR::Equ(keyExpr, valExpr));
-
-            } else {
-                //XXX: UNSUPPORTED;
-                BUG("Unknown type");
-            }
-        }
-
         // XXX: should I put TraceEvent::Generic(tableStream.str())?
+        const IR::Expression* hitCondition = computeHitFromTestCase(entry);
         stepper->result->emplace_back(hitCondition, stepper->state, nextState);
     }
 

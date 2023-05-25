@@ -17,10 +17,11 @@ message P4CoverageRequest {
 }
 
 message P4CoverageReply {
-    bytes stmt_cov_bitmap = 1;
-    int32 stmt_cov_size = 2;
-    bytes action_cov_bitmap = 3;
-    int32 action_cov_size = 4;
+    p4testgen.TestCase test_case = 1;
+    bytes stmt_cov_bitmap = 2;
+    int32 stmt_cov_size = 3;
+    bytes action_cov_bitmap = 4;
+    int32 action_cov_size = 5;
 }
 
 message P4StatementRequest {

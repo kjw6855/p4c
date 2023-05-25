@@ -22,9 +22,11 @@
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
 #include "backends/p4tools/modules/fuzzer/core/target.h"
 #include "backends/p4tools/modules/fuzzer/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_concolic.h"
 #include "backends/p4tools/modules/fuzzer/lib/continuation.h"
 #include "backends/p4tools/modules/fuzzer/lib/execution_state.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/concolic.h"
+#include "backends/p4tools/modules/fuzzer/targets/bmv2/visit_concolic.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/p4_asserts_parser.h"
 #include "backends/p4tools/modules/fuzzer/targets/bmv2/p4_refers_to_parser.h"
 
@@ -43,6 +45,7 @@ BMv2_V1ModelProgramInfo::BMv2_V1ModelProgramInfo(
       programmableBlocks(std::move(inputBlocks)),
       declIdToGress(declIdToGress) {
     concolicMethodImpls.add(*Bmv2Concolic::getBmv2ConcolicMethodImpls());
+    visitConcolicMethodImpls.add(*Bmv2VisitConcolic::getBmv2VisitConcolicMethodImpls());
 
     // Just concatenate everything together.
     // Iterate through the (ordered) pipes of the target architecture.

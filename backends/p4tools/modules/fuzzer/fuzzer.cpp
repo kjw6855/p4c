@@ -74,47 +74,15 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             return dynamic_cast<const Base*>(ptr) != nullptr;
         }
 
-        void recordTestCase(ExecutionState* estate, const TestCase testCase) {
+        std::string hexToByteString(const std::string& hex) {
+            char bytes[hex.length() / 2];
 
-            std::cout << "[ENTITY]" << std::endl;
-            for (const ::p4::v1::Entity &entity : testCase.entities()) {
-                // TODO: find IR::Statement from Entity
-                if (!entity.has_table_entry())
-                    continue;
-
-                auto entry = entity.table_entry();
-
-                // Matches
-                for  (const ::p4::v1::FieldMatch &match : entry.match()) {
-                    // TODO
-                }
-
-                // Actions
-                auto action = entry.action();
-                std::cout << "[" << entry.table_id() << "] "
-                    << entry.match_size() << " matches and action: "
-                    << action.action().action_id() << std::endl;
-
-                //estate->markVisited(stmt);
+            for (unsigned int i = 0; i < hex.length(); i += 2) {
+                std::string byteString = hex.substr(i, 2);
+                bytes[i/2] = (char) strtol(byteString.c_str(), NULL, 16);
             }
 
-            // IR::P4Program
-            auto cmds = {programInfo_->program};
-            std::cout << std::endl << "[PROGRAM INFO]" << std::endl;
-            int node_cnt = 0;
-            for (auto it = cmds.begin(); it != cmds.end(); ++it) {
-                auto node = *it;
-                if (instanceof<IR::Node>(node)) {
-                    node_cnt ++;
-                }
-            }
-            std::cout << "# nodes: "
-                << node_cnt << "/"
-                << cmds.size() << std::endl;
-
-            // step
-            //auto* stepper = TestgenTarget::getCmdStepper(*estate, *programInfo_);
-            //auto* result = stepper->step(programInfo_->program);
+            return std::string(reinterpret_cast<char*>(bytes), hex.length()/2);
         }
 
     public:
@@ -204,12 +172,29 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
 
             try {
                 stateMgr->run(req->test_case());
+
             } catch (const Util::CompilerBug& e) {
                 std::cerr << "Internal error: " << e.what() << std::endl;
                 std::cerr << "Please submit a bug report with your code." << std::endl;
                 return Status::CANCELLED;
             }
 
+            auto* newTestCase = new TestCase(req->test_case());
+            // TODO: multiple output Packets
+            auto outputPacketOpt = stateMgr->getOutputPacket();
+            newTestCase->clear_expected_output_packet();
+            if (outputPacketOpt != boost::none) {
+                auto outputPacket = outputPacketOpt.get();
+                auto* output = newTestCase->add_expected_output_packet();
+                const auto* payload = outputPacket.getEvaluatedPayload();
+                const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
+
+                output->set_port(std::to_string(outputPacket.getPort()));
+                output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
+                output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+            }
+
+            rep->set_allocated_test_case(newTestCase);
             rep->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
             rep->set_stmt_cov_size(stateMgr->statementBitmapSize);
             rep->set_action_cov_bitmap("");

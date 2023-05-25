@@ -9,6 +9,7 @@
 #include <boost/variant/static_visitor.hpp>
 
 #include "backends/p4tools/common/lib/timer.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "gsl/gsl-lite.hpp"
 #include "ir/ir.h"
 #include "ir/irutils.h"
@@ -23,12 +24,15 @@
 #include "backends/p4tools/modules/fuzzer/core/small_step/visit_stepper.h"
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
 #include "backends/p4tools/modules/fuzzer/lib/visit_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
 
 namespace P4Tools {
 
 namespace P4Testgen {
 
 void SelectedTest::run(const TestCase& testCase) {
+    executionState = new VisitState(programInfo.program);
+
     while (!executionState->isTerminal()) {
 
         std::cout << " stack/body size: " << executionState->getStackSize() << "/" << executionState->getBodySize() << std::endl;
@@ -107,8 +111,6 @@ SelectedTest::SelectedTest(const ProgramInfo& programInfo)
       evaluator(programInfo),
       statementBitmapSize(allStatements.size()) {
 
-    executionState = new VisitState(programInfo.program);
-
     int allocLen = (statementBitmapSize / 8) + 1;
     statementBitmap = (unsigned char *)malloc(allocLen);
     memset(statementBitmap, 0, allocLen);
@@ -160,6 +162,8 @@ bool SelectedTest::testHandleTerminalState(const VisitState& terminalState) {
         i++;
     }
 
+    finalState = new FinalVisitState(terminalState);
+
     return true;
 }
 
@@ -170,6 +174,32 @@ const std::string SelectedTest::getStatementBitmapStr() {
 
 const P4::Coverage::CoverageSet& SelectedTest::getVisitedStatements() {
     return visitedStatements;
+}
+
+boost::optional<Packet> SelectedTest::getOutputPacket() {
+    if (executionState->getProperty<bool>("drop"))
+        return boost::none;
+
+    BUG_CHECK(finalState, "Un-initialized");
+    const auto* model = finalState->getCompletedModel();
+
+    const auto* outPortExpr = executionState->get(programInfo.getTargetOutputPortVar());
+    int outPortInt = 0;
+    if (dynamic_cast<const IR::Literal*>(outPortExpr) != nullptr)
+        outPortInt = IR::getIntFromLiteral(outPortExpr->checkedTo<IR::Literal>());
+    else
+        return boost::none;
+
+    const auto* outPacketExpr = executionState->getPacketBuffer();
+    auto concolicResolver =
+        VisitConcolicResolver(model, *executionState, programInfo.getVisitConcolicMethodImpls());
+    outPacketExpr->apply(concolicResolver);
+    const auto* outPacket = model->evaluate(outPacketExpr);
+
+    const auto* outEvalMask = Taint::buildTaintMask(executionState->getSymbolicEnv().getInternalMap(),
+                                                    model, outPacketExpr);
+
+    return Packet(outPortInt, outPacket, outEvalMask);
 }
 
 }  // namespace P4Testgen

@@ -81,10 +81,12 @@ set(
   core/target.cpp
 
   lib/concolic.cpp
+  lib/visit_concolic.cpp
   lib/continuation.cpp
   lib/execution_state.cpp
   lib/visit_state.cpp
   lib/final_state.cpp
+  lib/final_visit_state.cpp
   lib/gen_eq.cpp
   lib/logging.cpp
   lib/namespace_context.cpp

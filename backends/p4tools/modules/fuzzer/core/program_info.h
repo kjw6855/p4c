@@ -17,6 +17,7 @@
 
 #include "backends/p4tools/modules/fuzzer/core/arch_spec.h"
 #include "backends/p4tools/modules/fuzzer/lib/concolic.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_concolic.h"
 #include "backends/p4tools/modules/fuzzer/lib/continuation.h"
 #include "backends/p4tools/modules/fuzzer/lib/namespace_context.h"
 
@@ -35,6 +36,8 @@ class ProgramInfo : public ICastable {
     /// The list of concolic methods implemented by the target. This list is assembled during
     /// initialization.
     ConcolicMethodImpls concolicMethodImpls;
+
+    VisitConcolicMethodImpls visitConcolicMethodImpls;
 
     /// Set of all statements in the input P4 program.
     P4::Coverage::CoverageSet allStatements;
@@ -88,6 +91,8 @@ class ProgramInfo : public ICastable {
 
     /// @returns the list of implemented concolic methods for this particular program.
     const ConcolicMethodImpls* getConcolicMethodImpls() const;
+
+    const VisitConcolicMethodImpls* getVisitConcolicMethodImpls() const;
 
     // @returns the width of the parser error for this specific target.
     virtual const IR::Type_Bits* getParserErrorType() const = 0;

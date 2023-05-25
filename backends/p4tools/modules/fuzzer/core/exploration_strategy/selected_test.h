@@ -11,7 +11,9 @@
 #include "backends/p4tools/modules/fuzzer/core/small_step/visit_step_evaluator.h"
 #include "backends/p4tools/modules/fuzzer/core/small_step/visit_stepper.h"
 #include "backends/p4tools/modules/fuzzer/core/program_info.h"
+#include "backends/p4tools/modules/fuzzer/lib/visit_concolic.h"
 #include "backends/p4tools/modules/fuzzer/lib/visit_state.h"
+#include "backends/p4tools/modules/fuzzer/lib/final_visit_state.h"
 #include "backends/p4tools/modules/fuzzer/p4testgen.pb.h"
 
 using p4testgen::TestCase;
@@ -37,6 +39,8 @@ class SelectedTest {
 
     const std::string getStatementBitmapStr();
 
+    boost::optional<Packet> getOutputPacket();
+
     using VisitBranch = VisitStepEvaluator::VisitBranch;
     using VisitResult = VisitStepEvaluator::VisitResult;
 
@@ -53,6 +57,8 @@ class SelectedTest {
 
     /// The current execution state.
     VisitState* executionState = nullptr;
+
+    FinalVisitState* finalState = nullptr;
 
     /// Set of all stetements, to be retrieved from programInfo.
     const P4::Coverage::CoverageSet& allStatements;

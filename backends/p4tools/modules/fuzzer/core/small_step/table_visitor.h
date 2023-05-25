@@ -16,6 +16,7 @@
 #include "backends/p4tools/modules/fuzzer/core/small_step/visit_stepper.h"
 #include "backends/p4tools/modules/fuzzer/lib/visit_state.h"
 #include "backends/p4tools/modules/fuzzer/lib/test_spec.h"
+#include "backends/p4tools/modules/fuzzer/p4testgen.pb.h"
 
 namespace P4Tools {
 
@@ -150,6 +151,9 @@ class TableVisitor {
     /// this to insert table entries using the STF/PTF framework.
     const IR::Expression* computeHit(VisitState* nextState,
                                      std::map<cstring, const FieldMatch>* matches);
+
+
+    const IR::Expression* computeHitFromTestCase(const ::p4::v1::TableEntry& entry);
 
     /// Collects properties that may be set per table. Target back end may have different semantics
     /// for table execution that need to be collect before evaluation the table.
