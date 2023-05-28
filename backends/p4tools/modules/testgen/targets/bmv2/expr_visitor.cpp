@@ -289,8 +289,8 @@ void Bmv2V1ModelExprVisitor::processRecirculate(const ExecutionState &state,
 }
 
 Bmv2V1ModelExprVisitor::Bmv2V1ModelExprVisitor(ExecutionState &state, AbstractSolver &solver,
-                                               const ProgramInfo &programInfo)
-    : ExprVisitor(state, solver, programInfo) {}
+                                               const ProgramInfo &programInfo, const TestCase &testCase)
+    : ExprVisitor(state, solver, programInfo, testCase) {}
 
 void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                                                   const IR::Expression *receiver, IR::ID name,

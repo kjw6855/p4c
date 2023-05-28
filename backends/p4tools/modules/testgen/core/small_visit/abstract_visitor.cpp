@@ -28,8 +28,9 @@
 namespace P4Tools::P4Testgen {
 
 AbstractVisitor::AbstractVisitor(ExecutionState &state, AbstractSolver &solver,
-                                 const ProgramInfo &programInfo)
-    : programInfo(programInfo), state(state), solver(solver), result(new std::vector<Branch>()) {}
+                                 const ProgramInfo &programInfo, const TestCase &testCase)
+    : programInfo(programInfo), state(state), solver(solver), testCase(testCase),
+      result(new std::vector<Branch>()) {}
 
 AbstractVisitor::Result AbstractVisitor::step(const IR::Node *node) {
     node->apply(*this);

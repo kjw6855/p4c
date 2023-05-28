@@ -328,8 +328,15 @@ const IR::Expression *ExecutionState::getInputPacket() const {
 }
 
 int ExecutionState::getInputPacketSize() const {
+    if (inputPacketSize > 0)
+        return inputPacketSize;
+
     const auto *inputPkt = getInputPacket();
     return inputPkt->type->width_bits();
+}
+
+void ExecutionState::setInputPacketSize(int packetSize) const {
+    inputPacketSize = packetSize;
 }
 
 void ExecutionState::appendToInputPacket(const IR::Expression *expr) {

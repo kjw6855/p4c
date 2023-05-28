@@ -80,14 +80,16 @@ PnaDpdkExprStepper *PnaDpdkTestgenTarget::getExprStepperImpl(ExecutionState &sta
 
 CmdVisitor *PnaDpdkTestgenTarget::getCmdVisitorImpl(ExecutionState &state,
                                                            AbstractSolver &solver,
-                                                           const ProgramInfo &programInfo) const {
+                                                           const ProgramInfo &programInfo,
+                                                           const TestCase &testCase) const {
     // TODO
     return nullptr;
 }
 
 ExprVisitor *PnaDpdkTestgenTarget::getExprVisitorImpl(ExecutionState &state,
                                                              AbstractSolver &solver,
-                                                             const ProgramInfo &programInfo) const {
+                                                             const ProgramInfo &programInfo,
+                                                             const TestCase &testCase) const {
     // TODO
     return nullptr;
 }

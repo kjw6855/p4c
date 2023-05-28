@@ -41,7 +41,7 @@ class Bmv2V1ModelExprVisitor : public ExprVisitor {
 
  public:
     Bmv2V1ModelExprVisitor(ExecutionState &state, AbstractSolver &solver,
-                           const ProgramInfo &programInfo);
+                           const ProgramInfo &programInfo, const TestCase &testCase);
 
     void evalExternMethodCall(const IR::MethodCallExpression *call, const IR::Expression *receiver,
                               IR::ID name, const IR::Vector<IR::Argument> *args,

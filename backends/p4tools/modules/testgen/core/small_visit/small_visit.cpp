@@ -130,7 +130,7 @@ class CommandVisitor {
             }
         }
         auto *visitor =
-            TestgenTarget::getCmdVisitor(state, self.get().solver, self.get().programInfo);
+            TestgenTarget::getCmdVisitor(state, self.get().solver, self.get().programInfo, testCase);
         auto *result = visitor->step(node);
         if (self.get().reachabilityEngine != nullptr) {
             SmallVisitEvaluator::renginePostprocessing(r.first, result);
@@ -158,7 +158,7 @@ class CommandVisitor {
                 return new std::vector<Branch>({Branch(state)});
             }
             auto *visitor =
-                TestgenTarget::getExprVisitor(state, self.get().solver, self.get().programInfo);
+                TestgenTarget::getExprVisitor(state, self.get().solver, self.get().programInfo, testCase);
             auto *result = visitor->step(expr);
             if (self.get().reachabilityEngine != nullptr) {
                 ReachabilityResult rresult = std::make_pair(true, nullptr);

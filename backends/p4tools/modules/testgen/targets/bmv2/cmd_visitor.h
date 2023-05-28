@@ -22,7 +22,7 @@ class Bmv2V1ModelCmdVisitor : public CmdVisitor {
 
     const Bmv2V1ModelProgramInfo &getProgramInfo() const override;
 
-    void initializeTargetEnvironment(ExecutionState &nextState) const override;
+    void initializeTargetEnvironment(ExecutionState &nextState, const TestCase &testCase) const override;
 
     std::optional<const Constraint *> startParserImpl(const IR::P4Parser *parser,
                                                       ExecutionState &nextState) const override;
@@ -33,7 +33,7 @@ class Bmv2V1ModelCmdVisitor : public CmdVisitor {
 
  public:
     Bmv2V1ModelCmdVisitor(ExecutionState &nextState, AbstractSolver &solver,
-                          const ProgramInfo &programInfo);
+                          const ProgramInfo &programInfo, const TestCase &testCase);
 };
 
 }  // namespace P4Tools::P4Testgen::Bmv2

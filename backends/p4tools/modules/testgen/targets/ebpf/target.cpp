@@ -88,14 +88,15 @@ EBPFExprStepper *EBPFTestgenTarget::getExprStepperImpl(ExecutionState &state,
 }
 
 CmdVisitor *EBPFTestgenTarget::getCmdVisitorImpl(ExecutionState &state, AbstractSolver &solver,
-                                                     const ProgramInfo &programInfo) const {
+                                                     const ProgramInfo &programInfo, const TestCase &testCase) const {
     // TODO
     return nullptr;
 }
 
 ExprVisitor *EBPFTestgenTarget::getExprVisitorImpl(ExecutionState &state,
                                                        AbstractSolver &solver,
-                                                       const ProgramInfo &programInfo) const {
+                                                       const ProgramInfo &programInfo,
+                                                       const TestCase &testCase) const {
     // TODO
     return nullptr;
 }

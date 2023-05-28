@@ -42,8 +42,8 @@
 namespace P4Tools::P4Testgen {
 
 CmdVisitor::CmdVisitor(ExecutionState &state, AbstractSolver &solver,
-                       const ProgramInfo &programInfo)
-    : AbstractVisitor(state, solver, programInfo) {}
+                       const ProgramInfo &programInfo, const TestCase &testCase)
+    : AbstractVisitor(state, solver, programInfo, testCase) {}
 
 bool CmdVisitor::preorder(const IR::AssignmentStatement *assign) {
     logStep(assign);
@@ -289,7 +289,7 @@ bool CmdVisitor::preorder(const IR::P4Program * /*program*/) {
     std::optional<const Constraint *> cond = programInfo.getTargetConstraints();
 
     // Initialize all relevant environment variables for the respective target.
-    initializeTargetEnvironment(state);
+    initializeTargetEnvironment(state, testCase);
 
     // If this option is active, mandate that all packets conform to a fixed size.
     auto pktSize = TestgenOptions::get().minPktSize;

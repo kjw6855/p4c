@@ -33,8 +33,8 @@
 namespace P4Tools::P4Testgen {
 
 ExprVisitor::ExprVisitor(ExecutionState &state, AbstractSolver &solver,
-                         const ProgramInfo &programInfo)
-    : AbstractVisitor(state, solver, programInfo) {}
+                         const ProgramInfo &programInfo, const TestCase &testCase)
+    : AbstractVisitor(state, solver, programInfo, testCase) {}
 
 bool ExprVisitor::preorder(const IR::BoolLiteral *boolLiteral) {
     logStep(boolLiteral);

@@ -44,10 +44,10 @@ class Bmv2V1ModelTestgenTarget : public TestgenTarget {
                                                const ProgramInfo &programInfo) const override;
 
     Bmv2V1ModelCmdVisitor *getCmdVisitorImpl(ExecutionState &state, AbstractSolver &solver,
-                                             const ProgramInfo &programInfo) const override;
+                                             const ProgramInfo &programInfo, const TestCase &testCase) const override;
 
     Bmv2V1ModelExprVisitor *getExprVisitorImpl(ExecutionState &state, AbstractSolver &solver,
-                                               const ProgramInfo &programInfo) const override;
+                                               const ProgramInfo &programInfo, const TestCase &testCase) const override;
 
     [[nodiscard]] const ArchSpec *getArchSpecImpl() const override;
 

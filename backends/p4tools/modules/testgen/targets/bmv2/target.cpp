@@ -89,13 +89,13 @@ Bmv2V1ModelExprStepper *Bmv2V1ModelTestgenTarget::getExprStepperImpl(
 }
 
 Bmv2V1ModelCmdVisitor *Bmv2V1ModelTestgenTarget::getCmdVisitorImpl(
-    ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo) const {
-    return new Bmv2V1ModelCmdVisitor(state, solver, programInfo);
+    ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo, const TestCase &testCase) const {
+    return new Bmv2V1ModelCmdVisitor(state, solver, programInfo, testCase);
 }
 
 Bmv2V1ModelExprVisitor *Bmv2V1ModelTestgenTarget::getExprVisitorImpl(
-    ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo) const {
-    return new Bmv2V1ModelExprVisitor(state, solver, programInfo);
+    ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo, const TestCase &testCase) const {
+    return new Bmv2V1ModelExprVisitor(state, solver, programInfo, testCase);
 }
 
 const ArchSpec Bmv2V1ModelTestgenTarget::ARCH_SPEC =

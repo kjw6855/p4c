@@ -63,13 +63,13 @@ CmdStepper *TestgenTarget::getCmdStepper(ExecutionState &state, AbstractSolver &
 }
 
 ExprVisitor *TestgenTarget::getExprVisitor(ExecutionState &state, AbstractSolver &solver,
-                                         const ProgramInfo &programInfo) {
-    return get().getExprVisitorImpl(state, solver, programInfo);
+                                         const ProgramInfo &programInfo, const TestCase &testCase) {
+    return get().getExprVisitorImpl(state, solver, programInfo, testCase);
 }
 
 CmdVisitor *TestgenTarget::getCmdVisitor(ExecutionState &state, AbstractSolver &solver,
-                                         const ProgramInfo &programInfo) {
-    return get().getCmdVisitorImpl(state, solver, programInfo);
+                                         const ProgramInfo &programInfo, const TestCase &testCase) {
+    return get().getCmdVisitorImpl(state, solver, programInfo, testCase);
 }
 
 void TestgenTarget::argumentsToTypeDeclarations(

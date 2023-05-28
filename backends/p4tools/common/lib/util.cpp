@@ -15,6 +15,7 @@
 #include <boost/multiprecision/number.hpp>
 #include <boost/random/uniform_int_distribution.hpp>
 
+#include "frontends/p4/optimizeExpressions.h"
 #include "ir/id.h"
 #include "ir/irutils.h"
 #include "ir/vector.h"
@@ -103,6 +104,29 @@ const IR::MethodCallExpression *Utils::generateInternalMethodCall(
                        new IR::PathExpression(new IR::Type_Extern("*"), new IR::Path("*")),
                        methodName),
         args);
+}
+
+const IR::Expression *Utils::getValExpr(const std::string& strVal, size_t bitWidth) {
+    const auto* baseVar = P4::optimizeExpression(IR::getConstant(IR::getBitType(0), 0));
+    const auto* baseVarType = IR::getBitType(bitWidth);
+
+    // Int size
+    for (size_t w = 0; w < bitWidth; w += 32) {
+        int num = 0;
+        int subBitWidth = std::min(32, int(bitWidth - w));
+        int shl = (subBitWidth - 1) / 8;
+        for (int i = 0; i < subBitWidth; i+= 8) {
+            int idx = (i + w) / 8;
+            num |= int((unsigned char)(strVal[idx]) << (shl * 8 - i));
+        }
+
+        const auto* concat = new IR::Concat(baseVarType, baseVar,
+                IR::getConstant(IR::getBitType(subBitWidth), (unsigned int)num));
+
+        baseVar = P4::optimizeExpression(concat);
+    }
+
+    return baseVar;
 }
 
 }  // namespace P4Tools

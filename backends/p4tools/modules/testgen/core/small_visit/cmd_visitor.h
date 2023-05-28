@@ -19,7 +19,8 @@ namespace P4Tools::P4Testgen {
 /// Implements small-step operational semantics for commands.
 class CmdVisitor : public AbstractVisitor {
  public:
-    CmdVisitor(ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo);
+    CmdVisitor(ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo,
+            const TestCase &testCase);
 
     bool preorder(const IR::AssignmentStatement *assign) override;
     bool preorder(const IR::P4Parser *p4parser) override;
@@ -50,7 +51,7 @@ class CmdVisitor : public AbstractVisitor {
 
     /// Initializes variables and adds constraints for the program initialization, which is target
     /// specific.
-    virtual void initializeTargetEnvironment(ExecutionState &state) const = 0;
+    virtual void initializeTargetEnvironment(ExecutionState &state, const TestCase &testCase) const = 0;
 
     /// Provides exception-handler implementations for the given parser.
     ///

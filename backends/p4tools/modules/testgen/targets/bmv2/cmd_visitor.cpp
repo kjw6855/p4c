@@ -11,6 +11,7 @@
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/constants.h"
+#include "backends/p4tools/common/lib/util.h"
 #include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"
@@ -32,14 +33,14 @@
 namespace P4Tools::P4Testgen::Bmv2 {
 
 Bmv2V1ModelCmdVisitor::Bmv2V1ModelCmdVisitor(ExecutionState &state, AbstractSolver &solver,
-                                             const ProgramInfo &programInfo)
-    : CmdVisitor(state, solver, programInfo) {}
+                                             const ProgramInfo &programInfo, const TestCase &testCase)
+    : CmdVisitor(state, solver, programInfo, testCase) {}
 
 const Bmv2V1ModelProgramInfo &Bmv2V1ModelCmdVisitor::getProgramInfo() const {
     return *CmdVisitor::getProgramInfo().checkedTo<Bmv2V1ModelProgramInfo>();
 }
 
-void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextState) const {
+void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextState, const TestCase& testCase) const {
     // Associate intrinsic metadata with the packet. The input packet is prefixed with
     // ingress intrinsic metadata and port metadata.
     //
@@ -80,7 +81,10 @@ void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextStat
     const auto *nineBitType = IR::getBitType(9);
     const auto *oneBitType = IR::getBitType(1);
     nextState.set(programInfo.getTargetInputPortVar(),
-                  nextState.createSymbolicVariable(nineBitType, "bmv2_ingress_port"));
+            IR::getConstant(nineBitType, std::stoi(testCase.input_packet().port())));
+
+    const auto &inputPacket = testCase.input_packet().packet();
+
     // BMv2 implicitly sets the output port to 0.
     nextState.set(programInfo.getTargetOutputPortVar(), IR::getConstant(nineBitType, 0));
     // Initialize parser_err with no error.
@@ -96,9 +100,9 @@ void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextStat
     const auto *pktSizeType = &PacketVars::PACKET_SIZE_VAR_TYPE;
     const auto *packetSizeVar =
         new IR::Member(pktSizeType, new IR::PathExpression("*standard_metadata"), "packet_length");
-    const auto *packetSizeConst = new IR::Div(pktSizeType, ExecutionState::getInputPacketSizeVar(),
-                                              IR::getConstant(pktSizeType, 8));
-    nextState.set(packetSizeVar, packetSizeConst);
+    nextState.set(packetSizeVar, IR::getConstant(pktSizeType, inputPacket.length()));
+    nextState.setInputPacketSize(inputPacket.length() * 8);
+    nextState.appendToPacketBuffer(Utils::getValExpr(inputPacket, inputPacket.length() * 8));
 }
 
 std::optional<const Constraint *> Bmv2V1ModelCmdVisitor::startParserImpl(

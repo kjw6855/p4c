@@ -81,6 +81,8 @@ class Utils {
     /// @returns a IR::Constant with a random big integer that fits the specified @param type.
     static const IR::Constant *getRandConstantForType(const IR::Type_Bits *type);
 
+    static const IR::Expression *getValExpr(const std::string& strVal, size_t strValBitLen);
+
     /* =========================================================================================
      *  Other.
      * ========================================================================================= */

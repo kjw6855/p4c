@@ -109,6 +109,8 @@ class ExecutionState : public AbstractExecutionState {
     /// cursor. The cursor ensures that parsing remains consistent in these cases.
     int inputPacketCursor = 0;
 
+    int inputPacketSize = 0;
+
     /// List of path constraints - expressions that must all evaluate to true to reach this
     /// execution state.
     std::vector<const IR::Expression *> pathConstraint;
@@ -318,6 +320,8 @@ class ExecutionState : public AbstractExecutionState {
 
     /// @returns the current size of the input packet.
     [[nodiscard]] int getInputPacketSize() const;
+
+    void setInputPacketSize(int packetSize) const;
 
     /// Append data to the input packet.
     void appendToInputPacket(const IR::Expression *expr);

@@ -16,6 +16,9 @@
 #include "backends/p4tools/modules/testgen/core/small_step/small_step.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/testgen/p4testgen.pb.h"
+
+using p4testgen::TestCase;
 
 namespace P4Tools::P4Testgen {
 
@@ -40,7 +43,8 @@ class AbstractVisitor : public Inspector {
     /// Provides generic handling of unsupported nodes.
     bool preorder(const IR::Node *) override;
 
-    AbstractVisitor(ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo);
+    AbstractVisitor(ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo,
+            const TestCase &testCase);
 
  protected:
     /// Target-specific information about the P4 program being evaluated.
@@ -51,6 +55,8 @@ class AbstractVisitor : public Inspector {
 
     /// The solver backing the state being executed.
     AbstractSolver &solver;
+
+    const TestCase &testCase;
 
     /// The output of the evaluation.
     Result result;
