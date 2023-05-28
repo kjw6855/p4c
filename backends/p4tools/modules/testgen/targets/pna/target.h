@@ -41,6 +41,12 @@ class PnaDpdkTestgenTarget : public TestgenTarget {
     PnaDpdkExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                            const ProgramInfo &programInfo) const override;
 
+    CmdVisitor *getCmdVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+                                         const ProgramInfo &programInfo) const override;
+
+    ExprVisitor *getExprVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+                                           const ProgramInfo &programInfo) const override;
+
     [[nodiscard]] const ArchSpec *getArchSpecImpl() const override;
 
  private:

@@ -88,6 +88,14 @@ class TestgenTarget : public Target {
     virtual ExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                             const ProgramInfo &programInfo) const = 0;
 
+    /// @see getCmdStepper.
+    virtual CmdVisitor *getCmdVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+                                          const ProgramInfo &programInfo) const = 0;
+
+    /// @see getExprVisitor.
+    virtual ExprVisitor *getExprVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+                                            const ProgramInfo &programInfo) const = 0;
+
     /// @see getArchSpec
     [[nodiscard]] virtual const ArchSpec *getArchSpecImpl() const = 0;
 

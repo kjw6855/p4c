@@ -451,7 +451,7 @@ void PTF::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_
 }
 
 void PTF::outputTest(const TestSpec *testSpec, cstring selectedBranches, size_t testIdx,
-                     float currentCoverage) {
+                     float currentCoverage, unsigned char* testCoverage, int mapSize) {
     if (!preambleEmitted) {
         auto ptfFile = basePath;
         ptfFile.replace_extension(".py");

@@ -110,21 +110,45 @@ bool TestBackEnd::run(const FinalState &state) {
         symbex.updateVisitedNodes(replacedState.getVisited());
         const P4::Coverage::CoverageSet &visitedNodes = symbex.getVisitedNodes();
         float coverage = NAN;
+        int testCoverage = 0;
+        int bitmapSize = 0;
+        unsigned char *testCoverageMap = nullptr;
         if (coverableNodes.empty()) {
             printFeature("test_info", 4, "============ Test %1% ============", testCount);
         } else {
+            bitmapSize = coverableNodes.size();
+            int allocLen = (bitmapSize / 8) + 1;
+            testCoverageMap = (unsigned char *)malloc(allocLen);
+            memset(testCoverageMap, 0, allocLen);
+            int i = 0;
+            auto& visitedStmtSet = executionState->getVisited();
+            for (auto& stmt : coverableNodes) {
+                if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
+                    int idx = i / 8;
+                    int shl = 7 - (i % 8);
+                    testCoverageMap[idx] |= 1 << shl;
+                    testCoverage ++;
+                }
+
+                i++;
+            }
+
             coverage =
                 static_cast<float>(visitedNodes.size()) / static_cast<float>(coverableNodes.size());
             printFeature("test_info", 4,
-                         "============ Test %1%: Nodes covered: %2% (%3%/%4%) ============",
-                         testCount, coverage, visitedNodes.size(), coverableNodes.size());
+                    "============ Test %1%: Nodes covered: %2% (%3% .. %4%/%5%) ============",
+                    testCount, coverage, testCoverage,
+                    visitedNodes.size(), coverableNodes.size());
             P4::Coverage::logCoverage(coverableNodes, visitedNodes, executionState->getVisited());
         }
 
         // Output the test.
-        Util::withTimer("backend", [this, &testSpec, &selectedBranches, &coverage] {
-            testWriter->outputTest(testSpec, selectedBranches, testCount, coverage);
+        Util::withTimer("backend", [this, &testSpec, &selectedBranches, &coverage, testCoverageMap, bitmapSize] {
+            testWriter->outputTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap, bitmapSize);
         });
+
+        if (testCoverageMap)
+            free(testCoverageMap);
 
         printTraces("============ End Test %1% ============\n", testCount);
         testCount++;
