@@ -111,6 +111,7 @@ TestgenOptions::TestgenOptions()
         "--out-dir", "outputDir",
         [this](const char *arg) {
             outputDir = arg;
+            interactive = false;
             return true;
         },
         "The output directory for the generated tests. The directory will be created, if it does "

@@ -62,6 +62,18 @@ CmdStepper *TestgenTarget::getCmdStepper(ExecutionState &state, AbstractSolver &
     return get().getCmdStepperImpl(state, solver, programInfo);
 }
 
+ExprVisitor *TestgenTarget::getExprVisitor(ExecutionState &state, AbstractSolver &solver,
+                                         const ProgramInfo &programInfo) {
+    return nullptr;     // TODO
+    //return get().getCmdVisitorImpl(state, solver, programInfo);
+}
+
+CmdVisitor *TestgenTarget::getCmdVisitor(ExecutionState &state, AbstractSolver &solver,
+                                         const ProgramInfo &programInfo) {
+    return nullptr;     // TODO
+    //return get().getCmdVisitorImpl(state, solver, programInfo);
+}
+
 void TestgenTarget::argumentsToTypeDeclarations(
     const IR::IGeneralNamespace *ns, const IR::Vector<IR::Argument> *inputArgs,
     std::vector<const IR::Type_Declaration *> &resultDecls) {

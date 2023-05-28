@@ -30,3 +30,5 @@ function(add_p4tools_library target)
     PUBLIC "${CMAKE_BINARY_DIR}"
   )
 endfunction(add_p4tools_library)
+
+find_program(_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin)

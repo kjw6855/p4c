@@ -4,7 +4,9 @@
 #include "backends/p4tools/common/p4ctool.h"
 #include "ir/ir.h"
 
+#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/modules/testgen/options.h"
+#include "backends/p4tools/modules/testgen/core/program_info.h"
 
 namespace P4Tools::P4Testgen {
 
@@ -14,6 +16,8 @@ class Testgen : public AbstractP4cTool<TestgenOptions> {
     void registerTarget() override;
 
     int mainImpl(const IR::P4Program *program) override;
+
+    void runServer(AbstractSolver &solver, const ProgramInfo* programInfo);
 
  public:
     virtual ~Testgen() = default;

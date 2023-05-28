@@ -16,6 +16,8 @@
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/core/small_step/cmd_stepper.h"
 #include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/testgen/core/small_visit/cmd_visitor.h"
+#include "backends/p4tools/modules/testgen/core/small_visit/expr_visitor.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
@@ -46,6 +48,12 @@ class TestgenTarget : public Target {
 
     /// Provides a ExprStepper implementation for this target.
     static ExprStepper *getExprStepper(ExecutionState &state, AbstractSolver &solver,
+                                       const ProgramInfo &programInfo);
+
+    static CmdVisitor *getCmdVisitor(ExecutionState &state, AbstractSolver &solver,
+                                       const ProgramInfo &programInfo);
+
+    static ExprVisitor *getExprVisitor(ExecutionState &state, AbstractSolver &solver,
                                        const ProgramInfo &programInfo);
 
     /// A vector that maps the architecture parameters of each pipe to the corresponding

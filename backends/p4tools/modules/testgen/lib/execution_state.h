@@ -129,6 +129,10 @@ class ExecutionState : public AbstractExecutionState {
     /// @returns list of paths constraints.
     [[nodiscard]] const std::vector<const IR::Expression *> &getPathConstraint() const;
 
+    [[nodiscard]] size_t getStackSize() const { return stack.size(); }
+
+    [[nodiscard]] size_t getBodySize() const { return body.size(); }
+
     /// @returns list of branch decisions leading into this state.
     [[nodiscard]] const std::vector<uint64_t> &getSelectedBranches() const;
 
@@ -393,13 +397,15 @@ class ExecutionState : public AbstractExecutionState {
     /// Returns a reference not a pointer.
     [[nodiscard]] static ExecutionState &create(const IR::P4Program *program);
 
+ public:
+    explicit ExecutionState(const IR::P4Program *program);
+
  private:
     /// Create an initial execution state with @param body for testing.
     explicit ExecutionState(Continuation::Body body);
 
     // Execution state should always be allocated through explicit operators.
     /// Creates an initial execution state for the given program.
-    explicit ExecutionState(const IR::P4Program *program);
     ExecutionState(const ExecutionState &) = default;
 
     /// Do not accidentally copy-assign the execution state.
