@@ -20,7 +20,7 @@ namespace P4Tools::P4Testgen {
 /// The main class that implements small-step operational semantics. Delegates to implementations
 /// of AbstractStepper.
 class SmallStepEvaluator {
-    friend class CommandVisitor;
+    friend class CommandStepper;
 
  public:
     /// A branch is an execution state paired with an optional path constraint representing the

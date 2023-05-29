@@ -335,7 +335,7 @@ int ExecutionState::getInputPacketSize() const {
     return inputPkt->type->width_bits();
 }
 
-void ExecutionState::setInputPacketSize(int packetSize) const {
+void ExecutionState::setInputPacketSize(int packetSize) {
     inputPacketSize = packetSize;
 }
 

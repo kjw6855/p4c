@@ -94,7 +94,8 @@ ExprVisitor::PacketCursorAdvanceInfo ExprVisitor::calculateSuccessfulParserAdvan
     // advancing into the packet minus whatever has been buffered in the current buffer.
     auto minSize =
         std::max(0, state.getInputPacketCursor() + advanceSize - state.getPacketBufferSize());
-    auto *cond = new IR::Geq(IR::Type::Boolean::get(), ExecutionState::getInputPacketSizeVar(),
+    auto *cond = new IR::Geq(IR::Type::Boolean::get(),
+                             IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, state.getInputPacketSize()),
                              IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, minSize));
     return {advanceSize, cond, advanceSize, new IR::LNot(cond)};
 }

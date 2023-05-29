@@ -138,7 +138,16 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             try {
                 stateMgr->run(req->test_case());
 
-            } catch (const Util::CompilerBug& e) {
+            } catch (const Util::CompilerBug &e) {
+                std::cerr << "Internal compiler error: " << e.what() << std::endl;
+                std::cerr << "Please submit a bug report with your code." << std::endl;
+                return Status::CANCELLED;
+
+            } catch (const Util::CompilationError &e) {
+                std::cerr << "Compilation error: " << e.what() << std::endl;
+                return Status::CANCELLED;
+
+            } catch (const std::exception &e) {
                 std::cerr << "Internal error: " << e.what() << std::endl;
                 std::cerr << "Please submit a bug report with your code." << std::endl;
                 return Status::CANCELLED;

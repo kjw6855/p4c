@@ -321,7 +321,7 @@ class ExecutionState : public AbstractExecutionState {
     /// @returns the current size of the input packet.
     [[nodiscard]] int getInputPacketSize() const;
 
-    void setInputPacketSize(int packetSize) const;
+    void setInputPacketSize(int packetSize);
 
     /// Append data to the input packet.
     void appendToInputPacket(const IR::Expression *expr);

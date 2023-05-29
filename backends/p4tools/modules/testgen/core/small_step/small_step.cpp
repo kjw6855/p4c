@@ -108,7 +108,7 @@ SmallStepEvaluator::REngineType SmallStepEvaluator::renginePreprocessing(
     return std::make_pair(rresult, branches);
 }
 
-class CommandVisitor {
+class CommandStepper {
  private:
     std::reference_wrapper<SmallStepEvaluator> self;
     std::reference_wrapper<ExecutionState> state;
@@ -228,7 +228,7 @@ class CommandVisitor {
         return new std::vector<Branch>({{cond, state, nextState}});
     }
 
-    explicit CommandVisitor(SmallStepEvaluator &self, ExecutionState &state)
+    explicit CommandStepper(SmallStepEvaluator &self, ExecutionState &state)
         : self(self), state(state) {}
 };
 
@@ -236,7 +236,7 @@ SmallStepEvaluator::Result SmallStepEvaluator::step(ExecutionState &state) {
     BUG_CHECK(!state.isTerminal(), "Tried to step from a terminal state.");
 
     if (const auto cmdOpt = state.getNextCmd()) {
-        return std::visit(CommandVisitor(*this, state), *cmdOpt);
+        return std::visit(CommandStepper(*this, state), *cmdOpt);
     }
     // State has an empty body. Pop the continuation stack.
     state.popContinuation();

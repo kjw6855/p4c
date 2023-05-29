@@ -81,7 +81,7 @@ void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextStat
     const auto *nineBitType = IR::getBitType(9);
     const auto *oneBitType = IR::getBitType(1);
     nextState.set(programInfo.getTargetInputPortVar(),
-            IR::getConstant(nineBitType, std::stoi(testCase.input_packet().port())));
+            IR::getConstant(nineBitType, testCase.input_packet().port()));
 
     const auto &inputPacket = testCase.input_packet().packet();
 
