@@ -5,7 +5,6 @@
 #include <optional>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/ir.h"
 #include "lib/cstring.h"
 
@@ -19,7 +18,7 @@ namespace P4Tools::P4Testgen {
 /// Implements small-step operational semantics for commands.
 class CmdVisitor : public AbstractVisitor {
  public:
-    CmdVisitor(ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo,
+    CmdVisitor(ExecutionState &state, const ProgramInfo &programInfo,
             const TestCase &testCase);
 
     bool preorder(const IR::AssignmentStatement *assign) override;

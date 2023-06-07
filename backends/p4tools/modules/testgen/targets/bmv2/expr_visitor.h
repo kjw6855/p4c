@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <string>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/vector.h"
@@ -40,7 +39,7 @@ class Bmv2V1ModelExprVisitor : public ExprVisitor {
     void processRecirculate(const ExecutionState &state, SmallStepEvaluator::Result &result);
 
  public:
-    Bmv2V1ModelExprVisitor(ExecutionState &state, AbstractSolver &solver,
+    Bmv2V1ModelExprVisitor(ExecutionState &state,
                            const ProgramInfo &programInfo, const TestCase &testCase);
 
     void evalExternMethodCall(const IR::MethodCallExpression *call, const IR::Expression *receiver,

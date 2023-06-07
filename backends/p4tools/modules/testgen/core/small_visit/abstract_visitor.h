@@ -5,7 +5,6 @@
 #include <optional>
 #include <string>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/ir.h"
 #include "ir/node.h"
 #include "ir/vector.h"
@@ -43,7 +42,7 @@ class AbstractVisitor : public Inspector {
     /// Provides generic handling of unsupported nodes.
     bool preorder(const IR::Node *) override;
 
-    AbstractVisitor(ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo,
+    AbstractVisitor(ExecutionState &state, const ProgramInfo &programInfo,
             const TestCase &testCase);
 
  protected:
@@ -52,9 +51,6 @@ class AbstractVisitor : public Inspector {
 
     /// The state being evaluated.
     ExecutionState &state;
-
-    /// The solver backing the state being executed.
-    AbstractSolver &solver;
 
     const TestCase &testCase;
 

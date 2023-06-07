@@ -4,7 +4,6 @@
 #include <utility>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/vector.h"
@@ -128,7 +127,7 @@ class ExprVisitor : public AbstractVisitor {
 
     ExprVisitor &operator=(ExprVisitor &&) = delete;
 
-    ExprVisitor(ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo,
+    ExprVisitor(ExecutionState &state, const ProgramInfo &programInfo,
             const TestCase &testCase);
 
     bool preorder(const IR::BoolLiteral *boolLiteral) override;

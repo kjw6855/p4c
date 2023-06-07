@@ -13,6 +13,7 @@
 #include "backends/p4tools/common/lib/constants.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
+#include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
@@ -144,6 +145,68 @@ const IR::Expression *TableVisitor::computeHit(ExecutionState &nextState, TableM
     for (auto keyProperties : properties.resolvedKeys) {
         hitCondition = computeTargetMatchType(nextState, keyProperties, matches, hitCondition);
     }
+    return hitCondition;
+}
+
+const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::TableEntry& entry) {
+    const auto* keys = table->getKey();
+    const IR::Expression* hitCondition = IR::getBoolLiteral(true);
+
+    for (const auto& match : entry.match()) {
+        size_t idx = (size_t)(match.field_id() - 1);
+
+        BUG_CHECK(idx < keys->keyElements.size(),
+                "given idx %1% is out of size %2%",
+                idx, keys->keyElements.size());
+        const auto* key = keys->keyElements.at(idx);
+
+        const IR::Expression* keyExpr = key->expression;
+        const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+        auto keyWidth = keyType->width_bits();
+        if (match.has_range()) {
+            const auto& matchRange = match.range();
+            const auto* minExpr = Utils::getValExpr(matchRange.low(), keyWidth);
+            const auto* maxExpr = Utils::getValExpr(matchRange.high(), keyWidth);
+            hitCondition = new IR::LAnd(
+                    hitCondition,
+                    new IR::LAnd(new IR::Leq(minExpr, keyExpr), new IR::Leq(keyExpr, maxExpr)));
+
+        } else if (match.has_ternary()) {
+            const auto& matchTernary = match.ternary();
+            const auto* valExpr = Utils::getValExpr(matchTernary.value(), keyWidth);
+            const auto* maskExpr = Utils::getValExpr(matchTernary.mask(), keyWidth);
+
+            hitCondition = new IR::LAnd(
+                    hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
+                        new IR::BAnd(valExpr, maskExpr)));
+
+        } else if (match.has_lpm()) {
+            const auto& matchLpm = match.lpm();
+            const auto* valExpr = Utils::getValExpr(matchLpm.value(), keyWidth);
+            // get maxReturn
+            auto maxReturn = IR::getMaxBvVal(matchLpm.prefix_len());
+
+            // maskExpr = (maxReturn) (Shl; <<) (prefix_len:32)
+            auto* maskExpr = new IR::Shl(IR::getConstant(keyType, maxReturn),
+                    new IR::Sub(IR::getConstant(keyType, keyWidth),
+                        IR::getConstant(keyType, matchLpm.prefix_len())));
+
+            hitCondition = new IR::LAnd(
+                    hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
+                        new IR::BAnd(valExpr, maskExpr)));
+
+        } else if (match.has_exact()) {
+            const auto& matchExact = match.exact();
+            const auto* valExpr = Utils::getValExpr(matchExact.value(), keyWidth);
+
+            hitCondition = new IR::LAnd(hitCondition, new IR::Equ(keyExpr, valExpr));
+
+        } else {
+            //XXX: UNSUPPORTED;
+            BUG("Unknown type");
+        }
+    }
+
     return hitCondition;
 }
 
@@ -334,85 +397,87 @@ void TableVisitor::evalTableControlEntries(
     const auto *key = table->getKey();
     BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
 
-    for (const auto *action : tableActionList) {
-        // Grab the path from the method call.
-        const auto *tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
-        // Try to find the action declaration corresponding to the path reference in the table.
-        const auto *actionType = visitor->state.getP4Action(tableAction);
+    // TODO: sort entries in order of priority
+    for (const auto& entity : testCase.entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        const auto entry = entity.table_entry();
+        if (entry.table_name() != properties.tableName) {
+            std::cout << "Different table name: "
+                << entry.table_name() << " (testCase) vs. "
+                << properties.tableName << " (table)"
+                << std::endl;
+            continue;
+        }
+
+        /* XXX: NoAction? */
+        if (!entry.has_action())
+            continue;
 
         auto &nextState = visitor->state.clone();
+        bool found = false;
+        const auto& p4v1Action = entry.action().action();
+        for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+            const auto* action = tableActionList.at(idx);
+            const auto* tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+            const auto* actionType = visitor->state.getP4Action(tableAction);
+            CHECK_NULL(actionType);
+            cstring actionName = actionType->controlPlaneName();
 
-        // First, we compute the hit condition to trigger this particular action call.
-        TableMatchMap matches;
-        const auto *hitCondition = computeHit(nextState, &matches);
+            if (actionName != p4v1Action.action_name())
+                continue;
 
-        // We get the control plane name of the action we are calling.
-        cstring actionName = actionType->controlPlaneName();
-        // Synthesize arguments for the call based on the action parameters.
-        const auto &parameters = actionType->parameters;
-        auto *arguments = new IR::Vector<IR::Argument>();
-        std::vector<ActionArg> ctrlPlaneArgs;
-        for (size_t argIdx = 0; argIdx < parameters->size(); ++argIdx) {
-            const auto *parameter = parameters->getParameter(argIdx);
-            // Synthesize a variable constant here that corresponds to a control plane argument.
-            // We get the unique name of the table coupled with the unique name of the action.
-            // Getting the unique name is needed to avoid generating duplicate arguments.
-            cstring paramName =
-                properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
-            const auto &actionArg = nextState.createSymbolicVariable(parameter->type, paramName);
-            arguments->push_back(new IR::Argument(actionArg));
-            // We also track the argument we synthesize for the control plane.
-            // Note how we use the control plane name for the parameter here.
-            ctrlPlaneArgs.emplace_back(parameter, actionArg);
-        }
-        ActionCall ctrlPlaneActionCall(actionType, ctrlPlaneArgs);
-
-        // We add the arguments to our action call, effectively creating a const entry call.
-        auto *synthesizedAction = tableAction->clone();
-        synthesizedAction->arguments = arguments;
-
-        // We need to set the table action in the state for eventual switch action_run hits.
-        // We also will need it for control plane table entries.
-        setTableAction(nextState, tableAction);
-
-        // Finally, add all the new rules to the execution visitor->state.
-        auto tableRule =
-            TableRule(matches, TestSpec::LOW_PRIORITY, ctrlPlaneActionCall, TestSpec::TTL);
-        auto *tableConfig = new TableConfig(table, {tableRule});
-        nextState.addTestObject("tableconfigs", properties.tableName, tableConfig);
-
-        // Update all the tracking variables for tables.
-        std::vector<Continuation::Command> replacements;
-        replacements.emplace_back(
-            new IR::MethodCallStatement(Util::SourceInfo(), synthesizedAction));
-        // Some path selection strategies depend on looking ahead and collecting potential
-        // statements. If that is the case, apply the CoverableNodesScanner visitor.
-        P4::Coverage::CoverageSet coveredNodes;
-        if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
-            auto collector = CoverableNodesScanner(visitor->state);
-            collector.updateNodeCoverage(actionType, coveredNodes);
-        }
-
-        nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-        nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
-        std::stringstream tableStream;
-        tableStream << "Table Branch: " << properties.tableName;
-        bool isFirstKey = true;
-        const auto &keyElements = key->keyElements;
-
-        for (const auto *keyElement : keyElements) {
-            if (isFirstKey) {
-                tableStream << " | Key(s): ";
-            } else {
-                tableStream << ", ";
+            P4::Coverage::CoverageSet coveredNodes;
+            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
+                auto collector = CoverableNodesScanner(visitor->state);
+                collector.updateNodeCoverage(actionType, coveredNodes);
             }
-            tableStream << keyElement->expression;
-            isFirstKey = false;
+
+            // FOUND!
+            found = true;
+            auto* arguments = new IR::Vector<IR::Argument>();
+            std::vector<ActionArg> ctrlPlaneArgs;
+            for (auto& param : p4v1Action.params()) {
+                size_t argIdx = (size_t)(param.param_id() - 1);
+                BUG_CHECK(argIdx < actionType->parameters->size(),
+                        "given argIdx %1% is out of size %2%",
+                        argIdx, actionType->parameters->size());
+                const auto* parameter = actionType->parameters->getParameter(argIdx);
+                const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+                auto paramWidth = paramType->width_bits();
+
+                // change to constant value
+                const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
+                const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                //cstring paramName =
+                //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
+                //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
+                //const auto* actionArgVar = new IR::Member(parameter->type, new IR::PathExpression("*"), paramName);
+                nextState.set(actionDataVar, paramExpr);
+                arguments->push_back(new IR::Argument(paramExpr));
+                ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+            }
+
+            auto* synthesizedAction = tableAction->clone();
+            synthesizedAction->arguments = arguments;
+            setTableAction(nextState, tableAction);
+
+            std::vector<Continuation::Command> replacements;
+            replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
+
+            // ??
+            nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
+            nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+            nextState.replaceTopBody(&replacements);
+            break;
         }
-        tableStream << "| Chosen action: " << actionName;
-        nextState.add(*new TraceEvents::Generic(tableStream.str()));
-        nextState.replaceTopBody(&replacements);
-        visitor->result->emplace_back(hitCondition, visitor->state, nextState, coveredNodes);
+
+        BUG_CHECK(found, "P4 Action is not found!");
+
+        // XXX: should I put TraceEvent::Generic(tableStream.str())?
+        const IR::Expression* hitCondition = computeHitFromTestCase(entry);
+        visitor->result->emplace_back(hitCondition, visitor->state, nextState);
     }
 }
 
@@ -603,8 +668,8 @@ bool TableVisitor::eval() {
     return false;
 }
 
-TableVisitor::TableVisitor(ExprVisitor *visitor, const IR::P4Table *table)
-    : visitor(visitor), table(table) {
+TableVisitor::TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, const TestCase &testCase)
+    : visitor(visitor), table(table), testCase(testCase) {
     properties.tableName = table->controlPlaneName();
 }
 

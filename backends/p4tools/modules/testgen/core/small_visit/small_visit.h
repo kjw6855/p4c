@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "backends/p4tools/common/compiler/reachability.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/node.h"
 #include "midend/coverage.h"
 
@@ -27,33 +26,6 @@ class SmallVisitEvaluator {
     friend class CommandVisitor;
 
  public:
-#if 0
-    /// A branch is an execution state paired with an optional path constraint representing the
-    /// choice made to take the branch.
-    struct Branch {
-        const Constraint *constraint;
-
-        std::reference_wrapper<ExecutionState> nextState;
-
-        P4::Coverage::CoverageSet potentialStatements;
-
-        /// Simple branch without any constraint.
-        explicit Branch(ExecutionState &nextState);
-
-        /// Branch constrained by a condition. prevState is the state in which the condition
-        /// is later evaluated.
-        Branch(std::optional<const Constraint *> c, const ExecutionState &prevState,
-               ExecutionState &nextState);
-
-        /// Branch constrained by a condition. prevState is the state in which the condition
-        /// is later evaluated.
-        Branch(std::optional<const Constraint *> c, const ExecutionState &prevState,
-               ExecutionState &nextState, P4::Coverage::CoverageSet potentialStatements);
-    };
-
-    using Result = std::vector<Branch> *;
-#endif
-
     using Branch = SmallStepEvaluator::Branch;
     using Result = SmallStepEvaluator::Result;
 
@@ -65,27 +37,24 @@ class SmallVisitEvaluator {
     /// Target-specific information about the P4 program being evaluated.
     const ProgramInfo &programInfo;
 
-    /// The solver backing this evaluator.
-    AbstractSolver &solver;
-
     /// The number of times a guard was not satisfiable.
     uint64_t violatedGuardConditions = 0;
 
     /// Reachability engine.
     ReachabilityEngine *reachabilityEngine = nullptr;
 
-    using REngineType = std::pair<ReachabilityResult, std::vector<Branch> *>;
+    using RVisitEngineType = std::pair<ReachabilityResult, std::vector<Branch> *>;
 
     static void renginePostprocessing(ReachabilityResult &result,
                                       std::vector<Branch> *branches);
 
-    REngineType renginePreprocessing(SmallVisitEvaluator &visitor, const ExecutionState &nextState,
+    RVisitEngineType renginePreprocessing(SmallVisitEvaluator &visitor, const ExecutionState &nextState,
                                      const IR::Node *node);
 
  public:
     Result step(ExecutionState &state, const TestCase& testCase);
 
-    SmallVisitEvaluator(AbstractSolver &solver, const ProgramInfo &programInfo);
+    SmallVisitEvaluator(const ProgramInfo &programInfo);
 };
 
 }  // namespace P4Tools::P4Testgen

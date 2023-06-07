@@ -43,10 +43,10 @@ class Bmv2V1ModelTestgenTarget : public TestgenTarget {
     Bmv2V1ModelExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                                const ProgramInfo &programInfo) const override;
 
-    Bmv2V1ModelCmdVisitor *getCmdVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+    Bmv2V1ModelCmdVisitor *getCmdVisitorImpl(ExecutionState &state,
                                              const ProgramInfo &programInfo, const TestCase &testCase) const override;
 
-    Bmv2V1ModelExprVisitor *getExprVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+    Bmv2V1ModelExprVisitor *getExprVisitorImpl(ExecutionState &state,
                                                const ProgramInfo &programInfo, const TestCase &testCase) const override;
 
     [[nodiscard]] const ArchSpec *getArchSpecImpl() const override;

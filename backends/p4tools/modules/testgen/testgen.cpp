@@ -2,21 +2,24 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fcntl.h>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <utility>
+#include <memory>
 
-#include <grpc/grpc.h>
-#include <grpcpp/security/server_credentials.h>
-#include <grpcpp/server.h>
-#include <grpcpp/server_builder.h>
-#include <grpcpp/server_context.h>
+#include <grpcpp/grpcpp.h>
+#include <grpc/support/log.h>
+#include <google/protobuf/text_format.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "frontends/common/parser_options.h"
+#include "lib/gc.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 
@@ -32,151 +35,51 @@
 #include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/lib/logging.h"
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
+#include "backends/p4tools/modules/testgen/async_server.h"
 #include "backends/p4tools/modules/testgen/options.h"
 #include "backends/p4tools/modules/testgen/register.h"
-#include "backends/p4tools/modules/testgen/p4testgen.grpc.pb.h"
-
-using grpc::Server;
-using grpc::ServerBuilder;
-using grpc::ServerContext;
-using grpc::ServerReader;
-using grpc::ServerReaderWriter;
-using grpc::ServerWriter;
-using grpc::Status;
-using p4testgen::P4FuzzGuide;
-using p4testgen::P4CoverageRequest;
-using p4testgen::P4CoverageReply;
-using p4testgen::P4StatementRequest;
-using p4testgen::P4StatementReply;
-using p4testgen::TestCase;
+#include "backends/p4tools/modules/testgen/p4testgen.pb.h"
 
 namespace P4Tools::P4Testgen {
 
-class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
-    private:
-        std::map<std::string, ConcolicExecutor*> coverage_map;
-        AbstractSolver &solver;
-        const ProgramInfo* programInfo;
+using grpc::ServerBuilder;
+using p4testgen::P4FuzzGuide;
+using p4testgen::TestCase;
 
-        std::string hexToByteString(const std::string& hex) {
-            char *bytes = (char*)std::malloc(hex.length() / 2);
+Testgen::~Testgen() {
+    server_->Shutdown();
+    cq_->Shutdown();
+}
 
-            for (unsigned int i = 0; i < hex.length(); i += 2) {
-                std::string byteString = hex.substr(i, 2);
-                bytes[i/2] = (char) strtol(byteString.c_str(), NULL, 16);
-            }
+void Testgen::runServer(const ProgramInfo *programInfo) {
+    std::string server_address("0.0.0.0:50051");
+    //P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo);
+    P4FuzzGuide::AsyncService service_;
+    std::map<std::string, ConcolicExecutor*> coverageMap;
+    const ProgramInfo* programInfo_;
 
-            auto retStr = std::string(reinterpret_cast<char*>(bytes), hex.length()/2);
-            free(bytes);
+    ServerBuilder builder;
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.RegisterService(&service_);
+    cq_ = builder.AddCompletionQueue();
+    server_ = builder.BuildAndStart();
 
-            return retStr;
-        }
+    //std::unique_ptr<Server> server(builder.BuildAndStart());
+    std::cout << "Server listening on " << server_address << std::endl;
+    //server->Wait();
 
-    public:
-        P4FuzzGuideImpl(AbstractSolver &solver, const ProgramInfo* programInfo)
-        : solver(solver), programInfo(programInfo) {}
+    new GetP4StatementData(&service_, cq_.get(), programInfo);
+    new GetP4CoverageData(&service_, cq_.get(), programInfo);
+    new RecordP4TestgenData(&service_, cq_.get(), programInfo);
 
-        Status GetP4Statement(ServerContext* context,
-                const P4StatementRequest* req,
-                P4StatementReply* rep) override {
-
-            auto allNodes = programInfo->getCoverableNodes();
-
-            int i = 1, idx = req->idx();
-            for (auto node : allNodes) {
-                if (i++ != idx)
-                    continue;
-
-                std::stringstream ss;
-                ss << node;
-                rep->set_statement(ss.str());
-                break;
-            }
-
-            return Status::OK;
-        }
-
-        Status GetP4Coverage(ServerContext* context,
-                const P4CoverageRequest* req,
-                P4CoverageReply* rep) override {
-
-            auto devId = req->device_id();
-
-            auto allNodes = programInfo->getCoverableNodes();
-            std::cout << "Get P4 Coverage of device: " << devId << std::endl;
-
-            if (coverage_map.count(devId) == 0) {
-                rep->set_stmt_cov_bitmap("");
-                rep->set_stmt_cov_size(allNodes.size());
-                rep->set_action_cov_bitmap("");
-                rep->set_action_cov_size(0);
-            } else {
-                auto* stateMgr = coverage_map.at(devId);
-                rep->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
-                rep->set_stmt_cov_size(stateMgr->statementBitmapSize);
-                rep->set_action_cov_bitmap("");
-                rep->set_action_cov_size(1);
-            }
-            return Status::OK;
-        }
-
-        Status RecordP4Testgen(ServerContext* context,
-                const P4CoverageRequest* req,
-                P4CoverageReply* rep) override {
-
-            auto devId = req->device_id();
-            std::cout << "Record P4 Coverage of device: " << devId << std::endl;
-
-            auto allNodes = programInfo->getCoverableNodes();
-            if (coverage_map.count(devId) == 0) {
-                coverage_map.insert(std::make_pair(devId,
-                            new ConcolicExecutor(solver, *programInfo)));
-            }
-
-            auto* stateMgr = coverage_map.at(devId);
-
-            try {
-                stateMgr->run(req->test_case());
-
-            } catch (const Util::CompilerBug &e) {
-                std::cerr << "Internal compiler error: " << e.what() << std::endl;
-                std::cerr << "Please submit a bug report with your code." << std::endl;
-                return Status::CANCELLED;
-
-            } catch (const Util::CompilationError &e) {
-                std::cerr << "Compilation error: " << e.what() << std::endl;
-                return Status::CANCELLED;
-
-            } catch (const std::exception &e) {
-                std::cerr << "Internal error: " << e.what() << std::endl;
-                std::cerr << "Please submit a bug report with your code." << std::endl;
-                return Status::CANCELLED;
-            }
-
-            auto* newTestCase = new TestCase(req->test_case());
-            // TODO: multiple output Packets
-            auto outputPacketOpt = stateMgr->getOutputPacket();
-            newTestCase->clear_expected_output_packet();
-            if (outputPacketOpt != boost::none) {
-                auto outputPacket = outputPacketOpt.get();
-                auto* output = newTestCase->add_expected_output_packet();
-                const auto* payload = outputPacket.getEvaluatedPayload();
-                const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
-
-                output->set_port(outputPacket.getPort());
-                output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
-                output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
-            }
-
-            rep->set_allocated_test_case(newTestCase);
-            rep->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
-            rep->set_stmt_cov_size(stateMgr->statementBitmapSize);
-            rep->set_action_cov_bitmap("");
-            rep->set_action_cov_size(1);
-
-            return Status::OK;
-        }
-};
+    void *tag;
+    bool ok;
+    while (true) {
+        GPR_ASSERT(cq_->Next(&tag, &ok));
+        GPR_ASSERT(ok);
+        static_cast<CallData*>(tag)->Proceed(coverageMap);
+    }
+}
 
 void Testgen::registerTarget() {
     // Register all available compiler targets.
@@ -203,19 +106,10 @@ SymbolicExecutor *pickExecutionEngine(const TestgenOptions &testgenOptions,
     return new DepthFirstSearch(solver, *programInfo);
 }
 
-void Testgen::runServer(AbstractSolver &solver, const ProgramInfo* programInfo) {
-    std::string server_address("0.0.0.0:50051");
-    P4FuzzGuideImpl service = P4FuzzGuideImpl(solver, programInfo);
-
-    ServerBuilder builder;
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
-    std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "Server listening on " << server_address << std::endl;
-    server->Wait();
-}
-
 int Testgen::mainImpl(const IR::P4Program *program) {
+    // Get the options and the seed.
+    const auto &testgenOptions = TestgenOptions::get();
+
     // Register all available testgen targets.
     // These are discovered by CMAKE, which fills out the register.h.in file.
     registerTestgenTargets();
@@ -233,8 +127,12 @@ int Testgen::mainImpl(const IR::P4Program *program) {
     // Print basic information for each test.
     enableInformationLogging();
 
-    // Get the options and the seed.
-    const auto &testgenOptions = TestgenOptions::get();
+    // Run interactive mode
+    if (testgenOptions.interactive) {
+        runServer(programInfo);
+        return EXIT_SUCCESS;
+    }
+
     auto seed = Utils::getCurrentSeed();
     if (seed) {
         printFeature("test_info", 4, "============ Program seed %1% =============\n", *seed);
@@ -252,13 +150,30 @@ int Testgen::mainImpl(const IR::P4Program *program) {
         testPath = testDir / testPath;
     }
 
-    // Need to declare the solver here to ensure its lifetime.
-    Z3Solver solver;
+    if (testgenOptions.pathSelectionPolicy ==
+            PathSelectionPolicy::TestCase) {
+        auto *concExec = new ConcolicExecutor(*programInfo);
+        TestCase *testCase = new TestCase();
+        int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
 
-    if (testgenOptions.interactive) {
-        runServer(solver, programInfo);
+        if (fd < 0) {
+            std::cerr << " Error opening the file " << std::endl;
+        }
+
+        google::protobuf::io::FileInputStream fileInput(fd);
+        fileInput.SetCloseOnDelete( true );
+
+        if (!google::protobuf::TextFormat::Parse(&fileInput, testCase)) {
+            std::cerr << std::endl << "Failed to parse file!" << std::endl;
+        } else {
+            std::cerr << "Read Input File" << std::endl;
+        }
+        concExec->run(*testCase);
 
     } else {
+        // Need to declare the solver here to ensure its lifetime.
+        Z3Solver solver;
+
         auto *symExec = pickExecutionEngine(testgenOptions, programInfo, solver);
 
         // Define how to handle the final state for each test. This is target defined.

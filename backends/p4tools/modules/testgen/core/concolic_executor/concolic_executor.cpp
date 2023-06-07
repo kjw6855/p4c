@@ -65,11 +65,10 @@ uint64_t getNumeric(const std::string& str) {
 }
 */
 
-ConcolicExecutor::ConcolicExecutor(AbstractSolver &solver, const ProgramInfo& programInfo)
+ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo)
     : programInfo(programInfo),
       allStatements(programInfo.getCoverableNodes()),
-      evaluator(solver, programInfo),
-      solver(solver),
+      evaluator(programInfo),
       statementBitmapSize(allStatements.size()) {
 
     int allocLen = (statementBitmapSize / 8) + 1;
@@ -123,7 +122,7 @@ bool ConcolicExecutor::testHandleTerminalState(ExecutionState *terminalState) {
         i++;
     }
 
-    finalState = new FinalState(solver, *terminalState);
+    finalState = new FinalVisitState(*terminalState);
 
     return true;
 }

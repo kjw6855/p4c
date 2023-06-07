@@ -8,7 +8,6 @@
 
 #include <boost/multiprecision/cpp_int.hpp>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/constants.h"
 #include "backends/p4tools/common/lib/util.h"
@@ -32,9 +31,9 @@
 
 namespace P4Tools::P4Testgen::Bmv2 {
 
-Bmv2V1ModelCmdVisitor::Bmv2V1ModelCmdVisitor(ExecutionState &state, AbstractSolver &solver,
+Bmv2V1ModelCmdVisitor::Bmv2V1ModelCmdVisitor(ExecutionState &state,
                                              const ProgramInfo &programInfo, const TestCase &testCase)
-    : CmdVisitor(state, solver, programInfo, testCase) {}
+    : CmdVisitor(state, programInfo, testCase) {}
 
 const Bmv2V1ModelProgramInfo &Bmv2V1ModelCmdVisitor::getProgramInfo() const {
     return *CmdVisitor::getProgramInfo().checkedTo<Bmv2V1ModelProgramInfo>();
@@ -100,6 +99,7 @@ void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextStat
     const auto *pktSizeType = &PacketVars::PACKET_SIZE_VAR_TYPE;
     const auto *packetSizeVar =
         new IR::Member(pktSizeType, new IR::PathExpression("*standard_metadata"), "packet_length");
+
     nextState.set(packetSizeVar, IR::getConstant(pktSizeType, inputPacket.length()));
     nextState.setInputPacketSize(inputPacket.length() * 8);
     nextState.appendToPacketBuffer(Utils::getValExpr(inputPacket, inputPacket.length() * 8));

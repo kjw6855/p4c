@@ -27,9 +27,9 @@
 
 namespace P4Tools::P4Testgen {
 
-AbstractVisitor::AbstractVisitor(ExecutionState &state, AbstractSolver &solver,
+AbstractVisitor::AbstractVisitor(ExecutionState &state,
                                  const ProgramInfo &programInfo, const TestCase &testCase)
-    : programInfo(programInfo), state(state), solver(solver), testCase(testCase),
+    : programInfo(programInfo), state(state), testCase(testCase),
       result(new std::vector<Branch>()) {}
 
 AbstractVisitor::Result AbstractVisitor::step(const IR::Node *node) {
@@ -328,8 +328,9 @@ bool AbstractVisitor::stepStackPushPopFront(const IR::Expression *stackRef,
 
 const IR::Literal *AbstractVisitor::evaluateExpression(
     const IR::Expression *expr, std::optional<const IR::Expression *> cond) const {
-    BUG_CHECK(solver.isInIncrementalMode(),
-              "Currently, expression valuation only supports an incremental solver.");
+    // TODO: replace solver
+    //BUG_CHECK(solver.isInIncrementalMode(),
+    //          "Currently, expression valuation only supports an incremental solver.");
     auto constraints = state.getPathConstraint();
     expr = state.getSymbolicEnv().subst(expr);
     expr = P4::optimizeExpression(expr);
@@ -337,15 +338,17 @@ const IR::Literal *AbstractVisitor::evaluateExpression(
     if (cond) {
         constraints.push_back(*cond);
     }
-    auto solverResult = solver.checkSat(constraints);
+    //auto solverResult = solver.checkSat(constraints);
     // If the solver can find a solution under the given condition, get the model and return the
     // value.
     const IR::Literal *result = nullptr;
+#if 0
     if (solverResult != std::nullopt && *solverResult) {
         auto model = Model(solver.getSymbolicMapping());
         model.complete(expr);
         result = model.evaluate(expr);
     }
+#endif
     return result;
 }
 

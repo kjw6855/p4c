@@ -41,10 +41,10 @@ class EBPFTestgenTarget : public TestgenTarget {
     EBPFExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                         const ProgramInfo &programInfo) const override;
 
-    CmdVisitor *getCmdVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+    CmdVisitor *getCmdVisitorImpl(ExecutionState &state,
                                       const ProgramInfo &programInfo, const TestCase &testCase) const override;
 
-    ExprVisitor *getExprVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+    ExprVisitor *getExprVisitorImpl(ExecutionState &state,
                                         const ProgramInfo &programInfo, const TestCase &testCase) const override;
 
     const ArchSpec *getArchSpecImpl() const override;

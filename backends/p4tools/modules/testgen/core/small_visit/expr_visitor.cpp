@@ -6,7 +6,6 @@
 #include <utility>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/gen_eq.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/variables.h"
@@ -32,9 +31,9 @@
 
 namespace P4Tools::P4Testgen {
 
-ExprVisitor::ExprVisitor(ExecutionState &state, AbstractSolver &solver,
+ExprVisitor::ExprVisitor(ExecutionState &state,
                          const ProgramInfo &programInfo, const TestCase &testCase)
-    : AbstractVisitor(state, solver, programInfo, testCase) {}
+    : AbstractVisitor(state, programInfo, testCase) {}
 
 bool ExprVisitor::preorder(const IR::BoolLiteral *boolLiteral) {
     logStep(boolLiteral);
@@ -197,7 +196,7 @@ bool ExprVisitor::preorder(const IR::MethodCallExpression *call) {
 
 bool ExprVisitor::preorder(const IR::P4Table *table) {
     // Delegate to the tableVisitor.
-    TableVisitor tableVisitor(this, table);
+    TableVisitor tableVisitor(this, table, testCase);
 
     return tableVisitor.eval();
 }

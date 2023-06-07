@@ -39,6 +39,7 @@ add_custom_command(
 # Source files for p4testgen.
 set(
   TESTGEN_SOURCES
+  async_server.cpp
   options.cpp
   testgen.cpp
 
@@ -70,6 +71,7 @@ set(
   lib/continuation.cpp
   lib/execution_state.cpp
   lib/final_state.cpp
+  lib/final_visit_state.cpp
   lib/logging.cpp
   lib/packet_vars.cpp
   lib/test_backend.cpp
@@ -119,6 +121,7 @@ set(
   TESTGEN_LIBS
   p4tools-common
   inja
+  grpc
   grpc++
   ${PROTOBUF_LIBRARY}
 )

@@ -456,7 +456,8 @@ void Bmv2V1ModelTableVisitor::evalTargetTable(
 }
 
 Bmv2V1ModelTableVisitor::Bmv2V1ModelTableVisitor(Bmv2V1ModelExprVisitor *visitor,
-                                                 const IR::P4Table *table)
-    : TableVisitor(visitor, table) {}
+                                                 const IR::P4Table *table,
+                                                 const TestCase &testCase)
+    : TableVisitor(visitor, table, testCase) {}
 
 }  // namespace P4Tools::P4Testgen::Bmv2

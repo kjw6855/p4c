@@ -13,6 +13,7 @@
 #include "backends/p4tools/modules/testgen/core/small_visit/expr_visitor.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/testgen/p4testgen.pb.h"
 
 namespace P4Tools::P4Testgen {
 
@@ -24,6 +25,8 @@ class TableVisitor {
 
     /// The table for this particular visitor.
     const IR::P4Table *table;
+
+    const TestCase& testCase;
 
     /// Basic table properties that are set when initializing the TableVisitor.
     TableUtils::TableProperties properties;
@@ -100,6 +103,8 @@ class TableVisitor {
     /// this to insert table entries using the STF/PTF framework.
     const IR::Expression *computeHit(ExecutionState &nextState, TableMatchMap *matches);
 
+    const IR::Expression* computeHitFromTestCase(const ::p4::v1::TableEntry& entry);
+
     /// Collects properties that may be set per table. Target back end may have different semantics
     /// for table execution that need to be collect before evaluation the table.
     virtual void checkTargetProperties(
@@ -150,7 +155,7 @@ class TableVisitor {
     /// such as annotations, action profiles/selectors that may alter semantics, too.
     bool eval();
 
-    explicit TableVisitor(ExprVisitor *visitor, const IR::P4Table *table);
+    explicit TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, const TestCase &testCase);
 
     virtual ~TableVisitor() = default;
 };

@@ -50,10 +50,10 @@ class TestgenTarget : public Target {
     static ExprStepper *getExprStepper(ExecutionState &state, AbstractSolver &solver,
                                        const ProgramInfo &programInfo);
 
-    static CmdVisitor *getCmdVisitor(ExecutionState &state, AbstractSolver &solver,
+    static CmdVisitor *getCmdVisitor(ExecutionState &state,
                                        const ProgramInfo &programInfo, const TestCase &testCase);
 
-    static ExprVisitor *getExprVisitor(ExecutionState &state, AbstractSolver &solver,
+    static ExprVisitor *getExprVisitor(ExecutionState &state,
                                        const ProgramInfo &programInfo, const TestCase &testCase);
 
     /// A vector that maps the architecture parameters of each pipe to the corresponding
@@ -89,11 +89,11 @@ class TestgenTarget : public Target {
                                             const ProgramInfo &programInfo) const = 0;
 
     /// @see getCmdStepper.
-    virtual CmdVisitor *getCmdVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+    virtual CmdVisitor *getCmdVisitorImpl(ExecutionState &state,
                                           const ProgramInfo &programInfo, const TestCase &testCase) const = 0;
 
     /// @see getExprVisitor.
-    virtual ExprVisitor *getExprVisitorImpl(ExecutionState &state, AbstractSolver &solver,
+    virtual ExprVisitor *getExprVisitorImpl(ExecutionState &state,
                                             const ProgramInfo &programInfo, const TestCase &testCase) const = 0;
 
     /// @see getArchSpec

@@ -10,7 +10,6 @@
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/number.hpp>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
@@ -288,9 +287,9 @@ void Bmv2V1ModelExprVisitor::processRecirculate(const ExecutionState &state,
     result->emplace_back(recState);
 }
 
-Bmv2V1ModelExprVisitor::Bmv2V1ModelExprVisitor(ExecutionState &state, AbstractSolver &solver,
+Bmv2V1ModelExprVisitor::Bmv2V1ModelExprVisitor(ExecutionState &state,
                                                const ProgramInfo &programInfo, const TestCase &testCase)
-    : ExprVisitor(state, solver, programInfo, testCase) {}
+    : ExprVisitor(state, programInfo, testCase) {}
 
 void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                                                   const IR::Expression *receiver, IR::ID name,
@@ -1829,7 +1828,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
 
 bool Bmv2V1ModelExprVisitor::preorder(const IR::P4Table *table) {
     // Delegate to the tableVisitor.
-    Bmv2V1ModelTableVisitor tableVisitor(this, table);
+    Bmv2V1ModelTableVisitor tableVisitor(this, table, testCase);
 
     return tableVisitor.eval();
 }

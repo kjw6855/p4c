@@ -11,7 +11,6 @@
 #include <boost/multiprecision/cpp_int.hpp>
 
 #include "backends/p4tools/common/compiler/convert_hs_index.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
 #include "backends/p4tools/common/lib/util.h"
@@ -41,9 +40,9 @@
 
 namespace P4Tools::P4Testgen {
 
-CmdVisitor::CmdVisitor(ExecutionState &state, AbstractSolver &solver,
+CmdVisitor::CmdVisitor(ExecutionState &state,
                        const ProgramInfo &programInfo, const TestCase &testCase)
-    : AbstractVisitor(state, solver, programInfo, testCase) {}
+    : AbstractVisitor(state, programInfo, testCase) {}
 
 bool CmdVisitor::preorder(const IR::AssignmentStatement *assign) {
     logStep(assign);

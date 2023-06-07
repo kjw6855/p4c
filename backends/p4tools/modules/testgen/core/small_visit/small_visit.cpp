@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "backends/p4tools/common/compiler/reachability.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "frontends/p4/optimizeExpressions.h"
@@ -67,8 +66,8 @@ SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
 }
 #endif
 
-SmallVisitEvaluator::SmallVisitEvaluator(AbstractSolver &solver, const ProgramInfo &programInfo)
-    : programInfo(programInfo), solver(solver) {
+SmallVisitEvaluator::SmallVisitEvaluator(const ProgramInfo &programInfo)
+    : programInfo(programInfo) {
     if (!TestgenOptions::get().pattern.empty()) {
         reachabilityEngine =
             new ReachabilityEngine(*programInfo.dcg, TestgenOptions::get().pattern, true);
@@ -92,7 +91,7 @@ void SmallVisitEvaluator::renginePostprocessing(ReachabilityResult &result,
     }
 }
 
-SmallVisitEvaluator::REngineType SmallVisitEvaluator::renginePreprocessing(
+SmallVisitEvaluator::RVisitEngineType SmallVisitEvaluator::renginePreprocessing(
     SmallVisitEvaluator &visitor, const ExecutionState &nextState, const IR::Node *node) {
     ReachabilityResult rresult = std::make_pair(true, nullptr);
     std::vector<SmallStepEvaluator::Branch> *branches = nullptr;
@@ -122,7 +121,7 @@ class CommandVisitor {
     Result operator()(const IR::Node *node) {
         // Step on the given node as a command.
         BUG_CHECK(node, "Attempted to evaluate null node.");
-        SmallVisitEvaluator::REngineType r;
+        SmallVisitEvaluator::RVisitEngineType r;
         if (self.get().reachabilityEngine != nullptr) {
             r = self.get().renginePreprocessing(self, state, node);
             if (r.second != nullptr) {
@@ -130,7 +129,7 @@ class CommandVisitor {
             }
         }
         auto *visitor =
-            TestgenTarget::getCmdVisitor(state, self.get().solver, self.get().programInfo, testCase);
+            TestgenTarget::getCmdVisitor(state, self.get().programInfo, testCase);
         auto *result = visitor->step(node);
         if (self.get().reachabilityEngine != nullptr) {
             SmallVisitEvaluator::renginePostprocessing(r.first, result);
@@ -158,7 +157,7 @@ class CommandVisitor {
                 return new std::vector<Branch>({Branch(state)});
             }
             auto *visitor =
-                TestgenTarget::getExprVisitor(state, self.get().solver, self.get().programInfo, testCase);
+                TestgenTarget::getExprVisitor(state, self.get().programInfo, testCase);
             auto *result = visitor->step(expr);
             if (self.get().reachabilityEngine != nullptr) {
                 ReachabilityResult rresult = std::make_pair(true, nullptr);
@@ -209,7 +208,8 @@ class CommandVisitor {
             // state.get().
             auto pathConstraints = state.get().getPathConstraint();
             pathConstraints.push_back(cond);
-            solverResult = self.get().solver.checkSat(pathConstraints);
+            // TODO
+            // solverResult = self.get().solver.checkSat(pathConstraints);
         }
 
         auto &nextState = state.get().clone();

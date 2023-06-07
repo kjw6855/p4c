@@ -68,7 +68,7 @@ class Bmv2V1ModelTableVisitor : public TableVisitor {
         const std::vector<const IR::ActionListElement *> &tableActionList) override;
 
  public:
-    explicit Bmv2V1ModelTableVisitor(Bmv2V1ModelExprVisitor *visitor, const IR::P4Table *table);
+    explicit Bmv2V1ModelTableVisitor(Bmv2V1ModelExprVisitor *visitor, const IR::P4Table *table, const TestCase &testCase);
 };
 
 }  // namespace P4Tools::P4Testgen::Bmv2

@@ -13,7 +13,7 @@
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/lib/concolic.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/final_state.h"
+#include "backends/p4tools/modules/testgen/lib/final_visit_state.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
 #include "backends/p4tools/modules/testgen/p4testgen.pb.h"
 
@@ -29,7 +29,7 @@ class ConcolicExecutor {
     ~ConcolicExecutor();
 
     /// Constructor for this strategy, considering inheritance
-    ConcolicExecutor(AbstractSolver &solver, const ProgramInfo &programInfo);
+    ConcolicExecutor(const ProgramInfo &programInfo);
 
     /// Executes the P4 program along a randomly chosen path. When the program terminates, the
     /// given callback is invoked. If the callback returns true, then the executor terminates.
@@ -49,9 +49,6 @@ class ConcolicExecutor {
     /// Target-specific information about the P4 program.
     const ProgramInfo &programInfo;
 
-    /// The SMT solver backing this executor.
-    AbstractSolver &solver;
-
     /// Chooses a branch corresponding to a given branch identifier.
     ///
     /// @returns next execution state to be examined, throws an exception on invalid nextBranch.
@@ -62,7 +59,7 @@ class ConcolicExecutor {
     /// The current execution state.
     ExecutionState* executionState = nullptr;
 
-    FinalState* finalState = nullptr;
+    FinalVisitState* finalState = nullptr;
 
     /// Set of all stetements, to be retrieved from programInfo.
     const P4::Coverage::CoverageSet &allStatements;

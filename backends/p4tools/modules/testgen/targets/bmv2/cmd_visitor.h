@@ -5,7 +5,6 @@
 #include <optional>
 #include <string>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/ir.h"
 
 #include "backends/p4tools/modules/testgen/core/program_info.h"
@@ -32,7 +31,7 @@ class Bmv2V1ModelCmdVisitor : public CmdVisitor {
         const ExecutionState &nextState) const override;
 
  public:
-    Bmv2V1ModelCmdVisitor(ExecutionState &nextState, AbstractSolver &solver,
+    Bmv2V1ModelCmdVisitor(ExecutionState &nextState,
                           const ProgramInfo &programInfo, const TestCase &testCase);
 };
 
