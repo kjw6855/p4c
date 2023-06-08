@@ -11,6 +11,7 @@
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/irutils.h"
 #include "lib/cstring.h"
+#include "lib/gc.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
 #include "lib/null.h"

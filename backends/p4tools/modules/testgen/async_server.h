@@ -54,29 +54,30 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
 
 class CallData {
  public:
-    virtual void Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap) = 0;
+    enum CallStatus { CREATE, REQ, RET, ERROR, FINISH };
 
- protected:
-    enum CallStatus { PROCESS, FINISH };
+    virtual CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) = 0;
 };
 
 class GetP4StatementData : public CallData {
  public:
     explicit GetP4StatementData(P4FuzzGuide::AsyncService *service,
             ServerCompletionQueue *cq, const ProgramInfo *programInfo)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::PROCESS), programInfo_(programInfo) {
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo) {
         service_->RequestGetP4Statement(&ctx_, &request_, &responder_,
                 cq_, cq_, this);
     }
 
-    void Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap) override;
+    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
 
  private:
     const ProgramInfo* programInfo_;
     P4FuzzGuide::AsyncService *service_;
+    CallStatus status_;  // The current serving state.
     ServerCompletionQueue *cq_;
     ServerContext ctx_;
-    CallStatus status_;  // The current serving state.
     P4StatementRequest request_;
     P4StatementReply reply_;
     ServerAsyncResponseWriter<P4StatementReply> responder_;
@@ -86,19 +87,20 @@ class GetP4CoverageData : public CallData {
  public:
     explicit GetP4CoverageData(P4FuzzGuide::AsyncService *service,
             ServerCompletionQueue *cq, const ProgramInfo *programInfo)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::PROCESS), programInfo_(programInfo) {
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo) {
         service_->RequestGetP4Coverage(&ctx_, &request_, &responder_,
                 cq_, cq_, this);
     }
 
-    void Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap) override;
+    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
 
  private:
     const ProgramInfo* programInfo_;
     P4FuzzGuide::AsyncService *service_;
+    CallStatus status_;  // The current serving state.
     ServerCompletionQueue *cq_;
     ServerContext ctx_;
-    CallStatus status_;  // The current serving state.
     P4CoverageRequest request_;
     P4CoverageReply reply_;
     ServerAsyncResponseWriter<P4CoverageReply> responder_;
@@ -108,19 +110,20 @@ class RecordP4TestgenData : public CallData {
  public:
     explicit RecordP4TestgenData(P4FuzzGuide::AsyncService *service,
             ServerCompletionQueue *cq, const ProgramInfo *programInfo)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::PROCESS), programInfo_(programInfo) {
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo) {
         service_->RequestRecordP4Testgen(&ctx_, &request_, &responder_,
                 cq_, cq_, this);
     }
 
-    void Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap) override;
+    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
 
  private:
     const ProgramInfo* programInfo_;
     P4FuzzGuide::AsyncService *service_;
+    CallStatus status_;  // The current serving state.
     ServerCompletionQueue *cq_;
     ServerContext ctx_;
-    CallStatus status_;  // The current serving state.
     P4CoverageRequest request_;
     P4CoverageReply reply_;
     ServerAsyncResponseWriter<P4CoverageReply> responder_;

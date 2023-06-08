@@ -56,7 +56,6 @@ void Testgen::runServer(const ProgramInfo *programInfo) {
     //P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo);
     P4FuzzGuide::AsyncService service_;
     std::map<std::string, ConcolicExecutor*> coverageMap;
-    const ProgramInfo* programInfo_;
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -72,12 +71,50 @@ void Testgen::runServer(const ProgramInfo *programInfo) {
     new GetP4CoverageData(&service_, cq_.get(), programInfo);
     new RecordP4TestgenData(&service_, cq_.get(), programInfo);
 
+    CallData::CallStatus callStatus;
     void *tag;
-    bool ok;
+    bool ok, callAgain = false;
+    std::string devId;
+    TestCase testCase;
     while (true) {
+        callStatus = CallData::CREATE;
+
         GPR_ASSERT(cq_->Next(&tag, &ok));
         GPR_ASSERT(ok);
-        static_cast<CallData*>(tag)->Proceed(coverageMap);
+        do {
+            callStatus = static_cast<CallData*>(tag)->Proceed(coverageMap, devId, testCase, callStatus);
+
+            if (callStatus == CallData::REQ) {
+                std::cout << "Record P4 Coverage of device: " << devId << std::endl;
+                if (coverageMap.count(devId) == 0) {
+                    coverageMap.insert(std::make_pair(devId,
+                                new ConcolicExecutor(*programInfo)));
+                }
+
+                auto* stateMgr = coverageMap.at(devId);
+                callStatus = CallData::ERROR;
+
+                try {
+                    stateMgr->run(testCase);
+                    callStatus = CallData::RET;
+
+                } catch (const Util::CompilerBug &e) {
+                    std::cerr << "Internal compiler error: " << e.what() << std::endl;
+                    std::cerr << "Please submit a bug report with your code." << std::endl;
+
+                } catch (const Util::CompilationError &e) {
+                    std::cerr << "Compilation error: " << e.what() << std::endl;
+
+                } catch (const std::exception &e) {
+                    std::cerr << "Internal error: " << e.what() << std::endl;
+                    std::cerr << "Please submit a bug report with your code." << std::endl;
+                }
+                callAgain = true;
+
+            } else {
+                callAgain = false;
+            }
+        } while (callAgain);
     }
 }
 

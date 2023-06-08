@@ -9,8 +9,12 @@
 #include <string>
 #include <utility>
 
+#include "lib/gc.h"
+
+#include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/core/z3_solver.h"
+#include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/depth_first.h"
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
 
@@ -20,7 +24,7 @@ P4FuzzGuideImpl::P4FuzzGuideImpl(const ProgramInfo *programInfo)
 : programInfo_(programInfo) {}
 
 static std::string hexToByteString(const std::string &hex) {
-    char *bytes = (char*)std::malloc(hex.length() / 2);
+    char *bytes = (char*)malloc(hex.length() / 2);
 
     for (unsigned int i = 0; i < hex.length(); i += 2) {
         std::string byteString = hex.substr(i, 2);
@@ -142,9 +146,10 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     return Status::OK;
 }
 
-void GetP4StatementData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap) {
+CallData::CallStatus GetP4StatementData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+        std::string &devId, TestCase &testCase, CallData::CallStatus callStatus) {
     switch (status_) {
-        case CallData::PROCESS:
+        case CallData::CREATE:
         {
             new GetP4StatementData(service_, cq_, programInfo_);
 
@@ -170,11 +175,14 @@ void GetP4StatementData::Proceed(std::map<std::string, ConcolicExecutor*> &cover
             delete this;
             break;
     }
+
+    return status_;
 }
 
-void GetP4CoverageData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap) {
+CallData::CallStatus GetP4CoverageData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+        std::string &devId, TestCase &testCase, CallData::CallStatus callStatus) {
     switch (status_) {
-        case CallData::PROCESS:
+        case CallData::CREATE:
         {
             new GetP4CoverageData(service_, cq_, programInfo_);
 
@@ -203,74 +211,82 @@ void GetP4CoverageData::Proceed(std::map<std::string, ConcolicExecutor*> &covera
             delete this;
             break;
     }
+
+    return status_;
 }
 
-void RecordP4TestgenData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap) {
+CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+        std::string &devId, TestCase &testCase, CallData::CallStatus callStatus) {
+
+    if (callStatus == CallData::ERROR || callStatus == CallData::RET)
+        status_ = callStatus;
+
     switch (status_) {
-        case CallData::PROCESS:
+        case CallData::CREATE:
         {
             new RecordP4TestgenData(service_, cq_, programInfo_);
 
-            auto devId = request_.device_id();
-            auto allNodes = programInfo_->getCoverableNodes();
-            std::cout << "Record P4 Coverage of device: " << devId << std::endl;
-
-            if (coverageMap.count(devId) == 0) {
-                coverageMap.insert(std::make_pair(devId,
-                            new ConcolicExecutor(*programInfo_)));
-            }
-
-            auto* stateMgr = coverageMap.at(devId);
-            bool isSuc = false;
-
-            try {
-                stateMgr->run(request_.test_case());
-                isSuc = true;
-
-            } catch (const Util::CompilerBug &e) {
-                std::cerr << "Internal compiler error: " << e.what() << std::endl;
-                std::cerr << "Please submit a bug report with your code." << std::endl;
-
-            } catch (const Util::CompilationError &e) {
-                std::cerr << "Compilation error: " << e.what() << std::endl;
-
-            } catch (const std::exception &e) {
-                std::cerr << "Internal error: " << e.what() << std::endl;
-                std::cerr << "Please submit a bug report with your code." << std::endl;
-            }
-
-            if (isSuc) {
-                auto* newTestCase = new TestCase(request_.test_case());
-                // TODO: multiple output Packets
-                auto outputPacketOpt = stateMgr->getOutputPacket();
-                newTestCase->clear_expected_output_packet();
-                if (outputPacketOpt != boost::none) {
-                    auto outputPacket = outputPacketOpt.get();
-                    auto* output = newTestCase->add_expected_output_packet();
-                    const auto* payload = outputPacket.getEvaluatedPayload();
-                    const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
-
-                    output->set_port(outputPacket.getPort());
-                    output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
-                    output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
-                }
-
-                reply_.set_allocated_test_case(newTestCase);
-                reply_.set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
-                reply_.set_stmt_cov_size(stateMgr->statementBitmapSize);
-                reply_.set_action_cov_bitmap("");
-                reply_.set_action_cov_size(1);
-            }
-
-            status_ = CallData::FINISH;
-            responder_.Finish(reply_, isSuc ? Status::OK : Status::CANCELLED, this);
+            devId = request_.device_id();
+            status_ = CallData::REQ;
+            testCase = request_.test_case();
             break;
         }
+        case CallData::REQ:
+            break;
+
+        case CallData::ERROR:
+        {
+            status_ = CallData::FINISH;
+            responder_.Finish(reply_, Status::CANCELLED, this);
+            break;
+        }
+
+        case CallData::RET:
+        {
+            auto* stateMgr = coverageMap.at(devId);
+            auto* newTestCase = new TestCase(testCase);
+            // TODO: multiple output Packets
+            auto outputPacketOpt = stateMgr->getOutputPacket();
+            newTestCase->clear_expected_output_packet();
+            if (outputPacketOpt != boost::none) {
+                auto outputPacket = outputPacketOpt.get();
+                auto* output = newTestCase->add_expected_output_packet();
+                const auto* payload = outputPacket.getEvaluatedPayload();
+                const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
+
+                output->set_port(outputPacket.getPort());
+                output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
+                output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+            }
+
+            reply_.set_allocated_test_case(newTestCase);
+            reply_.set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
+            reply_.set_stmt_cov_size(stateMgr->statementBitmapSize);
+            reply_.set_action_cov_bitmap("");
+            reply_.set_action_cov_size(1);
+
+            status_ = CallData::FINISH;
+            responder_.Finish(reply_, Status::OK, this);
+            break;
+        }
+
+#if 0
+                Z3Solver solver;
+                auto *stateMgr = new DepthFirstSearch(solver, *programInfo_);
+                auto testPath = std::filesystem::path("/tmp/p4testgen_out/tmp").stem();
+                auto *testBackend = TestgenTarget::getTestBackend(*programInfo_, *stateMgr, testPath, Utils::getCurrentSeed());
+                auto callBack = [testBackend](auto &&finalState) {
+                    return testBackend->run(std::forward<decltype(finalState)>(finalState));
+                };
+                stateMgr->run(callBack);
+#endif
 
         case CallData::FINISH:
             delete this;
             break;
     }
+
+    return status_;
 }
 
 } // namespace P4Tools::P4Testgen

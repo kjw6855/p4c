@@ -13,6 +13,7 @@
 #include "ir/irutils.h"
 #include "ir/visitor.h"
 #include "ir/node.h"
+#include "lib/gc.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/null.h"
@@ -28,28 +29,29 @@ namespace P4Tools {
 namespace P4Testgen {
 
 void ConcolicExecutor::run(const TestCase& testCase) {
-    executionState = new ExecutionState(programInfo.program);
+    executionState = ExecutionState::create(programInfo.program);
 
-    while (!executionState->isTerminal()) {
+    while (!executionState.get().isTerminal()) {
 
-        std::cout << " stack/body size: " << executionState->getStackSize() << "/" << executionState->getBodySize() << std::endl;
-        Result successors = evaluator.step(*executionState, testCase);
+        LOG_FEATURE("small_visit", 4, " stack/body size: " << executionState.get().getStackSize() << "/" << executionState.get().getBodySize());
+
+        Result successors = evaluator.step(executionState, testCase);
 
         if (successors->size() == 1) {
             // Non-branching states are not recorded by selected branches.
-            executionState = &(*successors)[0].nextState.get();
+            executionState = (*successors)[0].nextState;
             continue;
         }
         // If there are multiple, pop one branch decision from the input list and pick
         // successor matching the given branch decision.
-        ExecutionState* next = chooseBranch(*successors, 0);
+        auto* next = chooseBranch(*successors, 0);
         if (next == nullptr) {
             break;
         }
-        executionState = next;
+        executionState = *next;
     }
 
-    if (executionState->isTerminal()) {
+    if (executionState.get().isTerminal()) {
         // We've reached the end of the program. Call back and (if desired) end execution.
         testHandleTerminalState(executionState);
         return;
@@ -67,6 +69,7 @@ uint64_t getNumeric(const std::string& str) {
 
 ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo)
     : programInfo(programInfo),
+      executionState(ExecutionState::create(programInfo.program)),
       allStatements(programInfo.getCoverableNodes()),
       evaluator(programInfo),
       statementBitmapSize(allStatements.size()) {
@@ -86,7 +89,7 @@ ExecutionState* ConcolicExecutor::chooseBranch(const std::vector<Branch>& branch
     ExecutionState* next = nullptr;
     for (const auto& branch : branches) {
         const Constraint* constraint = branch.constraint;
-        std::cout << "Branch Constraint: " << constraint << std::endl;
+        LOG_FEATURE("small_visit", 4, "Branch Constraint: " << constraint);
 
         if (dynamic_cast<const IR::BoolLiteral*>(constraint) != nullptr) {
             auto val = constraint->checkedTo<IR::BoolLiteral>()->value;
@@ -109,9 +112,9 @@ ExecutionState* ConcolicExecutor::chooseBranch(const std::vector<Branch>& branch
     return next;
 }
 
-bool ConcolicExecutor::testHandleTerminalState(ExecutionState *terminalState) {
+bool ConcolicExecutor::testHandleTerminalState(const ExecutionState &terminalState) {
     int i = 0;
-    auto& visitedStmtSet = terminalState->getVisited();
+    auto& visitedStmtSet = terminalState.getVisited();
     for (auto& stmt : allStatements) {
         if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
             int idx = i / 8;
@@ -122,7 +125,7 @@ bool ConcolicExecutor::testHandleTerminalState(ExecutionState *terminalState) {
         i++;
     }
 
-    finalState = new FinalVisitState(*terminalState);
+    finalState = new FinalVisitState(terminalState);
 
     return true;
 }
@@ -137,20 +140,20 @@ const P4::Coverage::CoverageSet& ConcolicExecutor::getVisitedStatements() {
 }
 
 boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
-    if (executionState->getProperty<bool>("drop"))
+    if (executionState.get().getProperty<bool>("drop"))
         return boost::none;
 
     BUG_CHECK(finalState, "Un-initialized");
     const auto* model = finalState->getCompletedModel();
 
-    const auto* outPortExpr = executionState->get(programInfo.getTargetOutputPortVar());
+    const auto* outPortExpr = executionState.get().get(programInfo.getTargetOutputPortVar());
     int outPortInt = 0;
     if (dynamic_cast<const IR::Literal*>(outPortExpr) != nullptr)
         outPortInt = IR::getIntFromLiteral(outPortExpr->checkedTo<IR::Literal>());
     else
         return boost::none;
 
-    const auto* outPacketExpr = executionState->getPacketBuffer();
+    const auto* outPacketExpr = executionState.get().getPacketBuffer();
 
 #if 0
     /* TODO */

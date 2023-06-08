@@ -54,10 +54,10 @@ class ConcolicExecutor {
     /// @returns next execution state to be examined, throws an exception on invalid nextBranch.
     ExecutionState* chooseBranch(const std::vector<Branch>& branches, uint64_t nextBranch);
 
-    bool testHandleTerminalState(ExecutionState *terminalState);
+    bool testHandleTerminalState(const ExecutionState &terminalState);
 
     /// The current execution state.
-    ExecutionState* executionState = nullptr;
+    std::reference_wrapper<ExecutionState> executionState;
 
     FinalVisitState* finalState = nullptr;
 

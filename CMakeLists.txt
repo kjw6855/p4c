@@ -167,6 +167,8 @@ set (HAVE_LIBBOOST_IOSTREAMS 1)
 set (P4C_LIB_DEPS "${P4C_LIB_DEPS};${Boost_LIBRARIES}")
 if (ENABLE_GC)
   set (P4C_LIB_DEPS "${P4C_LIB_DEPS};${LIBGC_LIBRARIES}")
+  add_definitions(-DGC_PTHREADS)
+  add_definitions(-DTHREAD_LOCAL_ALLOC)
 endif ()
 
 # other required libraries
