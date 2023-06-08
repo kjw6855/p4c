@@ -300,7 +300,7 @@ void STF::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_
 }
 
 void STF::outputTest(const TestSpec *testSpec, cstring selectedBranches, size_t testIdx,
-                     float currentCoverage) {
+                     float currentCoverage, unsigned char* testCoverage, int mapSize) {
     std::string testCase = getTestCaseTemplate();
     emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage);
 }

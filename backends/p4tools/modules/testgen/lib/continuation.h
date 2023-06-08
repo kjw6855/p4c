@@ -150,6 +150,8 @@ class Continuation {
         /// Removes all commands in this body.
         void clear();
 
+        size_t size() const { return cmds.size(); };
+
         bool operator==(const Body &) const;
 
         /// Allows the command stack to be initialized with a list initializer.

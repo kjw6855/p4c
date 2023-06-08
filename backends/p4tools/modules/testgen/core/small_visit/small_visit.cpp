@@ -1,4 +1,4 @@
-#include "backends/p4tools/modules/testgen/core/small_step/small_step.h"
+#include "backends/p4tools/modules/testgen/core/small_visit/small_visit.h"
 
 #include <functional>
 #include <iosfwd>
@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "backends/p4tools/common/compiler/reachability.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "frontends/p4/optimizeExpressions.h"
@@ -20,8 +19,8 @@
 #include "lib/null.h"
 
 #include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/small_step/cmd_stepper.h"
-#include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/testgen/core/small_visit/cmd_visitor.h"
+#include "backends/p4tools/modules/testgen/core/small_visit/expr_visitor.h"
 #include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
@@ -29,6 +28,7 @@
 
 namespace P4Tools::P4Testgen {
 
+#if 0
 SmallStepEvaluator::Branch::Branch(ExecutionState &nextState)
     : constraint(IR::getBoolLiteral(true)), nextState(nextState) {}
 
@@ -64,16 +64,17 @@ SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
         nextState.pushPathConstraint(constraint);
     }
 }
+#endif
 
-SmallStepEvaluator::SmallStepEvaluator(AbstractSolver &solver, const ProgramInfo &programInfo)
-    : programInfo(programInfo), solver(solver) {
+SmallVisitEvaluator::SmallVisitEvaluator(const ProgramInfo &programInfo)
+    : programInfo(programInfo) {
     if (!TestgenOptions::get().pattern.empty()) {
         reachabilityEngine =
             new ReachabilityEngine(*programInfo.dcg, TestgenOptions::get().pattern, true);
     }
 }
 
-void SmallStepEvaluator::renginePostprocessing(ReachabilityResult &result,
+void SmallVisitEvaluator::renginePostprocessing(ReachabilityResult &result,
                                                std::vector<SmallStepEvaluator::Branch> *branches) {
     // All Reachability engine state for branch should be copied.
     if (branches->size() > 1 || result.second != nullptr) {
@@ -90,28 +91,29 @@ void SmallStepEvaluator::renginePostprocessing(ReachabilityResult &result,
     }
 }
 
-SmallStepEvaluator::REngineType SmallStepEvaluator::renginePreprocessing(
-    SmallStepEvaluator &stepper, const ExecutionState &nextState, const IR::Node *node) {
+SmallVisitEvaluator::RVisitEngineType SmallVisitEvaluator::renginePreprocessing(
+    SmallVisitEvaluator &visitor, const ExecutionState &nextState, const IR::Node *node) {
     ReachabilityResult rresult = std::make_pair(true, nullptr);
     std::vector<SmallStepEvaluator::Branch> *branches = nullptr;
     // Current node should be inside DCG.
-    if (stepper.reachabilityEngine->getDCG().isCaller(node)) {
+    if (visitor.reachabilityEngine->getDCG().isCaller(node)) {
         // Move reachability engine to next state.
-        rresult = stepper.reachabilityEngine->next(nextState.getReachabilityEngineState(), node);
+        rresult = visitor.reachabilityEngine->next(nextState.getReachabilityEngineState(), node);
         if (!rresult.first) {
             // Reachability property was failed.
             branches = new std::vector<SmallStepEvaluator::Branch>({});
         }
     } else if (const auto *method = node->to<IR::MethodCallStatement>()) {
-        return renginePreprocessing(stepper, nextState, method->methodCall);
+        return renginePreprocessing(visitor, nextState, method->methodCall);
     }
     return std::make_pair(rresult, branches);
 }
 
-class CommandStepper {
+class CommandVisitor {
  private:
-    std::reference_wrapper<SmallStepEvaluator> self;
+    std::reference_wrapper<SmallVisitEvaluator> self;
     std::reference_wrapper<ExecutionState> state;
+    const TestCase& testCase;
     using Branch = SmallStepEvaluator::Branch;
     using Result = SmallStepEvaluator::Result;
 
@@ -119,18 +121,18 @@ class CommandStepper {
     Result operator()(const IR::Node *node) {
         // Step on the given node as a command.
         BUG_CHECK(node, "Attempted to evaluate null node.");
-        SmallStepEvaluator::REngineType r;
+        SmallVisitEvaluator::RVisitEngineType r;
         if (self.get().reachabilityEngine != nullptr) {
             r = self.get().renginePreprocessing(self, state, node);
             if (r.second != nullptr) {
                 return r.second;
             }
         }
-        auto *stepper =
-            TestgenTarget::getCmdStepper(state, self.get().solver, self.get().programInfo);
-        auto *result = stepper->step(node);
+        auto *visitor =
+            TestgenTarget::getCmdVisitor(state, self.get().programInfo, testCase);
+        auto *result = visitor->step(node);
         if (self.get().reachabilityEngine != nullptr) {
-            SmallStepEvaluator::renginePostprocessing(r.first, result);
+            SmallVisitEvaluator::renginePostprocessing(r.first, result);
         }
         return result;
     }
@@ -149,17 +151,17 @@ class CommandStepper {
             // Step on the returned expression.
             const auto *expr = *ret.expr;
             BUG_CHECK(expr, "Attempted to evaluate null expr.");
-            // Do not bother with the stepper, if the expression is already symbolic.
+            // Do not bother with the visitor, if the expression is already symbolic.
             if (SymbolicEnv::isSymbolicValue(expr)) {
                 state.get().popContinuation(expr);
                 return new std::vector<Branch>({Branch(state)});
             }
-            auto *stepper =
-                TestgenTarget::getExprStepper(state, self.get().solver, self.get().programInfo);
-            auto *result = stepper->step(expr);
+            auto *visitor =
+                TestgenTarget::getExprVisitor(state, self.get().programInfo, testCase);
+            auto *result = visitor->step(expr);
             if (self.get().reachabilityEngine != nullptr) {
                 ReachabilityResult rresult = std::make_pair(true, nullptr);
-                SmallStepEvaluator::renginePostprocessing(rresult, result);
+                SmallVisitEvaluator::renginePostprocessing(rresult, result);
             }
             return result;
         }
@@ -185,7 +187,7 @@ class CommandStepper {
         // This usually indicates that we have many branches that produce an invalid
         // state.get(). The P4 program should be fixed in that case, because we can not
         // generate useful tests.
-        if (self.get().violatedGuardConditions > SmallStepEvaluator::MAX_GUARD_VIOLATIONS) {
+        if (self.get().violatedGuardConditions > SmallVisitEvaluator::MAX_GUARD_VIOLATIONS) {
             BUG("Condition %1% exceeded the maximum number of permitted guard "
                 "violations for this run."
                 " This implies that the P4 program produces an output that violates"
@@ -206,7 +208,8 @@ class CommandStepper {
             // state.get().
             auto pathConstraints = state.get().getPathConstraint();
             pathConstraints.push_back(cond);
-            solverResult = self.get().solver.checkSat(pathConstraints);
+            // TODO
+            // solverResult = self.get().solver.checkSat(pathConstraints);
         }
 
         auto &nextState = state.get().clone();
@@ -228,15 +231,15 @@ class CommandStepper {
         return new std::vector<Branch>({{cond, state, nextState}});
     }
 
-    explicit CommandStepper(SmallStepEvaluator &self, ExecutionState &state)
-        : self(self), state(state) {}
+    explicit CommandVisitor(SmallVisitEvaluator &self, ExecutionState &state, const TestCase &testCase)
+        : self(self), state(state), testCase(testCase) {}
 };
 
-SmallStepEvaluator::Result SmallStepEvaluator::step(ExecutionState &state) {
+SmallStepEvaluator::Result SmallVisitEvaluator::step(ExecutionState &state, const TestCase &testCase) {
     BUG_CHECK(!state.isTerminal(), "Tried to step from a terminal state.");
 
     if (const auto cmdOpt = state.getNextCmd()) {
-        return std::visit(CommandStepper(*this, state), *cmdOpt);
+        return std::visit(CommandVisitor(*this, state, testCase), *cmdOpt);
     }
     // State has an empty body. Pop the continuation stack.
     state.popContinuation();

@@ -75,6 +75,20 @@ PnaDpdkExprStepper *PnaDpdkTestgenTarget::getExprStepperImpl(ExecutionState &sta
     return new PnaDpdkExprStepper(state, solver, programInfo);
 }
 
+CmdVisitor *PnaDpdkTestgenTarget::getCmdVisitorImpl(ExecutionState &state,
+                                                           const ProgramInfo &programInfo,
+                                                           const TestCase &testCase) const {
+    // TODO
+    return nullptr;
+}
+
+ExprVisitor *PnaDpdkTestgenTarget::getExprVisitorImpl(ExecutionState &state,
+                                                             const ProgramInfo &programInfo,
+                                                             const TestCase &testCase) const {
+    // TODO
+    return nullptr;
+}
+
 const ArchSpec PnaDpdkTestgenTarget::ARCH_SPEC = ArchSpec(
     "PNA_NIC", {
                    // parser MainParserT<MH, MM>(

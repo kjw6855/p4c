@@ -144,7 +144,7 @@ class TF {
     /// @param currentCoverage current coverage ratio (between 0.0 and 1.0)
     // attaches arbitrary string data to the test preamble.
     virtual void outputTest(const TestSpec *spec, cstring selectedBranches, size_t testIdx,
-                            float currentCoverage) = 0;
+                            float currentCoverage, unsigned char* testCoverage, int mapSize) = 0;
 
     /// Print out some performance numbers if logging feature "performance" is enabled.
     /// Also log performance numbers to a separate file in the test folder if @param write is

@@ -66,6 +66,8 @@ class TestgenOptions : public AbstractP4cToolOptions {
     /// Enforces the test generation of tests with mandatory output packet.
     bool withOutputPacket = false;
 
+    bool interactive = true;
+
     /// Add conditions defined in assert/assume to the path conditions.
     /// Only tests which satisfy these conditions can be generated. This is active by default.
     bool enforceAssumptions = true;

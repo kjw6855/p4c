@@ -33,7 +33,7 @@ class STF : public TF {
 
     /// Produce an STF test.
     void outputTest(const TestSpec *spec, cstring selectedBranches, size_t testIdx,
-                    float currentCoverage) override;
+                    float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
  private:
     /// Emits a test case.

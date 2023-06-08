@@ -261,6 +261,8 @@ metadata: "Date generated: {{timestamp}}"
 metadata: "{{selected_branches}}"
 ## endif
 metadata: "Current statement coverage: {{coverage}}"
+stmt_cov_bitmap: "{{local_coverage}}"
+stmt_cov_size: {{local_cov_size}}
 
 ## for trace_item in trace
 traces: "{{trace_item}}"
@@ -287,6 +289,7 @@ entities : [
   {
     table_entry {
       table_id: {{table.id}}
+      table_name: "{{table.table_name}}"
 ## if rule.rules.needs_priority
       priority: {{rule.priority}}
 ## endif
@@ -294,6 +297,7 @@ entities : [
       # Match field {{r.field_name}}
       match {
         field_id: {{r.id}}
+        field_name: "{{r.field_name}}"
         exact {
           value: "{{r.value}}"
         }
@@ -303,6 +307,7 @@ entities : [
     # Match field {{r.field_name}}
     match {
       field_id: {{r.id}}
+      field_name: "{{r.field_name}}"
       optional {
         value: "{{r.value}}"
       }
@@ -312,6 +317,7 @@ entities : [
       # Match field {{r.field_name}}
       match {
         field_id: {{r.id}}
+        field_name: "{{r.field_name}}"
         range {
           low: "{{r.lo}}"
           high: "{{r.hi}}"
@@ -322,6 +328,7 @@ entities : [
       # Match field {{r.field_name}}
       match {
         field_id: {{r.id}}
+        field_name: "{{r.field_name}}"
         ternary {
           value: "{{r.value}}"
           mask: "{{r.mask}}"
@@ -332,6 +339,7 @@ entities : [
       # Match field {{r.field_name}}
       match {
         field_id: {{r.id}}
+        field_name: "{{r.field_name}}"
         lpm {
           value: "{{r.value}}"
           prefix_len: {{r.prefix_len}}
@@ -345,10 +353,12 @@ entities : [
           action_profile_actions {
             action {
               action_id: {{rule.action_id}}
+              action_name: "{{rule.action_name}}"
 ## for act_param in rule.rules.act_args
               # Param {{act_param.param}}
               params {
                 param_id: {{act_param.id}}
+                param_name: "{{act_param.param}}"
                 value: "{{act_param.value}}"
               }
 ## endfor
@@ -358,10 +368,12 @@ entities : [
 ## else
         action {
           action_id: {{rule.action_id}}
+          action_name: "{{rule.action_name}}"
 ## for act_param in rule.rules.act_args
           # Param {{act_param.param}}
           params {
             param_id: {{act_param.id}}
+            param_name: "{{act_param.param}}"
             value: "{{act_param.value}}"
           }
 ## endfor
@@ -379,7 +391,7 @@ entities : [
 }
 
 void Protobuf::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_t testIdx,
-                            const std::string &testCase, float currentCoverage) {
+                            const std::string &testCase, float currentCoverage, unsigned char* testCoverage, int mapSize) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -400,6 +412,20 @@ void Protobuf::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, 
     coverageStr << std::setprecision(2) << currentCoverage;
     dataJson["coverage"] = coverageStr.str();
 
+    dataJson["local_cov_size"] = mapSize;
+    if (mapSize) {
+        std::stringstream testCoverageMapStr;
+        int allocLen = (mapSize / 8) + 1;
+        for (int i = 0; i < allocLen; i++) {
+            testCoverageMapStr << "\\x" << std::setw(2) << std::setfill('0')
+                << std::hex << (unsigned int)testCoverage[i];
+        }
+        dataJson["local_coverage"] = testCoverageMapStr.str();
+    } else {
+        dataJson["local_coverage"] = "";
+    }
+
+
     LOG5("Protobuf test back end: emitting testcase:" << std::setw(4) << dataJson);
     auto protobufFile = basePath;
     protobufFile.replace_extension("_" + std::to_string(testIdx) + ".proto");
@@ -409,9 +435,10 @@ void Protobuf::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, 
 }
 
 void Protobuf::outputTest(const TestSpec *testSpec, cstring selectedBranches, size_t testIdx,
-                          float currentCoverage) {
+                          float currentCoverage, unsigned char* testCoverage, int mapSize) {
     std::string testCase = getTestCaseTemplate();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage);
+    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage,
+            testCoverage, mapSize);
 }
 
 }  // namespace P4Tools::P4Testgen::Bmv2

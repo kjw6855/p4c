@@ -84,6 +84,19 @@ EBPFExprStepper *EBPFTestgenTarget::getExprStepperImpl(ExecutionState &state,
     return new EBPFExprStepper(state, solver, programInfo);
 }
 
+CmdVisitor *EBPFTestgenTarget::getCmdVisitorImpl(ExecutionState &state,
+                                                     const ProgramInfo &programInfo, const TestCase &testCase) const {
+    // TODO
+    return nullptr;
+}
+
+ExprVisitor *EBPFTestgenTarget::getExprVisitorImpl(ExecutionState &state,
+                                                       const ProgramInfo &programInfo,
+                                                       const TestCase &testCase) const {
+    // TODO
+    return nullptr;
+}
+
 const ArchSpec EBPFTestgenTarget::archSpec =
     ArchSpec("ebpfFilter", {// parser parse<H>(packet_in packet, out H headers);
                             {"parse", {nullptr, "*hdr"}},

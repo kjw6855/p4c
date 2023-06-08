@@ -44,7 +44,7 @@ class PTF : public TF {
 
     /// Produce a PTF test.
     void outputTest(const TestSpec *spec, cstring selectedBranches, size_t testIdx,
-                    float currentCoverage) override;
+                    float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
  private:
     /// Emits the test preamble. This is only done once for all generated tests.

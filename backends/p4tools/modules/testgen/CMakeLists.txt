@@ -8,9 +8,38 @@ project(p4testgen)
 set(P4TESTGEN_DIR ${P4C_BINARY_DIR}/testgen)
 set(P4TESTGEN_DRIVER "${CMAKE_CURRENT_BINARY_DIR}/p4testgen")
 
+get_filename_component(p4testgen_proto_path "./targets/bmv2/proto" ABSOLUTE)
+set(p4testgen_proto "${p4testgen_proto_path}/p4testgen.proto")
+set(p4runtime_proto_path "${P4C_SOURCE_DIR}/control-plane/p4runtime/proto")
+set(p4runtime_cp_path "${P4C_SOURCE_DIR}/control-plane")
+
+set(p4testgen_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4testgen.grpc.pb.cc")
+set(p4testgen_grpc_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4testgen.grpc.pb.h")
+set(p4testgen_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4testgen.pb.cc")
+set(p4testgen_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4testgen.pb.h")
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/p4runtime")
+add_custom_target(link_target ALL
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+        "${P4C_BINARY_DIR}/control-plane"
+        "${CMAKE_CURRENT_BINARY_DIR}/p4runtime/proto")
+
+add_custom_command(
+      OUTPUT "${p4testgen_proto_srcs}" "${p4testgen_proto_hdrs}" "${p4testgen_grpc_srcs}" "${p4testgen_grpc_hdrs}"
+      COMMAND "${PROTOBUF_PROTOC_EXECUTABLE}"
+      ARGS --grpc_out "${CMAKE_CURRENT_BINARY_DIR}"
+        --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
+        -I "${p4testgen_proto_path}"
+        -I "${p4runtime_proto_path}"
+        -I "${p4runtime_cp_path}"
+        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+        "${p4testgen_proto}"
+      DEPENDS "${p4testgen_proto}")
+
 # Source files for p4testgen.
 set(
   TESTGEN_SOURCES
+  async_server.cpp
   options.cpp
   testgen.cpp
 
@@ -22,12 +51,19 @@ set(
   core/small_step/extern_stepper.cpp
   core/small_step/table_stepper.cpp
   core/small_step/small_step.cpp
+  core/small_visit/abstract_visitor.cpp
+  core/small_visit/cmd_visitor.cpp
+  core/small_visit/expr_visitor.cpp
+  core/small_visit/extern_visitor.cpp
+  core/small_visit/table_visitor.cpp
+  core/small_visit/small_visit.cpp
   core/symbolic_executor/depth_first.cpp
   core/symbolic_executor/selected_branches.cpp
   core/symbolic_executor/random_backtrack.cpp
   core/symbolic_executor/greedy_stmt_cov.cpp
   core/symbolic_executor/max_stmt_cov.cpp
   core/symbolic_executor/symbolic_executor.cpp
+  core/concolic_executor/concolic_executor.cpp
   core/target.cpp
 
   lib/collect_coverable_nodes.cpp
@@ -35,11 +71,17 @@ set(
   lib/continuation.cpp
   lib/execution_state.cpp
   lib/final_state.cpp
+  lib/final_visit_state.cpp
   lib/logging.cpp
   lib/packet_vars.cpp
   lib/test_backend.cpp
   lib/test_spec.cpp
   lib/tf.cpp
+
+  ${p4testgen_proto_srcs}
+  ${p4testgen_proto_hdrs}
+  ${p4testgen_grpc_srcs}
+  ${p4testgen_grpc_hdrs}
 )
 
 # GTest source files for p4testgen.
@@ -79,6 +121,9 @@ set(
   TESTGEN_LIBS
   PRIVATE p4tools-common
   PUBLIC inja
+  PUBLIC grpc
+  PUBLIC grpc++
+  PUBLIC ${PROTOBUF_LIBRARY}
 )
 
 file(GLOB testgen_targets RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/targets ${CMAKE_CURRENT_SOURCE_DIR}/targets/*)

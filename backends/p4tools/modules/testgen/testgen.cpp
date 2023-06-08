@@ -2,15 +2,24 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fcntl.h>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <utility>
+#include <memory>
+
+#include <grpcpp/grpcpp.h>
+#include <grpc/support/log.h>
+#include <google/protobuf/text_format.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "frontends/common/parser_options.h"
+#include "lib/gc.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 
@@ -22,13 +31,92 @@
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/random_backtrack.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/selected_branches.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
+#include "backends/p4tools/modules/testgen/core/concolic_executor/concolic_executor.h"
 #include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/lib/logging.h"
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
+#include "backends/p4tools/modules/testgen/async_server.h"
 #include "backends/p4tools/modules/testgen/options.h"
 #include "backends/p4tools/modules/testgen/register.h"
+#include "backends/p4tools/modules/testgen/p4testgen.pb.h"
 
 namespace P4Tools::P4Testgen {
+
+using grpc::ServerBuilder;
+using p4testgen::P4FuzzGuide;
+using p4testgen::TestCase;
+
+Testgen::~Testgen() {
+    server_->Shutdown();
+    cq_->Shutdown();
+}
+
+void Testgen::runServer(const ProgramInfo *programInfo) {
+    std::string server_address("0.0.0.0:50051");
+    //P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo);
+    P4FuzzGuide::AsyncService service_;
+    std::map<std::string, ConcolicExecutor*> coverageMap;
+
+    ServerBuilder builder;
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.RegisterService(&service_);
+    cq_ = builder.AddCompletionQueue();
+    server_ = builder.BuildAndStart();
+
+    //std::unique_ptr<Server> server(builder.BuildAndStart());
+    std::cout << "Server listening on " << server_address << std::endl;
+    //server->Wait();
+
+    new GetP4StatementData(&service_, cq_.get(), programInfo);
+    new GetP4CoverageData(&service_, cq_.get(), programInfo);
+    new RecordP4TestgenData(&service_, cq_.get(), programInfo);
+
+    CallData::CallStatus callStatus;
+    void *tag;
+    bool ok, callAgain = false;
+    std::string devId;
+    TestCase testCase;
+    while (true) {
+        callStatus = CallData::CREATE;
+
+        GPR_ASSERT(cq_->Next(&tag, &ok));
+        GPR_ASSERT(ok);
+        do {
+            callStatus = static_cast<CallData*>(tag)->Proceed(coverageMap, devId, testCase, callStatus);
+
+            if (callStatus == CallData::REQ) {
+                std::cout << "Record P4 Coverage of device: " << devId << std::endl;
+                if (coverageMap.count(devId) == 0) {
+                    coverageMap.insert(std::make_pair(devId,
+                                new ConcolicExecutor(*programInfo)));
+                }
+
+                auto* stateMgr = coverageMap.at(devId);
+                callStatus = CallData::ERROR;
+
+                try {
+                    stateMgr->run(testCase);
+                    callStatus = CallData::RET;
+
+                } catch (const Util::CompilerBug &e) {
+                    std::cerr << "Internal compiler error: " << e.what() << std::endl;
+                    std::cerr << "Please submit a bug report with your code." << std::endl;
+
+                } catch (const Util::CompilationError &e) {
+                    std::cerr << "Compilation error: " << e.what() << std::endl;
+
+                } catch (const std::exception &e) {
+                    std::cerr << "Internal error: " << e.what() << std::endl;
+                    std::cerr << "Please submit a bug report with your code." << std::endl;
+                }
+                callAgain = true;
+
+            } else {
+                callAgain = false;
+            }
+        } while (callAgain);
+    }
+}
 
 void Testgen::registerTarget() {
     // Register all available compiler targets.
@@ -87,16 +175,6 @@ int generateAbstractTests(const TestgenOptions &testgenOptions, const ProgramInf
             // command line. For example, --input-branches "1,1".
             symbex.printCurrentTraceAndBranches(std::cerr);
         }
-        throw;
-    }
-    // Emit a performance report, if desired.
-    testBackend->printPerformanceReport(true);
-
-    // Do not print this warning if assertion mode is enabled.
-    if (testBackend->getTestCount() == 0 && !testgenOptions.assertionModeEnabled) {
-        ::warning(
-            "Unable to generate tests with given inputs. Double-check provided options and "
-            "parameters.\n");
     }
     return ::errorCount() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -124,6 +202,32 @@ int Testgen::mainImpl(const IR::P4Program *program) {
     auto seed = Utils::getCurrentSeed();
     if (seed) {
         printFeature("test_info", 4, "============ Program seed %1% =============\n", *seed);
+    }
+
+    if (testgenOptions.interactive) {
+        runServer(programInfo);
+        return EXIT_SUCCESS;
+    }
+
+    if (testgenOptions.pathSelectionPolicy == PathSelectionPolicy::TestCase) {
+        auto *concExec = new ConcolicExecutor(*programInfo);
+        TestCase *testCase = new TestCase();
+        int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
+
+        if (fd < 0) {
+            std::cerr << " Error opening the file " << std::endl;
+        }
+
+        google::protobuf::io::FileInputStream fileInput(fd);
+        fileInput.SetCloseOnDelete( true );
+
+        if (!google::protobuf::TextFormat::Parse(&fileInput, testCase)) {
+            std::cerr << std::endl << "Failed to parse file!" << std::endl;
+        } else {
+            std::cerr << "Read Input File" << std::endl;
+        }
+        concExec->run(*testCase);
+        return EXIT_SUCCESS;
     }
 
     // Need to declare the solver here to ensure its lifetime.

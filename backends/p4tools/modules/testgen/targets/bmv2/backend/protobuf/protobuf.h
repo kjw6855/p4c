@@ -41,7 +41,7 @@ class Protobuf : public TF {
 
     /// Produce a Protobuf test.
     void outputTest(const TestSpec *spec, cstring selectedBranches, size_t testIdx,
-                    float currentCoverage) override;
+                    float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
  private:
     /// Emits the test preamble. This is only done once for all generated tests.
@@ -54,7 +54,7 @@ class Protobuf : public TF {
     /// @param currentCoverage contains statistics  about the current coverage of this test and its
     /// preceding tests.
     void emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_t testIdx,
-                      const std::string &testCase, float currentCoverage);
+                      const std::string &testCase, float currentCoverage, unsigned char* testCoverage, int mapSize);
 
     /// @returns the inja test case template as a string.
     static std::string getTestCaseTemplate();

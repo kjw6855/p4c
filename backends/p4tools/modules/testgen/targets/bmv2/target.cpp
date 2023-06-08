@@ -15,8 +15,10 @@
 #include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/cmd_stepper.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/cmd_visitor.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/constants.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/expr_visitor.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/program_info.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/test_backend.h"
 
@@ -81,6 +83,16 @@ Bmv2V1ModelCmdStepper *Bmv2V1ModelTestgenTarget::getCmdStepperImpl(
 Bmv2V1ModelExprStepper *Bmv2V1ModelTestgenTarget::getExprStepperImpl(
     ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo) const {
     return new Bmv2V1ModelExprStepper(state, solver, programInfo);
+}
+
+Bmv2V1ModelCmdVisitor *Bmv2V1ModelTestgenTarget::getCmdVisitorImpl(
+    ExecutionState &state, const ProgramInfo &programInfo, const TestCase &testCase) const {
+    return new Bmv2V1ModelCmdVisitor(state, programInfo, testCase);
+}
+
+Bmv2V1ModelExprVisitor *Bmv2V1ModelTestgenTarget::getExprVisitorImpl(
+    ExecutionState &state, const ProgramInfo &programInfo, const TestCase &testCase) const {
+    return new Bmv2V1ModelExprVisitor(state, programInfo, testCase);
 }
 
 const ArchSpec Bmv2V1ModelTestgenTarget::ARCH_SPEC =
