@@ -143,10 +143,43 @@ SymbolicExecutor *pickExecutionEngine(const TestgenOptions &testgenOptions,
     return new DepthFirstSearch(solver, *programInfo);
 }
 
-int Testgen::mainImpl(const IR::P4Program *program) {
-    // Get the options and the seed.
-    const auto &testgenOptions = TestgenOptions::get();
+int generateAbstractTests(const TestgenOptions &testgenOptions, const ProgramInfo *programInfo,
+                          SymbolicExecutor &symbex) {
+    // Get the filename of the input file and remove the extension
+    // This assumes that inputFile is not null.
+    auto const inputFile = P4CContext::get().options().file;
+    auto testPath = std::filesystem::path(inputFile.c_str()).stem();
+    // Create the directory, if the directory string is valid and if it does not exist.
+    cstring testDirStr = testgenOptions.outputDir;
+    if (!testDirStr.isNullOrEmpty()) {
+        auto testDir = std::filesystem::path(testDirStr.c_str());
+        std::filesystem::create_directories(testDir);
+        testPath = testDir / testPath;
+    }
+    // Each test back end has a different run function.
+    auto *testBackend = TestgenTarget::getTestBackend(*programInfo, symbex, testPath);
+    // Define how to handle the final state for each test. This is target defined.
+    // We delegate execution to the symbolic executor.
+    auto callBack = [testBackend](auto &&finalState) {
+        return testBackend->run(std::forward<decltype(finalState)>(finalState));
+    };
 
+    try {
+        // Run the symbolic executor with given exploration strategy.
+        symbex.run(callBack);
+    } catch (...) {
+        if (testgenOptions.trackBranches) {
+            // Print list of the selected branches and store all information into
+            // dumpFolder/selectedBranches.txt file.
+            // This printed list could be used for repeat this bug in arguments of --input-branches
+            // command line. For example, --input-branches "1,1".
+            symbex.printCurrentTraceAndBranches(std::cerr);
+        }
+    }
+    return ::errorCount() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+int Testgen::mainImpl(const IR::P4Program *program) {
     // Register all available testgen targets.
     // These are discovered by CMAKE, which fills out the register.h.in file.
     registerTestgenTargets();
@@ -164,31 +197,19 @@ int Testgen::mainImpl(const IR::P4Program *program) {
     // Print basic information for each test.
     enableInformationLogging();
 
-    // Run interactive mode
-    if (testgenOptions.interactive) {
-        runServer(programInfo);
-        return EXIT_SUCCESS;
-    }
-
+    // Get the options and the seed.
+    const auto &testgenOptions = TestgenOptions::get();
     auto seed = Utils::getCurrentSeed();
     if (seed) {
         printFeature("test_info", 4, "============ Program seed %1% =============\n", *seed);
     }
 
-    // Get the filename of the input file and remove the extension
-    // This assumes that inputFile is not null.
-    auto const inputFile = P4CContext::get().options().file;
-    auto testPath = std::filesystem::path(inputFile.c_str()).stem();
-    // Create the directory, if the directory string is valid and if it does not exist.
-    cstring testDirStr = testgenOptions.outputDir;
-    if (!testDirStr.isNullOrEmpty()) {
-        auto testDir = std::filesystem::path(testDirStr.c_str());
-        std::filesystem::create_directories(testDir);
-        testPath = testDir / testPath;
+    if (testgenOptions.interactive) {
+        runServer(programInfo);
+        return EXIT_SUCCESS;
     }
 
-    if (testgenOptions.pathSelectionPolicy ==
-            PathSelectionPolicy::TestCase) {
+    if (testgenOptions.pathSelectionPolicy == PathSelectionPolicy::TestCase) {
         auto *concExec = new ConcolicExecutor(*programInfo);
         TestCase *testCase = new TestCase();
         int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
@@ -206,46 +227,14 @@ int Testgen::mainImpl(const IR::P4Program *program) {
             std::cerr << "Read Input File" << std::endl;
         }
         concExec->run(*testCase);
-
-    } else {
-        // Need to declare the solver here to ensure its lifetime.
-        Z3Solver solver;
-
-        auto *symExec = pickExecutionEngine(testgenOptions, programInfo, solver);
-
-        // Define how to handle the final state for each test. This is target defined.
-        auto *testBackend = TestgenTarget::getTestBackend(*programInfo, *symExec, testPath, seed);
-        // Each test back end has a different run function.
-        // We delegate execution to the symbolic executor.
-        auto callBack = [testBackend](auto &&finalState) {
-            return testBackend->run(std::forward<decltype(finalState)>(finalState));
-        };
-
-        try {
-            // Run the symbolic executor with given exploration strategy.
-            symExec->run(callBack);
-        } catch (...) {
-            if (testgenOptions.trackBranches) {
-                // Print list of the selected branches and store all information into
-                // dumpFolder/selectedBranches.txt file.
-                // This printed list could be used for repeat this bug in arguments of --input-branches
-                // command line. For example, --input-branches "1,1".
-                symExec->printCurrentTraceAndBranches(std::cerr);
-            }
-            throw;
-        }
-        // Emit a performance report, if desired.
-        testBackend->printPerformanceReport(true);
-
-        // Do not print this warning if assertion mode is enabled.
-        if (testBackend->getTestCount() == 0 && !testgenOptions.assertionModeEnabled) {
-            ::warning(
-                    "Unable to generate tests with given inputs. Double-check provided options and "
-                    "parameters.\n");
-        }
+        return EXIT_SUCCESS;
     }
 
-    return ::errorCount() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    // Need to declare the solver here to ensure its lifetime.
+    Z3Solver solver;
+    auto *symbex = pickExecutionEngine(testgenOptions, programInfo, solver);
+
+    return generateAbstractTests(testgenOptions, programInfo, *symbex);
 }
 
 }  // namespace P4Tools::P4Testgen
