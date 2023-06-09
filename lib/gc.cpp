@@ -77,10 +77,12 @@ void *operator new[](std::size_t size) { return gc::operator new(size); }
 void operator delete[](void *p) noexcept { gc::operator delete(p); }
 void operator delete[](void *p, std::size_t /*size*/) noexcept { ::operator delete(p); }
 
+#if 0
 #if HAVE_GC_PRINT_STATS
 /* GC_print_stats is not exported as an API symbol and cannot be used on some systems */
 extern "C" int GC_print_stats;
 #endif /* HAVE_GC_PRINT_STATS */
+#endif
 
 static int gc_logging_level;
 
@@ -98,9 +100,11 @@ void silent(char *, GC_word) {}
 
 void reset_gc_logging() {
     gc_logging_level = Log::Detail::fileLogLevel(__FILE__);
+#if 0
 #if HAVE_GC_PRINT_STATS
     GC_print_stats = gc_logging_level >= 2;  // unfortunately goes directly to stderr!
 #endif                                       /* HAVE_GC_PRINT_STATS */
+#endif
 }
 
 #endif /* HAVE_LIBGC */

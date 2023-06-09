@@ -190,7 +190,7 @@ const ConcolicMethodImpls::ImplList Bmv2Concolic::BMV2_CONCOLIC_METHOD_IMPLS{
     {"*method_checksum",
      {"result", "algo", "data"},
      [](cstring /*concolicMethodName*/, const IR::ConcolicVariable *var,
-        const ExecutionState & /*state*/, const Model &completedModel,
+        const ExecutionState &state, const Model &completedModel,
         ConcolicVariableMap *resolvedConcolicVariables) {
          // Assign arguments to concrete variables and perform type checking.
          const auto *args = var->arguments;
@@ -216,6 +216,12 @@ const ConcolicMethodImpls::ImplList Bmv2Concolic::BMV2_CONCOLIC_METHOD_IMPLS{
          computedResult = computeChecksum(exprList, completedModel, algo, &resolvedExpressions);
          // Behavioral model uses this technique to limit the checksum output.
          computedResult = std::min(computedResult, maxHashInt);
+
+         // XXX: [work-around] Set zero for consecutive pktVar symVars
+         if (const auto *cksumExpr = state.getZeroCksum()) {
+             checksumVarType = cksumExpr->type;
+             computedResult = 0;
+         }
          // Assign a value to the @param result using the computed result
          if (checksumVarType->is<IR::Type_Bits>()) {
              // Overwrite any previous assignment or result.

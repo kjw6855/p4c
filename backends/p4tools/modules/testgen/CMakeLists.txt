@@ -68,6 +68,7 @@ set(
 
   lib/collect_coverable_nodes.cpp
   lib/concolic.cpp
+  lib/visit_concolic.cpp
   lib/continuation.cpp
   lib/execution_state.cpp
   lib/final_state.cpp

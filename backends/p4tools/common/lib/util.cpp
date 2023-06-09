@@ -129,4 +129,87 @@ const IR::Expression *Utils::getValExpr(const std::string& strVal, size_t bitWid
     return baseVar;
 }
 
+const IR::Expression *Utils::removeUnknownVar(const IR::Expression *expr) {
+    if (const auto *symVar = expr->to<IR::SymbolicVariable>()) {
+        // remove unknown symVar (e.g., pktVar) in expr
+        if (symVar->label.startsWith("pktVar"))
+            return nullptr;
+
+        return expr;
+    }
+
+    if (const auto *binary = expr->to<IR::Operation_Binary>()) {
+        if (binary->is<IR::ArrayIndex>()) {
+            return removeUnknownVar(binary->right);
+        }
+
+        const auto *leftExpr = removeUnknownVar(binary->left);
+        const auto *rightExpr = removeUnknownVar(binary->right);
+        if (leftExpr != nullptr) {
+            if (rightExpr != nullptr) {
+                auto bitWidth = leftExpr->type->width_bits() +
+                    rightExpr->type->width_bits();
+
+                const auto *newExpr = new IR::Concat(IR::getBitType(bitWidth), leftExpr, rightExpr);
+
+                return P4::optimizeExpression(newExpr);
+
+            } else {
+                return leftExpr;
+            }
+        } else if (rightExpr != nullptr) {
+            return rightExpr;
+        }
+
+        return nullptr;
+    }
+
+    return expr;
+}
+
+const IR::Constant *Utils::getZeroCksum(const IR::Expression *expr, int zeroLen, bool init) {
+    if (const auto *symVar = expr->to<IR::SymbolicVariable>()) {
+        if (symVar->label.startsWith("*method_checksum")) {
+            if (init)
+                return IR::getConstant(IR::getBitType(8), 0);
+            else if (zeroLen < 88)
+                return IR::getConstant(IR::getBitType(16), 0);
+        }
+
+        return nullptr;
+    }
+
+    if (const auto *constVal = expr->to<IR::Constant>()) {
+        if (constVal->value == 0) {
+            auto bitWidth = constVal->type->width_bits() + zeroLen;
+            return IR::getConstant(IR::getBitType(bitWidth), 1);
+        }
+
+        return nullptr;
+    }
+
+    if (const auto *binary = expr->to<IR::Operation_Binary>()) {
+        if (binary->is<IR::ArrayIndex>()) {
+            return getZeroCksum(binary->right, zeroLen, init);
+        }
+
+        auto *retVal = getZeroCksum(binary->right, zeroLen, init);
+        if (retVal == nullptr) {
+            // N/A
+            return nullptr;
+
+        } else if (retVal->value == 0) {
+            // reached chksum
+            return retVal;
+
+        } else {
+            // not yet
+            return getZeroCksum(binary->left, retVal->type->width_bits(), false);
+        }
+
+    }
+
+    return nullptr;
+}
+
 }  // namespace P4Tools

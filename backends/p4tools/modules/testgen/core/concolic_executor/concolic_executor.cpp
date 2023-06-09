@@ -20,9 +20,11 @@
 #include "lib/timer.h"
 #include "midend/coverage.h"
 
+#include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
+#include "backends/p4tools/modules/testgen/lib/visit_concolic.h"
 
 namespace P4Tools {
 
@@ -153,22 +155,44 @@ boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
     else
         return boost::none;
 
-    const auto* outPacketExpr = executionState.get().getPacketBuffer();
+    const auto* outPacketOrigExpr = executionState.get().getPacketBuffer();
 
-#if 0
-    /* TODO */
-    auto concolicResolver =
-        VisitConcolicResolver(model, *executionState, programInfo.getVisitConcolicMethodImpls());
+    const IR::Expression* outPacketExpr = outPacketOrigExpr;
+    if (dynamic_cast<const IR::Concat*>(outPacketOrigExpr) != nullptr) {
+        const auto *concat = outPacketOrigExpr->checkedTo<IR::Concat>();
+        outPacketExpr = Utils::removeUnknownVar(concat);
+    }
+
+    executionState.get().setZeroCksum(Utils::getZeroCksum(outPacketExpr, 0, true));
+
+    auto concolicResolver = VisitConcolicResolver(*model,
+            executionState.get(), *programInfo.getConcolicMethodImpls());
     outPacketExpr->apply(concolicResolver);
-    const auto* outPacket = model->evaluate(outPacketExpr);
 
-    const auto* outEvalMask = Taint::buildTaintMask(executionState->getSymbolicEnv().getInternalMap(),
-                                                    model, outPacketExpr);
+    for (const auto *assert : executionState.get().getPathConstraint()) {
+        CHECK_NULL(assert);
+        assert->apply(concolicResolver);
+    }
+    const ConcolicVariableMap *resolvedConcolicVariables =
+        concolicResolver.getResolvedConcolicVariables();
+
+    auto concolicOptState = finalState->computeConcolicState(*resolvedConcolicVariables);
+    auto replacedState = concolicOptState.value().get();
+    const auto *newExecState = replacedState.getExecutionState();
+    outPacketExpr = newExecState->getPacketBuffer();
+    if (dynamic_cast<const IR::Concat*>(outPacketExpr) != nullptr) {
+        const auto *concat = outPacketExpr->checkedTo<IR::Concat>();
+        outPacketExpr = Utils::removeUnknownVar(concat);
+    }
+
+
+    const auto *completedModel = replacedState.getCompletedModel();
+    const auto* outPacket = completedModel->evaluate(outPacketExpr);
+
+    const auto* outEvalMask = Taint::buildTaintMask(newExecState->getSymbolicEnv().getInternalMap(),
+                                                    completedModel, outPacketExpr);
 
     return Packet(outPortInt, outPacket, outEvalMask);
-#endif
-
-    return boost::none;
 }
 
 }  // namespace P4Testgen

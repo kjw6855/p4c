@@ -34,7 +34,7 @@ class FinalVisitState {
     /// Complete the model according to target-specific completion criteria.
     /// We first complete (this means we fill all the variables that have not been bound).
     /// Then we evaluate the model (we assign values to the variables that have been bound).
-    static Model &completeModel(const ExecutionState &finalState,
+    static Model &completeModel(const ExecutionState &finalState, const Model *model,
                                 bool postProcess = true);
 
  public:

@@ -24,7 +24,7 @@ namespace P4Tools::P4Testgen {
 
 FinalVisitState::FinalVisitState(const ExecutionState &finalState)
     : state(finalState),
-      completedModel(completeModel(finalState)) {
+      completedModel(completeModel(finalState, new Model(*new SymbolicMapping()))) {
     for (const auto &event : finalState.getTrace()) {
         trace.emplace_back(*event.get().evaluate(completedModel));
     }
@@ -54,10 +54,8 @@ void FinalVisitState::calculatePayload(const ExecutionState &executionState, Mod
     }
 }
 
-Model &FinalVisitState::completeModel(const ExecutionState &finalState,
+Model &FinalVisitState::completeModel(const ExecutionState &finalState, const Model *model,
                                  bool postProcess) {
-    // TODO
-    auto *model = new Model(*new SymbolicMapping());
 
     // Complete the model based on the symbolic environment.
     auto *completedModel = finalState.getSymbolicEnv().complete(*model);
@@ -89,10 +87,13 @@ std::optional<std::reference_wrapper<const FinalVisitState>> FinalVisitState::co
     }
     std::vector<const Constraint *> asserts = state.get().getPathConstraint();
 
+    auto *symbolicMaps = new SymbolicMapping();
+
     for (const auto &resolvedConcolicVariable : resolvedConcolicVariables) {
         const auto &concolicVariable = resolvedConcolicVariable.first;
         const auto *concolicAssignment = resolvedConcolicVariable.second;
         const IR::Expression *pathConstraint = nullptr;
+
         // We need to differentiate between state variables and expressions here.
         if (std::holds_alternative<IR::ConcolicVariable>(concolicVariable)) {
             pathConstraint = new IR::Equ(std::get<IR::ConcolicVariable>(concolicVariable).clone(),
@@ -104,7 +105,16 @@ std::optional<std::reference_wrapper<const FinalVisitState>> FinalVisitState::co
         CHECK_NULL(pathConstraint);
         pathConstraint = state.get().getSymbolicEnv().subst(pathConstraint);
         pathConstraint = P4::optimizeExpression(pathConstraint);
-        asserts.push_back(pathConstraint);
+        // Put SymbolicVariables here!!!
+        if (dynamic_cast<const IR::Literal*>(pathConstraint) == nullptr &&
+                dynamic_cast<const IR::Equ*>(pathConstraint) != nullptr) {
+            if (std::holds_alternative<IR::ConcolicVariable>(concolicVariable)) {
+                symbolicMaps->emplace(std::get<IR::ConcolicVariable>(concolicVariable).clone(),
+                        concolicAssignment);
+            }
+        }
+
+        //asserts.push_back(pathConstraint);
     }
 #if 0
     auto solverResult = solver.get().checkSat(asserts);
@@ -119,7 +129,7 @@ std::optional<std::reference_wrapper<const FinalVisitState>> FinalVisitState::co
     }
 #endif
 
-    auto &model = completeModel(state, false);
+    auto &model = completeModel(state, new Model(*symbolicMaps), false);
     //auto &model = completeModel(state, new Model(solver.get().getSymbolicMapping()), false);
     /// Transfer any derived variables from that are missing  in this model.
     /// Do NOT update any variables that already exist.

@@ -121,6 +121,8 @@ class ExecutionState : public AbstractExecutionState {
     /// State that is needed to track reachability of statements given a query.
     ReachabilityEngineState *reachabilityEngineState = nullptr;
 
+    const IR::Constant *zeroCksum = nullptr;
+
     /* =========================================================================================
      *  Accessors
      * ========================================================================================= */
@@ -145,6 +147,9 @@ class ExecutionState : public AbstractExecutionState {
     /// successor. These branch decision identifiers are then used by track branches and
     /// selected (input) branches features.
     void pushBranchDecision(uint64_t);
+
+    const IR::Constant *getZeroCksum() const { return zeroCksum; }
+    void setZeroCksum(const IR::Constant *cksum) { zeroCksum = cksum; }
 
     /// @returns the next command to be evaluated, if any.
     /// @returns std::nullopt if the current body is empty.
