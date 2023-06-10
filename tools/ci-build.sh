@@ -31,6 +31,8 @@ P4C_DIR=$(readlink -f ${THIS_DIR}/..)
 # Whether to build the P4Tools back end and platform.
 : "${ENABLE_TEST_TOOLS:=OFF}"
 
+: "${CMAKE_EXPORT_COMPILE_COMMANDS=OFF}"
+
 # Whether to treat warnings as errors.
 : "${ENABLE_WERROR:=ON}"
 # Compile with Clang compiler
@@ -231,6 +233,8 @@ CMAKE_FLAGS+="-DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} "
 CMAKE_FLAGS+="-DBUILD_STATIC_RELEASE=${BUILD_STATIC_RELEASE} "
 # Toggle the installation of the tools back end.
 CMAKE_FLAGS+="-DENABLE_TEST_TOOLS=${ENABLE_TEST_TOOLS} "
+
+CMAKE_FLAGS+="-DCMAKE_EXPORT_COMPILE_COMMANDS=${CMAKE_EXPORT_COMPILE_COMMANDS} "
 # RELEASE should be default, but we want to make sure.
 CMAKE_FLAGS+="-DCMAKE_BUILD_TYPE=RELEASE "
 # Treat warnings as errors.

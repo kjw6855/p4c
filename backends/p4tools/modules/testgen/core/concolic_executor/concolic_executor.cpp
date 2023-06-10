@@ -73,8 +73,8 @@ ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo)
     : programInfo(programInfo),
       executionState(ExecutionState::create(programInfo.program)),
       allStatements(programInfo.getCoverableNodes()),
-      evaluator(programInfo),
-      statementBitmapSize(allStatements.size()) {
+      statementBitmapSize(allStatements.size()),
+      evaluator(programInfo) {
 
     int allocLen = (statementBitmapSize / 8) + 1;
     statementBitmap = (unsigned char *)malloc(allocLen);

@@ -73,14 +73,14 @@ class GetP4StatementData : public CallData {
             std::string &devId, TestCase &testCase, CallStatus callStatus) override;
 
  private:
-    const ProgramInfo* programInfo_;
     P4FuzzGuide::AsyncService *service_;
-    CallStatus status_;  // The current serving state.
     ServerCompletionQueue *cq_;
+    ServerAsyncResponseWriter<P4StatementReply> responder_;
+    CallStatus status_;  // The current serving state.
+    const ProgramInfo* programInfo_;
     ServerContext ctx_;
     P4StatementRequest request_;
     P4StatementReply reply_;
-    ServerAsyncResponseWriter<P4StatementReply> responder_;
 };
 
 class GetP4CoverageData : public CallData {
@@ -96,14 +96,14 @@ class GetP4CoverageData : public CallData {
             std::string &devId, TestCase &testCase, CallStatus callStatus) override;
 
  private:
-    const ProgramInfo* programInfo_;
     P4FuzzGuide::AsyncService *service_;
-    CallStatus status_;  // The current serving state.
     ServerCompletionQueue *cq_;
+    ServerAsyncResponseWriter<P4CoverageReply> responder_;
+    CallStatus status_;  // The current serving state.
+    const ProgramInfo* programInfo_;
     ServerContext ctx_;
     P4CoverageRequest request_;
     P4CoverageReply reply_;
-    ServerAsyncResponseWriter<P4CoverageReply> responder_;
 };
 
 class RecordP4TestgenData : public CallData {
@@ -119,14 +119,14 @@ class RecordP4TestgenData : public CallData {
             std::string &devId, TestCase &testCase, CallStatus callStatus) override;
 
  private:
-    const ProgramInfo* programInfo_;
     P4FuzzGuide::AsyncService *service_;
-    CallStatus status_;  // The current serving state.
     ServerCompletionQueue *cq_;
+    ServerAsyncResponseWriter<P4CoverageReply> responder_;
+    CallStatus status_;  // The current serving state.
+    const ProgramInfo* programInfo_;
     ServerContext ctx_;
     P4CoverageRequest request_;
     P4CoverageReply reply_;
-    ServerAsyncResponseWriter<P4CoverageReply> responder_;
 };
 
 } // namespace P4Tools::P4Testgen
