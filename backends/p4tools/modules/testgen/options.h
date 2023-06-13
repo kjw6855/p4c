@@ -80,6 +80,10 @@ class TestgenOptions : public AbstractP4cToolOptions {
     /// Multiple options are possible. Currently supported: STATEMENTS, TABLE_ENTRIES.
     P4::Coverage::CoverageOptions coverageOptions;
 
+    int maxPortNo = 0;
+
+    std::vector<int> allowPorts;
+
     const char *getIncludePath() override;
 
  private:

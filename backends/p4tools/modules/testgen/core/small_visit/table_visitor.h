@@ -26,7 +26,7 @@ class TableVisitor {
     /// The table for this particular visitor.
     const IR::P4Table *table;
 
-    const TestCase& testCase;
+    TestCase& testCase;
 
     /// Basic table properties that are set when initializing the TableVisitor.
     TableUtils::TableProperties properties;
@@ -155,7 +155,7 @@ class TableVisitor {
     /// such as annotations, action profiles/selectors that may alter semantics, too.
     bool eval();
 
-    explicit TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, const TestCase &testCase);
+    explicit TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, TestCase &testCase);
 
     virtual ~TableVisitor() = default;
 };

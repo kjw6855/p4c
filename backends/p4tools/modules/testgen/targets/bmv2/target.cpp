@@ -86,12 +86,12 @@ Bmv2V1ModelExprStepper *Bmv2V1ModelTestgenTarget::getExprStepperImpl(
 }
 
 Bmv2V1ModelCmdVisitor *Bmv2V1ModelTestgenTarget::getCmdVisitorImpl(
-    ExecutionState &state, const ProgramInfo &programInfo, const TestCase &testCase) const {
+    ExecutionState &state, const ProgramInfo &programInfo, TestCase &testCase) const {
     return new Bmv2V1ModelCmdVisitor(state, programInfo, testCase);
 }
 
 Bmv2V1ModelExprVisitor *Bmv2V1ModelTestgenTarget::getExprVisitorImpl(
-    ExecutionState &state, const ProgramInfo &programInfo, const TestCase &testCase) const {
+    ExecutionState &state, const ProgramInfo &programInfo, TestCase &testCase) const {
     return new Bmv2V1ModelExprVisitor(state, programInfo, testCase);
 }
 

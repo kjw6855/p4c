@@ -128,7 +128,7 @@ class ExprVisitor : public AbstractVisitor {
     ExprVisitor &operator=(ExprVisitor &&) = delete;
 
     ExprVisitor(ExecutionState &state, const ProgramInfo &programInfo,
-            const TestCase &testCase);
+            TestCase &testCase);
 
     bool preorder(const IR::BoolLiteral *boolLiteral) override;
     bool preorder(const IR::Constant *constant) override;

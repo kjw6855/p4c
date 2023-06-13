@@ -45,8 +45,8 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             P4CoverageReply* rep) override;
 
  private:
-    std::map<std::string, ConcolicExecutor*> coverage_map;
-    //std::map<std::string, SymbolicExecutor*> coverage_map;
+    std::map<std::string, ConcolicExecutor*> coverageMap;
+    //std::map<std::string, SymbolicExecutor*> coverageMap;
     const ProgramInfo* programInfo_;
 
     //std::string hexToByteString(const std::string &hex);

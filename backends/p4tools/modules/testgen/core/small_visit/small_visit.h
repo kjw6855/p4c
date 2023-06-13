@@ -52,7 +52,7 @@ class SmallVisitEvaluator {
                                      const IR::Node *node);
 
  public:
-    Result step(ExecutionState &state, const TestCase& testCase);
+    Result step(ExecutionState &state, TestCase& testCase);
 
     SmallVisitEvaluator(const ProgramInfo &programInfo);
 };

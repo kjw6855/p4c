@@ -66,18 +66,29 @@ Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
     auto allNodes = programInfo_->getCoverableNodes();
     std::cout << "Get P4 Coverage of device: " << devId << std::endl;
 
-    if (coverage_map.count(devId) == 0) {
-        rep->set_stmt_cov_bitmap("");
-        rep->set_stmt_cov_size(allNodes.size());
-        rep->set_action_cov_bitmap("");
-        rep->set_action_cov_size(0);
+    auto* newTestCase = new TestCase(req->test_case());
+    std::string stmtBitmap, actionBitmap;
+    int stmtBitmapSize, actionBitmapSize;
+    if (coverageMap.count(devId) == 0) {
+        stmtBitmap = "";
+        stmtBitmapSize = allNodes.size();
+        actionBitmap = "";
+        actionBitmapSize = 0;
     } else {
-        auto* stateMgr = coverage_map.at(devId);
-        rep->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
-        rep->set_stmt_cov_size(stateMgr->statementBitmapSize);
-        rep->set_action_cov_bitmap("");
-        rep->set_action_cov_size(1);
+        auto* stateMgr = coverageMap.at(devId);
+        stmtBitmap = stateMgr->getStatementBitmapStr();
+        stmtBitmapSize = stateMgr->statementBitmapSize;
+        actionBitmap = "";
+        actionBitmapSize = 1;
     }
+
+    newTestCase->set_stmt_cov_bitmap(stmtBitmap);
+    newTestCase->set_stmt_cov_size(stmtBitmapSize);
+    newTestCase->set_action_cov_bitmap(actionBitmap);
+    newTestCase->set_action_cov_size(actionBitmapSize);
+
+    rep->set_allocated_test_case(newTestCase);
+
     return Status::OK;
 }
 
@@ -89,15 +100,22 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     std::cout << "Record P4 Coverage of device: " << devId << std::endl;
 
     auto allNodes = programInfo_->getCoverableNodes();
-    if (coverage_map.count(devId) == 0) {
-        coverage_map.insert(std::make_pair(devId,
+    if (coverageMap.count(devId) == 0) {
+        coverageMap.insert(std::make_pair(devId,
                     new ConcolicExecutor(*programInfo_)));
     }
 
-    auto* stateMgr = coverage_map.at(devId);
+    auto *stateMgr = coverageMap.at(devId);
+    auto *newTestCase = new TestCase(req->test_case());
+    for (auto &entity : *newTestCase->mutable_entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        entity.mutable_table_entry()->set_is_valid_entry(0);
+    }
 
     try {
-        stateMgr->run(req->test_case());
+        stateMgr->run(*newTestCase);
 #if 0
         auto testPath = std::filesystem::path("/tmp/p4testgen_out/tmp").stem();
         auto *testBackend = TestgenTarget::getTestBackend(*programInfo_, *stateMgr, testPath, Utils::getCurrentSeed());
@@ -122,7 +140,11 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
         return Status::CANCELLED;
     }
 
-    auto* newTestCase = new TestCase(req->test_case());
+    newTestCase->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
+    newTestCase->set_stmt_cov_size(stateMgr->statementBitmapSize);
+    newTestCase->set_action_cov_bitmap("");
+    newTestCase->set_action_cov_size(1);
+
     // TODO: multiple output Packets
     auto outputPacketOpt = stateMgr->getOutputPacket();
     newTestCase->clear_expected_output_packet();
@@ -138,10 +160,6 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     }
 
     rep->set_allocated_test_case(newTestCase);
-    rep->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
-    rep->set_stmt_cov_size(stateMgr->statementBitmapSize);
-    rep->set_action_cov_bitmap("");
-    rep->set_action_cov_size(1);
 
     return Status::OK;
 }
@@ -190,18 +208,28 @@ CallData::CallStatus GetP4CoverageData::Proceed(std::map<std::string, ConcolicEx
             auto allNodes = programInfo_->getCoverableNodes();
             std::cout << "Get P4 Coverage of device: " << devId << std::endl;
 
+            auto* newTestCase = new TestCase(request_.test_case());
+            std::string stmtBitmap, actionBitmap;
+            int stmtBitmapSize, actionBitmapSize;
             if (coverageMap.count(devId) == 0) {
-                reply_.set_stmt_cov_bitmap("");
-                reply_.set_stmt_cov_size(allNodes.size());
-                reply_.set_action_cov_bitmap("");
-                reply_.set_action_cov_size(0);
+                stmtBitmap = "";
+                stmtBitmapSize = allNodes.size();
+                actionBitmap = "";
+                actionBitmapSize = 0;
             } else {
                 auto* stateMgr = coverageMap.at(devId);
-                reply_.set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
-                reply_.set_stmt_cov_size(stateMgr->statementBitmapSize);
-                reply_.set_action_cov_bitmap("");
-                reply_.set_action_cov_size(1);
+                stmtBitmap = stateMgr->getStatementBitmapStr();
+                stmtBitmapSize = stateMgr->statementBitmapSize;
+                actionBitmap = "";
+                actionBitmapSize = 1;
             }
+
+            newTestCase->set_stmt_cov_bitmap(stmtBitmap);
+            newTestCase->set_stmt_cov_size(stmtBitmapSize);
+            newTestCase->set_action_cov_bitmap(actionBitmap);
+            newTestCase->set_action_cov_size(actionBitmapSize);
+
+            reply_.set_allocated_test_case(newTestCase);
             status_ = CallData::FINISH;
             responder_.Finish(reply_, Status::OK, this);
             break;
@@ -229,6 +257,12 @@ CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, Concolic
             devId = request_.device_id();
             status_ = CallData::REQ;
             testCase = request_.test_case();
+            for (auto &entity : *testCase.mutable_entities()) {
+                if (!entity.has_table_entry())
+                    continue;
+
+                entity.mutable_table_entry()->set_is_valid_entry(0);
+            }
             break;
         }
         case CallData::REQ:
@@ -245,6 +279,11 @@ CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, Concolic
         {
             auto* stateMgr = coverageMap.at(devId);
             auto* newTestCase = new TestCase(testCase);
+            newTestCase->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
+            newTestCase->set_stmt_cov_size(stateMgr->statementBitmapSize);
+            newTestCase->set_action_cov_bitmap("");
+            newTestCase->set_action_cov_size(1);
+
             // TODO: multiple output Packets
             auto outputPacketOpt = stateMgr->getOutputPacket();
             newTestCase->clear_expected_output_packet();
@@ -260,11 +299,6 @@ CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, Concolic
             }
 
             reply_.set_allocated_test_case(newTestCase);
-            reply_.set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
-            reply_.set_stmt_cov_size(stateMgr->statementBitmapSize);
-            reply_.set_action_cov_bitmap("");
-            reply_.set_action_cov_size(1);
-
             status_ = CallData::FINISH;
             responder_.Finish(reply_, Status::OK, this);
             break;

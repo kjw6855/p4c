@@ -41,7 +41,7 @@
 namespace P4Tools::P4Testgen {
 
 CmdVisitor::CmdVisitor(ExecutionState &state,
-                       const ProgramInfo &programInfo, const TestCase &testCase)
+                       const ProgramInfo &programInfo, TestCase &testCase)
     : AbstractVisitor(state, programInfo, testCase) {}
 
 bool CmdVisitor::preorder(const IR::AssignmentStatement *assign) {

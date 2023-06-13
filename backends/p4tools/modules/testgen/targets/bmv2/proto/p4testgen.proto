@@ -9,7 +9,6 @@ import "p4/v1/p4runtime.proto";
 service P4FuzzGuide {
     rpc GetP4Coverage(P4CoverageRequest) returns (P4CoverageReply) {}
     rpc RecordP4Testgen(P4CoverageRequest) returns (P4CoverageReply) {}
-
     rpc GetP4Statement(P4StatementRequest) returns (P4StatementReply) {}
 }
 
@@ -20,10 +19,6 @@ message P4CoverageRequest {
 
 message P4CoverageReply {
     TestCase test_case = 1;
-    bytes stmt_cov_bitmap = 2;
-    int32 stmt_cov_size = 3;
-    bytes action_cov_bitmap = 4;
-    int32 action_cov_size = 5;
 }
 
 message P4StatementRequest {
@@ -63,4 +58,6 @@ message TestCase {
     repeated string metadata = 5;
     bytes stmt_cov_bitmap = 6;
     int32 stmt_cov_size = 7;
+    bytes action_cov_bitmap = 8;
+    int32 action_cov_size = 9;
 }

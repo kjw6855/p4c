@@ -43,7 +43,7 @@ class AbstractVisitor : public Inspector {
     bool preorder(const IR::Node *) override;
 
     AbstractVisitor(ExecutionState &state, const ProgramInfo &programInfo,
-            const TestCase &testCase);
+            TestCase &testCase);
 
  protected:
     /// Target-specific information about the P4 program being evaluated.
@@ -52,7 +52,7 @@ class AbstractVisitor : public Inspector {
     /// The state being evaluated.
     ExecutionState &state;
 
-    const TestCase &testCase;
+    TestCase &testCase;
 
     /// The output of the evaluation.
     Result result;

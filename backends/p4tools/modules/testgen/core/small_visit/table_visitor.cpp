@@ -160,6 +160,17 @@ const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::Table
                 idx, keys->keyElements.size());
         const auto* key = keys->keyElements.at(idx);
 
+        const auto *nameAnnot = key->getAnnotation("name");
+        if (nameAnnot != nullptr) {
+            if (nameAnnot->getName() != match.field_name()) {
+                std::cout << "** Different match name: "
+                    << match.field_name() << " (testCase) vs. "
+                    << nameAnnot->getName() << " (table)"
+                    << std::endl;
+                return nullptr;
+            }
+        }
+
         const IR::Expression* keyExpr = key->expression;
         const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
         auto keyWidth = keyType->width_bits();
@@ -398,26 +409,26 @@ void TableVisitor::evalTableControlEntries(
     BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
 
     // TODO: sort entries in order of priority
-    for (const auto& entity : testCase.entities()) {
+    for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
 
-        const auto entry = entity.table_entry();
-        if (entry.table_name() != properties.tableName) {
+        auto *entry = entity.mutable_table_entry();
+        if (entry->table_name() != properties.tableName) {
             std::cout << "Different table name: "
-                << entry.table_name() << " (testCase) vs. "
+                << entry->table_name() << " (testCase) vs. "
                 << properties.tableName << " (table)"
                 << std::endl;
             continue;
         }
 
         /* XXX: NoAction? */
-        if (!entry.has_action())
+        if (!entry->has_action())
             continue;
 
         auto &nextState = visitor->state.clone();
         bool found = false;
-        const auto& p4v1Action = entry.action().action();
+        const auto& p4v1Action = entry->action().action();
         for (size_t idx = 0; idx < tableActionList.size(); idx++) {
             const auto* action = tableActionList.at(idx);
             const auto* tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
@@ -439,6 +450,7 @@ void TableVisitor::evalTableControlEntries(
             auto* arguments = new IR::Vector<IR::Argument>();
             std::vector<ActionArg> ctrlPlaneArgs;
             for (auto& param : p4v1Action.params()) {
+                // TODO: check param_name comparison
                 size_t argIdx = (size_t)(param.param_id() - 1);
                 BUG_CHECK(argIdx < actionType->parameters->size(),
                         "given argIdx %1% is out of size %2%",
@@ -473,11 +485,14 @@ void TableVisitor::evalTableControlEntries(
             break;
         }
 
-        BUG_CHECK(found, "P4 Action is not found!");
-
-        // XXX: should I put TraceEvent::Generic(tableStream.str())?
-        const IR::Expression* hitCondition = computeHitFromTestCase(entry);
-        visitor->result->emplace_back(hitCondition, visitor->state, nextState);
+        if (found) {
+            // XXX: should I put TraceEvent::Generic(tableStream.str())?
+            const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
+            if (hitCondition != nullptr) {
+                visitor->result->emplace_back(hitCondition, visitor->state, nextState);
+                entry->set_is_valid_entry(1);
+            }
+        }
     }
 }
 
@@ -668,7 +683,7 @@ bool TableVisitor::eval() {
     return false;
 }
 
-TableVisitor::TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, const TestCase &testCase)
+TableVisitor::TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, TestCase &testCase)
     : visitor(visitor), table(table), testCase(testCase) {
     properties.tableName = table->controlPlaneName();
 }

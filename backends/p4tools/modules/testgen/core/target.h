@@ -47,10 +47,10 @@ class TestgenTarget : public Target {
                                        const ProgramInfo &programInfo);
 
     static CmdVisitor *getCmdVisitor(ExecutionState &state,
-                                       const ProgramInfo &programInfo, const TestCase &testCase);
+                                       const ProgramInfo &programInfo, TestCase &testCase);
 
     static ExprVisitor *getExprVisitor(ExecutionState &state,
-                                       const ProgramInfo &programInfo, const TestCase &testCase);
+                                       const ProgramInfo &programInfo, TestCase &testCase);
 
     /// A vector that maps the architecture parameters of each pipe to the corresponding
     /// global architecture variables. For example, this map specifies which parameter of each pipe
@@ -82,11 +82,11 @@ class TestgenTarget : public Target {
 
     /// @see getCmdStepper.
     virtual CmdVisitor *getCmdVisitorImpl(ExecutionState &state,
-                                          const ProgramInfo &programInfo, const TestCase &testCase) const = 0;
+                                          const ProgramInfo &programInfo, TestCase &testCase) const = 0;
 
     /// @see getExprVisitor.
     virtual ExprVisitor *getExprVisitorImpl(ExecutionState &state,
-                                            const ProgramInfo &programInfo, const TestCase &testCase) const = 0;
+                                            const ProgramInfo &programInfo, TestCase &testCase) const = 0;
 
     /// @see getArchSpec
     [[nodiscard]] virtual const ArchSpec *getArchSpecImpl() const = 0;

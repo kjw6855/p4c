@@ -160,7 +160,14 @@ std::vector<Continuation::Command> Bmv2V1ModelProgramInfo::processDeclaration(
         if (TestgenOptions::get().testBackend == "PTF") {
             /// Set the restriction on the output port,
             /// this is necessary since ptf tests use ports from 0 to 7
-            cmds.emplace_back(Continuation::Guard(getPortConstraint(getTargetOutputPortVar())));
+            cmds.emplace_back(Continuation::Guard(getOutPortConstraint(getTargetOutputPortVar(),
+                            0, 8, TestgenOptions::get().allowPorts)));
+
+        } else if (TestgenOptions::get().maxPortNo > 0) {
+            cmds.emplace_back(Continuation::Guard(getInPortConstraint(getTargetInputPortVar(),
+                            1, TestgenOptions::get().maxPortNo, TestgenOptions::get().allowPorts)));
+            cmds.emplace_back(Continuation::Guard(getOutPortConstraint(getTargetOutputPortVar(),
+                            1, TestgenOptions::get().maxPortNo, TestgenOptions::get().allowPorts)));
         }
         // TODO: We have not implemented multi cast yet.
         // Drop the packet if the multicast group is set.
@@ -192,10 +199,35 @@ const IR::StateVariable &Bmv2V1ModelProgramInfo::getTargetInputPortVar() const {
                                                  "ingress_port"));
 }
 
-const IR::Expression *Bmv2V1ModelProgramInfo::getPortConstraint(const IR::StateVariable &portVar) {
+const IR::Expression *Bmv2V1ModelProgramInfo::getOutPortConstraint(const IR::StateVariable &portVar,
+        int minPortNo, int maxPortNo, std::vector<int> allowPorts) {
     const IR::Operation_Binary *portConstraint =
         new IR::LOr(new IR::Equ(portVar, new IR::Constant(portVar->type, BMv2Constants::DROP_PORT)),
-                    new IR::Lss(portVar, new IR::Constant(portVar->type, 8)));
+                    new IR::LAnd(
+                        new IR::Geq(portVar, new IR::Constant(portVar->type, minPortNo)),
+                        new IR::Lss(portVar, new IR::Constant(portVar->type, maxPortNo))));
+
+    for (size_t i = 0; i < allowPorts.size(); i++) {
+        portConstraint = new IR::LOr(new IR::Equ(portVar, new IR::Constant(portVar->type, allowPorts[i])),
+                portConstraint);
+    }
+
+    return portConstraint;
+}
+
+const IR::Expression *Bmv2V1ModelProgramInfo::getInPortConstraint(const IR::StateVariable &portVar,
+        int minPortNo, int maxPortNo, std::vector<int> allowPorts) {
+    const IR::Operation_Binary *portConstraint =
+        new IR::LAnd(new IR::Neq(portVar, new IR::Constant(portVar->type, BMv2Constants::DROP_PORT)),
+                    new IR::LAnd(
+                        new IR::Geq(portVar, new IR::Constant(portVar->type, minPortNo)),
+                        new IR::Lss(portVar, new IR::Constant(portVar->type, maxPortNo))));
+
+    for (size_t i = 0; i < allowPorts.size(); i++) {
+        portConstraint = new IR::LOr(new IR::Equ(portVar, new IR::Constant(portVar->type, allowPorts[i])),
+                portConstraint);
+    }
+
     return portConstraint;
 }
 

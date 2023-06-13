@@ -30,7 +30,7 @@ namespace P4Tools {
 
 namespace P4Testgen {
 
-void ConcolicExecutor::run(const TestCase& testCase) {
+void ConcolicExecutor::run(TestCase& testCase) {
     executionState = ExecutionState::create(programInfo.program);
 
     while (!executionState.get().isTerminal()) {

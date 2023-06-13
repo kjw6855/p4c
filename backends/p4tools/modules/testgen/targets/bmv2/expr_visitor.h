@@ -40,7 +40,7 @@ class Bmv2V1ModelExprVisitor : public ExprVisitor {
 
  public:
     Bmv2V1ModelExprVisitor(ExecutionState &state,
-                           const ProgramInfo &programInfo, const TestCase &testCase);
+                           const ProgramInfo &programInfo, TestCase &testCase);
 
     void evalExternMethodCall(const IR::MethodCallExpression *call, const IR::Expression *receiver,
                               IR::ID name, const IR::Vector<IR::Argument> *args,

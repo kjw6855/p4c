@@ -56,7 +56,11 @@ class Bmv2V1ModelProgramInfo : public ProgramInfo {
     [[nodiscard]] const IR::StateVariable &getTargetInputPortVar() const override;
 
     /// @returns the constraint expression for a given port variable.
-    static const IR::Expression *getPortConstraint(const IR::StateVariable &portVar);
+    static const IR::Expression *getInPortConstraint(const IR::StateVariable &portVar,
+                                                   int minPortNo, int maxPortNo, std::vector<int> allowPorts);
+
+    static const IR::Expression *getOutPortConstraint(const IR::StateVariable &portVar,
+                                                   int minPortNo, int maxPortNo, std::vector<int> allowPorts);
 
     [[nodiscard]] const IR::StateVariable &getTargetOutputPortVar() const override;
 

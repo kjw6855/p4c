@@ -32,14 +32,14 @@
 namespace P4Tools::P4Testgen::Bmv2 {
 
 Bmv2V1ModelCmdVisitor::Bmv2V1ModelCmdVisitor(ExecutionState &state,
-                                             const ProgramInfo &programInfo, const TestCase &testCase)
+                                             const ProgramInfo &programInfo, TestCase &testCase)
     : CmdVisitor(state, programInfo, testCase) {}
 
 const Bmv2V1ModelProgramInfo &Bmv2V1ModelCmdVisitor::getProgramInfo() const {
     return *CmdVisitor::getProgramInfo().checkedTo<Bmv2V1ModelProgramInfo>();
 }
 
-void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextState, const TestCase& testCase) const {
+void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextState, TestCase& testCase) const {
     // Associate intrinsic metadata with the packet. The input packet is prefixed with
     // ingress intrinsic metadata and port metadata.
     //

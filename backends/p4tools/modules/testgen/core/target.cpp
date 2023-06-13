@@ -60,12 +60,12 @@ CmdStepper *TestgenTarget::getCmdStepper(ExecutionState &state, AbstractSolver &
 }
 
 ExprVisitor *TestgenTarget::getExprVisitor(ExecutionState &state,
-                                         const ProgramInfo &programInfo, const TestCase &testCase) {
+                                         const ProgramInfo &programInfo, TestCase &testCase) {
     return get().getExprVisitorImpl(state, programInfo, testCase);
 }
 
 CmdVisitor *TestgenTarget::getCmdVisitor(ExecutionState &state,
-                                         const ProgramInfo &programInfo, const TestCase &testCase) {
+                                         const ProgramInfo &programInfo, TestCase &testCase) {
     return get().getCmdVisitorImpl(state, programInfo, testCase);
 }
 

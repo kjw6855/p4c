@@ -40,6 +40,57 @@ TestgenOptions::TestgenOptions()
         "Fail on unimplemented features instead of trying the next branch.");
 
     registerOption(
+        "--max-port", "maxPortNo",
+        [this](const char *arg) {
+            try {
+                // Unfortunately, we can not use std::stoul because negative inputs are okay
+                // according to the C++ standard.
+                maxPortNo = std::stoi(arg);
+                if (maxPortNo < 0) {
+                    throw std::invalid_argument("Invalid input.");
+                }
+            } catch (std::invalid_argument &) {
+                ::error("Invalid input value %1% for --max-port. Expected positive integer.", arg);
+                return false;
+            }
+            return true;
+        },
+        "Sets the maximum number of input/output port to be generated [default: 0]. Setting the value to 0 "
+        "will generate unlimited input/output ports");
+
+    registerOption(
+        "--allow-ports", "allowPorts",
+        [this](const char *arg) {
+            try {
+                // Unfortunately, we can not use std::stoul because negative inputs are okay
+                // according to the C++ standard.
+                auto str = std::move(std::string(arg));
+                size_t n = 0;
+                while ((n = str.find(',')) != std::string::npos) {
+                    auto portNo = std::stoi(str.substr(0, n));
+                    if (portNo < 0) {
+                        throw std::invalid_argument("Invalid input.");
+                    }
+                    allowPorts.push_back(portNo);
+                    str = str.substr(n + 1);
+                }
+                if (str.length() != 0U) {
+                    auto portNo = std::stoi(str);
+                    if (portNo < 0) {
+                        throw std::invalid_argument("Invalid input.");
+                    }
+                    allowPorts.push_back(portNo);
+                }
+
+            } catch (std::invalid_argument &) {
+                ::error("Invalid input value %1% for --allow-ports. Expected positive integer.", arg);
+                return false;
+            }
+            return true;
+        },
+        "List of the allow input/output ports beyond min/max (Drop will be included in output port).");
+
+    registerOption(
         "--max-tests", "maxTests",
         [this](const char *arg) {
             try {
@@ -49,6 +100,7 @@ TestgenOptions::TestgenOptions()
                 if (maxTests < 0) {
                     throw std::invalid_argument("Invalid input.");
                 }
+
             } catch (std::invalid_argument &) {
                 ::error("Invalid input value %1% for --max-tests. Expected positive integer.", arg);
                 return false;

@@ -34,7 +34,7 @@ class ConcolicExecutor {
     /// Executes the P4 program along a randomly chosen path. When the program terminates, the
     /// given callback is invoked. If the callback returns true, then the executor terminates.
     /// Otherwise, execution of the P4 program continues on a different random path.
-    void run(const TestCase &testCase);
+    void run(TestCase &testCase);
 
     const P4::Coverage::CoverageSet &getVisitedStatements();
 
@@ -70,6 +70,9 @@ class ConcolicExecutor {
  public:
     const int statementBitmapSize;
     unsigned char* statementBitmap;
+    //const int tableEntryBitmapSize;
+    //unsigned char* tableEntryBitmap;
+
 
  private:
     SmallVisitEvaluator evaluator;

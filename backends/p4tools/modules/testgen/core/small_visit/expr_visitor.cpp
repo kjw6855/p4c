@@ -32,7 +32,7 @@
 namespace P4Tools::P4Testgen {
 
 ExprVisitor::ExprVisitor(ExecutionState &state,
-                         const ProgramInfo &programInfo, const TestCase &testCase)
+                         const ProgramInfo &programInfo, TestCase &testCase)
     : AbstractVisitor(state, programInfo, testCase) {}
 
 bool ExprVisitor::preorder(const IR::BoolLiteral *boolLiteral) {

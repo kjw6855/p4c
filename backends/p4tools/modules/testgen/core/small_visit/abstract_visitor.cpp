@@ -28,7 +28,7 @@
 namespace P4Tools::P4Testgen {
 
 AbstractVisitor::AbstractVisitor(ExecutionState &state,
-                                 const ProgramInfo &programInfo, const TestCase &testCase)
+                                 const ProgramInfo &programInfo, TestCase &testCase)
     : programInfo(programInfo), state(state), testCase(testCase),
       result(new std::vector<Branch>()) {}
 

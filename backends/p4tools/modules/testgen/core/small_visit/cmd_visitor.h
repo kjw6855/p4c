@@ -19,7 +19,7 @@ namespace P4Tools::P4Testgen {
 class CmdVisitor : public AbstractVisitor {
  public:
     CmdVisitor(ExecutionState &state, const ProgramInfo &programInfo,
-            const TestCase &testCase);
+            TestCase &testCase);
 
     bool preorder(const IR::AssignmentStatement *assign) override;
     bool preorder(const IR::P4Parser *p4parser) override;
@@ -50,7 +50,7 @@ class CmdVisitor : public AbstractVisitor {
 
     /// Initializes variables and adds constraints for the program initialization, which is target
     /// specific.
-    virtual void initializeTargetEnvironment(ExecutionState &state, const TestCase &testCase) const = 0;
+    virtual void initializeTargetEnvironment(ExecutionState &state, TestCase &testCase) const = 0;
 
     /// Provides exception-handler implementations for the given parser.
     ///

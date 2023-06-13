@@ -113,7 +113,7 @@ class CommandVisitor {
  private:
     std::reference_wrapper<SmallVisitEvaluator> self;
     std::reference_wrapper<ExecutionState> state;
-    const TestCase& testCase;
+    TestCase& testCase;
     using Branch = SmallStepEvaluator::Branch;
     using Result = SmallStepEvaluator::Result;
 
@@ -231,11 +231,11 @@ class CommandVisitor {
         return new std::vector<Branch>({{cond, state, nextState}});
     }
 
-    explicit CommandVisitor(SmallVisitEvaluator &self, ExecutionState &state, const TestCase &testCase)
+    explicit CommandVisitor(SmallVisitEvaluator &self, ExecutionState &state, TestCase &testCase)
         : self(self), state(state), testCase(testCase) {}
 };
 
-SmallStepEvaluator::Result SmallVisitEvaluator::step(ExecutionState &state, const TestCase &testCase) {
+SmallStepEvaluator::Result SmallVisitEvaluator::step(ExecutionState &state, TestCase &testCase) {
     BUG_CHECK(!state.isTerminal(), "Tried to step from a terminal state.");
 
     if (const auto cmdOpt = state.getNextCmd()) {
