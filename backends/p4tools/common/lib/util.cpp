@@ -129,6 +129,15 @@ const IR::Expression *Utils::getValExpr(const std::string& strVal, size_t bitWid
     return baseVar;
 }
 
+const big_int Utils::getVal(const std::string &strVal, size_t bitWidth) {
+    const auto *valExpr = Utils::getValExpr(strVal, bitWidth);
+
+    if (!valExpr->is<IR::Constant>()) {
+        BUG("value is not constant");
+    }
+    return valExpr->checkedTo<IR::Constant>()->value;
+}
+
 const IR::Expression *Utils::removeUnknownVar(const IR::Expression *expr) {
     if (const auto *symVar = expr->to<IR::SymbolicVariable>()) {
         // remove unknown symVar (e.g., pktVar) in expr

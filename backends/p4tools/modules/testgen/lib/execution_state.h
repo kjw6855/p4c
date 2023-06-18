@@ -406,8 +406,11 @@ class ExecutionState : public AbstractExecutionState {
     /// Returns a reference not a pointer.
     [[nodiscard]] static ExecutionState &create(const IR::P4Program *program);
 
+    [[nodiscard]] static ExecutionState &create(const IR::P4Program *program, Continuation::Body body);
+
  public:
     explicit ExecutionState(const IR::P4Program *program);
+    explicit ExecutionState(const IR::P4Program *program, Continuation::Body body);
 
  private:
     /// Create an initial execution state with @param body for testing.

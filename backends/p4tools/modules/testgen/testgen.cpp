@@ -75,7 +75,7 @@ void Testgen::runServer(const ProgramInfo *programInfo) {
     void *tag;
     bool ok, callAgain = false;
     std::string devId;
-    TestCase testCase;
+    TestCase testCase;      // Mutable
     while (true) {
         callStatus = CallData::CREATE;
 
@@ -86,6 +86,7 @@ void Testgen::runServer(const ProgramInfo *programInfo) {
 
             if (callStatus == CallData::REQ) {
                 std::cout << "Record P4 Coverage of device: " << devId << std::endl;
+
                 if (coverageMap.count(devId) == 0) {
                     coverageMap.insert(std::make_pair(devId,
                                 new ConcolicExecutor(*programInfo)));

@@ -332,7 +332,7 @@ class TestSpec {
 
     /// Priority definitions for LPM and ternary entries.
     static constexpr int NO_PRIORITY = -1;
-    static constexpr int LOW_PRIORITY = 1;
+    static constexpr int LOW_PRIORITY = 10;
     static constexpr int HIGH_PRIORITY = 100;
     static constexpr int TTL = 0;
 };

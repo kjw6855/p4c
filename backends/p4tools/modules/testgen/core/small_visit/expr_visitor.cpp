@@ -198,6 +198,8 @@ bool ExprVisitor::preorder(const IR::P4Table *table) {
     // Delegate to the tableVisitor.
     TableVisitor tableVisitor(this, table, testCase);
 
+    tableVisitor.checkTable = checkTable;
+
     return tableVisitor.eval();
 }
 

@@ -33,6 +33,8 @@ class AbstractVisitor : public Inspector {
     using Branch = SmallStepEvaluator::Branch;
     using Result = SmallStepEvaluator::Result;
 
+    bool checkTable = false;
+
     /// Steps on the given node. This is the main entry point into a visitor.
     ///
     /// The given node is assumed to be derived from the command at the top of the current

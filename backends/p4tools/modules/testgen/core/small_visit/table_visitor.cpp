@@ -403,6 +403,185 @@ void TableVisitor::setTableDefaultEntries(
     }
 }
 
+// Verify mutant actionName and paramName/Val
+bool TableVisitor::verifyAction(const ::p4::v1::Action &p4v1Action,
+        const std::vector<const IR::ActionListElement *> tableActionList) {
+
+    bool found = false;
+
+    for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+        const auto* action = tableActionList.at(idx);
+        const auto *tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+        const auto* actionType = visitor->state.getP4Action(tableAction);
+        CHECK_NULL(actionType);
+        auto actionName = actionType->controlPlaneName();
+        if (actionName != p4v1Action.action_name())
+            continue;
+
+        // action found
+        found = true;
+        for (auto& param : p4v1Action.params()) {
+            // check param_name comparison
+            size_t argIdx = (size_t)(param.param_id() - 1);
+            const auto* parameter = actionType->parameters->getParameter(argIdx);
+            /* [INVALID] param.param_name */
+            if (parameter->controlPlaneName() != param.param_name()) {
+                LOG_FEATURE("small_visit", 4, "Param name diff: "
+                        << param.param_name() << " (TestCase) vs. "
+                        << parameter->controlPlaneName() << " (Table)");
+
+                return false;
+            }
+
+#ifdef P4FUZZER_VALUE_CHECK
+            /* [INVALID] param.value */
+            const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+            auto paramWidth = paramType->width_bits();
+            if (param.value() > IR::getMaxBvVal(paramWidth)) {
+                LOG_FEATURE("small_visit", 4, "Param value range: "
+                        << param.value() << " (TestCase) vs. |bit<"
+                        << paramWidth << ">| (Table)");
+
+                return false;
+            }
+#endif /* P4FUZZER_VALUE_CHECK */
+        }
+    }
+
+    return found;
+}
+
+// Verify mutant match.field_name and value
+bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::Key *keys) {
+    size_t idx = (size_t)(p4v1Match.field_id() - 1);
+
+    BUG_CHECK(idx < keys->keyElements.size(),
+            "given idx %1% is out of size %2%",
+            idx, keys->keyElements.size());
+    const auto* key = keys->keyElements.at(idx);
+
+    const auto *nameAnnot = key->getAnnotation("name");
+    if (nameAnnot != nullptr) {
+        if (nameAnnot->getName() != p4v1Match.field_name()) {
+            LOG_FEATURE("small_visit", 4, "Table name diff: "
+                << p4v1Match.field_name() << " (TestCase) vs. "
+                << nameAnnot->getName() << " (Table)");
+            return false;
+        }
+    }
+
+    auto keyMatchType = key->matchType->toString();
+#ifdef P4FUZZER_VALUE_CHECK
+    const IR::Expression* keyExpr = key->expression;
+    const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+    auto keyWidth = keyType->width_bits();
+    // TODO
+    const auto maxVal = IR::getMaxBvVal(keyWidth);
+#endif /* P4FUZZER_VALUE_CHECK */
+    if (p4v1Match.has_range()) {
+        if (keyMatchType != "range")        // XXX: BMv2 Match
+            return false;
+
+#ifdef P4FUZZER_VALUE_CHECK
+        const auto& matchRange = p4v1Match.range();
+        if (Utils::getVal(matchRange.low(), keyWidth) > matchRange.high())
+            return false;
+        else if (Utils::getVal(matchRange.high(), keyWidth) > maxVal)
+            return false;
+#endif /* P4FUZZER_VALUE_CHECK */
+
+    } else if (p4v1Match.has_ternary()) {
+        if (keyMatchType != P4Constants::MATCH_KIND_TERNARY)
+            return false;
+
+#ifdef P4FUZZER_VALUE_CHECK
+        const auto& matchRange = p4v1Match.range();
+        const auto& matchTernary = p4v1Match.ternary();
+        if (Utils::getVal(matchTernary.value(), keyWidth) > maxVal ||
+                Utils::getVal(matchTernary.mask(), keyWidth) > maxVal)
+            return false;
+#endif /* P4FUZZER_VALUE_CHECK */
+
+    } else if (p4v1Match.has_lpm()) {
+        if (keyMatchType != P4Constants::MATCH_KIND_LPM)
+            return false;
+
+#ifdef P4FUZZER_VALUE_CHECK
+        const auto& matchRange = p4v1Match.range();
+        const auto& matchLpm = p4v1Match.lpm();
+        if (Utils::getVal(matchLpm.prefix_len(), keyWidth) > keyWidth)
+            return false;
+#endif /* P4FUZZER_VALUE_CHECK */
+
+        // TODO: check error, if value is larger than maxVal
+
+    } else if (p4v1Match.has_exact()) {
+        if (keyMatchType != P4Constants::MATCH_KIND_EXACT)
+            return false;
+
+#ifdef P4FUZZER_VALUE_CHECK
+        const auto& matchRange = p4v1Match.range();
+        const auto& matchExact = p4v1Match.exact();
+        if (Utils::getVal(matchExact.value(), keyWidth) > maxVal)
+            return false;
+#endif /* P4FUZZER_VALUE_CHECK */
+
+    } else {
+        //XXX: UNSUPPORTED;
+        BUG("Unknown type");
+        return false;
+    }
+
+    return true;
+}
+
+void TableVisitor::verifyTableControlEntries(
+    const std::vector<const IR::ActionListElement *> &tableActionList) {
+
+    auto tableName = table->controlPlaneName();
+    const auto *keys = table->getKey();
+
+    for (auto &entity : *testCase.mutable_entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        auto *entry = entity.mutable_table_entry();
+        if (entry->table_name() != tableName)
+            continue;
+
+        // Action & Parameter check first
+        const auto entryAction = entry->action();
+        if (entryAction.has_action() && !verifyAction(entryAction.action(), tableActionList)) {
+            continue;
+
+        } else if (entryAction.has_action_profile_action_set()) {
+            const auto entryActionSet = entryAction.action_profile_action_set();
+            bool foundProfileAction = true;
+            for (const auto &p4v1Action : entryActionSet.action_profile_actions()) {
+                if (!verifyAction(p4v1Action.action(), tableActionList)) {
+                    foundProfileAction = false;
+                    break;
+                }
+            }
+
+            if (!foundProfileAction)
+                continue;
+        }
+
+        // Match check
+        bool found = true;
+        for (const auto &p4v1Match : entry->match()) {
+            if (!verifyMatch(p4v1Match, keys)) {
+                found = false;
+                break;
+            }
+        }
+
+        if (found)
+            entry->set_is_valid_entry(1);
+    }
+}
+
 void TableVisitor::evalTableControlEntries(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     const auto *key = table->getKey();
@@ -414,6 +593,15 @@ void TableVisitor::evalTableControlEntries(
             continue;
 
         auto *entry = entity.mutable_table_entry();
+
+        // Skip invalid entry!
+        if (!entry->is_valid_entry()) {
+            std::cout << "Invalid table entry in "
+                << entry->table_name()
+                << std::endl;
+            continue;
+        }
+
         if (entry->table_name() != properties.tableName) {
             std::cout << "Different table name: "
                 << entry->table_name() << " (testCase) vs. "
@@ -428,7 +616,19 @@ void TableVisitor::evalTableControlEntries(
 
         auto &nextState = visitor->state.clone();
         bool found = false;
-        const auto& p4v1Action = entry->action().action();
+
+        ::p4::v1::Action *p4v1Action;
+        if (entry->action().has_action()) {
+            p4v1Action = entry->mutable_action()->mutable_action();
+
+        } else if (entry->action().has_action_profile_action_set()) {
+            // TODO: multiple actions
+            p4v1Action = entry->mutable_action()->mutable_action_profile_action_set()
+                         ->mutable_action_profile_actions(0)->mutable_action();
+        } else {
+            continue;
+        }
+
         for (size_t idx = 0; idx < tableActionList.size(); idx++) {
             const auto* action = tableActionList.at(idx);
             const auto* tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
@@ -436,7 +636,7 @@ void TableVisitor::evalTableControlEntries(
             CHECK_NULL(actionType);
             cstring actionName = actionType->controlPlaneName();
 
-            if (actionName != p4v1Action.action_name())
+            if (actionName != p4v1Action->action_name())
                 continue;
 
             P4::Coverage::CoverageSet coveredNodes;
@@ -449,7 +649,7 @@ void TableVisitor::evalTableControlEntries(
             found = true;
             auto* arguments = new IR::Vector<IR::Argument>();
             std::vector<ActionArg> ctrlPlaneArgs;
-            for (auto& param : p4v1Action.params()) {
+            for (auto& param : p4v1Action->params()) {
                 // TODO: check param_name comparison
                 size_t argIdx = (size_t)(param.param_id() - 1);
                 BUG_CHECK(argIdx < actionType->parameters->size(),
@@ -490,7 +690,6 @@ void TableVisitor::evalTableControlEntries(
             const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
             if (hitCondition != nullptr) {
                 visitor->result->emplace_back(hitCondition, visitor->state, nextState);
-                entry->set_is_valid_entry(1);
             }
         }
     }
@@ -660,25 +859,39 @@ void TableVisitor::evalTargetTable(
 bool TableVisitor::eval() {
     // Set the appropriate properties when the table is immutable, meaning it has constant entries.
     TableUtils::checkTableImmutability(*table, properties);
-    // Resolve any non-symbolic table keys. The function returns true when a key needs replacement.
-    if (resolveTableKeys()) {
-        return false;
+
+    if (checkTable) {
+        // Gather the list of executable actions. This does not include default actions, for example.
+        const auto tableActionList = TableUtils::buildTableActionList(*table);
+
+        checkTargetProperties(tableActionList);
+
+        if (!properties.tableIsTainted && !properties.tableIsImmutable)
+            verifyTableControlEntries(tableActionList);
+
+        visitor->state.popBody();
+
+    } else {
+        // Resolve any non-symbolic table keys. The function returns true when a key needs replacement.
+        if (resolveTableKeys()) {
+            return false;
+        }
+        // Gather the list of executable actions. This does not include default actions, for example.
+        const auto tableActionList = TableUtils::buildTableActionList(*table);
+
+        checkTargetProperties(tableActionList);
+
+        // If the table key is tainted, the control plane entries do not really matter.
+        // Assume that any action can be executed.
+        // Important: This should follow the immutability check.
+        // This is because the taint behavior may differ with constant entries.
+        if (properties.tableIsTainted) {
+            evalTaintedTable();
+            return false;
+        }
+
+        evalTargetTable(tableActionList);
     }
-    // Gather the list of executable actions. This does not include default actions, for example.
-    const auto tableActionList = TableUtils::buildTableActionList(*table);
-
-    checkTargetProperties(tableActionList);
-
-    // If the table key is tainted, the control plane entries do not really matter.
-    // Assume that any action can be executed.
-    // Important: This should follow the immutability check.
-    // This is because the taint behavior may differ with constant entries.
-    if (properties.tableIsTainted) {
-        evalTaintedTable();
-        return false;
-    }
-
-    evalTargetTable(tableActionList);
 
     return false;
 }
@@ -686,6 +899,7 @@ bool TableVisitor::eval() {
 TableVisitor::TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, TestCase &testCase)
     : visitor(visitor), table(table), testCase(testCase) {
     properties.tableName = table->controlPlaneName();
+    checkTable = visitor->checkTable;
 }
 
 }  // namespace P4Tools::P4Testgen

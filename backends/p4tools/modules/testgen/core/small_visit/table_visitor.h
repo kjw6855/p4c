@@ -147,7 +147,15 @@ class TableVisitor {
 
     void setTableDefaultEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
 
+    bool verifyAction(const ::p4::v1::Action &p4v1Action, const std::vector<const IR::ActionListElement *> tableActionList);
+
+    bool verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::Key *keys);
+
+    void verifyTableControlEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
+
  public:
+    bool checkTable = false;
+
     /// Table implementations in P4 are rather flexible. Eval is a delegation function that chooses
     /// the right implementation depending on the properties of the table. For example, immutable
     /// tables can not be programmed using the control plane. If an table key is tainted, we can

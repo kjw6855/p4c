@@ -23,16 +23,46 @@
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/testgen/lib/table_collector.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
 #include "backends/p4tools/modules/testgen/lib/visit_concolic.h"
 
-namespace P4Tools {
-
-namespace P4Testgen {
+namespace P4Tools::P4Testgen {
 
 void ConcolicExecutor::run(TestCase& testCase) {
     executionState = ExecutionState::create(programInfo.program);
 
+    auto tableCollector = TableCollector();
+    programInfo.program->apply(tableCollector);
+
+    Continuation::Body body(tableCollector.getP4Tables());
+    body.push(programInfo.program);
+
+    tableState = ExecutionState::create(programInfo.program, body);
+
+    // 1. Verify validity first
+    while (!tableState.get().isTerminal()) {
+        LOG_FEATURE("small_visit", 4, " [T] stack/body size: " << tableState.get().getStackSize() << "/" << tableState.get().getBodySize());
+
+        Result successors = tableEvaluator.step(tableState, testCase);
+
+        if (successors->size() == 1) {
+            // Non-branching states are not recorded by selected branches.
+            tableState = (*successors)[0].nextState;
+            continue;
+        } else if (successors->size() == 0) {
+            continue;
+        }
+
+        // If there are multiple, pop one branch decision from the input list and pick
+        // successor matching the given branch decision.
+        auto* next = chooseBranch(*successors, 0);
+        if (next == nullptr) {
+            break;
+        }
+    }
+
+    // 2. Measure coverage and calculate expected output
     while (!executionState.get().isTerminal()) {
 
         LOG_FEATURE("small_visit", 4, " stack/body size: " << executionState.get().getStackSize() << "/" << executionState.get().getBodySize());
@@ -72,10 +102,13 @@ uint64_t getNumeric(const std::string& str) {
 ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo)
     : programInfo(programInfo),
       executionState(ExecutionState::create(programInfo.program)),
+      tableState(ExecutionState::create(programInfo.program)),
       allStatements(programInfo.getCoverableNodes()),
       statementBitmapSize(allStatements.size()),
-      evaluator(programInfo) {
+      evaluator(programInfo),
+      tableEvaluator(programInfo) {
 
+    tableEvaluator.checkTable = true;
     int allocLen = (statementBitmapSize / 8) + 1;
     statementBitmap = (unsigned char *)malloc(allocLen);
     memset(statementBitmap, 0, allocLen);
@@ -195,6 +228,4 @@ boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
     return Packet(outPortInt, outPacket, outEvalMask);
 }
 
-}  // namespace P4Testgen
-
-}  // namespace P4Tools
+}  // namespace P4Tools::P4Testgen

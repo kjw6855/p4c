@@ -19,9 +19,7 @@
 
 using p4testgen::TestCase;
 
-namespace P4Tools {
-
-namespace P4Testgen {
+namespace P4Tools::P4Testgen {
 
 /// Explores one path described by a list of branches.
 class ConcolicExecutor {
@@ -59,6 +57,8 @@ class ConcolicExecutor {
     /// The current execution state.
     std::reference_wrapper<ExecutionState> executionState;
 
+    std::reference_wrapper<ExecutionState> tableState;
+
     FinalVisitState* finalState = nullptr;
 
     /// Set of all stetements, to be retrieved from programInfo.
@@ -76,10 +76,9 @@ class ConcolicExecutor {
 
  private:
     SmallVisitEvaluator evaluator;
+    SmallVisitEvaluator tableEvaluator;
 };
 
-}  // namespace P4Testgen
-
-}  // namespace P4Tools
+}  // namespace P4Tools::P4Testgen
 
 #endif /* BACKENDS_P4TOOLS_MODULES_TESTGEN_CORE_CONCOLIC_EXECUTOR_CONCOLIC_EXECUTOR_H_ */

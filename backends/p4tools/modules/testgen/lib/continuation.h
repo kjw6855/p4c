@@ -143,6 +143,8 @@ class Continuation {
         /// Pushes the given command onto the command stack.
         void push(Command cmd);
 
+        void push(Body body);
+
         /// Pops the next element off the command stack. A BUG occurs if the command stack is
         /// empty.
         void pop();

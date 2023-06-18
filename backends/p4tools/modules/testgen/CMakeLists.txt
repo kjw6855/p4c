@@ -75,6 +75,7 @@ set(
   lib/final_visit_state.cpp
   lib/logging.cpp
   lib/packet_vars.cpp
+  lib/table_collector.cpp
   lib/test_backend.cpp
   lib/test_spec.cpp
   lib/tf.cpp

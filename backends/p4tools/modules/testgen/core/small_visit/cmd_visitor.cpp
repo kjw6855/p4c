@@ -310,16 +310,19 @@ bool CmdVisitor::preorder(const IR::P4Program * /*program*/) {
     // The drop exception just terminates execution completely.
     // We first pop the current body.
     state.popBody();
-    // Then we insert the exception handlers.
-    std::map<Continuation::Exception, Continuation> handlers;
-    handlers.emplace(Continuation::Exception::Drop, Continuation::Body({}));
-    handlers.emplace(Continuation::Exception::Exit, Continuation::Body({}));
-    handlers.emplace(Continuation::Exception::Abort, Continuation::Body({}));
-    state.pushCurrentContinuation(handlers);
 
-    // After, we insert the program commands into the new body and push them to the top.
-    Continuation::Body newBody(*topLevelBlocks);
-    state.replaceBody(newBody);
+    if (!checkTable) {
+        // Then we insert the exception handlers.
+        std::map<Continuation::Exception, Continuation> handlers;
+        handlers.emplace(Continuation::Exception::Drop, Continuation::Body({}));
+        handlers.emplace(Continuation::Exception::Exit, Continuation::Body({}));
+        handlers.emplace(Continuation::Exception::Abort, Continuation::Body({}));
+        state.pushCurrentContinuation(handlers);
+
+        // After, we insert the program commands into the new body and push them to the top.
+        Continuation::Body newBody(*topLevelBlocks);
+        state.replaceBody(newBody);
+    }
 
     result->emplace_back(cond, state, state);
     return false;

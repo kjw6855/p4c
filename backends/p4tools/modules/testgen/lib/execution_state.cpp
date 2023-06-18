@@ -78,8 +78,25 @@ ExecutionState::ExecutionState(Continuation::Body body)
     }
 }
 
+ExecutionState::ExecutionState(const IR::P4Program *program, Continuation::Body body)
+    : AbstractExecutionState(program),
+      body(std::move(body)),
+      stack(*(new std::stack<std::reference_wrapper<const StackFrame>>())) {
+    allocatedSymbolicVariables.insert(getInputPacketSizeVar());
+    env.set(&PacketVars::INPUT_PACKET_LABEL, IR::getConstant(IR::getBitType(0), 0));
+    env.set(&PacketVars::PACKET_BUFFER_LABEL, IR::getConstant(IR::getBitType(0), 0));
+    // We also add the taint property and set it to false.
+    setProperty("inUndefinedState", false);
+    // Drop is initialized to false, too.
+    setProperty("drop", false);
+}
+
 ExecutionState &ExecutionState::create(const IR::P4Program *program) {
     return *new ExecutionState(program);
+}
+
+ExecutionState &ExecutionState::create(const IR::P4Program *program, Continuation::Body body) {
+    return *new ExecutionState(program, body);
 }
 
 ExecutionState &ExecutionState::clone() const { return *new ExecutionState(*this); }

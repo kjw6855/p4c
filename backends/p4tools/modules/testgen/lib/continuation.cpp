@@ -42,6 +42,11 @@ const Continuation::Command Continuation::Body::next() const {
 
 void Continuation::Body::push(Command cmd) { cmds.emplace_front(cmd); }
 
+void Continuation::Body::push(Body body) {
+    for (auto it = body.cmds.rbegin(); it != body.cmds.rend(); ++it) {
+        cmds.emplace_front(*it);
+    }
+}
 void Continuation::Body::pop() {
     BUG_CHECK(!cmds.empty(), "Attempted to pop an empty command stack");
     cmds.pop_front();

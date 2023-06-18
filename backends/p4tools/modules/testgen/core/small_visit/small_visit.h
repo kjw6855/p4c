@@ -32,6 +32,7 @@ class SmallVisitEvaluator {
     /// Specifies how many times a guard can be violated in the interpreter until it throws an
     /// error.
     static constexpr uint64_t MAX_GUARD_VIOLATIONS = 100;
+    bool checkTable = false;
 
  private:
     /// Target-specific information about the P4 program being evaluated.

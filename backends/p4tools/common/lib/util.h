@@ -83,6 +83,8 @@ class Utils {
 
     static const IR::Expression *getValExpr(const std::string& strVal, size_t strValBitLen);
 
+    static const big_int getVal(const std::string &strVal, size_t bitWidth);
+
     static const IR::Expression *removeUnknownVar(const IR::Expression *node);
 
     static const IR::Constant *getZeroCksum(const IR::Expression *expr, int zeroLen, bool init);
