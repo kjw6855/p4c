@@ -24,6 +24,7 @@ namespace P4Tools::P4Testgen {
 /// of AbstractVisitor.
 class SmallVisitEvaluator {
     friend class CommandVisitor;
+    friend class ConcolicExecutor;
 
  public:
     using Branch = SmallStepEvaluator::Branch;

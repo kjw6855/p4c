@@ -130,6 +130,9 @@ const IR::Expression *Utils::getValExpr(const std::string& strVal, size_t bitWid
 }
 
 const big_int Utils::getVal(const std::string &strVal, size_t bitWidth) {
+    if (strVal.length() * 8 > bitWidth)
+        bitWidth = strVal.length() * 8;
+
     const auto *valExpr = Utils::getValExpr(strVal, bitWidth);
 
     if (!valExpr->is<IR::Constant>()) {

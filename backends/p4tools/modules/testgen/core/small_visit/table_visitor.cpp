@@ -433,18 +433,16 @@ bool TableVisitor::verifyAction(const ::p4::v1::Action &p4v1Action,
                 return false;
             }
 
-#ifdef P4FUZZER_VALUE_CHECK
             /* [INVALID] param.value */
             const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
             auto paramWidth = paramType->width_bits();
-            if (param.value() > IR::getMaxBvVal(paramWidth)) {
+            if (Utils::getVal(param.value(), paramWidth) > IR::getMaxBvVal(paramWidth)) {
                 LOG_FEATURE("small_visit", 4, "Param value range: "
                         << param.value() << " (TestCase) vs. |bit<"
                         << paramWidth << ">| (Table)");
 
                 return false;
             }
-#endif /* P4FUZZER_VALUE_CHECK */
         }
     }
 
@@ -463,7 +461,7 @@ bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::
     const auto *nameAnnot = key->getAnnotation("name");
     if (nameAnnot != nullptr) {
         if (nameAnnot->getName() != p4v1Match.field_name()) {
-            LOG_FEATURE("small_visit", 4, "Table name diff: "
+            LOG_FEATURE("small_visit", 4, "Match name diff: "
                 << p4v1Match.field_name() << " (TestCase) vs. "
                 << nameAnnot->getName() << " (Table)");
             return false;
@@ -471,47 +469,39 @@ bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::
     }
 
     auto keyMatchType = key->matchType->toString();
-#ifdef P4FUZZER_VALUE_CHECK
     const IR::Expression* keyExpr = key->expression;
     const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
     auto keyWidth = keyType->width_bits();
     // TODO
     const auto maxVal = IR::getMaxBvVal(keyWidth);
-#endif /* P4FUZZER_VALUE_CHECK */
     if (p4v1Match.has_range()) {
         if (keyMatchType != "range")        // XXX: BMv2 Match
             return false;
 
-#ifdef P4FUZZER_VALUE_CHECK
         const auto& matchRange = p4v1Match.range();
-        if (Utils::getVal(matchRange.low(), keyWidth) > matchRange.high())
+        const auto lowVal = Utils::getVal(matchRange.low(), keyWidth);
+        const auto highVal = Utils::getVal(matchRange.high(), keyWidth);
+        if (lowVal > highVal)
             return false;
-        else if (Utils::getVal(matchRange.high(), keyWidth) > maxVal)
+        else if (highVal > maxVal)
             return false;
-#endif /* P4FUZZER_VALUE_CHECK */
 
     } else if (p4v1Match.has_ternary()) {
         if (keyMatchType != P4Constants::MATCH_KIND_TERNARY)
             return false;
 
-#ifdef P4FUZZER_VALUE_CHECK
-        const auto& matchRange = p4v1Match.range();
         const auto& matchTernary = p4v1Match.ternary();
         if (Utils::getVal(matchTernary.value(), keyWidth) > maxVal ||
                 Utils::getVal(matchTernary.mask(), keyWidth) > maxVal)
             return false;
-#endif /* P4FUZZER_VALUE_CHECK */
 
     } else if (p4v1Match.has_lpm()) {
         if (keyMatchType != P4Constants::MATCH_KIND_LPM)
             return false;
 
-#ifdef P4FUZZER_VALUE_CHECK
-        const auto& matchRange = p4v1Match.range();
         const auto& matchLpm = p4v1Match.lpm();
-        if (Utils::getVal(matchLpm.prefix_len(), keyWidth) > keyWidth)
+        if (matchLpm.prefix_len() > keyWidth)
             return false;
-#endif /* P4FUZZER_VALUE_CHECK */
 
         // TODO: check error, if value is larger than maxVal
 
@@ -519,16 +509,13 @@ bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::
         if (keyMatchType != P4Constants::MATCH_KIND_EXACT)
             return false;
 
-#ifdef P4FUZZER_VALUE_CHECK
-        const auto& matchRange = p4v1Match.range();
         const auto& matchExact = p4v1Match.exact();
         if (Utils::getVal(matchExact.value(), keyWidth) > maxVal)
             return false;
-#endif /* P4FUZZER_VALUE_CHECK */
 
     } else {
-        //XXX: UNSUPPORTED;
-        BUG("Unknown type");
+        LOG_FEATURE("small_visit", 4, "Match " << p4v1Match.field_name()
+                << " - Unknown type" << std::endl);
         return false;
     }
 

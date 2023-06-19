@@ -40,6 +40,9 @@ void ConcolicExecutor::run(TestCase& testCase) {
 
     tableState = ExecutionState::create(programInfo.program, body);
 
+    tableEvaluator.violatedGuardConditions = 0;
+    evaluator.violatedGuardConditions = 0;
+
     // 1. Verify validity first
     while (!tableState.get().isTerminal()) {
         LOG_FEATURE("small_visit", 4, " [T] stack/body size: " << tableState.get().getStackSize() << "/" << tableState.get().getBodySize());
