@@ -293,6 +293,7 @@ entities : [
 ## if rule.rules.needs_priority
       priority: {{rule.priority}}
 ## endif
+      is_valid_entry: 1
 ## for r in rule.rules.single_exact_matches
       # Match field {{r.field_name}}
       match {
