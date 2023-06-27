@@ -47,8 +47,10 @@ using p4testgen::P4FuzzGuide;
 using p4testgen::TestCase;
 
 Testgen::~Testgen() {
-    server_->Shutdown();
-    cq_->Shutdown();
+    if (server_ != nullptr)
+        server_->Shutdown();
+    if (cq_ != nullptr)
+        cq_->Shutdown();
 }
 
 void Testgen::runServer(const ProgramInfo *programInfo) {

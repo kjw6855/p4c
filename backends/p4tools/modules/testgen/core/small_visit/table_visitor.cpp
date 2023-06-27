@@ -513,9 +513,13 @@ bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::
         if (Utils::getVal(matchExact.value(), keyWidth) > maxVal)
             return false;
 
+    } else if (p4v1Match.has_optional()) {
+        if (keyMatchType != "optional")     // XXX: BMv2 Optional
+            return false;
+
     } else {
         LOG_FEATURE("small_visit", 4, "Match " << p4v1Match.field_name()
-                << " - Unknown type" << std::endl);
+                << " - Unknown type");
         return false;
     }
 
