@@ -82,6 +82,8 @@ class TestgenOptions : public AbstractP4cToolOptions {
 
     int maxPortNo = 0;
 
+    int grpcPort = 50051;
+
     std::vector<int> allowPorts;
 
     const char *getIncludePath() override;

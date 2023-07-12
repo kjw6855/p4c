@@ -53,8 +53,9 @@ Testgen::~Testgen() {
         cq_->Shutdown();
 }
 
-void Testgen::runServer(const ProgramInfo *programInfo) {
-    std::string server_address("0.0.0.0:50051");
+void Testgen::runServer(const ProgramInfo *programInfo, int grpcPort) {
+    std::string server_address("0.0.0.0:");
+    server_address += std::to_string(grpcPort);
     //P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo);
     P4FuzzGuide::AsyncService service_;
     std::map<std::string, ConcolicExecutor*> coverageMap;
@@ -208,7 +209,7 @@ int Testgen::mainImpl(const IR::P4Program *program) {
     }
 
     if (testgenOptions.interactive) {
-        runServer(programInfo);
+        runServer(programInfo, testgenOptions.grpcPort);
         return EXIT_SUCCESS;
     }
 

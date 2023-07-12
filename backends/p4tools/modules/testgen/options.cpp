@@ -40,6 +40,24 @@ TestgenOptions::TestgenOptions()
         "Fail on unimplemented features instead of trying the next branch.");
 
     registerOption(
+        "--grpc-port", "grpcPort",
+        [this](const char *arg) {
+            try {
+                // Unfortunately, we can not use std::stoul because negative inputs are okay
+                // according to the C++ standard.
+                grpcPort = std::stoi(arg);
+                if (grpcPort < 0) {
+                    throw std::invalid_argument("Invalid input.");
+                }
+            } catch (std::invalid_argument &) {
+                ::error("Invalid input value %1% for --grpc-port. Expected positive integer.", arg);
+                return false;
+            }
+            return true;
+        },
+        "Sets grpc port of interactive server [default: 50051].");
+
+    registerOption(
         "--max-port", "maxPortNo",
         [this](const char *arg) {
             try {

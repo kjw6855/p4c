@@ -25,7 +25,7 @@ class Testgen : public AbstractP4cTool<TestgenOptions> {
 
     int mainImpl(const IR::P4Program *program) override;
 
-    void runServer(const ProgramInfo *programInfo);
+    void runServer(const ProgramInfo *programInfo, int grpcPort);
 
  public:
     //virtual ~Testgen() = default;
