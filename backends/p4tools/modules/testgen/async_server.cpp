@@ -20,8 +20,6 @@
 
 namespace P4Tools::P4Testgen {
 
-using p4testgen::HealthCheckResponse;
-
 P4FuzzGuideImpl::P4FuzzGuideImpl(const ProgramInfo *programInfo)
 : programInfo_(programInfo) {}
 
@@ -173,7 +171,7 @@ CallData::CallStatus HelloData::Proceed(std::map<std::string, ConcolicExecutor*>
         {
             new HelloData(service_, cq_);
             status_ = CallData::FINISH;
-            reply_.set_status(HealthCheckResponse::SERVING);
+            reply_.set_status(1);
             responder_.Finish(reply_, Status::OK, this);
             break;
         }
