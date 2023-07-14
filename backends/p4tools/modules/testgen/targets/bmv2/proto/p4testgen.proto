@@ -3,13 +3,26 @@ syntax = "proto3";
 
 package p4testgen;
 
-//import "p4runtime/proto/p4/v1/p4runtime.proto";
 import "p4/v1/p4runtime.proto";
 
 service P4FuzzGuide {
+    rpc Hello(HealthCheckRequest) returns (HealthCheckResponse) {}
     rpc GetP4Coverage(P4CoverageRequest) returns (P4CoverageReply) {}
     rpc RecordP4Testgen(P4CoverageRequest) returns (P4CoverageReply) {}
     rpc GetP4Statement(P4StatementRequest) returns (P4StatementReply) {}
+}
+
+message HealthCheckRequest {
+    string service = 1;
+}
+
+message HealthCheckResponse {
+    enum ServingStatus {
+        UNKNOWN = 0;
+        SERVING = 1;
+        NOT_SERVING = 2;
+    }
+    ServingStatus status = 1;
 }
 
 message P4CoverageRequest {

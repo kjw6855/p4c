@@ -22,6 +22,8 @@ using grpc::ServerCompletionQueue;
 using grpc::ServerContext;
 using grpc::Status;
 using p4testgen::P4FuzzGuide;
+using p4testgen::HealthCheckRequest;
+using p4testgen::HealthCheckResponse;
 using p4testgen::P4CoverageRequest;
 using p4testgen::P4CoverageReply;
 using p4testgen::P4StatementRequest;
@@ -127,6 +129,29 @@ class RecordP4TestgenData : public CallData {
     ServerContext ctx_;
     P4CoverageRequest request_;
     P4CoverageReply reply_;
+};
+
+class HelloData : public CallData {
+ public:
+    explicit HelloData(P4FuzzGuide::AsyncService *service,
+            ServerCompletionQueue *cq)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE) {
+        service_->RequestHello(&ctx_, &request_, &responder_,
+                cq_, cq_, this);
+    }
+
+    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
+
+
+ private:
+    P4FuzzGuide::AsyncService *service_;
+    ServerCompletionQueue *cq_;
+    ServerAsyncResponseWriter<HealthCheckResponse> responder_;
+    CallStatus status_;  // The current serving state.
+    ServerContext ctx_;
+    HealthCheckRequest request_;
+    HealthCheckResponse reply_;
 };
 
 } // namespace P4Tools::P4Testgen

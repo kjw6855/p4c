@@ -20,6 +20,8 @@
 
 namespace P4Tools::P4Testgen {
 
+using p4testgen::HealthCheckResponse;
+
 P4FuzzGuideImpl::P4FuzzGuideImpl(const ProgramInfo *programInfo)
 : programInfo_(programInfo) {}
 
@@ -162,6 +164,25 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     rep->set_allocated_test_case(newTestCase);
 
     return Status::OK;
+}
+
+CallData::CallStatus HelloData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) {
+    switch (status_) {
+        case CallData::CREATE:
+        {
+            new HelloData(service_, cq_);
+            status_ = CallData::FINISH;
+            reply_.set_status(HealthCheckResponse::SERVING);
+            responder_.Finish(reply_, Status::OK, this);
+            break;
+        }
+        case CallData::FINISH:
+            delete this;
+            break;
+    }
+
+    return status_;
 }
 
 CallData::CallStatus GetP4StatementData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,

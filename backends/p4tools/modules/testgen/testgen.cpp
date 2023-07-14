@@ -70,6 +70,7 @@ void Testgen::runServer(const ProgramInfo *programInfo, int grpcPort) {
     std::cout << "Server listening on " << server_address << std::endl;
     //server->Wait();
 
+    new HelloData(&service_, cq_.get());
     new GetP4StatementData(&service_, cq_.get(), programInfo);
     new GetP4CoverageData(&service_, cq_.get(), programInfo);
     new RecordP4TestgenData(&service_, cq_.get(), programInfo);
