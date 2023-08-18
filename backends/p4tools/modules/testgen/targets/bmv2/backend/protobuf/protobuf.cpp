@@ -349,6 +349,9 @@ entities : [
 ## endfor
       # Action {{rule.action_name}}
       action {
+## if existsIn(table, "has_as")
+        action_selector_name: "{{table.action_selector_name}}"
+## endif
 ## if existsIn(table, "has_ap")
         action_profile_action_set {
           action_profile_actions {

@@ -337,15 +337,17 @@ bool Bmv2V1ModelTableStepper::checkForActionSelector() {
     // Treat action selectors like action profiles for now.
     // The behavioral model P4Runtime is unclear how to configure action selectors.
     const auto *testObject =
-        state->getTestObject("action_profile", selectorDecl->controlPlaneName(), false);
+        state->getTestObject("action_selector", selectorDecl->controlPlaneName(), false);
     if (testObject == nullptr) {
         // This means, for every possible control plane entry (and with that, new execution state)
         // add the generated action profile.
-        bmv2V1ModelProperties.addProfileToState = true;
-        bmv2V1ModelProperties.actionProfile = new Bmv2V1ModelActionProfile(selectorDecl);
+        //bmv2V1ModelProperties.addProfileToState = true;
+        //bmv2V1ModelProperties.actionProfile = new Bmv2V1ModelActionProfile(selectorDecl);
+        bmv2V1ModelProperties.actionSelector = new Bmv2V1ModelActionSelector(selectorDecl,
+                new Bmv2V1ModelActionProfile(selectorDecl));
         return true;
     }
-    bmv2V1ModelProperties.actionProfile = testObject->checkedTo<Bmv2V1ModelActionProfile>();
+    bmv2V1ModelProperties.actionSelector = testObject->checkedTo<Bmv2V1ModelActionSelector>();
     bmv2V1ModelProperties.addProfileToState = false;
     return true;
 }
@@ -375,7 +377,7 @@ void Bmv2V1ModelTableStepper::checkTargetProperties(
     // Check whether the table has an action selector associated with it.
     if (checkForActionSelector()) {
         // TODO: This should be a selector. Implement.
-        bmv2V1ModelProperties.implementaton = TableImplementation::profile;
+        bmv2V1ModelProperties.implementaton = TableImplementation::selector;
         return;
     }
 }
