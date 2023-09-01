@@ -25,6 +25,8 @@ class CompilerTarget : public Target {
     /// @returns any unprocessed arguments, or nullptr if there was an error.
     static std::vector<const char *> *initCompiler(int argc, char **argv);
 
+    static std::optional<const IR::P4Program *> loadProgram();
+
     /// Runs the P4 compiler to produce an IR.
     ///
     /// @returns std::nullopt if an error occurs during compilation.

@@ -13,6 +13,8 @@
 #include "frontends/common/parseInput.h"
 #include "frontends/common/parser_options.h"
 #include "frontends/p4/frontend.h"
+#include "fstream"
+#include "ir/json_loader.h"
 #include "lib/compile_context.h"
 #include "lib/error.h"
 
@@ -31,6 +33,26 @@ std::optional<const IR::P4Program *> CompilerTarget::runCompiler() {
     }
 
     return runCompiler(program);
+}
+
+std::optional<const IR::P4Program *> CompilerTarget::loadProgram() {
+    std::filebuf fb;
+    auto &options = P4CContext::get().options();
+
+    if (fb.open(options.file, std::ios::in) == nullptr) {
+        ::error(ErrorType::ERR_IO, "%s: No such file or directory.", options.file);
+        return std::nullopt;
+    }
+    std::istream inJson(&fb);
+    JSONLoader jsonFileLoader(inJson);
+    if (jsonFileLoader.json == nullptr) {
+        ::error(ErrorType::ERR_IO, "%s: Not valid json input file", options.file);
+        return std::nullopt;
+    }
+    const auto *program = new IR::P4Program(jsonFileLoader);
+    fb.close();
+
+    return program;
 }
 
 std::optional<const IR::P4Program *> CompilerTarget::runCompiler(const std::string &source) {

@@ -41,10 +41,18 @@ class AbstractP4cTool {
         AutoCompileContext autoContext(*compileContext);
 
         // Run the compiler to get an IR and invoke the tool.
-        const auto program = P4Tools::CompilerTarget::runCompiler();
+        std::optional<const IR::P4Program *> program;
+        if (Options::get().loadIRFromJson == false) {
+            program = P4Tools::CompilerTarget::runCompiler();
+
+        } else {
+            program = P4Tools::CompilerTarget::loadProgram();
+        }
+
         if (!program) {
             return 1;
         }
+
         return mainImpl(*program);
     }
 };
