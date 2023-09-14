@@ -129,14 +129,12 @@ ExecutionState* ConcolicExecutor::chooseBranch(const std::vector<Branch>& branch
         const Constraint* constraint = branch.constraint;
         LOG_FEATURE("small_visit", 4, "Branch Constraint: " << constraint);
 
-        if (dynamic_cast<const IR::BoolLiteral*>(constraint) != nullptr) {
-            auto val = constraint->checkedTo<IR::BoolLiteral>()->value;
-            if (val) {
+        if (const auto *boolVal = constraint->to<IR::BoolLiteral>()) {
+            if (boolVal->value) {
                 next = &branch.nextState.get();
                 break;
             }
-
-        } else if (dynamic_cast<const IR::Neq*>(constraint) != nullptr) {
+        } else if (Utils::isDefaultByConstraint(constraint)) {
             // Select the branch temporarily
             next = &branch.nextState.get();
         }

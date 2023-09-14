@@ -190,15 +190,17 @@ CallData::CallStatus GetP4StatementData::Proceed(std::map<std::string, ConcolicE
         {
             new GetP4StatementData(service_, cq_, programInfo_);
 
-            auto allNodes = programInfo_->getCoverableNodes();
+            auto &allNodes = programInfo_->getCoverableNodes();
 
             int i = 1, idx = request_.idx();
-            for (auto node : allNodes) {
+            for (const auto *node : allNodes) {
                 if (i++ != idx)
                     continue;
 
+                const auto &srcInfo = node->getSourceInfo();
+                auto sourceLine = srcInfo.toPosition().sourceLine;
                 std::stringstream ss;
-                ss << node;
+                ss << srcInfo.getSourceFile() << "\\" << sourceLine << ": " << *node;
                 reply_.set_statement(ss.str());
                 break;
             }

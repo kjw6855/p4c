@@ -91,6 +91,21 @@ const IR::Constant *Utils::getRandConstantForType(const IR::Type_Bits *type) {
  *  Other.
  * ========================================================================================= */
 
+bool Utils::isDefaultByConstraint(const IR::Expression *constraint) {
+    if (constraint->is<IR::Neq>()) {
+        return true;
+
+    } else if (const auto *expr = constraint->to<IR::LAnd>()) {
+        return (Utils::isDefaultByConstraint(expr->left) &&
+            Utils::isDefaultByConstraint(expr->right));
+    } else if (const auto *expr = constraint->to<IR::LOr>()) {
+        return (Utils::isDefaultByConstraint(expr->left) ||
+            Utils::isDefaultByConstraint(expr->right));
+    }
+
+    return false;
+}
+
 const IR::MethodCallExpression *Utils::generateInternalMethodCall(
     cstring methodName, const std::vector<const IR::Expression *> &argVector,
     const IR::Type *returnType) {
@@ -184,7 +199,7 @@ const IR::Constant *Utils::getZeroCksum(const IR::Expression *expr, int zeroLen,
         if (symVar->label.startsWith("*method_checksum")) {
             if (init)
                 return IR::getConstant(IR::getBitType(8), 0);
-            else if (zeroLen < 88)
+            else if (zeroLen < 64)
                 return IR::getConstant(IR::getBitType(16), 0);
         }
 

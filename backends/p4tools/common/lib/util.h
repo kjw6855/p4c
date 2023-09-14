@@ -88,10 +88,13 @@ class Utils {
     static const IR::Expression *removeUnknownVar(const IR::Expression *node);
 
     static const IR::Constant *getZeroCksum(const IR::Expression *expr, int zeroLen, bool init);
+
+    static bool isDefaultByConstraint(const IR::Expression *constraint);
     /* =========================================================================================
      *  Other.
      * ========================================================================================= */
  public:
+
     /// @returns a method call to an internal extern consumed by the interpreter. The return type
     /// is typically Type_Void.
     static const IR::MethodCallExpression *generateInternalMethodCall(
