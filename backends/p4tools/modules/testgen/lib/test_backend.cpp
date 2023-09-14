@@ -122,8 +122,9 @@ bool TestBackEnd::run(const FinalState &state) {
             memset(testCoverageMap, 0, allocLen);
             int i = 0;
             auto& visitedStmtSet = executionState->getVisited();
-            for (auto& stmt : coverableNodes) {
-                if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
+            LOG_FEATURE("coverage", 5, "visited: " << visitedStmtSet.size());
+            for (auto *node : coverableNodes) {
+                if (visitedStmtSet.count(node)) {
                     int idx = i / 8;
                     int shl = 7 - (i % 8);
                     testCoverageMap[idx] |= 1 << shl;
@@ -139,7 +140,7 @@ bool TestBackEnd::run(const FinalState &state) {
                     "============ Test %1%: Nodes covered: %2% (%3% .. %4%/%5%) ============",
                     testCount, coverage, testCoverage,
                     visitedNodes.size(), coverableNodes.size());
-            P4::Coverage::logCoverage(coverableNodes, visitedNodes, executionState->getVisited());
+            P4::Coverage::logCoverage(coverableNodes, visitedNodes, visitedStmtSet);
         }
 
         // Output the test.

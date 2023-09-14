@@ -153,8 +153,8 @@ ExecutionState* ConcolicExecutor::chooseBranch(const std::vector<Branch>& branch
 bool ConcolicExecutor::testHandleTerminalState(const ExecutionState &terminalState) {
     int i = 0;
     auto& visitedStmtSet = terminalState.getVisited();
-    for (auto& stmt : allStatements) {
-        if (std::count(visitedStmtSet.begin(), visitedStmtSet.end(), stmt) != 0U) {
+    for (auto* stmt : allStatements) {
+        if (visitedStmtSet.count(stmt)) {
             int idx = i / 8;
             int shl = 7 - (i % 8);
             statementBitmap[idx] |= 1 << shl;
