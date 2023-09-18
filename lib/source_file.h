@@ -129,11 +129,13 @@ class SourceInfo final {
     int line = -1;
     int column = -1;
     cstring srcBrief = "";
+    bool isLoaded = false;
     SourceInfo(cstring filename, int line, int column, cstring srcBrief) {
         this->filename = filename;
         this->line = line;
         this->column = column;
         this->srcBrief = srcBrief;
+        this->isLoaded = filename.size() > 0;
     }
     /// Creates an "invalid" SourceInfo
     SourceInfo() : sources(nullptr), start(SourcePosition()), end(SourcePosition()) {}

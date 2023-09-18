@@ -26,6 +26,7 @@ class MidEnd : public PassManager {
     P4::ReferenceMap refMap;
     P4::TypeMap typeMap;
 
+    virtual Visitor *mkFillEnums();
     /// Provides a target-specific pass that converts P4 enums to bit<n>. The default
     /// implementation returns P4::ConvertEnums, instantiated with the policy provided by
     /// @mkChooseEnumRepresentation.
@@ -64,7 +65,7 @@ class MidEnd : public PassManager {
 
     /// Add the list of default passes to the mid end. This is not part of the initializer because
     /// some targets may add their own passes to the beginning of the pass list.
-    void addDefaultPasses();
+    void addDefaultPasses(bool loadIRFromJson);
 };
 
 }  // namespace P4Tools

@@ -265,17 +265,20 @@ cstring SourceInfo::toSourceFragment() const {
 }
 
 cstring SourceInfo::toBriefSourceFragment() const {
+    if (isLoaded) return srcBrief;
     if (!isValid()) return "";
     return sources->getBriefSourceFragment(*this);
 }
 
 cstring SourceInfo::toPositionString() const {
+    if (isLoaded) return SourceFileLine(filename, line).toString();
     if (!isValid()) return "";
     SourceFileLine position = sources->getSourceLine(start.getLineNumber());
     return position.toString();
 }
 
 cstring SourceInfo::toSourcePositionData(unsigned *outLineNumber, unsigned *outColumnNumber) const {
+    if (isLoaded) return filename;
     SourceFileLine position = sources->getSourceLine(start.getLineNumber());
     if (outLineNumber != nullptr) {
         *outLineNumber = position.sourceLine;
@@ -287,15 +290,18 @@ cstring SourceInfo::toSourcePositionData(unsigned *outLineNumber, unsigned *outC
 }
 
 SourceFileLine SourceInfo::toPosition() const {
+    if (isLoaded) return SourceFileLine(filename, line);
     return sources->getSourceLine(start.getLineNumber());
 }
 
 cstring SourceInfo::getSourceFile() const {
+    if (isLoaded) return filename;
     auto sourceLine = sources->getSourceLine(start.getLineNumber());
     return sourceLine.fileName;
 }
 
 cstring SourceInfo::getLineNum() const {
+    if (isLoaded) return toString(line);
     SourceFileLine sourceLine = sources->getSourceLine(start.getLineNumber());
     return toString(sourceLine.sourceLine);
 }

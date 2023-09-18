@@ -32,19 +32,19 @@ bool TableExecutionState::hasTaint(const IR::Expression *expr) const {
 TableCollector::TableCollector() : body({}), tmpBody({}) {}
 
 bool TableCollector::preorder(const IR::P4Control *p4control) {
-    tmpBody.clear();
+    //tmpBody.clear();
     enableDump = false;
     return true;
 }
 
 bool TableCollector::preorder(const IR::MethodCallStatement *methodCallStatement) {
-    tmpBody.push(methodCallStatement);
+    //tmpBody.push(methodCallStatement);
     return true;
 }
 
 bool TableCollector::preorder(const IR::P4Table *p4table) {
-    body.push(tmpBody);
-    tmpBody.clear();
+    //body.push(tmpBody);
+    //tmpBody.clear();
 
     body.push(Continuation::Return(p4table));
     enableDump = true;

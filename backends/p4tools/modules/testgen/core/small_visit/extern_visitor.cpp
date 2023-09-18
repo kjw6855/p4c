@@ -9,6 +9,7 @@
 
 #include <boost/multiprecision/cpp_int.hpp>
 
+#include "frontends/p4/optimizeExpressions.h"
 #include "backends/p4tools/common/lib/constants.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
@@ -611,6 +612,10 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                  varBitFieldSize = varbitConst->asInt();
                  condInfo = calculateSuccessfulParserAdvance(state, varBitFieldSize + extractSize);
              } else {
+                 const auto *varbitLiteral = P4::optimizeExpression(varbitExtractExpr);
+                 varBitFieldSize = varbitLiteral->checkedTo<IR::Constant>()->asInt();
+                 condInfo = calculateSuccessfulParserAdvance(state, varBitFieldSize + extractSize);
+#if 0
                  // Check whether advance expression is tainted.
                  // If that is the case, we have no control or idea how much the cursor can be
                  // advanced.
@@ -638,6 +643,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                      varbitExtractExpr, IR::getConstant(varbitExtractExpr->type, extractSize));
                  condInfo = calculateAdvanceExpression(state, varbitExtractExpr, restrictions);
                  varBitFieldSize = std::max(0, condInfo.advanceSize - extractSize);
+#endif
              }
              // Evaluate the case where the packet is large enough.
              if (condInfo.advanceCond != nullptr) {

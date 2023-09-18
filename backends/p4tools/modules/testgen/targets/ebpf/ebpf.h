@@ -13,7 +13,7 @@ class EBPFCompilerTarget : public CompilerTarget {
     static void make();
 
  private:
-    MidEnd mkMidEnd(const CompilerOptions &options) const override;
+    MidEnd mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const override;
 
     EBPFCompilerTarget();
 };

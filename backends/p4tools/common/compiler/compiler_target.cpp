@@ -35,22 +35,34 @@ std::optional<const IR::P4Program *> CompilerTarget::runCompiler() {
     return runCompiler(program);
 }
 
-std::optional<const IR::P4Program *> CompilerTarget::loadProgram() {
+std::optional<const IR::P4Program *> CompilerTarget::loadProgram(cstring irJsonFile) {
     std::filebuf fb;
     auto &options = P4CContext::get().options();
 
-    if (fb.open(options.file, std::ios::in) == nullptr) {
-        ::error(ErrorType::ERR_IO, "%s: No such file or directory.", options.file);
+    if (fb.open(irJsonFile, std::ios::in) == nullptr) {
+        ::error(ErrorType::ERR_IO, "%s: No such file or directory.", irJsonFile);
         return std::nullopt;
     }
     std::istream inJson(&fb);
     JSONLoader jsonFileLoader(inJson);
     if (jsonFileLoader.json == nullptr) {
-        ::error(ErrorType::ERR_IO, "%s: Not valid json input file", options.file);
+        ::error(ErrorType::ERR_IO, "%s: Not valid json input file", irJsonFile);
         return std::nullopt;
     }
     const auto *program = new IR::P4Program(jsonFileLoader);
     fb.close();
+
+    auto &compilerOptions = dynamic_cast<CompilerOptions &>(options);
+    P4::serializeP4RuntimeIfRequired(program, compilerOptions);
+    if (::errorCount() > 0) return std::nullopt;
+
+    const auto &self = get();
+    program = self.runMidEnd(program, true);
+    if (program == nullptr) {
+        return std::nullopt;
+    }
+
+    program = program->apply(HSIndexToMember());
 
     return program;
 }
@@ -77,7 +89,7 @@ std::optional<const IR::P4Program *> CompilerTarget::runCompilerImpl(
         return std::nullopt;
     }
 
-    program = self.runMidEnd(program);
+    program = self.runMidEnd(program, false);
     if (program == nullptr) {
         return std::nullopt;
     }
@@ -127,17 +139,17 @@ const IR::P4Program *CompilerTarget::runFrontend(const IR::P4Program *program) c
 
 P4::FrontEnd CompilerTarget::mkFrontEnd() const { return {}; }
 
-MidEnd CompilerTarget::mkMidEnd(const CompilerOptions &options) const {
+MidEnd CompilerTarget::mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const {
     MidEnd midEnd(options);
-    midEnd.addDefaultPasses();
+    midEnd.addDefaultPasses(loadIRFromJson);
     return midEnd;
 }
 
-const IR::P4Program *CompilerTarget::runMidEnd(const IR::P4Program *program) const {
+const IR::P4Program *CompilerTarget::runMidEnd(const IR::P4Program *program, bool loadIRFromJson) const {
     // Dynamic cast to get the CompilerOptions from ParserOptions
     auto &options = dynamic_cast<CompilerOptions &>(P4CContext::get().options());
 
-    auto midEnd = mkMidEnd(options);
+    auto midEnd = mkMidEnd(options, loadIRFromJson);
     midEnd.addDebugHook(options.getDebugHook(), true);
     return program->apply(midEnd);
 }

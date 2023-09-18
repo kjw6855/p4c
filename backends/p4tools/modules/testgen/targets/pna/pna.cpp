@@ -17,10 +17,10 @@ void PnaDpdkCompilerTarget::make() {
     }
 }
 
-MidEnd PnaDpdkCompilerTarget::mkMidEnd(const CompilerOptions &options) const {
+MidEnd PnaDpdkCompilerTarget::mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const {
     MidEnd midEnd(options);
     midEnd.addPasses({});
-    midEnd.addDefaultPasses();
+    midEnd.addDefaultPasses(loadIRFromJson);
 
     return midEnd;
 }

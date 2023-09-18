@@ -178,9 +178,9 @@ AbstractP4cToolOptions::AbstractP4cToolOptions(cstring message) : Options(messag
         "Provides a randomization seed");
 
     registerOption(
-        "--fromJson", nullptr,
-        [this](const char *) {
-            loadIRFromJson = true;
+        "--fromJson", "FILE",
+        [this](const char *arg) {
+            irJsonFile = arg;
             return true;
         },
         "Fail on unimplemented features instead of trying the next branch.");

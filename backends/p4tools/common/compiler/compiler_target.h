@@ -25,7 +25,7 @@ class CompilerTarget : public Target {
     /// @returns any unprocessed arguments, or nullptr if there was an error.
     static std::vector<const char *> *initCompiler(int argc, char **argv);
 
-    static std::optional<const IR::P4Program *> loadProgram();
+    static std::optional<const IR::P4Program *> loadProgram(cstring irJsonFile);
 
     /// Runs the P4 compiler to produce an IR.
     ///
@@ -66,7 +66,7 @@ class CompilerTarget : public Target {
     const IR::P4Program *runFrontend(const IR::P4Program *program) const;
 
     /// A factory method for providing a target-specific mid end implementation.
-    [[nodiscard]] virtual MidEnd mkMidEnd(const CompilerOptions &options) const;
+    [[nodiscard]] virtual MidEnd mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const;
 
     /// A factory method for providing a target-specific front end implementation.
     [[nodiscard]] virtual P4::FrontEnd mkFrontEnd() const;
@@ -74,7 +74,7 @@ class CompilerTarget : public Target {
     /// Runs the mid end provided by @mkMidEnd on the given program.
     ///
     /// @returns nullptr if an error occurs during compilation.
-    const IR::P4Program *runMidEnd(const IR::P4Program *program) const;
+    const IR::P4Program *runMidEnd(const IR::P4Program *program, bool loadIRFromJson) const;
 
     explicit CompilerTarget(std::string deviceName, std::string archName);
 

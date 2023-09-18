@@ -88,7 +88,15 @@ void TestgenTarget::argumentsToTypeDeclarations(
             // declaration instance.
             const auto *declInstance = ProgramInfo::findProgramDecl(ns, pathExpr->path)
                                            ->checkedTo<IR::Declaration_Instance>();
-            declType = declInstance->type->checkedTo<IR::Type_Declaration>();
+            if (const auto *pipe = declInstance->type->to<IR::Type_Specialized>()) {
+                const auto *pipeDecl = declInstance->to<IR::Declaration_Instance>();
+                argumentsToTypeDeclarations(ns, pipeDecl->arguments, resultDecls);
+                return;
+
+
+            } else {
+                declType = declInstance->type->checkedTo<IR::Type_Declaration>();
+            }
         } else {
             BUG("Unexpected main-declaration argument node type: %1%", expr->node_type_name());
         }

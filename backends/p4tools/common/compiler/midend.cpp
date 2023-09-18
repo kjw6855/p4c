@@ -22,6 +22,7 @@
 #include "midend/eliminateTypedefs.h"
 #include "midend/expandEmit.h"
 #include "midend/expandLookahead.h"
+#include "midend/fillEnumMap.h"
 #include "midend/flattenHeaders.h"
 #include "midend/hsIndexSimplify.h"
 #include "midend/local_copyprop.h"
@@ -42,6 +43,10 @@ namespace P4Tools {
 MidEnd::MidEnd(const CompilerOptions &options) {
     setName("MidEnd");
     refMap.setIsV1(options.langVersion == CompilerOptions::FrontendVersion::P4_14);
+}
+
+Visitor *MidEnd::mkFillEnums() {
+    return new P4::FillEnumMap(mkConvertEnumsPolicy(), &typeMap);
 }
 
 Visitor *MidEnd::mkConvertEnums() {
@@ -87,7 +92,14 @@ P4::ReferenceMap *MidEnd::getRefMap() { return &refMap; }
 
 P4::TypeMap *MidEnd::getTypeMap() { return &typeMap; }
 
-void MidEnd::addDefaultPasses() {
+void MidEnd::addDefaultPasses(bool loadIRFromJson) {
+    if (loadIRFromJson) {
+        addPasses({
+            //new P4::ResolveReferences(&refMap),
+            new P4::TypeChecking(&refMap, &typeMap),
+            mkFillEnums(),
+        });
+    }
     addPasses({
         // Replaces switch statements that operate on arbitrary scalars with switch statements
         // that

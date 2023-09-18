@@ -8,6 +8,7 @@
 #include "control-plane/addMissingIds.h"
 #include "control-plane/p4RuntimeArchStandard.h"
 #include "frontends/common/options.h"
+#include "frontends/common/resolveReferences/resolveReferences.h"
 #include "lib/cstring.h"
 
 #include "backends/p4tools/modules/testgen/options.h"
@@ -23,21 +24,29 @@ void Bmv2V1ModelCompilerTarget::make() {
     }
 }
 
-MidEnd Bmv2V1ModelCompilerTarget::mkMidEnd(const CompilerOptions &options) const {
+MidEnd Bmv2V1ModelCompilerTarget::mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const {
     MidEnd midEnd(options);
     auto *refMap = midEnd.getRefMap();
     auto *typeMap = midEnd.getTypeMap();
+
+    if (loadIRFromJson) {
+        midEnd.addPasses({
+            new P4::ResolveReferences(refMap),
+        });
+    }
+
     midEnd.addPasses({
         // Parse BMv2-specific annotations.
         new BMV2::ParseAnnotations(),
         // Parse P4Runtime-specific annotations and insert missing IDs.
         // Only do this for the protobuf back end.
         TestgenOptions::get().testBackend == "PROTOBUF"
-            ? new P4::AddMissingIdAnnotations(
-                  refMap, typeMap, new P4::ControlPlaneAPI::Standard::V1ModelArchHandlerBuilder())
-            : nullptr,
+        ? new P4::AddMissingIdAnnotations(
+                refMap, typeMap, new P4::ControlPlaneAPI::Standard::V1ModelArchHandlerBuilder())
+        : nullptr,
     });
-    midEnd.addDefaultPasses();
+
+    midEnd.addDefaultPasses(loadIRFromJson);
 
     return midEnd;
 }

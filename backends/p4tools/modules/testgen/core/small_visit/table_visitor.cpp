@@ -594,10 +594,6 @@ void TableVisitor::evalTableControlEntries(
         }
 
         if (entry->table_name() != properties.tableName) {
-            std::cout << "Different table name: "
-                << entry->table_name() << " (testCase) vs. "
-                << properties.tableName << " (table)"
-                << std::endl;
             continue;
         }
 
@@ -849,9 +845,30 @@ void TableVisitor::evalTargetTable(
 
 bool TableVisitor::eval() {
     // Set the appropriate properties when the table is immutable, meaning it has constant entries.
+    LOG_FEATURE("small_visit", 4,
+                "***** " << properties.tableName << " *****"
+                         << std::endl);
+
     TableUtils::checkTableImmutability(*table, properties);
 
     if (checkTable) {
+        bool hasEntry = false;
+        for (auto &entity : *testCase.mutable_entities()) {
+            if (!entity.has_table_entry())
+                continue;
+
+            auto *entry = entity.mutable_table_entry();
+            if (entry->table_name() == properties.tableName) {
+                hasEntry = true;
+                break;
+            }
+        }
+
+        if (!hasEntry) {
+            visitor->state.popBody();
+            return false;
+        }
+
         // Gather the list of executable actions. This does not include default actions, for example.
         const auto tableActionList = TableUtils::buildTableActionList(*table);
 

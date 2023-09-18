@@ -28,7 +28,7 @@ class AbstractP4cToolOptions : protected Util::Options {
     /// A seed for the PRNG.
     std::optional<uint32_t> seed = std::nullopt;
 
-    bool loadIRFromJson = false;
+    cstring irJsonFile = nullptr;
 
     /// Processes options.
     ///
