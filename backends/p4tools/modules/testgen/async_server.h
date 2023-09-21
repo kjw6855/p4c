@@ -30,6 +30,7 @@ using p4testgen::P4StatementRequest;
 using p4testgen::P4StatementReply;
 using p4testgen::TestCase;
 
+#if 0
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
  public:
     P4FuzzGuideImpl(const ProgramInfo *programInfo);
@@ -53,6 +54,7 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
 
     //std::string hexToByteString(const std::string &hex);
 };
+#endif
 
 class CallData {
  public:
@@ -65,8 +67,9 @@ class CallData {
 class GetP4StatementData : public CallData {
  public:
     explicit GetP4StatementData(P4FuzzGuide::AsyncService *service,
-            ServerCompletionQueue *cq, const ProgramInfo *programInfo)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo) {
+            ServerCompletionQueue *cq, const ProgramInfo *programInfo,
+            TableCollector &tableCollector)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo), tableCollector_(tableCollector) {
         service_->RequestGetP4Statement(&ctx_, &request_, &responder_,
                 cq_, cq_, this);
     }
@@ -80,6 +83,7 @@ class GetP4StatementData : public CallData {
     ServerAsyncResponseWriter<P4StatementReply> responder_;
     CallStatus status_;  // The current serving state.
     const ProgramInfo* programInfo_;
+    TableCollector &tableCollector_;
     ServerContext ctx_;
     P4StatementRequest request_;
     P4StatementReply reply_;
@@ -88,8 +92,9 @@ class GetP4StatementData : public CallData {
 class GetP4CoverageData : public CallData {
  public:
     explicit GetP4CoverageData(P4FuzzGuide::AsyncService *service,
-            ServerCompletionQueue *cq, const ProgramInfo *programInfo)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo) {
+            ServerCompletionQueue *cq, const ProgramInfo *programInfo,
+            TableCollector &tableCollector)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo), tableCollector_(tableCollector) {
         service_->RequestGetP4Coverage(&ctx_, &request_, &responder_,
                 cq_, cq_, this);
     }
@@ -103,6 +108,7 @@ class GetP4CoverageData : public CallData {
     ServerAsyncResponseWriter<P4CoverageReply> responder_;
     CallStatus status_;  // The current serving state.
     const ProgramInfo* programInfo_;
+    TableCollector &tableCollector_;
     ServerContext ctx_;
     P4CoverageRequest request_;
     P4CoverageReply reply_;
@@ -111,8 +117,9 @@ class GetP4CoverageData : public CallData {
 class RecordP4TestgenData : public CallData {
  public:
     explicit RecordP4TestgenData(P4FuzzGuide::AsyncService *service,
-            ServerCompletionQueue *cq, const ProgramInfo *programInfo)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo) {
+            ServerCompletionQueue *cq, const ProgramInfo *programInfo,
+            TableCollector &tableCollector)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo), tableCollector_(tableCollector) {
         service_->RequestRecordP4Testgen(&ctx_, &request_, &responder_,
                 cq_, cq_, this);
     }
@@ -126,6 +133,7 @@ class RecordP4TestgenData : public CallData {
     ServerAsyncResponseWriter<P4CoverageReply> responder_;
     CallStatus status_;  // The current serving state.
     const ProgramInfo* programInfo_;
+    TableCollector &tableCollector_;
     ServerContext ctx_;
     P4CoverageRequest request_;
     P4CoverageReply reply_;

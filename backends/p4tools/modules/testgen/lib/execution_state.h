@@ -68,6 +68,7 @@ class ExecutionState : public AbstractExecutionState {
 
     /// Set of visited nodes. Used for code coverage.
     P4::Coverage::CoverageSet visitedNodes;
+    P4::Coverage::CoverageSet visitedActions;
 
     /// The remaining body of the current function being executed.
     ///
@@ -110,6 +111,8 @@ class ExecutionState : public AbstractExecutionState {
     int inputPacketCursor = 0;
 
     int inputPacketSize = 0;
+
+    int matchedIdx = 0;
 
     /// List of path constraints - expressions that must all evaluate to true to reach this
     /// execution state.
@@ -160,9 +163,11 @@ class ExecutionState : public AbstractExecutionState {
 
     /// Checks whether the node has been visited in this state.
     void markVisited(const IR::Node *node);
+    void markAction(const IR::Node *node);
 
     /// @returns list of all statements visited before reaching this state.
     [[nodiscard]] const P4::Coverage::CoverageSet &getVisited() const;
+    [[nodiscard]] const P4::Coverage::CoverageSet &getVisitedActions() const;
 
     /// Sets the symbolic value of the given state variable to the given value. Constant folding
     /// is done on the given value before updating the symbolic state.
@@ -325,6 +330,8 @@ class ExecutionState : public AbstractExecutionState {
 
     /// @returns the current size of the input packet.
     [[nodiscard]] int getInputPacketSize() const;
+
+    [[nodiscard]] int getMatchedIdx();
 
     void setInputPacketSize(int packetSize);
 

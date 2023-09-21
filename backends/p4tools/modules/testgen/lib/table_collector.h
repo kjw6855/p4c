@@ -8,6 +8,7 @@
 #include "ir/irutils.h"
 #include "ir/visitor.h"
 #include "lib/source_file.h"
+#include "midend/coverage.h"
 
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/table_utils.h"
@@ -34,11 +35,13 @@ class TableExecutionState : public AbstractExecutionState {
     void set(const IR::StateVariable &var, const IR::Expression *value) override;
 
     explicit TableExecutionState(const IR::P4Program *program);
+
 };
 
 class TableCollector : public Inspector {
     Continuation::Body body;
     Continuation::Body tmpBody;
+    P4::Coverage::CoverageSet actionNodes;
 
     bool enableDump = false;
 
@@ -52,6 +55,7 @@ class TableCollector : public Inspector {
     explicit TableCollector();
 
     const Continuation::Body &getP4Tables() const;
+    const P4::Coverage::CoverageSet &getActionNodes() const;
 };
 
 }  // namespace P4Tools::P4Testgen

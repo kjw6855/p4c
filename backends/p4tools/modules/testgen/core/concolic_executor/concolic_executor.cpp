@@ -23,7 +23,6 @@
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
-#include "backends/p4tools/modules/testgen/lib/table_collector.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
 #include "backends/p4tools/modules/testgen/lib/visit_concolic.h"
 
@@ -32,10 +31,8 @@ namespace P4Tools::P4Testgen {
 void ConcolicExecutor::run(TestCase& testCase) {
     executionState = ExecutionState::create(programInfo.program);
 
-    auto tableCollector = TableCollector();
-    programInfo.program->apply(tableCollector);
-
     Continuation::Body body(tableCollector.getP4Tables());
+    const auto actionNodes = tableCollector.getActionNodes();
     body.push(programInfo.program);
 
     tableState = ExecutionState::create(programInfo.program, body);
@@ -102,12 +99,14 @@ uint64_t getNumeric(const std::string& str) {
 }
 */
 
-ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo)
+ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollector &tableCollector)
     : programInfo(programInfo),
+      tableCollector(tableCollector),
       executionState(ExecutionState::create(programInfo.program)),
       tableState(ExecutionState::create(programInfo.program)),
       allStatements(programInfo.getCoverableNodes()),
       statementBitmapSize(allStatements.size()),
+      actionBitmapSize(tableCollector.getActionNodes().size()),
       evaluator(programInfo),
       tableEvaluator(programInfo) {
 
@@ -115,6 +114,10 @@ ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo)
     int allocLen = (statementBitmapSize / 8) + 1;
     statementBitmap = (unsigned char *)malloc(allocLen);
     memset(statementBitmap, 0, allocLen);
+
+    allocLen = (actionBitmapSize / 8) + 1;
+    actionBitmap = (unsigned char *)malloc(allocLen);
+    memset(actionBitmap, 0, allocLen);
     //reachabilityEngine = new ReachabilityEngine(programInfo.dcg, "", true);
 }
 
@@ -161,6 +164,17 @@ bool ConcolicExecutor::testHandleTerminalState(const ExecutionState &terminalSta
         i++;
     }
 
+    auto &visitedActionSet = terminalState.getVisitedActions();
+    i = 0;
+    for (auto* action : tableCollector.getActionNodes()) {
+        if (visitedActionSet.count(action)) {
+            int idx = i / 8;
+            int shl = 7 - (i % 8);
+            actionBitmap[idx] |= 1 << shl;
+        }
+        i++;
+    }
+
     finalState = new FinalVisitState(terminalState);
 
     return true;
@@ -169,6 +183,11 @@ bool ConcolicExecutor::testHandleTerminalState(const ExecutionState &terminalSta
 const std::string ConcolicExecutor::getStatementBitmapStr() {
     int allocLen = (statementBitmapSize / 8) + 1;
     return std::string(reinterpret_cast<char*>(statementBitmap), allocLen);
+}
+
+const std::string ConcolicExecutor::getActionBitmapStr() {
+    int allocLen = (actionBitmapSize / 8) + 1;
+    return std::string(reinterpret_cast<char*>(actionBitmap), allocLen);
 }
 
 const P4::Coverage::CoverageSet& ConcolicExecutor::getVisitedStatements() {

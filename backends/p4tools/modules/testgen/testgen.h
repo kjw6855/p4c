@@ -10,6 +10,7 @@
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/modules/testgen/options.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
+#include "backends/p4tools/modules/testgen/lib/table_collector.h"
 #include "backends/p4tools/modules/testgen/p4testgen.grpc.pb.h"
 
 namespace P4Tools::P4Testgen {
@@ -25,7 +26,7 @@ class Testgen : public AbstractP4cTool<TestgenOptions> {
 
     int mainImpl(const IR::P4Program *program) override;
 
-    void runServer(const ProgramInfo *programInfo, int grpcPort);
+    void runServer(const ProgramInfo *programInfo, TableCollector &tableCollector, int grpcPort);
 
  public:
     //virtual ~Testgen() = default;

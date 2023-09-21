@@ -165,7 +165,14 @@ void ExecutionState::markVisited(const IR::Node *node) {
     visitedNodes.emplace(node);
 }
 
+void ExecutionState::markAction(const IR::Node *node) {
+    if (!node->is<IR::MethodCallExpression>())
+        return;
+    visitedActions.emplace(node);
+}
+
 const P4::Coverage::CoverageSet &ExecutionState::getVisited() const { return visitedNodes; }
+const P4::Coverage::CoverageSet &ExecutionState::getVisitedActions() const { return visitedActions; }
 
 bool ExecutionState::hasTaint(const IR::Expression *expr) const {
     return Taint::hasTaint(env.getInternalMap(), expr);
@@ -354,6 +361,10 @@ int ExecutionState::getInputPacketSize() const {
 
 void ExecutionState::setInputPacketSize(int packetSize) {
     inputPacketSize = packetSize;
+}
+
+int ExecutionState::getMatchedIdx() {
+    return matchedIdx++;
 }
 
 void ExecutionState::appendToInputPacket(const IR::Expression *expr) {

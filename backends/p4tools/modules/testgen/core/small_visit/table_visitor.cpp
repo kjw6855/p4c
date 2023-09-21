@@ -25,6 +25,7 @@
 #include "lib/source_file.h"
 #include "midend/coverage.h"
 
+#include "frontends/p4/optimizeExpressions.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/expr_visitor.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/path_selection.h"
@@ -636,6 +637,7 @@ void TableVisitor::evalTableControlEntries(
             found = true;
             auto* arguments = new IR::Vector<IR::Argument>();
             std::vector<ActionArg> ctrlPlaneArgs;
+
             for (auto& param : p4v1Action->params()) {
                 // TODO: check param_name comparison
                 size_t argIdx = (size_t)(param.param_id() - 1);
@@ -669,15 +671,22 @@ void TableVisitor::evalTableControlEntries(
             nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
             nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
             nextState.replaceTopBody(&replacements);
-            break;
-        }
 
-        if (found) {
             // XXX: should I put TraceEvent::Generic(tableStream.str())?
             const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
             if (hitCondition != nullptr) {
                 visitor->result->emplace_back(hitCondition, visitor->state, nextState);
+                const auto *expr = P4::optimizeExpression(hitCondition);
+                if (const auto *constVal = expr->to<IR::BoolLiteral>()) {
+                   if (constVal->value) {
+                       // put matched idx on entity
+                       entry->set_matched_idx(nextState.getMatchedIdx());
+                       nextState.markAction(tableAction);
+                   }
+                }
             }
+
+            break;
         }
     }
 }

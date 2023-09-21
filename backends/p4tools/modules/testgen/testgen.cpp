@@ -53,7 +53,7 @@ Testgen::~Testgen() {
         cq_->Shutdown();
 }
 
-void Testgen::runServer(const ProgramInfo *programInfo, int grpcPort) {
+void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCollector, int grpcPort) {
     std::string server_address("0.0.0.0:");
     server_address += std::to_string(grpcPort);
     //P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo);
@@ -71,9 +71,9 @@ void Testgen::runServer(const ProgramInfo *programInfo, int grpcPort) {
     //server->Wait();
 
     new HelloData(&service_, cq_.get());
-    new GetP4StatementData(&service_, cq_.get(), programInfo);
-    new GetP4CoverageData(&service_, cq_.get(), programInfo);
-    new RecordP4TestgenData(&service_, cq_.get(), programInfo);
+    new GetP4StatementData(&service_, cq_.get(), programInfo, tableCollector);
+    new GetP4CoverageData(&service_, cq_.get(), programInfo, tableCollector);
+    new RecordP4TestgenData(&service_, cq_.get(), programInfo, tableCollector);
 
     CallData::CallStatus callStatus;
     void *tag;
@@ -93,7 +93,7 @@ void Testgen::runServer(const ProgramInfo *programInfo, int grpcPort) {
 
                 if (coverageMap.count(devId) == 0) {
                     coverageMap.insert(std::make_pair(devId,
-                                new ConcolicExecutor(*programInfo)));
+                                new ConcolicExecutor(*programInfo, tableCollector)));
                 }
 
                 auto* stateMgr = coverageMap.at(devId);
@@ -210,12 +210,26 @@ int Testgen::mainImpl(const IR::P4Program *program) {
     }
 
     if (testgenOptions.interactive) {
-        runServer(programInfo, testgenOptions.grpcPort);
+        auto tableCollector = TableCollector();
+        programInfo->program->apply(tableCollector);
+        auto p4Tables = tableCollector.getP4Tables();
+        auto p4TableActions = tableCollector.getActionNodes();
+        LOG_FEATURE("small_visit", 4, "Table/Action size: " << p4Tables.size() << "/" << p4TableActions.size());
+        for (auto *action : p4TableActions) {
+            const auto &srcInfo = action->getSourceInfo();
+            auto sourceLine = srcInfo.toPosition().sourceLine;
+            LOG_FEATURE("small_visit", 4, "  " << srcInfo.getSourceFile() <<
+                    "\\" << sourceLine << ": " << *action);
+        }
+
+        runServer(programInfo, tableCollector, testgenOptions.grpcPort);
         return EXIT_SUCCESS;
     }
 
     if (testgenOptions.pathSelectionPolicy == PathSelectionPolicy::TestCase) {
-        auto *concExec = new ConcolicExecutor(*programInfo);
+        auto tableCollector = TableCollector();
+        programInfo->program->apply(tableCollector);
+        auto *concExec = new ConcolicExecutor(*programInfo, tableCollector);
         TestCase *testCase = new TestCase();
         int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
 

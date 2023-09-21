@@ -13,6 +13,7 @@
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/lib/concolic.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/testgen/lib/table_collector.h"
 #include "backends/p4tools/modules/testgen/lib/final_visit_state.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
 #include "backends/p4tools/modules/testgen/p4testgen.pb.h"
@@ -27,7 +28,7 @@ class ConcolicExecutor {
     ~ConcolicExecutor();
 
     /// Constructor for this strategy, considering inheritance
-    ConcolicExecutor(const ProgramInfo &programInfo);
+    ConcolicExecutor(const ProgramInfo &programInfo, TableCollector &tableCollector);
 
     /// Executes the P4 program along a randomly chosen path. When the program terminates, the
     /// given callback is invoked. If the callback returns true, then the executor terminates.
@@ -37,6 +38,7 @@ class ConcolicExecutor {
     const P4::Coverage::CoverageSet &getVisitedStatements();
 
     const std::string getStatementBitmapStr();
+    const std::string getActionBitmapStr();
 
     boost::optional<Packet> getOutputPacket();
 
@@ -46,6 +48,7 @@ class ConcolicExecutor {
  protected:
     /// Target-specific information about the P4 program.
     const ProgramInfo &programInfo;
+    TableCollector &tableCollector;
 
     /// Chooses a branch corresponding to a given branch identifier.
     ///
@@ -69,7 +72,9 @@ class ConcolicExecutor {
 
  public:
     const int statementBitmapSize;
+    const int actionBitmapSize;
     unsigned char* statementBitmap;
+    unsigned char* actionBitmap;
     //const int tableEntryBitmapSize;
     //unsigned char* tableEntryBitmap;
 

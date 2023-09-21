@@ -33,7 +33,6 @@ TableCollector::TableCollector() : body({}), tmpBody({}) {}
 
 bool TableCollector::preorder(const IR::P4Control *p4control) {
     //tmpBody.clear();
-    enableDump = false;
     return true;
 }
 
@@ -47,10 +46,17 @@ bool TableCollector::preorder(const IR::P4Table *p4table) {
     //tmpBody.clear();
 
     body.push(Continuation::Return(p4table));
-    enableDump = true;
+    const auto tableActionList = TableUtils::buildTableActionList(*p4table);
+    for (size_t i = 0; i < tableActionList.size(); i++) {
+        const auto* action = tableActionList.at(i);
+        const auto* tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+        actionNodes.emplace(tableAction);
+    }
     return true;
 }
 
 const Continuation::Body &TableCollector::getP4Tables() const { return body; }
+
+const P4::Coverage::CoverageSet &TableCollector::getActionNodes() const { return actionNodes; }
 
 }  // namespace P4Tools::P4Testgen
