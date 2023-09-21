@@ -68,4 +68,5 @@ message TestCase {
     int32 stmt_cov_size = 7;
     bytes action_cov_bitmap = 8;
     int32 action_cov_size = 9;
+    int32 table_size = 10;
 }

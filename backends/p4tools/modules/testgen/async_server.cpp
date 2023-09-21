@@ -120,14 +120,6 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
 
     try {
         stateMgr->run(*newTestCase);
-#if 0
-        auto testPath = std::filesystem::path("/tmp/p4testgen_out/tmp").stem();
-        auto *testBackend = TestgenTarget::getTestBackend(*programInfo_, *stateMgr, testPath, Utils::getCurrentSeed());
-        auto callBack = [testBackend](auto &&finalState) {
-            return testBackend->run(std::forward<decltype(finalState)>(finalState));
-        };
-        stateMgr->run(callBack);
-#endif
 
     } catch (const Util::CompilerBug &e) {
         std::cerr << "Internal compiler error: " << e.what() << std::endl;
@@ -232,6 +224,7 @@ CallData::CallStatus GetP4CoverageData::Proceed(std::map<std::string, ConcolicEx
 
             auto devId = request_.device_id();
             auto allNodes = programInfo_->getCoverableNodes();
+
             std::cout << "Get P4 Coverage of device: " << devId << std::endl;
 
             auto* newTestCase = new TestCase(request_.test_case());
@@ -254,6 +247,7 @@ CallData::CallStatus GetP4CoverageData::Proceed(std::map<std::string, ConcolicEx
             newTestCase->set_stmt_cov_size(stmtBitmapSize);
             newTestCase->set_action_cov_bitmap(actionBitmap);
             newTestCase->set_action_cov_size(actionBitmapSize);
+            newTestCase->set_table_size(tableCollector_.getP4Tables().size());
 
             reply_.set_allocated_test_case(newTestCase);
             status_ = CallData::FINISH;
@@ -310,6 +304,7 @@ CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, Concolic
             newTestCase->set_stmt_cov_size(stateMgr->statementBitmapSize);
             newTestCase->set_action_cov_bitmap(stateMgr->getActionBitmapStr());
             newTestCase->set_action_cov_size(stateMgr->actionBitmapSize);
+            newTestCase->set_table_size(tableCollector_.getP4Tables().size());
 
             // TODO: multiple output Packets
             auto outputPacketOpt = stateMgr->getOutputPacket();
