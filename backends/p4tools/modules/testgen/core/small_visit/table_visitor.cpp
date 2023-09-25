@@ -579,6 +579,9 @@ void TableVisitor::evalTableControlEntries(
     const auto *key = table->getKey();
     BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
 
+    bool isDefaultAction = true;
+    bool tableFound = false;
+
     // TODO: sort entries in order of priority
     for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
@@ -603,7 +606,7 @@ void TableVisitor::evalTableControlEntries(
             continue;
 
         auto &nextState = visitor->state.clone();
-        bool found = false;
+        tableFound = true;
 
         ::p4::v1::Action *p4v1Action;
         if (entry->action().has_action()) {
@@ -634,7 +637,6 @@ void TableVisitor::evalTableControlEntries(
             }
 
             // FOUND!
-            found = true;
             auto* arguments = new IR::Vector<IR::Argument>();
             std::vector<ActionArg> ctrlPlaneArgs;
 
@@ -682,12 +684,19 @@ void TableVisitor::evalTableControlEntries(
                        // put matched idx on entity
                        entry->set_matched_idx(nextState.getMatchedIdx());
                        nextState.markAction(tableAction);
+                       nextState.chooseEntryInGraph(entry);
+                       isDefaultAction = false;
                    }
                 }
             }
 
             break;
         }
+    }
+
+    if (tableFound && isDefaultAction) {
+        const auto *defaultAction = table->getDefaultAction();
+        visitor->state.choosePathInGraph(defaultAction);
     }
 }
 

@@ -22,6 +22,7 @@
 #include "lib/source_file.h"
 #include "midend/coverage.h"
 
+#include "frontends/p4/optimizeExpressions.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/table_visitor.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/testgen/lib/collect_coverable_nodes.h"
@@ -94,28 +95,32 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
     const auto *state = getExecutionState();
 
     // TODO: sort entries in order of priority
-    for (const auto& entity : testCase.entities()) {
+    for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
 
-        const auto entry = entity.table_entry();
-        if (entry.table_name() != properties.tableName) {
+        auto *entry = entity.mutable_table_entry();
+        if (!entry->is_valid_entry()) {
+            continue;
+        }
+
+        if (entry->table_name() != properties.tableName) {
             std::cout << "Different table name: "
-                << entry.table_name() << " (testCase) vs. "
+                << entry->table_name() << " (testCase) vs. "
                 << properties.tableName << " (table)"
                 << std::endl;
             continue;
         }
 
         /* XXX: NoAction? */
-        if (!entry.has_action())
+        if (!entry->has_action())
             continue;
 
         auto &nextState = state->clone();
         bool found = false;
         P4::Coverage::CoverageSet coveredNodes;
 
-        for (const auto& profileAction : entry.action().action_profile_action_set().action_profile_actions()) {
+        for (const auto& profileAction : entry->action().action_profile_action_set().action_profile_actions()) {
             const auto& p4v1Action = profileAction.action();
             for (size_t idx = 0; idx < tableActionList.size(); idx++) {
                 const auto* action = tableActionList.at(idx);
@@ -127,6 +132,7 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
                     continue;
 
                 found = true;
+                // FOUND!
                 const auto &parameters = actionType->parameters;
                 auto* arguments = new IR::Vector<IR::Argument>();
                 std::vector<ActionArg> ctrlPlaneArgs;
@@ -171,6 +177,19 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
                     collector.updateNodeCoverage(actionType, coveredNodes);
                 }
 
+                const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
+                if (hitCondition != nullptr) {
+                    getResult()->emplace_back(hitCondition, *state, nextState, coveredNodes);
+                    const auto *expr = P4::optimizeExpression(hitCondition);
+                    if (const auto *constVal = expr->to<IR::BoolLiteral>()) {
+                        if (constVal->value) {
+                            // put matched idx on entity
+                            entry->set_matched_idx(nextState.getMatchedIdx());
+                            nextState.markAction(tableAction);
+                            nextState.chooseEntryInGraph(entry);
+                        }
+                    }
+                }
                 break;
             }
 
@@ -179,9 +198,6 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
         }
 
         BUG_CHECK(found, "P4 Action is not found!");
-
-        const IR::Expression* hitCondition = computeHitFromTestCase(entry);
-        getResult()->emplace_back(hitCondition, *state, nextState, coveredNodes);
     }
 
     return;

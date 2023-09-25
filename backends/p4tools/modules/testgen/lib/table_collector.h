@@ -41,6 +41,7 @@ class TableExecutionState : public AbstractExecutionState {
 class TableCollector : public Inspector {
     Continuation::Body body;
     Continuation::Body tmpBody;
+    std::set<const IR::P4Table*> p4Tables;
     P4::Coverage::CoverageSet actionNodes;
 
     bool enableDump = false;
@@ -55,6 +56,7 @@ class TableCollector : public Inspector {
     explicit TableCollector();
 
     const Continuation::Body &getP4Tables() const;
+    const std::set<const IR::P4Table*> getP4TableSet() const;
     const P4::Coverage::CoverageSet &getActionNodes() const;
 };
 

@@ -7,6 +7,8 @@
 #include <vector>
 #include <boost/variant/apply_visitor.hpp>
 #include <boost/variant/static_visitor.hpp>
+#include <boost/graph/topological_sort.hpp>
+#include <boost/graph/adjacency_list.hpp>
 
 #include "backends/p4tools/common/lib/taint.h"
 #include "ir/ir.h"
@@ -25,8 +27,46 @@
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
 #include "backends/p4tools/modules/testgen/lib/visit_concolic.h"
+#include "backends/p4tools/modules/testgen/lib/graphs/graphs.h"
+#include "backends/p4tools/modules/testgen/lib/graphs/controls.h"
+#include "backends/p4tools/modules/testgen/lib/graphs/parsers.h"
 
 namespace P4Tools::P4Testgen {
+
+big_int ConcolicExecutor::get_total_path(Graphs::Graph *g) {
+    Graphs::OutEdgeIterator eit, eend;
+    typedef std::vector<Graphs::vertex_t> container;
+    container c;
+
+    auto subg = *g;
+    boost::topological_sort(subg, std::back_inserter(c));
+    LOG_FEATURE("small_visit", 4, "A topological ordering of "
+            << boost::get_property(subg, boost::graph_name));
+    big_int totalPath = 0;
+    for (container::reverse_iterator ii=c.rbegin(); ii!=c.rend(); ++ii) {
+        auto v = subg[*ii];
+        if (totalPath < v.numPaths)
+            totalPath = v.numPaths;
+
+        std::stringstream sstream;
+        if (v.node != nullptr)
+            sstream << v.node;
+        else
+            sstream << v.name;
+        sstream << " (" << v.numPaths << " paths)";
+        LOG_FEATURE("small_visit", 4, cstring(sstream));
+        std::tie(eit, eend) = boost::out_edges(*ii, subg);
+        for (; eit != eend; eit++) {
+            auto e = *eit;
+            auto u = boost::target(e, subg);
+            LOG_FEATURE("small_visit", 4, "Edge weight on Graph " << static_cast<void*>(g)
+                    << " from " << *ii
+                    << " to " << u
+                    << ": " << boost::get(boost::edge_weight, g->root(), e));
+        }
+    }
+    return totalPath;
+}
 
 void ConcolicExecutor::run(TestCase& testCase) {
     executionState = ExecutionState::create(programInfo.program);
@@ -62,7 +102,38 @@ void ConcolicExecutor::run(TestCase& testCase) {
         }
     }
 
-    // 2. Measure coverage and calculate expected output
+    // 2. Calculate callgraphs
+    LOG_FEATURE("small_visit", 4,
+            "Generating control graphs");
+    // TODO: optimize control graphs
+    ControlGraphs* cgen = new ControlGraphs(refMap, typeMap, testCase);
+    top->getMain()->apply(*cgen);
+    cgen->calc_ball_larus_on_graphs();
+    executionState.get().setControlGraphs(cgen);
+
+    if (pgg == nullptr) {
+        LOG_FEATURE("small_visit", 4, "Generating parser graphs");
+        pgg = new ParserGraphs(refMap);
+        programInfo.program->apply(*pgg);
+        pgg->calc_ball_larus_on_graphs();
+    }
+    executionState.get().setParserGraphs(pgg);
+
+    totalPaths.clear();
+    for (auto g : cgen->controlGraphsArray) {
+        big_int totalPath = get_total_path(g);
+        auto graphName = boost::get_property(*g, boost::graph_name);
+        totalPaths.insert(std::pair<cstring, big_int>(graphName, totalPath));
+    }
+
+    for (auto g : pgg->parserGraphsArray) {
+        big_int totalPath = get_total_path(g);
+        auto graphName = boost::get_property(*g, boost::graph_name);
+        totalPaths.insert(std::pair<cstring, big_int>(graphName, totalPath));
+    }
+
+
+    // 3. Measure coverage and calculate expected output
     while (!executionState.get().isTerminal()) {
 
         LOG_FEATURE("small_visit", 4, " stack/body size: " << executionState.get().getStackSize() << "/" << executionState.get().getBodySize());
@@ -85,6 +156,7 @@ void ConcolicExecutor::run(TestCase& testCase) {
 
     if (executionState.get().isTerminal()) {
         // We've reached the end of the program. Call back and (if desired) end execution.
+        executionState.get().storeGraphPath();
         testHandleTerminalState(executionState);
         return;
     }
@@ -99,9 +171,12 @@ uint64_t getNumeric(const std::string& str) {
 }
 */
 
-ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollector &tableCollector)
+ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollector &tableCollector, const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
     : programInfo(programInfo),
       tableCollector(tableCollector),
+      top(top),
+      refMap(refMap),
+      typeMap(typeMap),
       executionState(ExecutionState::create(programInfo.program)),
       tableState(ExecutionState::create(programInfo.program)),
       allStatements(programInfo.getCoverableNodes()),
@@ -173,6 +248,17 @@ bool ConcolicExecutor::testHandleTerminalState(const ExecutionState &terminalSta
             actionBitmap[idx] |= 1 << shl;
         }
         i++;
+    }
+
+    visitedPathComponents.clear();
+    visitedPaths.clear();
+    auto visitedPathInState = terminalState.getVisitedPaths();
+    for (auto blockName : terminalState.getVisitedPathComponents()) {
+        visitedPathComponents.push_back(blockName);
+        visitedPaths.insert(std::pair<cstring, big_int>(blockName, visitedPathInState[blockName]));
+        std::cout << blockName << ": "
+            << visitedPaths[blockName] << "/"
+            << totalPaths[blockName] << "\n";
     }
 
     finalState = new FinalVisitState(terminalState);

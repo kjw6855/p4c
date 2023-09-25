@@ -25,14 +25,24 @@
 #include "lib/exceptions.h"
 #include "midend/coverage.h"
 
+#include "backends/p4tools/modules/testgen/lib/graphs/graphs.h"
+#include "backends/p4tools/modules/testgen/lib/graphs/controls.h"
+#include "backends/p4tools/modules/testgen/lib/graphs/parsers.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
 #include "backends/p4tools/modules/testgen/lib/test_object.h"
+#include "backends/p4tools/modules/testgen/p4testgen.pb.h"
 
 namespace P4Tools::P4Testgen {
 
 /// Represents state of execution after having reached a program point.
 class ExecutionState : public AbstractExecutionState {
     friend class Test::SmallStepTest;
+
+    using Graph = Graphs::Graph;
+    using vertex_t = Graphs::vertex_t;
+    using Vertex = Graphs::Vertex;
+    using VertexIterator = Graphs::VertexIterator;
+    using OutEdgeIterator = Graphs::OutEdgeIterator;
 
  public:
     class StackFrame {
@@ -69,6 +79,8 @@ class ExecutionState : public AbstractExecutionState {
     /// Set of visited nodes. Used for code coverage.
     P4::Coverage::CoverageSet visitedNodes;
     P4::Coverage::CoverageSet visitedActions;
+    std::map<cstring, big_int> visitedPaths;
+    std::list<cstring> visitedPathComponents;
 
     /// The remaining body of the current function being executed.
     ///
@@ -125,6 +137,12 @@ class ExecutionState : public AbstractExecutionState {
     ReachabilityEngineState *reachabilityEngineState = nullptr;
 
     const IR::Constant *zeroCksum = nullptr;
+
+    ControlGraphs *cgen = nullptr;
+    ParserGraphs *pgg = nullptr;
+    Graph *curGraph = nullptr;
+    vertex_t curNode;
+    big_int pathVal = -1;
 
     /* =========================================================================================
      *  Accessors
@@ -401,6 +419,19 @@ class ExecutionState : public AbstractExecutionState {
     [[nodiscard]] const IR::SymbolicVariable *createSymbolicVariable(const IR::Type *type,
                                                                      cstring name,
                                                                      uint64_t instanceID = 0);
+
+    void storeGraphPath();
+    void setControlGraphs(ControlGraphs *cgenArg);
+    void setParserGraphs(ParserGraphs *pggArg);
+    bool setParserGraph(cstring parserName);
+    bool setControlGraph(cstring controlName);
+    void setStartNode(Graph *g);
+    void stepPathInGraph();
+    void choosePathInGraph(const IR::Node *node);
+    void chooseEntryInGraph(::p4::v1::TableEntry *entry);
+
+    const std::map<cstring, big_int> &getVisitedPaths() const;
+    const std::list<cstring> &getVisitedPathComponents() const;
 
     /* =========================================================================================
      *  Constructors

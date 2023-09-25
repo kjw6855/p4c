@@ -29,6 +29,9 @@
 #include "lib/ordered_map.h"
 #include "lib/source_file.h"
 
+#include "backends/p4tools/modules/testgen/lib/graphs/graphs.h"
+#include "backends/p4tools/modules/testgen/lib/graphs/controls.h"
+#include "backends/p4tools/modules/testgen/lib/graphs/parsers.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
 #include "backends/p4tools/modules/testgen/lib/packet_vars.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
@@ -540,6 +543,193 @@ const IR::SymbolicVariable *ExecutionState::createSymbolicVariable(const IR::Typ
                   variables->toString(), (*result.first)->type, type);
     }
     return variables;
+}
+
+void ExecutionState::setControlGraphs(ControlGraphs *cgenArg) { cgen = cgenArg; }
+void ExecutionState::setParserGraphs(ParserGraphs *pggArg) { pgg = pggArg; }
+const std::map<cstring, big_int> &ExecutionState::getVisitedPaths() const { return visitedPaths; }
+const std::list<cstring> &ExecutionState::getVisitedPathComponents() const { return visitedPathComponents; }
+
+void ExecutionState::storeGraphPath() {
+    if (curGraph == nullptr)
+        return;
+
+    if (pathVal < 0)
+        return;
+
+    auto graphName = boost::get_property(*curGraph, boost::graph_name);
+    visitedPaths.insert(std::pair<cstring, big_int>(graphName, pathVal));
+    visitedPathComponents.push_back(graphName);
+
+    curGraph = nullptr;
+    pathVal = -1;
+}
+
+bool ExecutionState::setParserGraph(cstring parserName) {
+    storeGraphPath();
+
+    if (pgg == nullptr)
+        return false;
+
+    curGraph = nullptr;
+    for (auto *g : pgg->parserGraphsArray) {
+        auto graphName = boost::get_property(*g, boost::graph_name);
+        if (parserName == graphName) {
+            curGraph = g;
+            break;
+        }
+    }
+
+    if (curGraph == nullptr)
+        return false;
+
+    setStartNode(curGraph);
+    stepPathInGraph();
+    return true;
+}
+
+bool ExecutionState::setControlGraph(cstring controlName) {
+    storeGraphPath();
+
+    if (cgen == nullptr)
+        return false;
+
+    curGraph = nullptr;
+    for (auto *g : cgen->controlGraphsArray) {
+        auto graphName = boost::get_property(*g, boost::graph_name);
+        if (controlName == graphName) {
+            curGraph = g;
+            break;
+        }
+    }
+
+    if (curGraph == nullptr)
+        return false;
+
+    setStartNode(curGraph);
+    stepPathInGraph();
+    return true;
+}
+
+void ExecutionState::setStartNode(Graph *g) {
+    if (g == nullptr)
+        return;
+
+    bool hasStart = false;
+
+    VertexIterator vti, vend;
+    for (boost::tie(vti, vend) = boost::vertices(*g); vti != vend; ++vti) {
+        auto nodeName = boost::get(&Vertex::name, *g, *vti);
+        if (nodeName == "__START__") {
+            curNode = *vti;
+            pathVal = 0;
+            hasStart = true;
+            break;
+        }
+    }
+
+    if (hasStart)
+        return;
+
+    typedef std::vector<Graphs::vertex_t> container;
+    container c;
+    boost::topological_sort(*g, std::back_inserter(c));
+    for (container::reverse_iterator ii=c.rbegin(); ii!=c.rend(); ++ii) {
+        big_int numPaths = boost::get(&Graphs::Vertex::numPaths, *g, *ii);
+
+        // skip a single node
+        if (numPaths <= 1)
+            continue;
+
+        curNode = *ii;
+        pathVal = 0;
+        break;
+    }
+}
+
+void ExecutionState::stepPathInGraph() {
+    if (curGraph == nullptr)
+        return;
+
+    OutEdgeIterator eit, eend;
+    vertex_t v = curNode;
+    while (true) {
+        std::tie(eit, eend) = boost::out_edges(v, *curGraph);
+
+        int edgeNum = std::distance(eit, eend);
+        if (edgeNum > 1 || edgeNum == 0)
+            break;
+
+        auto e = *eit;
+        pathVal += boost::get(boost::edge_weight, *curGraph, e);
+
+        v = boost::target(e, *curGraph);
+    }
+    curNode = v;
+}
+
+void ExecutionState::choosePathInGraph(const IR::Node *node) {
+    if (curGraph == nullptr)
+        return;
+
+    OutEdgeIterator eit, eend;
+    vertex_t v = curNode;
+    std::tie(eit, eend) = boost::out_edges(v, *curGraph);
+    int edgeNum = std::distance(eit, eend);
+
+    for (; eit != eend; eit++) {
+        auto e = *eit;
+        auto u = boost::target(e, *curGraph);
+        auto graphNode = boost::get(&Vertex::node, *curGraph, u);
+        auto graphEntry = boost::get(&Vertex::entry, *curGraph, u);
+
+        if (graphNode == node) {
+            if (graphEntry != nullptr)
+                continue;
+
+            LOG_FEATURE("small_visit", 4, "Edge weight by node on Graph " << static_cast<void*>(curGraph)
+                    << " from " << v
+                    << " to " << u
+                    << ": " << boost::get(boost::edge_weight, curGraph->root(), e)
+                    << " among " << edgeNum
+                    << " edges");
+            pathVal += boost::get(boost::edge_weight, curGraph->root(), e);
+            curNode = u;
+            break;
+        }
+    }
+
+    stepPathInGraph();
+}
+
+void ExecutionState::chooseEntryInGraph(::p4::v1::TableEntry *entry) {
+    if (curGraph == nullptr)
+        return;
+
+    OutEdgeIterator eit, eend;
+    vertex_t v = curNode;
+    std::tie(eit, eend) = boost::out_edges(v, *curGraph);
+    int edgeNum = std::distance(eit, eend);
+
+    for (; eit != eend; eit++) {
+        auto e = *eit;
+        auto u = boost::target(e, *curGraph);
+        auto graphEntry = boost::get(&Vertex::entry, *curGraph, u);
+
+        if (graphEntry == entry) {
+            LOG_FEATURE("small_visit", 4, "Edge weight by entry on Graph " << static_cast<void*>(curGraph)
+                    << " from " << v
+                    << " to " << u
+                    << ": " << boost::get(boost::edge_weight, curGraph->root(), e)
+                    << " among " << edgeNum
+                    << " edges");
+            pathVal += boost::get(boost::edge_weight, curGraph->root(), e);
+            curNode = u;
+            break;
+        }
+    }
+
+    stepPathInGraph();
 }
 
 }  // namespace P4Tools::P4Testgen

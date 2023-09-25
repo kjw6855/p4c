@@ -131,6 +131,8 @@ class CommandVisitor {
         auto *visitor =
             TestgenTarget::getCmdVisitor(state, self.get().programInfo, testCase);
         visitor->checkTable = self.get().checkTable;
+        // choose path first, because visitor copies state
+        state.get().choosePathInGraph(node);
         auto *result = visitor->step(node);
         if (self.get().reachabilityEngine != nullptr) {
             SmallVisitEvaluator::renginePostprocessing(r.first, result);
@@ -160,6 +162,8 @@ class CommandVisitor {
             auto *visitor =
                 TestgenTarget::getExprVisitor(state, self.get().programInfo, testCase);
             visitor->checkTable = self.get().checkTable;
+            // choose path first, because visitor copies state
+            state.get().choosePathInGraph(expr);
             auto *result = visitor->step(expr);
             if (self.get().reachabilityEngine != nullptr) {
                 ReachabilityResult rresult = std::make_pair(true, nullptr);

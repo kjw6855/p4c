@@ -46,6 +46,7 @@ bool TableCollector::preorder(const IR::P4Table *p4table) {
     //tmpBody.clear();
 
     body.push(Continuation::Return(p4table));
+    p4Tables.insert(p4table);
     const auto tableActionList = TableUtils::buildTableActionList(*p4table);
     for (size_t i = 0; i < tableActionList.size(); i++) {
         const auto* action = tableActionList.at(i);
@@ -54,6 +55,8 @@ bool TableCollector::preorder(const IR::P4Table *p4table) {
     }
     return true;
 }
+
+const std::set<const IR::P4Table*> TableCollector::getP4TableSet() const { return p4Tables; }
 
 const Continuation::Body &TableCollector::getP4Tables() const { return body; }
 

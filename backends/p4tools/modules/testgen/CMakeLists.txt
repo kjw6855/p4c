@@ -80,6 +80,10 @@ set(
   lib/test_spec.cpp
   lib/tf.cpp
 
+  lib/graphs/controls.cpp
+  lib/graphs/graphs.cpp
+  lib/graphs/parsers.cpp
+
   ${p4testgen_proto_srcs}
   ${p4testgen_proto_hdrs}
   ${p4testgen_grpc_srcs}

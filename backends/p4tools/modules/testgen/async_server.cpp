@@ -21,14 +21,16 @@
 namespace P4Tools::P4Testgen {
 
 static std::string hexToByteString(const std::string &hex) {
-    char *bytes = (char*)malloc(hex.length() / 2);
+    int byteLen = (hex.length() + 1) / 2;
+
+    char *bytes = (char*)malloc(byteLen);
 
     for (unsigned int i = 0; i < hex.length(); i += 2) {
         std::string byteString = hex.substr(i, 2);
         bytes[i/2] = (char) strtol(byteString.c_str(), NULL, 16);
     }
 
-    auto retStr = std::string(reinterpret_cast<char*>(bytes), hex.length()/2);
+    auto retStr = std::string(reinterpret_cast<char*>(bytes), byteLen);
     free(bytes);
 
     return retStr;
@@ -318,6 +320,24 @@ CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, Concolic
                 output->set_port(outputPacket.getPort());
                 output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
                 output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+            }
+
+
+            // Get path coverage
+            for (auto blockName : stateMgr->visitedPathComponents) {
+                auto *pathCov = newTestCase->add_path_cov();
+                pathCov->set_block_name(blockName);
+                big_int totalPathNum = stateMgr->totalPaths[blockName];
+                int width;
+                for (width = 0; totalPathNum != 0; width++)
+                    totalPathNum >>= 1;
+
+                pathCov->set_path_val(hexToByteString(
+                            formatHex(stateMgr->visitedPaths[blockName], width,
+                                false, true, false)));
+                pathCov->set_path_size(hexToByteString(
+                            formatHex(stateMgr->totalPaths[blockName], width,
+                                false, true, false)));
             }
 
             reply_.set_allocated_test_case(newTestCase);

@@ -98,6 +98,9 @@ bool CmdVisitor::preorder(const IR::P4Parser *p4parser) {
 
     auto &nextState = state.clone();
 
+    // startParserGraph
+    nextState.setParserGraph(p4parser->name);
+
     // Obtain the parser's namespace.
     const auto *ns = p4parser->to<IR::INamespace>();
     CHECK_NULL(ns);
@@ -179,6 +182,9 @@ bool CmdVisitor::preorder(const IR::P4Control *p4control) {
         Continuation::Body newBody(cmds);
         state.replaceBody(newBody);
     }
+
+    // startControlGraph
+    state.setControlGraph(p4control->name);
 
     result->emplace_back(state);
     return false;

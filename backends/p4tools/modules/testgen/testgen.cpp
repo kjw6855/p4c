@@ -19,6 +19,7 @@
 #include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "frontends/common/parser_options.h"
+#include "frontends/p4/evaluator/evaluator.h"
 #include "lib/gc.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
@@ -46,6 +47,31 @@ using grpc::ServerBuilder;
 using p4testgen::P4FuzzGuide;
 using p4testgen::TestCase;
 
+class GraphMidEnd : public PassManager {
+ public:
+    P4::ReferenceMap refMap;
+    P4::TypeMap typeMap;
+    IR::ToplevelBlock *toplevel = nullptr;
+
+    explicit GraphMidEnd(ParserOptions &options);
+    IR::ToplevelBlock *process(const IR::P4Program *&program) {
+        program = program->apply(*this);
+        return toplevel;
+    }
+};
+
+GraphMidEnd::GraphMidEnd(ParserOptions &options) {
+    bool isv1 = options.langVersion == ParserOptions::FrontendVersion::P4_14;
+    refMap.setIsV1(isv1);
+    auto evaluator = new P4::EvaluatorPass(&refMap, &typeMap);
+    setName("GraphMidEnd");
+
+    addPasses({
+        evaluator,
+        [this, evaluator]() { toplevel = evaluator->getToplevelBlock(); },
+    });
+}
+
 Testgen::~Testgen() {
     if (server_ != nullptr)
         server_->Shutdown();
@@ -53,7 +79,9 @@ Testgen::~Testgen() {
         cq_->Shutdown();
 }
 
-void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCollector, int grpcPort) {
+void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCollector,
+        const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+        int grpcPort) {
     std::string server_address("0.0.0.0:");
     server_address += std::to_string(grpcPort);
     //P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo);
@@ -93,7 +121,7 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
 
                 if (coverageMap.count(devId) == 0) {
                     coverageMap.insert(std::make_pair(devId,
-                                new ConcolicExecutor(*programInfo, tableCollector)));
+                                new ConcolicExecutor(*programInfo, tableCollector, top, refMap, typeMap)));
                 }
 
                 auto* stateMgr = coverageMap.at(devId);
@@ -209,27 +237,48 @@ int Testgen::mainImpl(const IR::P4Program *program) {
         printFeature("test_info", 4, "============ Program seed %1% =============\n", *seed);
     }
 
+    auto &options = P4CContext::get().options();
+    GraphMidEnd midEnd(options);
+    midEnd.addDebugHook(options.getDebugHook());
+    const IR::ToplevelBlock *top = nullptr;
+    try {
+        top = midEnd.process(program);
+    } catch (const std::exception &bug) {
+        std::cerr << bug.what() << std::endl;
+        return 1;
+    }
+
     if (testgenOptions.interactive) {
+        // Get Tables and Actions
         auto tableCollector = TableCollector();
         programInfo->program->apply(tableCollector);
         auto p4Tables = tableCollector.getP4Tables();
         auto p4TableActions = tableCollector.getActionNodes();
         LOG_FEATURE("small_visit", 4, "Table/Action size: " << p4Tables.size() << "/" << p4TableActions.size());
+
+        for (const auto *table : tableCollector.getP4TableSet()) {
+            LOG_FEATURE("small_visit", 4, "  [T] " << table->controlPlaneName());
+        }
+
+        LOG_FEATURE("small_visit", 4, "============================================");
         for (auto *action : p4TableActions) {
             const auto &srcInfo = action->getSourceInfo();
             auto sourceLine = srcInfo.toPosition().sourceLine;
-            LOG_FEATURE("small_visit", 4, "  " << srcInfo.getSourceFile() <<
+            LOG_FEATURE("small_visit", 4, "  [A] " << srcInfo.getSourceFile() <<
                     "\\" << sourceLine << ": " << *action);
         }
 
-        runServer(programInfo, tableCollector, testgenOptions.grpcPort);
+
+        runServer(programInfo, tableCollector, top,
+                &midEnd.refMap, &midEnd.typeMap, testgenOptions.grpcPort);
         return EXIT_SUCCESS;
     }
 
     if (testgenOptions.pathSelectionPolicy == PathSelectionPolicy::TestCase) {
         auto tableCollector = TableCollector();
         programInfo->program->apply(tableCollector);
-        auto *concExec = new ConcolicExecutor(*programInfo, tableCollector);
+        auto *concExec = new ConcolicExecutor(*programInfo, tableCollector, top,
+                &midEnd.refMap, &midEnd.typeMap);
         TestCase *testCase = new TestCase();
         int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
 
