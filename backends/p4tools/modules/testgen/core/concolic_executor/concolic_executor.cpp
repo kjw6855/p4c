@@ -32,6 +32,14 @@
 #include "backends/p4tools/modules/testgen/lib/graphs/parsers.h"
 
 namespace P4Tools::P4Testgen {
+inline void hash_combine(std::size_t& seed) { }
+
+template <typename T, typename... Rest>
+inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
+    std::hash<T> hasher;
+    seed ^= hasher(v) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+    hash_combine(seed, rest...);
+}
 
 big_int ConcolicExecutor::get_total_path(Graphs::Graph *g) {
     Graphs::OutEdgeIterator eit, eend;
@@ -68,6 +76,22 @@ big_int ConcolicExecutor::get_total_path(Graphs::Graph *g) {
     return totalPath;
 }
 
+std::size_t ConcolicExecutor::get_rule_key(TestCase &testCase) {
+    std::size_t h = 0;
+    for (const auto &entity : testCase.entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        const auto &entry = entity.table_entry();
+        if (!entry.is_valid_entry())
+            continue;
+
+        hash_combine<std::string>(h, entity.SerializeAsString());
+    }
+
+    return h;
+}
+
 void ConcolicExecutor::run(TestCase& testCase) {
     executionState = ExecutionState::create(programInfo.program);
 
@@ -102,13 +126,22 @@ void ConcolicExecutor::run(TestCase& testCase) {
         }
     }
 
-    // 2. Calculate callgraphs
-    LOG_FEATURE("small_visit", 4,
-            "Generating control graphs");
-    // TODO: optimize control graphs
-    ControlGraphs* cgen = new ControlGraphs(refMap, typeMap, testCase);
-    top->getMain()->apply(*cgen);
-    cgen->calc_ball_larus_on_graphs();
+    auto ruleKey = get_rule_key(testCase);
+    ControlGraphs *cgen = nullptr;
+    if (!cgenCache->exists(ruleKey)) {
+        // 2. Calculate callgraphs
+        LOG_FEATURE("small_visit", 3, "Generating control graphs (no rule key:"
+                << std::hex << ruleKey << ")");
+        cgen = new ControlGraphs(refMap, typeMap, testCase);
+        top->getMain()->apply(*cgen);
+        cgen->calc_ball_larus_on_graphs();
+        cgenCache->put(ruleKey, cgen);
+    } else {
+        LOG_FEATURE("small_visit", 3, "Reuse control graphs (rule key:"
+                << std::hex << ruleKey << ")");
+        cgen = cgenCache->get(ruleKey);
+        cgen->resetTestCase(testCase);
+    }
     executionState.get().setControlGraphs(cgen);
 
     if (pgg == nullptr) {
@@ -181,6 +214,7 @@ ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollecto
       tableState(ExecutionState::create(programInfo.program)),
       allStatements(programInfo.getCoverableNodes()),
       statementBitmapSize(allStatements.size()),
+      cgenCache(new lru_cache(16)),
       actionBitmapSize(tableCollector.getActionNodes().size()),
       evaluator(programInfo),
       tableEvaluator(programInfo) {

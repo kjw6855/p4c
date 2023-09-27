@@ -79,6 +79,10 @@ ControlGraphs::ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap, Tes
     visitDagOnce = false;
 }
 
+void ControlGraphs::resetTestCase(TestCase &newTestCase) {
+    testCase = newTestCase;
+}
+
 bool ControlGraphs::preorder(const IR::PackageBlock *block) {
     for (auto it : block->constantValue) {
         if (!it.second) continue;
