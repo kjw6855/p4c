@@ -36,23 +36,42 @@ static std::string hexToByteString(const std::string &hex) {
     return retStr;
 }
 
-#if 0
-P4FuzzGuideImpl::P4FuzzGuideImpl(const ProgramInfo *programInfo)
-: programInfo_(programInfo) {}
+/**
+ * SYNC API
+ */
+
+P4FuzzGuideImpl::P4FuzzGuideImpl(std::map<std::string, ConcolicExecutor*> &coverageMap,
+        const ProgramInfo *programInfo, TableCollector &tableCollector,
+        const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
+    : coverageMap(coverageMap),
+      programInfo(programInfo),
+      tableCollector(tableCollector),
+      top(top),
+      refMap(refMap),
+      typeMap(typeMap) {}
+
+Status P4FuzzGuideImpl::Hello(ServerContext* context,
+        const HealthCheckRequest* req,
+        HealthCheckResponse* rep) {
+    rep->set_status(1);
+    return Status::OK;
+}
 
 Status P4FuzzGuideImpl::GetP4Statement(ServerContext* context,
         const P4StatementRequest* req,
         P4StatementReply* rep) {
 
-    auto allNodes = programInfo_->getCoverableNodes();
+    auto &allNodes = programInfo->getCoverableNodes();
 
     int i = 1, idx = req->idx();
-    for (auto node : allNodes) {
+    for (const auto *node : allNodes) {
         if (i++ != idx)
             continue;
 
+        const auto &srcInfo = node->getSourceInfo();
+        auto sourceLine = srcInfo.toPosition().sourceLine;
         std::stringstream ss;
-        ss << node;
+        ss << srcInfo.getSourceFile() << "\\" << sourceLine << ": " << *node;
         rep->set_statement(ss.str());
         break;
     }
@@ -66,7 +85,7 @@ Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
 
     auto devId = req->device_id();
 
-    auto allNodes = programInfo_->getCoverableNodes();
+    auto allNodes = programInfo->getCoverableNodes();
     std::cout << "Get P4 Coverage of device: " << devId << std::endl;
 
     auto* newTestCase = new TestCase(req->test_case());
@@ -89,6 +108,7 @@ Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
     newTestCase->set_stmt_cov_size(stmtBitmapSize);
     newTestCase->set_action_cov_bitmap(actionBitmap);
     newTestCase->set_action_cov_size(actionBitmapSize);
+    newTestCase->set_table_size(tableCollector.getP4Tables().size());
 
     rep->set_allocated_test_case(newTestCase);
 
@@ -102,17 +122,8 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     auto devId = req->device_id();
     std::cout << "Record P4 Coverage of device: " << devId << std::endl;
 
-    auto allNodes = programInfo_->getCoverableNodes();
-    auto tableCollector = TableCollector();
-    programInfo_->program->apply(tableCollector);
-    if (coverageMap.count(devId) == 0) {
-        coverageMap.insert(std::make_pair(devId,
-                    new ConcolicExecutor(*programInfo_, tableCollector)));
-    }
-
-    auto *stateMgr = coverageMap.at(devId);
-    auto *newTestCase = new TestCase(req->test_case());
-    for (auto &entity : *newTestCase->mutable_entities()) {
+    auto testCase = req->test_case();
+    for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
 
@@ -120,8 +131,14 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
         entity.mutable_table_entry()->set_matched_idx(-1);
     }
 
+    if (coverageMap.count(devId) == 0) {
+        coverageMap.insert(std::make_pair(devId,
+                    new ConcolicExecutor(*programInfo, tableCollector, top, refMap, typeMap)));
+    }
+
+    auto *stateMgr = coverageMap.at(devId);
     try {
-        stateMgr->run(*newTestCase);
+        stateMgr->run(testCase);
 
     } catch (const Util::CompilerBug &e) {
         std::cerr << "Internal compiler error: " << e.what() << std::endl;
@@ -138,10 +155,12 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
         return Status::CANCELLED;
     }
 
+    auto *newTestCase = new TestCase(testCase);
     newTestCase->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
     newTestCase->set_stmt_cov_size(stateMgr->statementBitmapSize);
-    newTestCase->set_action_cov_bitmap("");
-    newTestCase->set_action_cov_size(1);
+    newTestCase->set_action_cov_bitmap(stateMgr->getActionBitmapStr());
+    newTestCase->set_action_cov_size(stateMgr->actionBitmapSize);
+    newTestCase->set_table_size(tableCollector.getP4Tables().size());
 
     // TODO: multiple output Packets
     auto outputPacketOpt = stateMgr->getOutputPacket();
@@ -157,11 +176,31 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
         output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
     }
 
+    // Get path coverage
+    for (auto blockName : stateMgr->visitedPathComponents) {
+        auto *pathCov = newTestCase->add_path_cov();
+        pathCov->set_block_name(blockName);
+        big_int totalPathNum = stateMgr->totalPaths[blockName];
+        int width;
+        for (width = 0; totalPathNum != 0; width++)
+            totalPathNum >>= 1;
+
+        pathCov->set_path_val(hexToByteString(
+                    formatHex(stateMgr->visitedPaths[blockName], width,
+                        false, true, false)));
+        pathCov->set_path_size(hexToByteString(
+                    formatHex(stateMgr->totalPaths[blockName], width,
+                        false, true, false)));
+    }
+
     rep->set_allocated_test_case(newTestCase);
 
     return Status::OK;
 }
-#endif
+
+/**
+ * ASYNC API
+ */
 
 CallData::CallStatus HelloData::Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
             std::string &devId, TestCase &testCase, CallStatus callStatus) {

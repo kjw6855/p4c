@@ -84,20 +84,23 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
         int grpcPort) {
     std::string server_address("0.0.0.0:");
     server_address += std::to_string(grpcPort);
-    //P4FuzzGuideImpl service = P4FuzzGuideImpl(programInfo);
-    P4FuzzGuide::AsyncService service_;
+
+    //P4FuzzGuide::AsyncService service_;
     std::map<std::string, ConcolicExecutor*> coverageMap;
+    P4FuzzGuideImpl service = P4FuzzGuideImpl(coverageMap,
+            programInfo, tableCollector, top, refMap, typeMap);
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service_);
-    cq_ = builder.AddCompletionQueue();
-    server_ = builder.BuildAndStart();
+    builder.RegisterService(&service);
+    //cq_ = builder.AddCompletionQueue();
+    //server_ = builder.BuildAndStart();
 
-    //std::unique_ptr<Server> server(builder.BuildAndStart());
+    std::unique_ptr<Server> server(builder.BuildAndStart());
     std::cout << "Server listening on " << server_address << std::endl;
-    //server->Wait();
+    server->Wait();
 
+#if 0
     new HelloData(&service_, cq_.get());
     new GetP4StatementData(&service_, cq_.get(), programInfo, tableCollector);
     new GetP4CoverageData(&service_, cq_.get(), programInfo, tableCollector);
@@ -149,6 +152,7 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
             }
         } while (callAgain);
     }
+#endif
 }
 
 void Testgen::registerTarget() {

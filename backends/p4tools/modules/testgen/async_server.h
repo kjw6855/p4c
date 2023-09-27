@@ -30,10 +30,15 @@ using p4testgen::P4StatementRequest;
 using p4testgen::P4StatementReply;
 using p4testgen::TestCase;
 
-#if 0
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
  public:
-    P4FuzzGuideImpl(const ProgramInfo *programInfo);
+    P4FuzzGuideImpl(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            const ProgramInfo *programInfo, TableCollector &tableCollector,
+            const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap);
+
+    Status Hello(ServerContext* context,
+            const HealthCheckRequest* req,
+            HealthCheckResponse* rep) override;
 
     Status GetP4Statement(ServerContext* context,
             const P4StatementRequest* req,
@@ -48,13 +53,15 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             P4CoverageReply* rep) override;
 
  private:
-    std::map<std::string, ConcolicExecutor*> coverageMap;
-    //std::map<std::string, SymbolicExecutor*> coverageMap;
-    const ProgramInfo* programInfo_;
+    std::map<std::string, ConcolicExecutor*> &coverageMap;
+    const ProgramInfo *programInfo;
+    TableCollector &tableCollector;
+    const IR::ToplevelBlock *top;
+    P4::ReferenceMap *refMap;
+    P4::TypeMap *typeMap;
 
     //std::string hexToByteString(const std::string &hex);
 };
-#endif
 
 class CallData {
  public:
