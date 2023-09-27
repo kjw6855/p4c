@@ -684,7 +684,7 @@ void TableVisitor::evalTableControlEntries(
                        // put matched idx on entity
                        entry->set_matched_idx(nextState.getMatchedIdx());
                        nextState.markAction(tableAction);
-                       nextState.chooseEntryInGraph(entry);
+                       nextState.chooseEntryInGraph(entity.table_entry());
                        isDefaultAction = false;
                    }
                 }

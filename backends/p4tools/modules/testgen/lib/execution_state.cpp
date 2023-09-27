@@ -702,7 +702,7 @@ void ExecutionState::choosePathInGraph(const IR::Node *node) {
     stepPathInGraph();
 }
 
-void ExecutionState::chooseEntryInGraph(::p4::v1::TableEntry *entry) {
+void ExecutionState::chooseEntryInGraph(const ::p4::v1::TableEntry &entry) {
     if (curGraph == nullptr)
         return;
 
@@ -710,13 +710,15 @@ void ExecutionState::chooseEntryInGraph(::p4::v1::TableEntry *entry) {
     vertex_t v = curNode;
     std::tie(eit, eend) = boost::out_edges(v, *curGraph);
     int edgeNum = std::distance(eit, eend);
+    ::p4::v1::TableEntry copyEntry(entry);
+    copyEntry.set_matched_idx(0);
 
     for (; eit != eend; eit++) {
         auto e = *eit;
         auto u = boost::target(e, *curGraph);
         auto graphEntry = boost::get(&Vertex::entry, *curGraph, u);
 
-        if (graphEntry == cstring(entry->SerializeAsString())) {
+        if (graphEntry == cstring(copyEntry.SerializeAsString())) {
             LOG_FEATURE("small_visit", 4, "Edge weight by entry on Graph " << static_cast<void*>(curGraph)
                     << " from " << v
                     << " to " << u

@@ -328,6 +328,9 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
             continue;
         }
 
+        ::p4::v1::TableEntry copyEntry(entity.table_entry());
+        copyEntry.set_matched_idx(0);
+
         for (auto action : actions) {
             auto mce = action->expression->checkedTo<IR::MethodCallExpression>();
             auto resolved = P4::MethodInstance::resolve(mce, refMap, typeMap);
@@ -347,7 +350,7 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
             parents = keyNode;
             // add entry as vertex
             auto v = add_and_connect_vertex(action->getName(), action, VertexType::ACTION);
-            boost::put(&Graphs::Vertex::entry, *g, v, cstring(entry->SerializeAsString()));
+            boost::put(&Graphs::Vertex::entry, *g, v, cstring(copyEntry.SerializeAsString()));
             parents = {{v, new EdgeUnconditional()}};
             visit(ac->action->to<IR::P4Action>());
             merge_other_statements_into_vertex();
@@ -366,7 +369,6 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
         auto ac = resolved->to<P4::ActionCall>();
         if (ac->action->is<IR::P4Action>()) {
             parents = keyNode;
-            // TODO: add entry as vertex
             std::stringstream sstream;
             sstream << defaultAction;
             auto v = add_and_connect_vertex(cstring(sstream), defaultAction, VertexType::ACTION);

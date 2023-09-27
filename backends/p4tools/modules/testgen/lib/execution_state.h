@@ -428,7 +428,7 @@ class ExecutionState : public AbstractExecutionState {
     void setStartNode(Graph *g);
     void stepPathInGraph();
     void choosePathInGraph(const IR::Node *node);
-    void chooseEntryInGraph(::p4::v1::TableEntry *entry);
+    void chooseEntryInGraph(const ::p4::v1::TableEntry &entry);
 
     const std::map<cstring, big_int> &getVisitedPaths() const;
     const std::list<cstring> &getVisitedPathComponents() const;
