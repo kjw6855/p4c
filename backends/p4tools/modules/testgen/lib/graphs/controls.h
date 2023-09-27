@@ -38,7 +38,6 @@ class ControlGraphs : public Graphs {
 
     ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap, TestCase &testCase);
 
-    void resetTestCase(TestCase &newTestCase);
     void calc_ball_larus_on_graphs();
 
     bool preorder(const IR::PackageBlock *block) override;

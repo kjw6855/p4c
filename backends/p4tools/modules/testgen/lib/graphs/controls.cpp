@@ -79,10 +79,6 @@ ControlGraphs::ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap, Tes
     visitDagOnce = false;
 }
 
-void ControlGraphs::resetTestCase(TestCase &newTestCase) {
-    testCase = newTestCase;
-}
-
 bool ControlGraphs::preorder(const IR::PackageBlock *block) {
     for (auto it : block->constantValue) {
         if (!it.second) continue;
@@ -349,9 +345,9 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
 
             // FOUND
             parents = keyNode;
-            // TODO: add entry as vertex
+            // add entry as vertex
             auto v = add_and_connect_vertex(action->getName(), action, VertexType::ACTION);
-            boost::put(&Graphs::Vertex::entry, *g, v, entry);
+            boost::put(&Graphs::Vertex::entry, *g, v, cstring(entry->SerializeAsString()));
             parents = {{v, new EdgeUnconditional()}};
             visit(ac->action->to<IR::P4Action>());
             merge_other_statements_into_vertex();

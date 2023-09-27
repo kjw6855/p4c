@@ -140,7 +140,6 @@ void ConcolicExecutor::run(TestCase& testCase) {
         LOG_FEATURE("small_visit", 3, "Reuse control graphs (rule key:"
                 << std::hex << ruleKey << ")");
         cgen = cgenCache->get(ruleKey);
-        cgen->resetTestCase(testCase);
     }
     executionState.get().setControlGraphs(cgen);
 

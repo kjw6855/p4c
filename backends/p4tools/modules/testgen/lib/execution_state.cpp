@@ -684,7 +684,7 @@ void ExecutionState::choosePathInGraph(const IR::Node *node) {
         auto graphEntry = boost::get(&Vertex::entry, *curGraph, u);
 
         if (graphNode == node) {
-            if (graphEntry != nullptr)
+            if (graphEntry.size() > 0)
                 continue;
 
             LOG_FEATURE("small_visit", 4, "Edge weight by node on Graph " << static_cast<void*>(curGraph)
@@ -716,7 +716,7 @@ void ExecutionState::chooseEntryInGraph(::p4::v1::TableEntry *entry) {
         auto u = boost::target(e, *curGraph);
         auto graphEntry = boost::get(&Vertex::entry, *curGraph, u);
 
-        if (graphEntry == entry) {
+        if (graphEntry == cstring(entry->SerializeAsString())) {
             LOG_FEATURE("small_visit", 4, "Edge weight by entry on Graph " << static_cast<void*>(curGraph)
                     << " from " << v
                     << " to " << u

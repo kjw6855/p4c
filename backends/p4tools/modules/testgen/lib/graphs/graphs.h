@@ -113,7 +113,7 @@ class Graphs : public Inspector {
     struct Vertex {
         cstring name;
         const IR::Node *node;
-        ::p4::v1::TableEntry *entry;
+        cstring entry;
         VertexType type;
         big_int numPaths;
     };
