@@ -24,6 +24,8 @@ using grpc::Status;
 using p4testgen::P4FuzzGuide;
 using p4testgen::HealthCheckRequest;
 using p4testgen::HealthCheckResponse;
+using p4testgen::P4NameRequest;
+using p4testgen::P4NameReply;
 using p4testgen::P4CoverageRequest;
 using p4testgen::P4CoverageReply;
 using p4testgen::P4StatementRequest;
@@ -39,6 +41,10 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
     Status Hello(ServerContext* context,
             const HealthCheckRequest* req,
             HealthCheckResponse* rep) override;
+
+    Status GetP4Name(ServerContext *context,
+            const P4NameRequest *req,
+            P4NameReply *rep) override;
 
     Status GetP4Statement(ServerContext* context,
             const P4StatementRequest* req,

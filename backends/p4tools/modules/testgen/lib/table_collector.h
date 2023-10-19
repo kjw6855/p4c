@@ -3,6 +3,7 @@
 
 #include <set>
 #include <vector>
+#include <map>
 
 #include "ir/ir.h"
 #include "ir/irutils.h"
@@ -42,21 +43,24 @@ class TableCollector : public Inspector {
     Continuation::Body body;
     Continuation::Body tmpBody;
     std::set<const IR::P4Table*> p4Tables;
+    std::map<cstring, P4::Coverage::CoverageSet> actionMap;
     P4::Coverage::CoverageSet actionNodes;
-
     bool enableDump = false;
 
     //bool preorder(const IR::Node *node) override;
     bool preorder(const IR::P4Control *p4control) override;
     bool preorder(const IR::MethodCallStatement *methodCallStatement) override;
     bool preorder(const IR::P4Table *p4table) override;
+    bool preorder(const IR::P4Action *p4action) override;
 
  public:
     const IR::P4Control *parentControl = nullptr;
     explicit TableCollector();
 
+    void findP4Actions();
     const Continuation::Body &getP4Tables() const;
-    const std::set<const IR::P4Table*> getP4TableSet() const;
+    const std::set<const IR::P4Table*> &getP4TableSet() const;
+    const P4::Coverage::CoverageSet &getActions(cstring tableName) const;
     const P4::Coverage::CoverageSet &getActionNodes() const;
 };
 

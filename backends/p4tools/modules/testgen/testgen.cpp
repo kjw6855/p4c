@@ -99,60 +99,6 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
     std::unique_ptr<Server> server(builder.BuildAndStart());
     std::cout << "Server listening on " << server_address << std::endl;
     server->Wait();
-
-#if 0
-    new HelloData(&service_, cq_.get());
-    new GetP4StatementData(&service_, cq_.get(), programInfo, tableCollector);
-    new GetP4CoverageData(&service_, cq_.get(), programInfo, tableCollector);
-    new RecordP4TestgenData(&service_, cq_.get(), programInfo, tableCollector);
-
-    CallData::CallStatus callStatus;
-    void *tag;
-    bool ok, callAgain = false;
-    std::string devId;
-    TestCase testCase;      // Mutable
-    while (true) {
-        callStatus = CallData::CREATE;
-
-        GPR_ASSERT(cq_->Next(&tag, &ok));
-        GPR_ASSERT(ok);
-        do {
-            callStatus = static_cast<CallData*>(tag)->Proceed(coverageMap, devId, testCase, callStatus);
-
-            if (callStatus == CallData::REQ) {
-                std::cout << "Record P4 Coverage of device: " << devId << std::endl;
-
-                if (coverageMap.count(devId) == 0) {
-                    coverageMap.insert(std::make_pair(devId,
-                                new ConcolicExecutor(*programInfo, tableCollector, top, refMap, typeMap)));
-                }
-
-                auto* stateMgr = coverageMap.at(devId);
-                callStatus = CallData::ERROR;
-
-                try {
-                    stateMgr->run(testCase);
-                    callStatus = CallData::RET;
-
-                } catch (const Util::CompilerBug &e) {
-                    std::cerr << "Internal compiler error: " << e.what() << std::endl;
-                    std::cerr << "Please submit a bug report with your code." << std::endl;
-
-                } catch (const Util::CompilationError &e) {
-                    std::cerr << "Compilation error: " << e.what() << std::endl;
-
-                } catch (const std::exception &e) {
-                    std::cerr << "Internal error: " << e.what() << std::endl;
-                    std::cerr << "Please submit a bug report with your code." << std::endl;
-                }
-                callAgain = true;
-
-            } else {
-                callAgain = false;
-            }
-        } while (callAgain);
-    }
-#endif
 }
 
 void Testgen::registerTarget() {
@@ -256,6 +202,8 @@ int Testgen::mainImpl(const IR::P4Program *program) {
         // Get Tables and Actions
         auto tableCollector = TableCollector();
         programInfo->program->apply(tableCollector);
+        tableCollector.findP4Actions();
+
         auto p4Tables = tableCollector.getP4Tables();
         auto p4TableActions = tableCollector.getActionNodes();
         LOG_FEATURE("small_visit", 4, "Table/Action size: " << p4Tables.size() << "/" << p4TableActions.size());
@@ -271,7 +219,6 @@ int Testgen::mainImpl(const IR::P4Program *program) {
             LOG_FEATURE("small_visit", 4, "  [A] " << srcInfo.getSourceFile() <<
                     "\\" << sourceLine << ": " << *action);
         }
-
 
         runServer(programInfo, tableCollector, top,
                 &midEnd.refMap, &midEnd.typeMap, testgenOptions.grpcPort);

@@ -57,6 +57,36 @@ Status P4FuzzGuideImpl::Hello(ServerContext* context,
     return Status::OK;
 }
 
+Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
+        const P4NameRequest *req,
+        P4NameReply *rep) {
+
+    rep->set_type(req->type());
+    switch (req->type()) {
+        case p4testgen::TABLE:
+            for (const auto *table : tableCollector.getP4TableSet()) {
+                rep->add_name(table->controlPlaneName());
+            }
+            break;
+
+        case p4testgen::ACTION:
+            {
+                auto p4TableActions = tableCollector.getActions(req->target());
+                for (const auto *action : p4TableActions) {
+                    rep->add_name(action->checkedTo<IR::P4Action>()->controlPlaneName());
+                }
+                break;
+            }
+
+        case p4testgen::MATCH:
+        case p4testgen::PARAM:
+            /* TODO */
+            break;
+    }
+
+    return Status::OK;
+}
+
 Status P4FuzzGuideImpl::GetP4Statement(ServerContext* context,
         const P4StatementRequest* req,
         P4StatementReply* rep) {
