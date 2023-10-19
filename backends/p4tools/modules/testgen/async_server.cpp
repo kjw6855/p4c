@@ -61,8 +61,8 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
         const P4NameRequest *req,
         P4NameReply *rep) {
 
-    rep->set_type(req->type());
-    switch (req->type()) {
+    rep->set_entity_type(req->entity_type());
+    switch (req->entity_type()) {
         case p4testgen::TABLE:
             for (const auto *table : tableCollector.getP4TableSet()) {
                 rep->add_name(table->controlPlaneName());
@@ -72,16 +72,42 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
         case p4testgen::ACTION:
             {
                 auto p4TableActions = tableCollector.getActions(req->target());
-                for (const auto *action : p4TableActions) {
+                for (const auto *action : p4TableActions)
                     rep->add_name(action->checkedTo<IR::P4Action>()->controlPlaneName());
-                }
                 break;
             }
 
         case p4testgen::MATCH:
+            {
+                for (const auto *table : tableCollector.getP4TableSet()) {
+                    if (table->controlPlaneName() == req->target()) {
+                        for (const auto *key : table->getKey()->keyElements) {
+                            const IR::Expression* keyExpr = key->expression;
+                            const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+                            rep->add_name(key->getAnnotation("name")->getName());
+                            rep->add_type(key->matchType->toString());
+                            rep->add_bit_len(keyType->width_bits());
+                        }
+                        break;
+                    }
+                }
+                break;
+            }
         case p4testgen::PARAM:
-            /* TODO */
-            break;
+            {
+                for (const auto *action : tableCollector.getActionNodes()) {
+                    const auto *p4Action = action->checkedTo<IR::P4Action>();
+                    if (p4Action->controlPlaneName() == req->target()) {
+                        for (const auto *param : *p4Action->parameters) {
+                            const auto* paramType = param->type->checkedTo<IR::Type_Bits>();
+                            rep->add_name(param->controlPlaneName());
+                            rep->add_bit_len(paramType->width_bits());
+                        }
+                        break;
+                    }
+                }
+                break;
+            }
     }
 
     return Status::OK;
