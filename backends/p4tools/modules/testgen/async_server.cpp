@@ -63,13 +63,13 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
 
     rep->set_entity_type(req->entity_type());
     switch (req->entity_type()) {
-        case p4testgen::TABLE:
+        case 0:
             for (const auto *table : tableCollector.getP4TableSet()) {
                 rep->add_name(table->controlPlaneName());
             }
             break;
 
-        case p4testgen::ACTION:
+        case 1:
             {
                 auto p4TableActions = tableCollector.getActions(req->target());
                 for (const auto *action : p4TableActions)
@@ -77,7 +77,7 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
                 break;
             }
 
-        case p4testgen::MATCH:
+        case 2:
             {
                 for (const auto *table : tableCollector.getP4TableSet()) {
                     if (table->controlPlaneName() == req->target()) {
@@ -93,7 +93,8 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
                 }
                 break;
             }
-        case p4testgen::PARAM:
+
+        case 3:
             {
                 for (const auto *action : tableCollector.getActionNodes()) {
                     const auto *p4Action = action->checkedTo<IR::P4Action>();
@@ -108,6 +109,9 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
                 }
                 break;
             }
+
+        default:
+            break;
     }
 
     return Status::OK;

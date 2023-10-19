@@ -21,20 +21,20 @@ message HealthCheckResponse {
     int32 status = 1;
 }
 
-enum P4NameEntity {
+/*
   TABLE = 0;
   MATCH = 1;
   ACTION = 2;
   PARAM = 3;
-}
+*/
 
 message P4NameRequest {
-    P4NameEntity entity_type = 1;
+    int32 entity_type = 1;
     string target = 2;
 }
 
 message P4NameReply {
-    P4NameEntity entity_type = 1;
+    int32 entity_type = 1;
     repeated string name = 2;
     repeated string type = 3;
     repeated int32 bit_len = 4;
