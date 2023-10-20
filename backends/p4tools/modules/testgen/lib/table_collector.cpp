@@ -75,18 +75,17 @@ const Continuation::Body &TableCollector::getP4Tables() const { return body; }
 
 const P4::Coverage::CoverageSet &TableCollector::getActionNodes() const { return actionNodes; }
 
-const P4::Coverage::CoverageSet &TableCollector::getActions(cstring tableName) const {
+const P4::Coverage::CoverageSet *TableCollector::getActions(cstring tableName) const {
     if (tableName.isNullOrEmpty()) {
-        return actionNodes;
+        return &actionNodes;
     }
 
     auto pos = actionMap.find(tableName);
     if (pos != actionMap.end()) {
-        return pos->second;
+        return &(pos->second);
     }
 
-    P4::Coverage::CoverageSet emptySet;
-    return emptySet;
+    return nullptr;
 }
 
 void TableCollector::findP4Actions() {

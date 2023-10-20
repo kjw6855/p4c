@@ -452,6 +452,11 @@ bool TableVisitor::verifyAction(const ::p4::v1::Action &p4v1Action,
 
 // Verify mutant match.field_name and value
 bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::Key *keys) {
+    if (p4v1Match.field_id() == 0) {
+        LOG_FEATURE("small_visit", 3, "field_id is 0");
+        return false;
+    }
+
     size_t idx = (size_t)(p4v1Match.field_id() - 1);
 
     BUG_CHECK(idx < keys->keyElements.size(),

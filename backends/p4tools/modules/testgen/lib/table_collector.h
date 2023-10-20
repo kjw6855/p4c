@@ -60,7 +60,7 @@ class TableCollector : public Inspector {
     void findP4Actions();
     const Continuation::Body &getP4Tables() const;
     const std::set<const IR::P4Table*> &getP4TableSet() const;
-    const P4::Coverage::CoverageSet &getActions(cstring tableName) const;
+    const P4::Coverage::CoverageSet *getActions(cstring tableName) const;
     const P4::Coverage::CoverageSet &getActionNodes() const;
 };
 

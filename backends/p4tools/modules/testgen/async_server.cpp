@@ -71,14 +71,6 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
 
         case 1:
             {
-                auto p4TableActions = tableCollector.getActions(req->target());
-                for (const auto *action : p4TableActions)
-                    rep->add_name(action->checkedTo<IR::P4Action>()->controlPlaneName());
-                break;
-            }
-
-        case 2:
-            {
                 for (const auto *table : tableCollector.getP4TableSet()) {
                     if (table->controlPlaneName() == req->target()) {
                         for (const auto *key : table->getKey()->keyElements) {
@@ -90,6 +82,16 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
                         }
                         break;
                     }
+                }
+                break;
+            }
+
+        case 2:
+            {
+                auto *p4TableActions = tableCollector.getActions(req->target());
+                if (p4TableActions != nullptr) {
+                    for (const auto *action : *p4TableActions)
+                        rep->add_name(action->checkedTo<IR::P4Action>()->controlPlaneName());
                 }
                 break;
             }
