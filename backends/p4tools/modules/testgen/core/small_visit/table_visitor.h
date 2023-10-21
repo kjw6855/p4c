@@ -147,9 +147,9 @@ class TableVisitor {
 
     void setTableDefaultEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
 
-    bool verifyAction(const ::p4::v1::Action &p4v1Action, const std::vector<const IR::ActionListElement *> tableActionList);
+    bool verifyAction(::p4::v1::Action *p4v1Action, const std::vector<const IR::ActionListElement *> tableActionList);
 
-    bool verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::Key *keys);
+    bool verifyMatch(::p4::v1::FieldMatch *p4v1Match, const IR::Key *keys);
 
     void verifyTableControlEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
 

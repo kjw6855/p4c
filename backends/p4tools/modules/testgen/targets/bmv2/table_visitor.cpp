@@ -94,7 +94,7 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     const auto *state = getExecutionState();
 
-    // TODO: sort entries in order of priority
+    // ActionProfile doesn't have priority
     for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
@@ -112,89 +112,97 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
             continue;
         }
 
-        /* XXX: NoAction? */
-        if (!entry->has_action())
-            continue;
-
         auto &nextState = state->clone();
         bool found = false;
         P4::Coverage::CoverageSet coveredNodes;
 
-        for (const auto& profileAction : entry->action().action_profile_action_set().action_profile_actions()) {
-            const auto& p4v1Action = profileAction.action();
-            for (size_t idx = 0; idx < tableActionList.size(); idx++) {
-                const auto* action = tableActionList.at(idx);
-                const auto* tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
-                const auto* actionType = state->getP4Action(tableAction);
-                cstring actionName = actionType->controlPlaneName();
+        const IR::MethodCallExpression *tableAction = nullptr;
+        const IR::P4Action *actionType = nullptr;
+        auto* arguments = new IR::Vector<IR::Argument>();
 
-                if (actionName != p4v1Action.action_name())
-                    continue;
+        if (!entry->has_action() || !entry->action().has_action_profile_action_set()) {
+            const auto *defaultAction = table->getDefaultAction();
+            tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
+            actionType = state->getP4Action(tableAction);
+            found = true;
 
-                found = true;
-                // FOUND!
-                const auto &parameters = actionType->parameters;
-                auto* arguments = new IR::Vector<IR::Argument>();
-                std::vector<ActionArg> ctrlPlaneArgs;
-                for (auto& param : p4v1Action.params()) {
-                    size_t argIdx = (size_t)(param.param_id() - 1);
-                    BUG_CHECK(argIdx < parameters->size(),
-                            "given argIdx %1% is out of size %2%",
-                            argIdx, actionType->parameters->size());
-                    const auto* parameter = parameters->getParameter(argIdx);
-                    const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
-                    auto paramWidth = paramType->width_bits();
+        } else {
+            for (const auto& profileAction : entry->action().action_profile_action_set().action_profile_actions()) {
+                const auto& p4v1Action = profileAction.action();
+                for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+                    const auto* action = tableActionList.at(idx);
+                    tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+                    actionType = state->getP4Action(tableAction);
+                    cstring actionName = actionType->controlPlaneName();
 
-                    // change to constant value
-                    const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
-                    const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
-                    nextState.set(actionDataVar, paramExpr);
-                    arguments->push_back(new IR::Argument(paramExpr));
-                    // We also track the argument we synthesize for the control plane.
-                    // Note how we use the control plane name for the parameter here.
-                    ctrlPlaneArgs.emplace_back(parameter, paramExpr);
-                }
-
-                auto* synthesizedAction = tableAction->clone();
-                synthesizedAction->arguments = arguments;
-                setTableAction(nextState, tableAction);
-
-                std::vector<Continuation::Command> replacements;
-                replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
-
-                // ??
-                nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-                nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
-                std::stringstream tableStream;
-                tableStream << "Table Branch: " << properties.tableName;
-                tableStream << " Chosen action: " << actionName;
-                nextState.add(*new TraceEvents::Generic(tableStream.str()));
-                nextState.replaceTopBody(&replacements);
-
-                // Set nodeCoverage
-                if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
-                    auto collector = CoverableNodesScanner(*state);
-                    collector.updateNodeCoverage(actionType, coveredNodes);
-                }
-
-                const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
-                if (hitCondition != nullptr) {
-                    getResult()->emplace_back(hitCondition, *state, nextState, coveredNodes);
-                    const auto *expr = P4::optimizeExpression(hitCondition);
-                    if (const auto *constVal = expr->to<IR::BoolLiteral>()) {
-                        if (constVal->value) {
-                            // put matched idx on entity
-                            entry->set_matched_idx(nextState.getMatchedIdx());
-                            nextState.markAction(tableAction);
-                            nextState.chooseEntryInGraph(entity.table_entry());
-                        }
+                    if (actionName != p4v1Action.action_name()) {
+                        continue;
                     }
+
+                    // FOUND!
+                    found = true;
+                    const auto &parameters = actionType->parameters;
+                    std::vector<ActionArg> ctrlPlaneArgs;
+                    for (auto& param : p4v1Action.params()) {
+                        size_t argIdx = (size_t)(param.param_id() - 1);
+                        BUG_CHECK(argIdx < parameters->size(),
+                                "given argIdx %1% is out of size %2%",
+                                argIdx, actionType->parameters->size());
+                        const auto* parameter = parameters->getParameter(argIdx);
+                        const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+                        auto paramWidth = paramType->width_bits();
+
+                        // change to constant value
+                        const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
+                        const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                        nextState.set(actionDataVar, paramExpr);
+                        arguments->push_back(new IR::Argument(paramExpr));
+                        // We also track the argument we synthesize for the control plane.
+                        // Note how we use the control plane name for the parameter here.
+                        ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+                    }
+
+                    break;
                 }
-                break;
+            }
+        }
+
+        if (found) {
+            auto* synthesizedAction = tableAction->clone();
+            synthesizedAction->arguments = arguments;
+            setTableAction(nextState, tableAction);
+
+            std::vector<Continuation::Command> replacements;
+            replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
+
+            // ??
+            nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
+            nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+            std::stringstream tableStream;
+            tableStream << "Table Branch: " << properties.tableName;
+            tableStream << " Chosen action: " << actionType->controlPlaneName();
+            nextState.add(*new TraceEvents::Generic(tableStream.str()));
+            nextState.replaceTopBody(&replacements);
+
+            // Set nodeCoverage
+            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
+                auto collector = CoverableNodesScanner(*state);
+                collector.updateNodeCoverage(actionType, coveredNodes);
             }
 
-            if (found)
-                break;
+            const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
+            if (hitCondition != nullptr) {
+                getResult()->emplace_back(hitCondition, *state, nextState, coveredNodes);
+                const auto *expr = P4::optimizeExpression(hitCondition);
+                if (const auto *constVal = expr->to<IR::BoolLiteral>()) {
+                    if (constVal->value) {
+                        // put matched idx on entity
+                        entry->set_matched_idx(nextState.getMatchedIdx());
+                        nextState.markAction(actionType);
+                        nextState.chooseEntryInGraph(entity.table_entry());
+                    }
+                }
+            }
         }
 
         BUG_CHECK(found, "P4 Action is not found!");

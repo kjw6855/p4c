@@ -169,7 +169,7 @@ void ExecutionState::markVisited(const IR::Node *node) {
 }
 
 void ExecutionState::markAction(const IR::Node *node) {
-    if (!node->is<IR::MethodCallExpression>())
+    if (!node->is<IR::P4Action>())
         return;
     visitedActions.emplace(node);
 }

@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <queue>
 
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/number.hpp>
@@ -405,37 +406,43 @@ void TableVisitor::setTableDefaultEntries(
 }
 
 // Verify mutant actionName and paramName/Val
-bool TableVisitor::verifyAction(const ::p4::v1::Action &p4v1Action,
+bool TableVisitor::verifyAction(::p4::v1::Action *p4v1Action,
         const std::vector<const IR::ActionListElement *> tableActionList) {
 
     bool found = false;
 
     for (size_t idx = 0; idx < tableActionList.size(); idx++) {
-        const auto* action = tableActionList.at(idx);
+        const auto *action = tableActionList.at(idx);
         const auto *tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
-        const auto* actionType = visitor->state.getP4Action(tableAction);
+        const auto *actionType = visitor->state.getP4Action(tableAction);
         CHECK_NULL(actionType);
         auto actionName = actionType->controlPlaneName();
-        if (actionName != p4v1Action.action_name())
+        if (actionName != p4v1Action->action_name())
             continue;
 
         // action found
         found = true;
-        for (auto& param : p4v1Action.params()) {
+        for (auto &param : *p4v1Action->mutable_params()) {
             // check param_name comparison
-            size_t argIdx = (size_t)(param.param_id() - 1);
-            const auto* parameter = actionType->parameters->getParameter(argIdx);
-            /* [INVALID] param.param_name */
-            if (parameter->controlPlaneName() != param.param_name()) {
-                LOG_FEATURE("small_visit", 4, "Param name diff: "
-                        << param.param_name() << " (TestCase) vs. "
-                        << parameter->controlPlaneName() << " (Table)");
+            const IR::Parameter *parameter = nullptr;
+            for (size_t i = 0; i < actionType->parameters->size(); i++) {
+                const auto *paramElem = actionType->parameters->getParameter(i);
+                if (paramElem->controlPlaneName() == param.param_name()) {
+                    parameter = paramElem;
+                    param.set_param_id(i + 1);
+                    break;
+                }
+            }
 
+            /* [INVALID] param.param_name */
+            if (parameter == nullptr) {
+                LOG_FEATURE("small_visit", 4, "Param name diff: "
+                        << param.param_name());
                 return false;
             }
 
             /* [INVALID] param.value */
-            const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+            const auto *paramType = parameter->type->checkedTo<IR::Type_Bits>();
             auto paramWidth = paramType->width_bits();
             if (Utils::getVal(param.value(), paramWidth) > IR::getMaxBvVal(paramWidth)) {
                 LOG_FEATURE("small_visit", 4, "Param value range: "
@@ -451,27 +458,27 @@ bool TableVisitor::verifyAction(const ::p4::v1::Action &p4v1Action,
 }
 
 // Verify mutant match.field_name and value
-bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::Key *keys) {
-    if (p4v1Match.field_id() == 0) {
-        LOG_FEATURE("small_visit", 3, "field_id is 0");
-        return false;
+bool TableVisitor::verifyMatch(::p4::v1::FieldMatch *p4v1Match,
+        const IR::Key *keys) {
+    // find match with name, not ID
+    const IR::KeyElement *key = nullptr;
+    for (size_t i = 0; i < keys->keyElements.size(); i++) {
+        const auto *keyElem = keys->keyElements.at(i);
+        const auto *nameAnnot = keyElem->getAnnotation("name");
+        if (nameAnnot == nullptr)
+            continue;
+
+        if (nameAnnot->getName() == p4v1Match->field_name()) {
+            key = keyElem;
+            p4v1Match->set_field_id(i + 1);     // change field_id
+            break;
+        }
     }
 
-    size_t idx = (size_t)(p4v1Match.field_id() - 1);
-
-    BUG_CHECK(idx < keys->keyElements.size(),
-            "given idx %1% is out of size %2%",
-            idx, keys->keyElements.size());
-    const auto* key = keys->keyElements.at(idx);
-
-    const auto *nameAnnot = key->getAnnotation("name");
-    if (nameAnnot != nullptr) {
-        if (nameAnnot->getName() != p4v1Match.field_name()) {
-            LOG_FEATURE("small_visit", 4, "Match name diff: "
-                << p4v1Match.field_name() << " (TestCase) vs. "
-                << nameAnnot->getName() << " (Table)");
-            return false;
-        }
+    if (key == nullptr) {
+        LOG_FEATURE("small_visit", 4, "Cannot find match name: "
+                << p4v1Match->field_name());
+        return false;
     }
 
     auto keyMatchType = key->matchType->toString();
@@ -480,11 +487,11 @@ bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::
     auto keyWidth = keyType->width_bits();
     // TODO
     const auto maxVal = IR::getMaxBvVal(keyWidth);
-    if (p4v1Match.has_range()) {
+    if (p4v1Match->has_range()) {
         if (keyMatchType != "range")        // XXX: BMv2 Match
             return false;
 
-        const auto& matchRange = p4v1Match.range();
+        const auto& matchRange = p4v1Match->range();
         const auto lowVal = Utils::getVal(matchRange.low(), keyWidth);
         const auto highVal = Utils::getVal(matchRange.high(), keyWidth);
         if (lowVal > highVal)
@@ -492,39 +499,39 @@ bool TableVisitor::verifyMatch(const ::p4::v1::FieldMatch &p4v1Match, const IR::
         else if (highVal > maxVal)
             return false;
 
-    } else if (p4v1Match.has_ternary()) {
+    } else if (p4v1Match->has_ternary()) {
         if (keyMatchType != P4Constants::MATCH_KIND_TERNARY)
             return false;
 
-        const auto& matchTernary = p4v1Match.ternary();
+        const auto& matchTernary = p4v1Match->ternary();
         if (Utils::getVal(matchTernary.value(), keyWidth) > maxVal ||
                 Utils::getVal(matchTernary.mask(), keyWidth) > maxVal)
             return false;
 
-    } else if (p4v1Match.has_lpm()) {
+    } else if (p4v1Match->has_lpm()) {
         if (keyMatchType != P4Constants::MATCH_KIND_LPM)
             return false;
 
-        const auto& matchLpm = p4v1Match.lpm();
+        const auto& matchLpm = p4v1Match->lpm();
         if (matchLpm.prefix_len() > keyWidth)
             return false;
 
         // TODO: check error, if value is larger than maxVal
 
-    } else if (p4v1Match.has_exact()) {
+    } else if (p4v1Match->has_exact()) {
         if (keyMatchType != P4Constants::MATCH_KIND_EXACT)
             return false;
 
-        const auto& matchExact = p4v1Match.exact();
+        const auto& matchExact = p4v1Match->exact();
         if (Utils::getVal(matchExact.value(), keyWidth) > maxVal)
             return false;
 
-    } else if (p4v1Match.has_optional()) {
+    } else if (p4v1Match->has_optional()) {
         if (keyMatchType != "optional")     // XXX: BMv2 Optional
             return false;
 
     } else {
-        LOG_FEATURE("small_visit", 4, "Match " << p4v1Match.field_name()
+        LOG_FEATURE("small_visit", 4, "Match " << p4v1Match->field_name()
                 << " - Unknown type");
         return false;
     }
@@ -547,15 +554,15 @@ void TableVisitor::verifyTableControlEntries(
             continue;
 
         // Action & Parameter check first
-        const auto entryAction = entry->action();
-        if (entryAction.has_action() && !verifyAction(entryAction.action(), tableActionList)) {
+        auto *entryAction = entry->mutable_action();
+        if (entryAction->has_action() && !verifyAction(entryAction->mutable_action(), tableActionList)) {
             continue;
 
-        } else if (entryAction.has_action_profile_action_set()) {
-            const auto entryActionSet = entryAction.action_profile_action_set();
+        } else if (entryAction->has_action_profile_action_set()) {
+            auto *entryActionSet = entryAction->mutable_action_profile_action_set();
             bool foundProfileAction = true;
-            for (const auto &p4v1Action : entryActionSet.action_profile_actions()) {
-                if (!verifyAction(p4v1Action.action(), tableActionList)) {
+            for (auto &p4v1Action : *entryActionSet->mutable_action_profile_actions()) {
+                if (!verifyAction(p4v1Action.mutable_action(), tableActionList)) {
                     foundProfileAction = false;
                     break;
                 }
@@ -567,8 +574,8 @@ void TableVisitor::verifyTableControlEntries(
 
         // Match check
         bool found = true;
-        for (const auto &p4v1Match : entry->match()) {
-            if (!verifyMatch(p4v1Match, keys)) {
+        for (auto &p4v1Match : *entry->mutable_match()) {
+            if (!verifyMatch(&p4v1Match, keys)) {
                 found = false;
                 break;
             }
@@ -587,7 +594,16 @@ void TableVisitor::evalTableControlEntries(
     bool isDefaultAction = true;
     bool tableFound = false;
 
-    // TODO: sort entries in order of priority
+    auto cmp = [](::p4::v1::Entity *left, ::p4::v1::Entity *right) {
+        return (left->table_entry().priority() < right->table_entry().priority());
+    };
+
+    std::priority_queue<::p4::v1::Entity*,
+        std::vector<::p4::v1::Entity*>,
+        decltype(cmp)> entityQueue(cmp);
+
+    // Sort entries in order of priority
+    // XXX: In P4, rules with same priority are not deterministic.
     for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
@@ -606,67 +622,88 @@ void TableVisitor::evalTableControlEntries(
             continue;
         }
 
-        /* XXX: NoAction? */
-        if (!entry->has_action())
-            continue;
+        entityQueue.push(&entity);
+    }
 
+    while (!entityQueue.empty()) {
+        auto *entity = entityQueue.top();
+        entityQueue.pop();
+
+        auto *entry = entity->mutable_table_entry();
         auto &nextState = visitor->state.clone();
+        bool actionFound = false;
         tableFound = true;
+        P4::Coverage::CoverageSet coveredNodes;
 
-        ::p4::v1::Action *p4v1Action;
-        if (entry->action().has_action()) {
-            p4v1Action = entry->mutable_action()->mutable_action();
+        const IR::MethodCallExpression *tableAction = nullptr;
+        const IR::P4Action *actionType = nullptr;
+        auto* arguments = new IR::Vector<IR::Argument>();
 
-        } else if (entry->action().has_action_profile_action_set()) {
-            // TODO: multiple actions
-            p4v1Action = entry->mutable_action()->mutable_action_profile_action_set()
-                         ->mutable_action_profile_actions(0)->mutable_action();
+        if (!entry->has_action()) {
+            const auto *defaultAction = table->getDefaultAction();
+            tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
+            actionType = visitor->state.getP4Action(tableAction);
+            actionFound = true;
+
         } else {
-            continue;
+            ::p4::v1::Action *p4v1Action;
+            if (entry->action().has_action()) {
+                p4v1Action = entry->mutable_action()->mutable_action();
+
+            } else if (entry->action().has_action_profile_action_set()) {
+                // TODO: multiple actions
+                p4v1Action = entry->mutable_action()->mutable_action_profile_action_set()
+                    ->mutable_action_profile_actions(0)->mutable_action();
+            } else {
+                const auto *defaultAction = table->getDefaultAction();
+                tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
+                actionType = visitor->state.getP4Action(tableAction);
+                actionFound = true;
+            }
+
+            if (!actionFound) {
+                for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+                    const auto* action = tableActionList.at(idx);
+                    tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+                    actionType = visitor->state.getP4Action(tableAction);
+                    CHECK_NULL(actionType);
+                    cstring actionName = actionType->controlPlaneName();
+
+                    if (actionName != p4v1Action->action_name())
+                        continue;
+
+                    // FOUND!
+                    actionFound = true;
+                    std::vector<ActionArg> ctrlPlaneArgs;
+
+                    for (auto& param : p4v1Action->params()) {
+                        // TODO: check param_name comparison
+                        size_t argIdx = (size_t)(param.param_id() - 1);
+                        BUG_CHECK(argIdx < actionType->parameters->size(),
+                                "given argIdx %1% is out of size %2%",
+                                argIdx, actionType->parameters->size());
+                        const auto* parameter = actionType->parameters->getParameter(argIdx);
+                        const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+                        auto paramWidth = paramType->width_bits();
+
+                        // change to constant value
+                        const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
+                        const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                        //cstring paramName =
+                        //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
+                        //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
+                        //const auto* actionArgVar = new IR::Member(parameter->type, new IR::PathExpression("*"), paramName);
+                        nextState.set(actionDataVar, paramExpr);
+                        arguments->push_back(new IR::Argument(paramExpr));
+                        ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+                    }
+                    break;
+                }
+            }
         }
 
-        for (size_t idx = 0; idx < tableActionList.size(); idx++) {
-            const auto* action = tableActionList.at(idx);
-            const auto* tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
-            const auto* actionType = visitor->state.getP4Action(tableAction);
-            CHECK_NULL(actionType);
-            cstring actionName = actionType->controlPlaneName();
 
-            if (actionName != p4v1Action->action_name())
-                continue;
-
-            P4::Coverage::CoverageSet coveredNodes;
-            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
-                auto collector = CoverableNodesScanner(visitor->state);
-                collector.updateNodeCoverage(actionType, coveredNodes);
-            }
-
-            // FOUND!
-            auto* arguments = new IR::Vector<IR::Argument>();
-            std::vector<ActionArg> ctrlPlaneArgs;
-
-            for (auto& param : p4v1Action->params()) {
-                // TODO: check param_name comparison
-                size_t argIdx = (size_t)(param.param_id() - 1);
-                BUG_CHECK(argIdx < actionType->parameters->size(),
-                        "given argIdx %1% is out of size %2%",
-                        argIdx, actionType->parameters->size());
-                const auto* parameter = actionType->parameters->getParameter(argIdx);
-                const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
-                auto paramWidth = paramType->width_bits();
-
-                // change to constant value
-                const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
-                const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
-                //cstring paramName =
-                //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
-                //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
-                //const auto* actionArgVar = new IR::Member(parameter->type, new IR::PathExpression("*"), paramName);
-                nextState.set(actionDataVar, paramExpr);
-                arguments->push_back(new IR::Argument(paramExpr));
-                ctrlPlaneArgs.emplace_back(parameter, paramExpr);
-            }
-
+        if (actionFound) {
             auto* synthesizedAction = tableAction->clone();
             synthesizedAction->arguments = arguments;
             setTableAction(nextState, tableAction);
@@ -679,23 +716,29 @@ void TableVisitor::evalTableControlEntries(
             nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
             nextState.replaceTopBody(&replacements);
 
+            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
+                auto collector = CoverableNodesScanner(visitor->state);
+                collector.updateNodeCoverage(actionType, coveredNodes);
+            }
+
             // XXX: should I put TraceEvent::Generic(tableStream.str())?
             const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
             if (hitCondition != nullptr) {
                 visitor->result->emplace_back(hitCondition, visitor->state, nextState);
                 const auto *expr = P4::optimizeExpression(hitCondition);
                 if (const auto *constVal = expr->to<IR::BoolLiteral>()) {
-                   if (constVal->value) {
-                       // put matched idx on entity
-                       entry->set_matched_idx(nextState.getMatchedIdx());
-                       nextState.markAction(tableAction);
-                       nextState.chooseEntryInGraph(entity.table_entry());
-                       isDefaultAction = false;
-                   }
+                    if (constVal->value) {
+                        // put matched idx on entity
+                        entry->set_matched_idx(nextState.getMatchedIdx());
+                        nextState.markAction(actionType);
+                        nextState.chooseEntryInGraph(entity->table_entry());
+                        isDefaultAction = false;
+
+                        // skip other low-priority rules
+                        break;
+                    }
                 }
             }
-
-            break;
         }
     }
 
