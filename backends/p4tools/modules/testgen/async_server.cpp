@@ -72,7 +72,8 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
         case 1:
             {
                 for (const auto *table : tableCollector.getP4TableSet()) {
-                    if (table->controlPlaneName() == req->target()) {
+                    if (table->controlPlaneName() == req->target() &&
+                            table->getKey() != nullptr) {
                         for (const auto *key : table->getKey()->keyElements) {
                             const IR::Expression* keyExpr = key->expression;
                             const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
@@ -89,9 +90,16 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
         case 2:
             {
                 auto *p4TableActions = tableCollector.getActions(req->target());
+                bool hasProfile = tableCollector.hasActionProfile(req->target());
                 if (p4TableActions != nullptr) {
-                    for (const auto *action : *p4TableActions)
+                    for (const auto *action : *p4TableActions) {
                         rep->add_name(action->checkedTo<IR::P4Action>()->controlPlaneName());
+                        if (hasProfile) {
+                            rep->add_bit_len(1);
+                        } else {
+                            rep->add_bit_len(0);
+                        }
+                    }
                 }
                 break;
             }

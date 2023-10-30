@@ -55,6 +55,13 @@ bool TableCollector::preorder(const IR::P4Table *p4table) {
     const auto tableActionList = TableUtils::buildTableActionList(*p4table);
     const auto tableName = p4table->controlPlaneName();
 
+    const auto *impl = p4table->properties->getProperty("implementation");
+    if (impl != nullptr) {
+        hasProfileMap.insert(std::pair<cstring, bool>(tableName, true));
+    } else {
+        hasProfileMap.insert(std::pair<cstring, bool>(tableName, false));
+    }
+
     P4::Coverage::CoverageSet actionSet;
     for (size_t i = 0; i < tableActionList.size(); i++) {
         const auto* action = tableActionList.at(i);
@@ -86,6 +93,18 @@ const P4::Coverage::CoverageSet *TableCollector::getActions(cstring tableName) c
     }
 
     return nullptr;
+}
+
+bool TableCollector::hasActionProfile(cstring tableName) const {
+    if (tableName.isNullOrEmpty()) {
+        return false;
+    }
+    auto pos = hasProfileMap.find(tableName);
+    if (pos != hasProfileMap.end()) {
+        return pos->second;
+    }
+
+    return false;
 }
 
 void TableCollector::findP4Actions() {

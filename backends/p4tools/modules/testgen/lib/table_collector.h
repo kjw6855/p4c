@@ -44,6 +44,7 @@ class TableCollector : public Inspector {
     Continuation::Body tmpBody;
     std::set<const IR::P4Table*> p4Tables;
     std::map<cstring, P4::Coverage::CoverageSet> actionMap;
+    std::map<cstring, bool> hasProfileMap;
     P4::Coverage::CoverageSet actionNodes;
     bool enableDump = false;
 
@@ -62,6 +63,7 @@ class TableCollector : public Inspector {
     const std::set<const IR::P4Table*> &getP4TableSet() const;
     const P4::Coverage::CoverageSet *getActions(cstring tableName) const;
     const P4::Coverage::CoverageSet &getActionNodes() const;
+    bool hasActionProfile(cstring tableName) const;
 };
 
 }  // namespace P4Tools::P4Testgen

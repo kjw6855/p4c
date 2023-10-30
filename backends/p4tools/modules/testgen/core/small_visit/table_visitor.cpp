@@ -592,7 +592,6 @@ void TableVisitor::evalTableControlEntries(
     BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
 
     bool isDefaultAction = true;
-    bool tableFound = false;
 
     auto cmp = [](::p4::v1::Entity *left, ::p4::v1::Entity *right) {
         return (left->table_entry().priority() < right->table_entry().priority());
@@ -632,7 +631,6 @@ void TableVisitor::evalTableControlEntries(
         auto *entry = entity->mutable_table_entry();
         auto &nextState = visitor->state.clone();
         bool actionFound = false;
-        tableFound = true;
         P4::Coverage::CoverageSet coveredNodes;
 
         const IR::MethodCallExpression *tableAction = nullptr;
@@ -742,9 +740,12 @@ void TableVisitor::evalTableControlEntries(
         }
     }
 
-    if (tableFound && isDefaultAction) {
+    if (isDefaultAction) {
         const auto *defaultAction = table->getDefaultAction();
+        const auto *tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
+        const auto *actionType = visitor->state.getP4Action(tableAction);
         visitor->state.choosePathInGraph(defaultAction);
+        visitor->state.markAction(actionType);
     }
 }
 
