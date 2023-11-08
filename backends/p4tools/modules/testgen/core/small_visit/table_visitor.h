@@ -66,6 +66,7 @@ class TableVisitor {
      * ========================================================================================= */
     /// @returns the execution state of the friend class ExpressionVisitor.
     const ExecutionState *getExecutionState();
+    ExecutionState &getMutableExecutionState();
 
     /// @returns the program info of the friend class ExpressionVisitor.
     const ProgramInfo *getProgramInfo();

@@ -41,6 +41,8 @@ namespace P4Tools::P4Testgen {
 
 const ExecutionState *TableVisitor::getExecutionState() { return &visitor->state; }
 
+ExecutionState &TableVisitor::getMutableExecutionState() { return visitor->state; }
+
 const ProgramInfo *TableVisitor::getProgramInfo() { return &visitor->programInfo; }
 
 ExprVisitor::Result TableVisitor::getResult() { return visitor->result; }

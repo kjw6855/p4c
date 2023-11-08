@@ -94,6 +94,8 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     const auto *state = getExecutionState();
 
+    bool isDefaultAction = true;
+
     // ActionProfile doesn't have priority
     for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
@@ -200,12 +202,22 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
                         entry->set_matched_idx(nextState.getMatchedIdx());
                         nextState.markAction(actionType);
                         nextState.chooseEntryInGraph(entity.table_entry());
+                        isDefaultAction = false;
                     }
                 }
             }
         }
 
         BUG_CHECK(found, "P4 Action is not found!");
+    }
+
+    if (isDefaultAction) {
+        auto &mutableState = getMutableExecutionState();
+        const auto *defaultAction = table->getDefaultAction();
+        const auto *tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
+        const auto *actionType = state->getP4Action(tableAction);
+        mutableState.markAction(actionType);
+        mutableState.choosePathInGraph(defaultAction);
     }
 
     return;
