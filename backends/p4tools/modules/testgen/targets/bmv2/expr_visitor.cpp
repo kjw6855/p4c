@@ -1132,6 +1132,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                          Utils::generateInternalMethodCall("drop_and_exit", {}));
                      nextState.replaceTopBody(dropStmt);
                      result->emplace_back(nextState);
+                     nextState.setUnsupported();
                      return;
                  }
              }
@@ -1163,6 +1164,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  auto &nextState = state.clone();
                  nextState.popBody();
                  result->emplace_back(nextState);
+                 nextState.setUnsupported();
                  return;
              }
 
@@ -1296,6 +1298,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                          Utils::generateInternalMethodCall("drop_and_exit", {}));
                      nextState.replaceTopBody(dropStmt);
                      result->emplace_back(nextState);
+                     nextState.setUnsupported();
                      return;
                  }
              }
@@ -1339,6 +1342,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                          Utils::generateInternalMethodCall("drop_and_exit", {}));
                      nextState.replaceTopBody(dropStmt);
                      result->emplace_back(nextState);
+                     nextState.setUnsupported();
                      return;
                  }
              }
@@ -1370,6 +1374,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  auto &nextState = state.clone();
                  nextState.popBody();
                  result->emplace_back(nextState);
+                 nextState.setUnsupported();
                  return;
              }
 

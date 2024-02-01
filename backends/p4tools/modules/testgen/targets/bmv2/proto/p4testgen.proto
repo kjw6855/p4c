@@ -97,4 +97,5 @@ message TestCase {
     int32 action_cov_size = 9;
     int32 table_size = 10;
     repeated PathCoverage path_cov = 11;
+    int32 unsupported = 12;
 }

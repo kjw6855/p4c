@@ -126,6 +126,8 @@ class ExecutionState : public AbstractExecutionState {
 
     int matchedIdx = 0;
 
+    bool unsupported = false;
+
     /// List of path constraints - expressions that must all evaluate to true to reach this
     /// execution state.
     std::vector<const IR::Expression *> pathConstraint;
@@ -350,6 +352,10 @@ class ExecutionState : public AbstractExecutionState {
     [[nodiscard]] int getInputPacketSize() const;
 
     [[nodiscard]] int getMatchedIdx();
+
+    [[nodiscard]] bool getUnsupported();
+
+    void setUnsupported();
 
     void setInputPacketSize(int packetSize);
 

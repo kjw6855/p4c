@@ -370,6 +370,14 @@ int ExecutionState::getMatchedIdx() {
     return matchedIdx++;
 }
 
+void ExecutionState::setUnsupported() {
+    unsupported = true;
+}
+
+bool ExecutionState::getUnsupported() {
+    return unsupported;
+}
+
 void ExecutionState::appendToInputPacket(const IR::Expression *expr) {
     const auto *inputPkt = getInputPacket();
     const auto *width = IR::getBitType(expr->type->width_bits() + inputPkt->type->width_bits());

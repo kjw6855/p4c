@@ -193,6 +193,7 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     std::cout << "Record P4 Coverage of device: " << devId << std::endl;
 
     auto testCase = req->test_case();
+    testCase.set_unsupported(0);
     for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
@@ -247,7 +248,14 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     }
 
     // Get path coverage
+    newTestCase->clear_path_cov();
+    std::set<cstring> visitedPath;
     for (auto blockName : stateMgr->visitedPathComponents) {
+        // Skip if blockName exists
+        if (visitedPath.find(blockName) != visitedPath.end())
+            continue;
+
+        // Fill path coverage in testCase
         auto *pathCov = newTestCase->add_path_cov();
         pathCov->set_block_name(blockName);
         big_int totalPathNum = stateMgr->totalPaths[blockName];
@@ -261,6 +269,8 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
         pathCov->set_path_size(hexToByteString(
                     formatHex(stateMgr->totalPaths[blockName], width,
                         false, true, false)));
+
+        visitedPath.insert(blockName);
     }
 
     rep->set_allocated_test_case(newTestCase);

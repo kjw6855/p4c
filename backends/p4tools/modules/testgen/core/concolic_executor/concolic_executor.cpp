@@ -189,6 +189,9 @@ void ConcolicExecutor::run(TestCase& testCase) {
     if (executionState.get().isTerminal()) {
         // We've reached the end of the program. Call back and (if desired) end execution.
         executionState.get().storeGraphPath();
+        if (executionState.get().getUnsupported()) {
+            testCase.set_unsupported(1);
+        }
         testHandleTerminalState(executionState);
         return;
     }
