@@ -16,6 +16,7 @@
 #include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/depth_first.h"
+#include "backends/p4tools/modules/testgen/lib/exceptions.h"
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
 
 namespace P4Tools::P4Testgen {
@@ -219,6 +220,10 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     } catch (const Util::CompilationError &e) {
         std::cerr << "Compilation error: " << e.what() << std::endl;
         return Status::CANCELLED;
+
+    } catch (TestgenUnimplemented &e) {
+        std::cerr << "Unimplemented error: " << e.what() << std::endl;
+        return Status(StatusCode::UNIMPLEMENTED, "unimplemented");
 
     } catch (const std::exception &e) {
         std::cerr << "Internal error: " << e.what() << std::endl;

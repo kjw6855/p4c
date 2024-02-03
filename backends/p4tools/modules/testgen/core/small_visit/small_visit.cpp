@@ -214,6 +214,9 @@ class CommandVisitor {
             // state.get().
             auto pathConstraints = state.get().getPathConstraint();
             pathConstraints.push_back(cond);
+            if (const auto *constVal = cond->to<IR::BoolLiteral>()) {
+                solverResult = constVal->value;
+            }
             // TODO
             // solverResult = self.get().solver.checkSat(pathConstraints);
         }

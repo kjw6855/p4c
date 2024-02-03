@@ -21,6 +21,7 @@ using grpc::ServerAsyncResponseWriter;
 using grpc::ServerCompletionQueue;
 using grpc::ServerContext;
 using grpc::Status;
+using grpc::StatusCode;
 using p4testgen::P4FuzzGuide;
 using p4testgen::HealthCheckRequest;
 using p4testgen::HealthCheckResponse;
