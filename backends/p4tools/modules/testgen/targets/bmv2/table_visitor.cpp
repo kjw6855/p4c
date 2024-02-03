@@ -107,10 +107,9 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
         }
 
         if (entry->table_name() != properties.tableName) {
-            std::cout << "Different table name: "
+            LOG_FEATURE("small_visit", 4, "Different table name: "
                 << entry->table_name() << " (testCase) vs. "
-                << properties.tableName << " (table)"
-                << std::endl;
+                << properties.tableName << " (table)");
             continue;
         }
 

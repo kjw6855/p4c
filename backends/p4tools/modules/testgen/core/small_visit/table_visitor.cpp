@@ -167,10 +167,9 @@ const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::Table
         const auto *nameAnnot = key->getAnnotation("name");
         if (nameAnnot != nullptr) {
             if (nameAnnot->getName() != match.field_name()) {
-                std::cout << "** Different match name: "
+                LOG_FEATURE("small_visit", 4, "** Different match name: "
                     << match.field_name() << " (testCase) vs. "
-                    << nameAnnot->getName() << " (table)"
-                    << std::endl;
+                    << nameAnnot->getName() << " (table)");
                 return nullptr;
             }
         }
@@ -613,9 +612,8 @@ void TableVisitor::evalTableControlEntries(
 
         // Skip invalid entry!
         if (!entry->is_valid_entry()) {
-            std::cout << "Invalid table entry in "
-                << entry->table_name()
-                << std::endl;
+            LOG_FEATURE("small_visit", 4, "Invalid table entry in "
+                << entry->table_name());
             continue;
         }
 
