@@ -90,6 +90,8 @@ class Utils {
     static const IR::Constant *getZeroCksum(const IR::Expression *expr, int zeroLen, bool init);
 
     static bool isDefaultByConstraint(const IR::Expression *constraint);
+
+    static std::optional<bool> evalCondWithTaint(const IR::Expression *cond);
     /* =========================================================================================
      *  Other.
      * ========================================================================================= */

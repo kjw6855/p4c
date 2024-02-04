@@ -26,6 +26,7 @@
 #include "lib/null.h"
 #include "midend/coverage.h"
 
+#include "frontends/p4/optimizeExpressions.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/abstract_visitor.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/table_visitor.h"
@@ -213,16 +214,44 @@ bool CmdVisitor::preorder(const IR::IfStatement *ifStatement) {
     // completed.
     // Because we may have nested taint, we need to check if we are already tainted.
     if (state.hasTaint(ifStatement->condition)) {
+        // Check if cond can be solved even with taint
+        std::optional<bool> evalResult = Utils::evalCondWithTaint(
+                P4::optimizeExpression(ifStatement->condition));
+
         auto &nextState = state.clone();
         std::vector<Continuation::Command> cmds;
-        auto currentTaint = state.getProperty<bool>("inUndefinedState");
-        nextState.add(*new TraceEvents::IfStatementCondition(ifStatement->condition));
-        cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", true));
-        cmds.emplace_back(ifStatement->ifTrue);
-        if (ifStatement->ifFalse != nullptr) {
-            cmds.emplace_back(ifStatement->ifFalse);
+        P4::Coverage::CoverageSet coveredNodes;
+        if (evalResult == std::nullopt) {
+
+            auto currentTaint = state.getProperty<bool>("inUndefinedState");
+            nextState.add(*new TraceEvents::IfStatementCondition(ifStatement->condition));
+            cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", true));
+            cmds.emplace_back(ifStatement->ifTrue);
+            if (ifStatement->ifFalse != nullptr) {
+                cmds.emplace_back(ifStatement->ifFalse);
+            }
+            cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", currentTaint));
+
+        } else if (evalResult.value()) {
+            cmds.emplace_back(ifStatement->ifTrue);
+            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
+                auto collector = CoverableNodesScanner(state);
+                collector.updateNodeCoverage(ifStatement->ifTrue, coveredNodes);
+            }
+
+        } else {
+            if (ifStatement->ifFalse != nullptr) {
+                cmds.emplace_back(ifStatement->ifFalse);
+            } else {
+                cmds.emplace_back(new IR::BlockStatement());
+            }
+
+            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
+                auto collector = CoverableNodesScanner(state);
+                collector.updateNodeCoverage(ifStatement->ifFalse, coveredNodes);
+            }
         }
-        cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", currentTaint));
+
         nextState.replaceTopBody(&cmds);
         result->emplace_back(nextState);
         return false;

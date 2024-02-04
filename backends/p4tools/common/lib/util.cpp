@@ -106,6 +106,36 @@ bool Utils::isDefaultByConstraint(const IR::Expression *constraint) {
     return false;
 }
 
+std::optional<bool> Utils::evalCondWithTaint(const IR::Expression *cond) {
+    if (cond->is<IR::Neq>()) {
+        return false;
+
+    } else if (const auto *val = cond->to<IR::BoolLiteral>()) {
+        return val->value;
+
+    } else if (const auto *expr = cond->to<IR::LAnd>()) {
+        std::optional<bool> leftCond = Utils::evalCondWithTaint(expr->left);
+        std::optional<bool> rightCond = Utils::evalCondWithTaint(expr->right);
+        if (leftCond != std::nullopt && !leftCond.value())
+            return false;
+
+        if (rightCond != std::nullopt && !rightCond.value())
+            return false;
+
+    } else if (const auto *expr = cond->to<IR::LOr>()) {
+        std::optional<bool> leftCond = Utils::evalCondWithTaint(expr->left);
+        std::optional<bool> rightCond = Utils::evalCondWithTaint(expr->right);
+
+        if (leftCond != std::nullopt && leftCond.value())
+            return true;
+
+        if (rightCond != std::nullopt && !rightCond.value())
+            return true;
+    }
+
+    return std::nullopt;
+}
+
 const IR::MethodCallExpression *Utils::generateInternalMethodCall(
     cstring methodName, const std::vector<const IR::Expression *> &argVector,
     const IR::Type *returnType) {
