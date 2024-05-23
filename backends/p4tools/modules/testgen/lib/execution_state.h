@@ -49,18 +49,31 @@ class ExecutionState : public AbstractExecutionState {
      public:
         using ExceptionHandlers = std::map<Continuation::Exception, Continuation>;
 
+     private:
         Continuation normalContinuation;
         ExceptionHandlers exceptionHandlers;
         const NamespaceContext *namespaces = nullptr;
 
-        StackFrame(Continuation normalContinuation, const NamespaceContext *namespaces)
-            : StackFrame(normalContinuation, {}, namespaces) {}
+     public:
+        StackFrame(Continuation normalContinuation, const NamespaceContext *namespaces);
 
         StackFrame(Continuation normalContinuation, ExceptionHandlers exceptionHandlers,
-                   const NamespaceContext *namespaces)
-            : normalContinuation(normalContinuation),
-              exceptionHandlers(exceptionHandlers),
-              namespaces(namespaces) {}
+                   const NamespaceContext *namespaces);
+
+        StackFrame(const StackFrame &) = default;
+        StackFrame(StackFrame &&) noexcept = default;
+        StackFrame &operator=(const StackFrame &) = default;
+        StackFrame &operator=(StackFrame &&) = default;
+        ~StackFrame() = default;
+
+        /// @returns the top-level continuation of this particular stack frame.
+        [[nodiscard]] const Continuation &getContinuation() const;
+
+        /// @returns the exception handlers contained within this stack frame.
+        [[nodiscard]] const ExceptionHandlers &getExceptionHandlers() const;
+
+        /// @returns the namespaces contained within this stack frame.
+        [[nodiscard]] const NamespaceContext *getNameSpaces() const;
     };
 
     /// No move semantics because of constant members. We always need to clone a state.
@@ -69,10 +82,6 @@ class ExecutionState : public AbstractExecutionState {
     ~ExecutionState() override = default;
 
  private:
-    /// The list of variables that have been created in this state.
-    /// These variables are later fed to the model for completion.
-    SymbolicSet allocatedSymbolicVariables;
-
     /// The program trace for the current program point (i.e., how we got to the current state).
     std::vector<std::reference_wrapper<const TraceEvent>> trace;
 
@@ -146,6 +155,16 @@ class ExecutionState : public AbstractExecutionState {
     vertex_t curNode;
     big_int pathVal = -1;
 
+    /// The number of individual packet variables that have been created in this state.
+    /// Used to create unique symbolic variables in some cases.
+    uint16_t numAllocatedPacketVariables = 0;
+
+    /// Helper function to create a new, unique symbolic packet variable.
+    /// Keeps track of the allocated packet variables by incrementing @ref
+    /// numAllocatedPacketVariables.
+    /// @returns a fresh symbolic variable.
+    [[nodiscard]] const IR::SymbolicVariable *createPacketVariable(const IR::Type *type);
+
     /* =========================================================================================
      *  Accessors
      * ========================================================================================= */
@@ -192,9 +211,6 @@ class ExecutionState : public AbstractExecutionState {
     /// Sets the symbolic value of the given state variable to the given value. Constant folding
     /// is done on the given value before updating the symbolic state.
     void set(const IR::StateVariable &var, const IR::Expression *value) override;
-
-    /// @see Taint::hasTaint
-    bool hasTaint(const IR::Expression *expr) const;
 
     /// @returns the current event trace.
     [[nodiscard]] const std::vector<std::reference_wrapper<const TraceEvent>> &getTrace() const;
@@ -411,6 +427,7 @@ class ExecutionState : public AbstractExecutionState {
     [[nodiscard]] const IR::StateVariable &getCurrentParserErrorLabel() const;
 
     /* =========================================================================================
+<<<<<<< HEAD
      *  Variables and symbolic constants.
      * =========================================================================================
      *  These mirror what's available in IRUtils, but automatically fill in the incarnation number,
@@ -440,6 +457,8 @@ class ExecutionState : public AbstractExecutionState {
     const std::list<cstring> &getVisitedPathComponents() const;
 
     /* =========================================================================================
+=======
+>>>>>>> v1.2.4.1
      *  Constructors
      * ========================================================================================= */
     /// Allocate a new execution state object with the same state as this object.
@@ -467,6 +486,8 @@ class ExecutionState : public AbstractExecutionState {
     /// Do not accidentally copy-assign the execution state.
     ExecutionState &operator=(const ExecutionState &) = default;
 };
+
+using ExecutionStateReference = std::reference_wrapper<ExecutionState>;
 
 }  // namespace P4Tools::P4Testgen
 

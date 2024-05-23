@@ -125,7 +125,7 @@ std::vector<Continuation::Command> Bmv2V1ModelProgramInfo::processDeclaration(
     const IR::Type_Declaration *typeDecl, size_t blockIdx) const {
     // Get the architecture specification for this target.
     const auto *archSpec = TestgenTarget::getArchSpec();
-
+    const auto &options = TestgenOptions::get();
     // Collect parameters.
     const auto *applyBlock = typeDecl->to<IR::IApply>();
     if (applyBlock == nullptr) {
@@ -157,6 +157,7 @@ std::vector<Continuation::Command> Bmv2V1ModelProgramInfo::processDeclaration(
                            new IR::PathExpression("*standard_metadata"), "egress_port");
         auto *portStmt = new IR::AssignmentStatement(egressPortVar, getTargetOutputPortVar());
         cmds.emplace_back(portStmt);
+
         if (TestgenOptions::get().testBackend == "PTF") {
             /// Set the restriction on the output port,
             /// this is necessary since ptf tests use ports from 0 to 7
@@ -168,6 +169,22 @@ std::vector<Continuation::Command> Bmv2V1ModelProgramInfo::processDeclaration(
                             1, TestgenOptions::get().maxPortNo, TestgenOptions::get().allowPorts)));
             cmds.emplace_back(Continuation::Guard(getOutPortConstraint(getTargetOutputPortVar(),
                             1, TestgenOptions::get().maxPortNo, TestgenOptions::get().allowPorts)));
+        }
+
+        /// If the the vector of permitted port ranges is not empty, set the restrictions on the
+        /// possible output port.
+        if (!options.permittedPortRanges.empty()) {
+            const auto &outPortVar = getTargetOutputPortVar();
+            /// The drop port is also always a valid port. Initialize the condition with it.
+            const IR::Expression *cond = new IR::Equ(
+                outPortVar, new IR::Constant(outPortVar->type, BMv2Constants::DROP_PORT));
+            for (auto portRange : options.permittedPortRanges) {
+                const auto *loVarOut = IR::getConstant(outPortVar->type, portRange.first);
+                const auto *hiVarOut = IR::getConstant(outPortVar->type, portRange.second);
+                cond = new IR::LOr(cond, new IR::LAnd(new IR::Leq(loVarOut, outPortVar),
+                                                      new IR::Leq(outPortVar, hiVarOut)));
+            }
+            cmds.emplace_back(Continuation::Guard(cond));
         }
         // TODO: We have not implemented multi cast yet.
         // Drop the packet if the multicast group is set.

@@ -45,7 +45,8 @@ Bmv2TestBackend::Bmv2TestBackend(const ProgramInfo &programInfo, SymbolicExecuto
     if (testBackendString.isNullOrEmpty()) {
         ::error(
             "No test back end provided. Please provide a test back end using the --test-backend "
-            "parameter.");
+            "parameter. Supported back ends are %1%.",
+            Utils::containerToString(SUPPORTED_BACKENDS));
         exit(EXIT_FAILURE);
     }
 
@@ -109,7 +110,7 @@ const TestSpec *Bmv2TestBackend::createTestSpec(const ExecutionState *executionS
         const auto &flatFields = executionState->getFlatFields(
             localMetadataVar, localMetadataType->checkedTo<IR::Type_Struct>(), {});
         for (const auto &fieldRef : flatFields) {
-            const auto *fieldVal = completedModel->evaluate(executionState->get(fieldRef));
+            const auto *fieldVal = completedModel->evaluate(executionState->get(fieldRef), true);
             // Try to remove the leading internal name for the metadata field.
             // Thankfully, this string manipulation is safe if we are out of range.
             auto fieldString = fieldRef->toString();
@@ -127,7 +128,7 @@ const TestSpec *Bmv2TestBackend::createTestSpec(const ExecutionState *executionS
     for (const auto &tablePair : uninterpretedTableConfigs) {
         const auto tableName = tablePair.first;
         const auto *uninterpretedTableConfig = tablePair.second->checkedTo<TableConfig>();
-        const auto *const tableConfig = uninterpretedTableConfig->evaluate(*completedModel);
+        const auto *tableConfig = uninterpretedTableConfig->evaluate(*completedModel, true);
         testSpec->addTestObject("tables", tableName, tableConfig);
     }
 
@@ -135,7 +136,7 @@ const TestSpec *Bmv2TestBackend::createTestSpec(const ExecutionState *executionS
     for (const auto &testObject : actionProfiles) {
         const auto profileName = testObject.first;
         const auto *actionProfile = testObject.second->checkedTo<Bmv2V1ModelActionProfile>();
-        const auto *evaluatedProfile = actionProfile->evaluate(*completedModel);
+        const auto *evaluatedProfile = actionProfile->evaluate(*completedModel, true);
         testSpec->addTestObject("action_profiles", profileName, evaluatedProfile);
     }
 
@@ -143,7 +144,7 @@ const TestSpec *Bmv2TestBackend::createTestSpec(const ExecutionState *executionS
     for (const auto &testObject : actionSelectors) {
         const auto selectorName = testObject.first;
         const auto *actionSelector = testObject.second->checkedTo<Bmv2V1ModelActionSelector>();
-        const auto *evaluatedSelector = actionSelector->evaluate(*completedModel);
+        const auto *evaluatedSelector = actionSelector->evaluate(*completedModel, true);
         testSpec->addTestObject("action_selectors", selectorName, evaluatedSelector);
     }
 
@@ -151,7 +152,7 @@ const TestSpec *Bmv2TestBackend::createTestSpec(const ExecutionState *executionS
     for (const auto &testObject : cloneSpecs) {
         const auto sessionId = testObject.first;
         const auto *cloneSpec = testObject.second->checkedTo<Bmv2V1ModelCloneSpec>();
-        const auto *evaluatedInfo = cloneSpec->evaluate(*completedModel);
+        const auto *evaluatedInfo = cloneSpec->evaluate(*completedModel, true);
         testSpec->addTestObject("clone_specs", sessionId, evaluatedInfo);
     }
 
@@ -159,7 +160,7 @@ const TestSpec *Bmv2TestBackend::createTestSpec(const ExecutionState *executionS
     for (const auto &testObject : meterInfos) {
         const auto meterName = testObject.first;
         const auto *meterInfo = testObject.second->checkedTo<Bmv2V1ModelMeterValue>();
-        const auto *evaluateMeterValue = meterInfo->evaluate(*completedModel);
+        const auto *evaluateMeterValue = meterInfo->evaluate(*completedModel, true);
         testSpec->addTestObject("meter_values", meterName, evaluateMeterValue);
     }
 

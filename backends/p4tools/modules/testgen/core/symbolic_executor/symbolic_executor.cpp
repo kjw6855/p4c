@@ -23,14 +23,22 @@
 namespace P4Tools::P4Testgen {
 
 SymbolicExecutor::StepResult SymbolicExecutor::step(ExecutionState &state) {
-    Util::ScopedTimer st("step");
-    StepResult successors = evaluator.step(state);
+    StepResult successors = nullptr;
+    // Use a scope here to measure the time it takes for a step.
+    {
+        Util::ScopedTimer st("step");
+        successors = evaluator.step(state);
+    }
     // Remove any successors that are unsatisfiable.
     successors->erase(
         std::remove_if(successors->begin(), successors->end(),
                        [this](const Branch &b) -> bool { return !evaluateBranch(b, solver); }),
         successors->end());
     return successors;
+}
+
+void SymbolicExecutor::run(const Callback &callBack) {
+    runImpl(callBack, ExecutionState::create(programInfo.program));
 }
 
 bool SymbolicExecutor::handleTerminalState(const Callback &callback,
@@ -84,7 +92,6 @@ SymbolicExecutor::Branch SymbolicExecutor::popRandomBranch(
 SymbolicExecutor::SymbolicExecutor(AbstractSolver &solver, const ProgramInfo &programInfo)
     : programInfo(programInfo),
       solver(solver),
-      executionState(ExecutionState::create(programInfo.program)),
       coverableNodes(programInfo.getCoverableNodes()),
       evaluator(solver, programInfo) {
     // If there is no seed provided, do not randomize the solver.
@@ -100,8 +107,9 @@ void SymbolicExecutor::updateVisitedNodes(const P4::Coverage::CoverageSet &newNo
 
 const P4::Coverage::CoverageSet &SymbolicExecutor::getVisitedNodes() { return visitedNodes; }
 
-void SymbolicExecutor::printCurrentTraceAndBranches(std::ostream &out) {
-    const auto &branchesList = executionState.get().getSelectedBranches();
+void SymbolicExecutor::printCurrentTraceAndBranches(std::ostream &out,
+                                                    const ExecutionState &executionState) {
+    const auto &branchesList = executionState.getSelectedBranches();
     printTraces("Track branches:");
     out << "Selected " << branchesList.size() << " branches : (";
     printTraces("Selected %1% branches : (", branchesList.size());

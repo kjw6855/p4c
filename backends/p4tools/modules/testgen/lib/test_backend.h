@@ -25,6 +25,9 @@ class TestBackEnd {
     /// The current test count. If it exceeds @var maxTests, the symbolic executor will stop.
     int64_t testCount = 0;
 
+    /// Indicates the number of generated tests after which we reset memory.
+    static const int64_t RESET_THRESHOLD = 10000;
+
  protected:
     /// ProgramInfo is used to access some target specific information for test generation.
     const ProgramInfo &programInfo;
@@ -86,8 +89,7 @@ class TestBackEnd {
 
     /// @returns the test specification which is consumed by the test back ends.
     virtual const TestSpec *createTestSpec(const ExecutionState *executionState,
-                                           const Model *completedModel,
-                                           const TestInfo &testInfo) = 0;
+                                           const Model *finalModel, const TestInfo &testInfo) = 0;
 
     /// Prints information about this particular test path.
     /// @returns false if the test generation is to be aborted (for example when the port is
@@ -102,7 +104,7 @@ class TestBackEnd {
     /// @returns a TestInfo objects, which contains information about the input/output ports, the
     /// taint mask, the packet sizes, etc...
     virtual TestInfo produceTestInfo(
-        const ExecutionState *executionState, const Model *completedModel,
+        const ExecutionState *executionState, const Model *finalModel,
         const IR::Expression *outputPacketExpr, const IR::Expression *outputPortExpr,
         const std::vector<std::reference_wrapper<const TraceEvent>> *programTraces);
 

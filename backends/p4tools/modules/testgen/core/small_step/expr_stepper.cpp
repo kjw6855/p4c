@@ -9,6 +9,7 @@
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/gen_eq.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/variables.h"
 #include "ir/declaration.h"
 #include "ir/irutils.h"
@@ -86,6 +87,8 @@ bool ExprStepper::preorder(const IR::Member *member) {
 
     return stepSymbolicValue(state.get(member));
 }
+
+bool ExprStepper::preorder(const IR::ArrayIndex *arr) { return stepSymbolicValue(state.get(arr)); }
 
 void ExprStepper::evalActionCall(const IR::P4Action *action, const IR::MethodCallExpression *call) {
     const auto *actionNameSpace = action->to<IR::INamespace>();
@@ -213,7 +216,7 @@ bool ExprStepper::preorder(const IR::Mux *mux) {
         });
     }
     // If the Mux condition  is tainted, just return a taint constant.
-    if (state.hasTaint(mux->e0)) {
+    if (Taint::hasTaint(mux->e0)) {
         state.replaceTopBody(
             Continuation::Return(programInfo.createTargetUninitialized(mux->type, true)));
         result->emplace_back(state);
@@ -372,7 +375,7 @@ bool ExprStepper::preorder(const IR::SelectExpression *selectExpression) {
 
         // TODO: Implement the taint case for select expressions.
         // In the worst case, this means the entire parser is tainted.
-        if (state.hasTaint(matchCondition)) {
+        if (Taint::hasTaint(matchCondition)) {
             TESTGEN_UNIMPLEMENTED(
                 "The SelectExpression %1% is trying to match on a tainted key set."
                 " This means it is matching on uninitialized data."

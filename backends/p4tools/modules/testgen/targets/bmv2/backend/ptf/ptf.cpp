@@ -244,11 +244,16 @@ import base_test as bt
 class AbstractTest(bt.P4RuntimeTest):
     EnumColor = Enum("EnumColor", ["GREEN", "YELLOW", "RED"], start=0)
 
-    @bt.autocleanup
     def setUp(self):
         bt.P4RuntimeTest.setUp(self)
         success = bt.P4RuntimeTest.updateConfig(self)
         assert success
+        packet_wait_time = ptfutils.test_param_get("packet_wait_time")
+        if not packet_wait_time:
+            self.packet_wait_time = 0.1
+        else:
+            self.packet_wait_time = float(packet_wait_time)
+
 
     def tearDown(self):
         bt.P4RuntimeTest.tearDown(self)
@@ -262,6 +267,7 @@ class AbstractTest(bt.P4RuntimeTest):
     def verifyPackets(self):
         pass
 
+    @bt.autocleanup
     def runTestImpl(self):
         self.setupCtrlPlane()
         bt.testutils.log.info("Sending Packet ...")
@@ -404,10 +410,10 @@ class Test{{test_id}}(AbstractTest):
 ## else 
         ptfutils.verify_packet(self, exp_pkt, eg_port)
         bt.testutils.log.info("Verifying no other packets ...")
-        ptfutils.verify_no_other_packets(self, self.device_id, timeout=2)
+        ptfutils.verify_no_other_packets(self, self.device_id, timeout=self.packet_wait_time)
 ## endif
 ## else
-        pass
+        ptfutils.verify_no_other_packets(self, self.device_id, timeout=self.packet_wait_time)
 ## endif
 
     def runTest(self):
@@ -417,14 +423,14 @@ class Test{{test_id}}(AbstractTest):
     return TEST_CASE;
 }
 
-void PTF::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_t testIdx,
+void PTF::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_t testId,
                        const std::string &testCase, float currentCoverage) {
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
     }
 
-    dataJson["test_id"] = testIdx + 1;
+    dataJson["test_id"] = testId;
     dataJson["trace"] = getTrace(testSpec);
     dataJson["control_plane"] = getControlPlane(testSpec);
     dataJson["send"] = getSend(testSpec);
@@ -450,7 +456,7 @@ void PTF::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_
     ptfFileStream.flush();
 }
 
-void PTF::outputTest(const TestSpec *testSpec, cstring selectedBranches, size_t testIdx,
+void PTF::outputTest(const TestSpec *testSpec, cstring selectedBranches, size_t testId,
                      float currentCoverage, unsigned char* testCoverage, int mapSize) {
     if (!preambleEmitted) {
         auto ptfFile = basePath;
@@ -460,7 +466,7 @@ void PTF::outputTest(const TestSpec *testSpec, cstring selectedBranches, size_t 
         preambleEmitted = true;
     }
     std::string testCase = getTestCaseTemplate();
-    emitTestcase(testSpec, selectedBranches, testIdx, testCase, currentCoverage);
+    emitTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
 }
 
 }  // namespace P4Tools::P4Testgen::Bmv2

@@ -321,7 +321,7 @@ boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
         return boost::none;
 
     BUG_CHECK(finalState, "Un-initialized");
-    const auto* model = finalState->getCompletedModel();
+    const auto &model = finalState->getFinalModel();
 
     const auto* outPortExpr = executionState.get().get(programInfo.getTargetOutputPortVar());
     int outPortInt = 0;
@@ -340,7 +340,7 @@ boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
 
     executionState.get().setZeroCksum(Utils::getZeroCksum(outPacketExpr, 0, true));
 
-    auto concolicResolver = VisitConcolicResolver(*model,
+    auto concolicResolver = VisitConcolicResolver(model,
             executionState.get(), *programInfo.getConcolicMethodImpls());
     outPacketExpr->apply(concolicResolver);
 
@@ -361,11 +361,11 @@ boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
     }
 
 
-    const auto *completedModel = replacedState.getCompletedModel();
-    const auto* outPacket = completedModel->evaluate(outPacketExpr);
+    const auto &finalModel = replacedState.getFinalModel();
+    const auto* outPacket = finalModel.evaluate(outPacketExpr, true);
 
-    const auto* outEvalMask = Taint::buildTaintMask(newExecState->getSymbolicEnv().getInternalMap(),
-                                                    completedModel, outPacketExpr);
+    const auto* outEvalMask = Taint::buildTaintMask(&finalModel, outPacketExpr);
+            //newExecState->getSymbolicEnv().getInternalMap(),
 
     return Packet(outPortInt, outPacket, outEvalMask);
 }

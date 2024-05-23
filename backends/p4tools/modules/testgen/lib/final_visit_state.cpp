@@ -24,59 +24,63 @@ namespace P4Tools::P4Testgen {
 
 FinalVisitState::FinalVisitState(const ExecutionState &finalState)
     : state(finalState),
-      completedModel(completeModel(finalState, new Model(*new SymbolicMapping()))) {
+      finalModel(processModel(finalState, *new Model(*new SymbolicMapping()))) {
     for (const auto &event : finalState.getTrace()) {
-        trace.emplace_back(*event.get().evaluate(completedModel));
+        trace.emplace_back(*event.get().evaluate(finalModel, true));
     }
 }
 
 FinalVisitState::FinalVisitState(const ExecutionState &finalState,
-                       const Model &completedModel)
-    : state(finalState), completedModel(completedModel) {
+                       const Model &finalModel)
+    : state(finalState), finalModel(finalModel) {
     for (const auto &event : finalState.getTrace()) {
-        trace.emplace_back(*event.get().evaluate(completedModel));
+        trace.emplace_back(*event.get().evaluate(finalModel, true));
     }
 }
 
 void FinalVisitState::calculatePayload(const ExecutionState &executionState, Model &evaluatedModel) {
     const auto &packetBitSizeVar = ExecutionState::getInputPacketSizeVar();
-    const auto *payloadSizeConst = evaluatedModel.evaluate(packetBitSizeVar);
+    const auto *payloadSizeConst = evaluatedModel.evaluate(packetBitSizeVar, true);
     int calculatedPacketSize = IR::getIntFromLiteral(payloadSizeConst);
     const auto *inputPacketExpr = executionState.getInputPacket();
     int payloadSize = calculatedPacketSize - inputPacketExpr->type->width_bits();
     if (payloadSize > 0) {
         const auto *payloadType = IR::getBitType(payloadSize);
-        const IR::Expression *payloadExpr = evaluatedModel.get(&PacketVars::PAYLOAD_LABEL, false);
+        const IR::Expression *payloadExpr = evaluatedModel.get(&PacketVars::PAYLOAD_SYMBOL, false);
         if (payloadExpr == nullptr) {
             payloadExpr = Utils::getRandConstantForType(payloadType);
-            evaluatedModel.emplace(&PacketVars::PAYLOAD_LABEL, payloadExpr);
+            evaluatedModel.set(&PacketVars::PAYLOAD_SYMBOL, payloadExpr);
         }
     }
 }
 
-Model &FinalVisitState::completeModel(const ExecutionState &finalState, const Model *model,
+Model &FinalVisitState::processModel(const ExecutionState &finalState, Model &model,
                                  bool postProcess) {
 
+#if 0
     // Complete the model based on the symbolic environment.
-    auto *completedModel = finalState.getSymbolicEnv().complete(*model);
+    auto *finalModel = finalState.getSymbolicEnv().complete(*model);
 
     // Also complete all the symbolic variables that were collected in this state.
     const auto &symbolicVars = finalState.getSymbolicVariables();
-    completedModel->complete(symbolicVars);
+    finalModel->complete(symbolicVars);
 
     // Now that the models initial values are completed evaluate the values that
     // are part of the constraints that have been added to the solver.
-    auto *evaluatedModel = finalState.getSymbolicEnv().evaluate(*completedModel);
-
+    auto *evaluatedModel = finalState.getSymbolicEnv().evaluate(*finalModel);
+#endif
     if (postProcess) {
         // Append a payload, if requested.
-        calculatePayload(finalState, *evaluatedModel);
+        calculatePayload(finalState, model);
     }
+
+#if 0
     for (const auto &event : finalState.getTrace()) {
         event.get().complete(evaluatedModel);
     }
+#endif
 
-    return *evaluatedModel;
+    return model;
 }
 
 std::optional<std::reference_wrapper<const FinalVisitState>> FinalVisitState::computeConcolicState(
@@ -129,17 +133,15 @@ std::optional<std::reference_wrapper<const FinalVisitState>> FinalVisitState::co
     }
 #endif
 
-    auto &model = completeModel(state, new Model(*symbolicMaps), false);
-    //auto &model = completeModel(state, new Model(solver.get().getSymbolicMapping()), false);
+    auto &model = processModel(state, *new Model(*symbolicMaps), false);
+    //auto &model = processModel(state, new Model(solver.get().getSymbolicMapping()), false);
     /// Transfer any derived variables from that are missing  in this model.
     /// Do NOT update any variables that already exist.
-    for (const auto &varTuple : completedModel) {
-        model.emplace(varTuple.first, varTuple.second);
-    }
+    model.mergeMap(finalModel.get().getSymbolicMap());
     return *new FinalVisitState(state, model);
 }
 
-const Model *FinalVisitState::getCompletedModel() const { return &completedModel; }
+const Model &FinalVisitState::getFinalModel() const { return finalModel; }
 
 const ExecutionState *FinalVisitState::getExecutionState() const { return &state.get(); }
 

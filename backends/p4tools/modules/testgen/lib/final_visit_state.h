@@ -21,7 +21,7 @@ class FinalVisitState {
     std::reference_wrapper<const ExecutionState> state;
 
     /// The final model which has been augmented with environment completions.
-    const Model &completedModel;
+    std::reference_wrapper<const Model> finalModel;
 
     /// The final program trace.
     std::vector<std::reference_wrapper<const TraceEvent>> trace;
@@ -34,17 +34,17 @@ class FinalVisitState {
     /// Complete the model according to target-specific completion criteria.
     /// We first complete (this means we fill all the variables that have not been bound).
     /// Then we evaluate the model (we assign values to the variables that have been bound).
-    static Model &completeModel(const ExecutionState &finalState, const Model *model,
+    static Model &processModel(const ExecutionState &finalState, Model &model,
                                 bool postProcess = true);
 
  public:
-    /// This constructor invokes @function completeModel() to produce the model based on the solver
+    /// This constructor invokes @function processModel() to produce the model based on the solver
     /// and the executionState.
     FinalVisitState(const ExecutionState &finalState);
 
-    /// This constructor takes the input model as is and does not invoke @function completeModel().
+    /// This constructor takes the input model as is and does not invoke @function processModel().
     FinalVisitState(const ExecutionState &finalState,
-               const Model &completedModel);
+               const Model &finalModel);
 
     /// If there are concolic variables in the program, compute a new final state by rerunning the
     /// solver on the concolic assignments. If the concolic assignment is not satisfiable, return
@@ -56,7 +56,7 @@ class FinalVisitState {
         const ConcolicVariableMap &resolvedConcolicVariables) const;
 
     /// @returns the model after it was augmented by completions from the symbolic environment.
-    [[nodiscard]] const Model *getCompletedModel() const;
+    [[nodiscard]] const Model &getFinalModel() const;
 
     /// @returns the execution state of this final state.
     [[nodiscard]] const ExecutionState *getExecutionState() const;

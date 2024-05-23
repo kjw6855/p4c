@@ -1,5 +1,5 @@
-#ifndef _MIDEND_HSINDEXSIMPLIFY_H_
-#define _MIDEND_HSINDEXSIMPLIFY_H_
+#ifndef MIDEND_HSINDEXSIMPLIFY_H_
+#define MIDEND_HSINDEXSIMPLIFY_H_
 
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
@@ -38,7 +38,7 @@ class HSIndexFinder : public Inspector {
     void addNewVariable();
 };
 
-/// This class substitutes index of a header stack in all occurence of found header stack.
+/// This class substitutes index of a header stack in all occurences of found header stack.
 class HSIndexTransform : public Transform {
     friend class HSIndexContretizer;
     size_t index;
@@ -104,4 +104,4 @@ class HSIndexSimplifier : public PassManager {
 
 }  // namespace P4
 
-#endif /*  _MIDEND_HSINDEXSIMPLIFY_H_ */
+#endif /* MIDEND_HSINDEXSIMPLIFY_H_ */

@@ -129,7 +129,8 @@ jobs:
 
     - name: Build (Ubuntu 18.04, GCC)
       run: |
-        docker build -t p4c --build-arg BASE_IMAGE=ubuntu:18.04 --build-arg IMAGE_TYPE=test .
+        docker build -t p4c --build-arg BASE_IMAGE=ubuntu:18.04 --build-arg IMAGE_TYPE=test \
+        --build-arg ENABLE_TEST_TOOLS=OFF .
         ./tools/export_ccache.sh
 
       # run with sudo (...) --privileged
@@ -207,7 +208,7 @@ jobs:
       # Also, there are no static protobuf libs in homebrew.
       # See also https://github.com/Homebrew/homebrew-core/pull/122277
       run: |
-          PROTOBUF=`brew --prefix --installed protobuf`
+          PROTOBUF=`brew --prefix --installed protobuf@21`
           ./bootstrap.sh -DENABLE_GC=ON -DCMAKE_BUILD_TYPE=RELEASE \
               -DCMAKE_UNITY_BUILD=ON \
               -DProtobuf_INCLUDE_DIR=$PROTOBUF/include \

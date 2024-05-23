@@ -3,9 +3,9 @@
 #include <iostream>
 #include <optional>
 
+#include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/common/lib/format_int.h"
 #include "backends/p4tools/common/lib/model.h"
-#include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "backends/p4tools/common/lib/util.h"
@@ -13,7 +13,6 @@
 #include "lib/cstring.h"
 #include "lib/gc.h"
 #include "lib/exceptions.h"
-#include "lib/log.h"
 #include "lib/null.h"
 #include "lib/timer.h"
 #include "midend/coverage.h"
@@ -25,7 +24,6 @@
 #include "backends/p4tools/modules/testgen/lib/final_state.h"
 #include "backends/p4tools/modules/testgen/lib/logging.h"
 #include "backends/p4tools/modules/testgen/lib/packet_vars.h"
-#include "backends/p4tools/modules/testgen/lib/test_spec.h"
 #include "backends/p4tools/modules/testgen/lib/tf.h"
 #include "backends/p4tools/modules/testgen/options.h"
 
@@ -59,11 +57,19 @@ bool TestBackEnd::run(const FinalState &state) {
                          "AssertionMode: Found an input that triggers an assertion.");
         }
 
+        // For long-running tests periodically reset the solver state to free up memory.
+        if (testCount != 0 && testCount % RESET_THRESHOLD == 0) {
+            auto &solver = state.getSolver();
+            auto *z3Solver = solver.to<Z3Solver>();
+            CHECK_NULL(z3Solver);
+            z3Solver->clearMemory();
+        }
+
         bool abort = false;
 
         // Execute concolic functions that may occur in the output packet, the output port,
         // or any path conditions.
-        auto concolicResolver = ConcolicResolver(state.getCompletedModel(), *executionState,
+        auto concolicResolver = ConcolicResolver(state.getFinalModel(), *executionState,
                                                  *programInfo.getConcolicMethodImpls());
 
         outputPacketExpr->apply(concolicResolver);
@@ -85,16 +91,16 @@ bool TestBackEnd::run(const FinalState &state) {
         auto replacedState = concolicOptState.value().get();
         executionState = replacedState.getExecutionState();
         outputPacketExpr = executionState->getPacketBuffer();
-        const auto &completedModel = replacedState.getCompletedModel();
+        const auto &finalModel = replacedState.getFinalModel();
         outputPortExpr = executionState->get(programInfo.getTargetOutputPortVar());
 
-        auto testInfo = produceTestInfo(executionState, &completedModel, outputPacketExpr,
+        auto testInfo = produceTestInfo(executionState, &finalModel, outputPacketExpr,
                                         outputPortExpr, programTraces);
 
         // Add a list of tracked branches to the test output, too.
         std::stringstream selectedBranches;
         if (TestgenOptions::get().trackBranches) {
-            symbex.printCurrentTraceAndBranches(selectedBranches);
+            symbex.printCurrentTraceAndBranches(selectedBranches, *executionState);
         }
 
         abort = printTestInfo(executionState, testInfo, outputPortExpr);
@@ -103,7 +109,7 @@ bool TestBackEnd::run(const FinalState &state) {
             printPerformanceReport(false);
             return needsToTerminate(testCount);
         }
-        const auto *testSpec = createTestSpec(executionState, &completedModel, testInfo);
+        const auto *testSpec = createTestSpec(executionState, &finalModel, testInfo);
 
         // Commit an update to the visited statements.
         // Only do this once we are sure we are generating a test.
@@ -165,17 +171,17 @@ bool TestBackEnd::run(const FinalState &state) {
 }
 
 TestBackEnd::TestInfo TestBackEnd::produceTestInfo(
-    const ExecutionState *executionState, const Model *completedModel,
+    const ExecutionState *executionState, const Model *finalModel,
     const IR::Expression *outputPacketExpr, const IR::Expression *outputPortExpr,
     const std::vector<std::reference_wrapper<const TraceEvent>> *programTraces) {
     // Evaluate all the important expressions necessary for program execution by using the
-    // completed model.
+    // final model.
     int calculatedPacketSize =
-        IR::getIntFromLiteral(completedModel->evaluate(ExecutionState::getInputPacketSizeVar()));
+        IR::getIntFromLiteral(finalModel->evaluate(ExecutionState::getInputPacketSizeVar(), true));
     const auto *inputPacketExpr = executionState->getInputPacket();
     // The payload fills the space between the minimum input size needed and the symbolically
     // calculated packet size.
-    const auto *payloadExpr = completedModel->get(&PacketVars::PAYLOAD_LABEL, false);
+    const auto *payloadExpr = finalModel->get(&PacketVars::PAYLOAD_SYMBOL, false);
     if (payloadExpr != nullptr) {
         inputPacketExpr =
             new IR::Concat(IR::getBitType(calculatedPacketSize), inputPacketExpr, payloadExpr);
@@ -183,15 +189,14 @@ TestBackEnd::TestInfo TestBackEnd::produceTestInfo(
             IR::getBitType(outputPacketExpr->type->width_bits() + payloadExpr->type->width_bits()),
             outputPacketExpr, payloadExpr);
     }
-    const auto *inputPacket = completedModel->evaluate(inputPacketExpr);
-    const auto *outputPacket = completedModel->evaluate(outputPacketExpr);
+    const auto *inputPacket = finalModel->evaluate(inputPacketExpr, true);
+    const auto *outputPacket = finalModel->evaluate(outputPacketExpr, true);
     const auto *inputPort =
-        completedModel->evaluate(executionState->get(programInfo.getTargetInputPortVar()));
+        finalModel->evaluate(executionState->get(programInfo.getTargetInputPortVar()), true);
 
-    const auto *outputPortVar = completedModel->evaluate(outputPortExpr);
+    const auto *outputPortVar = finalModel->evaluate(outputPortExpr, true);
     // Build the taint mask by dissecting the program packet variable
-    const auto *evalMask = Taint::buildTaintMask(executionState->getSymbolicEnv().getInternalMap(),
-                                                 completedModel, outputPacketExpr);
+    const auto *evalMask = Taint::buildTaintMask(finalModel, outputPacketExpr);
 
     // Get the input/output port integers.
     auto inputPortInt = IR::getIntFromLiteral(inputPort);
@@ -203,7 +208,7 @@ TestBackEnd::TestInfo TestBackEnd::produceTestInfo(
             executionState->getProperty<bool>("drop")};
 }
 
-bool TestBackEnd::printTestInfo(const ExecutionState *executionState, const TestInfo &testInfo,
+bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const TestInfo &testInfo,
                                 const IR::Expression *outputPortExpr) {
     // Print all the important variables and properties of this test.
     printTraces("============ Program trace for Test %1% ============\n", testCount);
@@ -219,7 +224,7 @@ bool TestBackEnd::printTestInfo(const ExecutionState *executionState, const Test
     printTraces(formatHexExpr(testInfo.inputPacket, false, true, false));
     printTraces("=======================================");
     // We have no control over the test, if the output port is tainted. So we abort.
-    if (executionState->hasTaint(outputPortExpr)) {
+    if (Taint::hasTaint(outputPortExpr)) {
         printFeature(
             "test_info", 4,
             "============ Test %1%: Output port tainted - Aborting Test ============", testCount);

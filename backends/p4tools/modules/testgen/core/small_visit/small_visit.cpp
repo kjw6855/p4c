@@ -9,6 +9,7 @@
 
 #include "backends/p4tools/common/compiler/reachability.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "frontends/p4/optimizeExpressions.h"
 #include "ir/ir.h"
@@ -207,7 +208,7 @@ class CommandVisitor {
         std::optional<bool> solverResult = std::nullopt;
 
         // If the guard condition is tainted, treat it equivalent to an invalid state.get().
-        if (!state.get().hasTaint(cond)) {
+        if (!Taint::hasTaint(cond)) {
             cond = state.get().getSymbolicEnv().subst(cond);
             cond = P4::optimizeExpression(cond);
             // Check whether the condition is satisfiable in the current execution

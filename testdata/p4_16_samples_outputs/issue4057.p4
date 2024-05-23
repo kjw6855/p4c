@@ -3,18 +3,23 @@
 #include <v1model.p4>
 
 header hdr {
-    bit<8>  e;
-    bit<16> t;
-    bit<8>  l;
-    bit<8>  r;
-    bit<1>  v;
+    bit<8> a;
 }
 
 struct Header_t {
     hdr h;
 }
 
+header SimpleHeader {
+    bit<8> b;
+}
+
+struct ArrayStruct {
+    tuple<SimpleHeader[10]> n;
+}
+
 struct Meta_t {
+    ArrayStruct s;
 }
 
 parser p(packet_in b, out Header_t h, inout Meta_t m, inout standard_metadata_t sm) {
@@ -46,29 +51,8 @@ control deparser(packet_out b, in Header_t h) {
 }
 
 control ingress(inout Header_t h, inout Meta_t m, inout standard_metadata_t standard_meta) {
-    action a() {
-        standard_meta.egress_spec = 0;
-    }
-    action a_with_control_params(bit<9> x) {
-        standard_meta.egress_spec = x;
-    }
-    table t_ternary {
-        key = {
-            h.h.t: ternary;
-        }
-        actions = {
-            a;
-            a_with_control_params;
-        }
-        default_action = a;
-        entries = {
-                        0x1111 &&& 0xf : a_with_control_params(1);
-                        0x1181 : a_with_control_params(2);
-                        0x1181 &&& 0xf00f : a_with_control_params(3);
-        }
-    }
     apply {
-        t_ternary.apply();
+        m.s.n[0][0].b = 1;
     }
 }
 

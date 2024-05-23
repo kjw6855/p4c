@@ -12,6 +12,7 @@
 #include "frontends/p4/optimizeExpressions.h"
 #include "backends/p4tools/common/lib/constants.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
 #include "backends/p4tools/common/lib/variables.h"
 #include "ir/id.h"
@@ -268,7 +269,7 @@ void ExprVisitor::evalInternalExternMethodCall(const IR::MethodCallExpression *c
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
              auto &nextState = state.clone();
              // If the drop variable is tainted, we also mark the port tainted.
-             if (state.hasTaint(programInfo.dropIsActive())) {
+             if (Taint::hasTaint(programInfo.dropIsActive())) {
                  nextState.set(programInfo.getTargetOutputPortVar(),
                                programInfo.createTargetUninitialized(
                                    programInfo.getTargetOutputPortVar()->type, true));
@@ -448,7 +449,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                  // Check whether advance expression is tainted.
                  // If that is the case, we have no control or idea how much the cursor can be
                  // advanced.
-                 auto advanceIsTainted = state.hasTaint(advanceExpr);
+                 auto advanceIsTainted = Taint::hasTaint(advanceExpr);
                  if (advanceIsTainted) {
                      TESTGEN_UNIMPLEMENTED(
                          "The advance expression of %1% is tainted. We can not predict how much "
@@ -619,7 +620,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                  // Check whether advance expression is tainted.
                  // If that is the case, we have no control or idea how much the cursor can be
                  // advanced.
-                 auto advanceIsTainted = state.hasTaint(varbitExtractExpr);
+                 auto advanceIsTainted = Taint::hasTaint(varbitExtractExpr);
                  if (advanceIsTainted) {
                      TESTGEN_UNIMPLEMENTED(
                          "The varbit expression of %1% is tainted. We can not predict how much "
@@ -731,7 +732,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
 
              // Check whether the validity bit of the header is tainted. If it is, the entire
              // emit is tainted. There is not much we can do here, so throw an error.
-             auto emitIsTainted = state.hasTaint(validVar);
+             auto emitIsTainted = Taint::hasTaint(validVar);
              if (emitIsTainted) {
                  TESTGEN_UNIMPLEMENTED(
                      "The validity bit of %1% is tainted. Tainted emit calls can not be "
@@ -827,7 +828,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
              }
 
              // If the verify condition is tainted, the error is also tainted.
-             if (state.hasTaint(cond)) {
+             if (Taint::hasTaint(cond)) {
                  auto &taintedState = state.clone();
                  std::stringstream traceString;
                  traceString << "Tainted verify: ";
@@ -884,7 +885,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
 
              // If the assert/assume condition is tainted, we do not know whether we abort.
              // For now, throw an exception.
-             if (state.hasTaint(cond)) {
+             if (Taint::hasTaint(cond)) {
                  TESTGEN_UNIMPLEMENTED(
                      "Assert/assume can not be executed under a tainted condition.");
              }
@@ -932,7 +933,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
 
              // If the assert/assume condition is tainted, we do not know whether we abort.
              // For now, throw an exception.
-             if (state.hasTaint(cond)) {
+             if (Taint::hasTaint(cond)) {
                  TESTGEN_UNIMPLEMENTED(
                      "Assert/assume can not be executed under a tainted condition.");
              }

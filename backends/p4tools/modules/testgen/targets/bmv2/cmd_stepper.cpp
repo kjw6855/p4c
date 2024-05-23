@@ -11,6 +11,7 @@
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/constants.h"
+#include "backends/p4tools/common/lib/variables.h"
 #include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"
@@ -80,7 +81,7 @@ void Bmv2V1ModelCmdStepper::initializeTargetEnvironment(ExecutionState &nextStat
     const auto *nineBitType = IR::getBitType(9);
     const auto *oneBitType = IR::getBitType(1);
     nextState.set(programInfo.getTargetInputPortVar(),
-                  nextState.createSymbolicVariable(nineBitType, "bmv2_ingress_port"));
+                  ToolsVariables::getSymbolicVariable(nineBitType, "bmv2_ingress_port"));
     // BMv2 implicitly sets the output port to 0.
     nextState.set(programInfo.getTargetOutputPortVar(), IR::getConstant(nineBitType, 0));
     // Initialize parser_err with no error.
@@ -108,12 +109,6 @@ std::optional<const Constraint *> Bmv2V1ModelCmdStepper::startParserImpl(
         parser, programInfo.getParserErrorType(), 3, "parser_error");
     nextState.setParserErrorLabel(errVar);
 
-    /// Set the restriction on the input port for PTF tests.
-    /// This is necessary since the PTF framework only allows a specific port range.
-    if (TestgenOptions::get().testBackend == "PTF") {
-        const auto &portVar = programInfo.getTargetInputPortVar();
-        return new IR::Lss(portVar, new IR::Constant(portVar->type, 8));
-    }
     return std::nullopt;
 }
 

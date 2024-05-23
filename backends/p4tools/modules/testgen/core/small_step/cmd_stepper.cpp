@@ -13,6 +13,7 @@
 #include "backends/p4tools/common/compiler/convert_hs_index.h"
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
@@ -207,7 +208,7 @@ bool CmdStepper::preorder(const IR::IfStatement *ifStatement) {
     // We insert a property that marks all execution as tainted until the if statement has
     // completed.
     // Because we may have nested taint, we need to check if we are already tainted.
-    if (state.hasTaint(ifStatement->condition)) {
+    if (Taint::hasTaint(ifStatement->condition)) {
         auto &nextState = state.clone();
         std::vector<Continuation::Command> cmds;
         auto currentTaint = state.getProperty<bool>("inUndefinedState");
@@ -285,11 +286,37 @@ bool CmdStepper::preorder(const IR::MethodCallStatement *methodCallStatement) {
 bool CmdStepper::preorder(const IR::P4Program * /*program*/) {
     // Don't invoke logStep for the top-level program, as that would be overly verbose.
 
+    const auto &options = TestgenOptions::get();
     // Get the initial constraints of the target. These constraints influence branch selection.
     std::optional<const Constraint *> cond = programInfo.getTargetConstraints();
 
     // Initialize all relevant environment variables for the respective target.
     initializeTargetEnvironment(state);
+
+    /// If the the vector of permitted port ranges is not empty, set the restrictions on the
+    /// possible input port.
+    if (!options.permittedPortRanges.empty()) {
+        std::optional<const Constraint *> portRangeCond = std::nullopt;
+        const auto &inputPortVar = programInfo.getTargetInputPortVar();
+        for (auto portRange : options.permittedPortRanges) {
+            const auto *loVarIn = IR::getConstant(inputPortVar->type, portRange.first);
+            const auto *hiVarIn = IR::getConstant(inputPortVar->type, portRange.second);
+            if (portRangeCond.has_value()) {
+                portRangeCond = new IR::LOr(portRangeCond.value(),
+                                            new IR::LAnd(new IR::Leq(loVarIn, inputPortVar),
+                                                         new IR::Leq(inputPortVar, hiVarIn)));
+            } else {
+                portRangeCond = new IR::LAnd(new IR::Leq(loVarIn, inputPortVar),
+                                             new IR::Leq(inputPortVar, hiVarIn));
+            }
+        }
+        if (cond == std::nullopt) {
+            cond = portRangeCond;
+        } else {
+            BUG_CHECK(portRangeCond.has_value(), "Port range constraint has no value.");
+            cond = new IR::LAnd(cond.value(), portRangeCond.value());
+        }
+    }
 
     // If this option is active, mandate that all packets conform to a fixed size.
     auto pktSize = TestgenOptions::get().minPktSize;
@@ -300,7 +327,7 @@ bool CmdStepper::preorder(const IR::P4Program * /*program*/) {
         if (cond == std::nullopt) {
             cond = fixedSizeEqu;
         } else {
-            cond = new IR::LAnd(*cond, fixedSizeEqu);
+            cond = new IR::LAnd(cond.value(), fixedSizeEqu);
         }
     }
 
@@ -512,7 +539,7 @@ bool CmdStepper::preorder(const IR::SwitchStatement *switchStatement) {
     // If the switch expression is tainted, we can not predict which case will be chosen. We taint
     // the program counter and execute all of the statements.
     P4::Coverage::CoverageSet coveredNodes;
-    if (state.hasTaint(switchStatement->expression)) {
+    if (Taint::hasTaint(switchStatement->expression)) {
         auto currentTaint = state.getProperty<bool>("inUndefinedState");
         cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", true));
         for (const auto *switchCase : switchStatement->cases) {

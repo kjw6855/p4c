@@ -23,7 +23,7 @@ const IR::Expression *TableExecutionState::get(const IR::StateVariable &var) con
 void TableExecutionState::set(const IR::StateVariable &var, const IR::Expression *value) {}
 
 bool TableExecutionState::hasTaint(const IR::Expression *expr) const {
-    return Taint::hasTaint(env.getInternalMap(), expr);
+    return Taint::hasTaint(expr);
 }
 
 /**

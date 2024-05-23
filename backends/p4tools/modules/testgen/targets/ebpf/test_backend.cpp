@@ -10,6 +10,7 @@
 
 #include "backends/p4tools/common/lib/model.h"
 #include "backends/p4tools/common/lib/trace_event.h"
+#include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"
 #include "lib/cstring.h"
@@ -34,31 +35,28 @@ EBPFTestBackend::EBPFTestBackend(const ProgramInfo &programInfo, SymbolicExecuto
                                  const std::filesystem::path &testPath)
     : TestBackEnd(programInfo, symbex) {
     cstring testBackendString = TestgenOptions::get().testBackend;
+    if (testBackendString.isNullOrEmpty()) {
+        ::error(
+            "No test back end provided. Please provide a test back end using the --test-backend "
+            "parameter. Supported back ends are %1%.",
+            Utils::containerToString(SUPPORTED_BACKENDS));
+        exit(EXIT_FAILURE);
+    }
 
     if (testBackendString == "STF") {
         testWriter = new STF(testPath.c_str(), TestgenOptions::get().seed);
     } else {
-        std::stringstream supportedBackendString;
-        bool isFirst = true;
-        for (const auto &backend : SUPPORTED_BACKENDS) {
-            if (!isFirst) {
-                supportedBackendString << ", ";
-            } else {
-                isFirst = false;
-            }
-            supportedBackendString << backend;
-        }
         P4C_UNIMPLEMENTED(
             "Test back end %1% not implemented for this target. Supported back ends are %2%.",
-            testBackendString, supportedBackendString.str());
+            testBackendString, Utils::containerToString(SUPPORTED_BACKENDS));
     }
 }
 
 TestBackEnd::TestInfo EBPFTestBackend::produceTestInfo(
-    const ExecutionState *executionState, const Model *completedModel,
+    const ExecutionState *executionState, const Model *finalModel,
     const IR::Expression *outputPacketExpr, const IR::Expression *outputPortExpr,
     const std::vector<std::reference_wrapper<const TraceEvent>> *programTraces) {
-    auto testInfo = TestBackEnd::produceTestInfo(executionState, completedModel, outputPacketExpr,
+    auto testInfo = TestBackEnd::produceTestInfo(executionState, finalModel, outputPacketExpr,
                                                  outputPortExpr, programTraces);
     // This is a hack to deal with an virtual kernel interface quirk.
     // Packets that are too small are truncated to 02000000 (in hex) with width 32 bit.
@@ -78,8 +76,7 @@ TestBackEnd::TestInfo EBPFTestBackend::produceTestInfo(
 }
 
 const TestSpec *EBPFTestBackend::createTestSpec(const ExecutionState *executionState,
-                                                const Model *completedModel,
-                                                const TestInfo &testInfo) {
+                                                const Model *finalModel, const TestInfo &testInfo) {
     // Create a testSpec.
     TestSpec *testSpec = nullptr;
 
@@ -99,7 +96,7 @@ const TestSpec *EBPFTestBackend::createTestSpec(const ExecutionState *executionS
     for (const auto &tablePair : uninterpretedTableConfigs) {
         const auto tableName = tablePair.first;
         const auto *uninterpretedTableConfig = tablePair.second->checkedTo<TableConfig>();
-        const auto *const tableConfig = uninterpretedTableConfig->evaluate(*completedModel);
+        const auto *const tableConfig = uninterpretedTableConfig->evaluate(*finalModel, true);
         testSpec->addTestObject("tables", tableName, tableConfig);
     }
     return testSpec;

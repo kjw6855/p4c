@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#ifndef _P4_VALIDATEPARSEDPROGRAM_H_
-#define _P4_VALIDATEPARSEDPROGRAM_H_
+#ifndef P4_VALIDATEPARSEDPROGRAM_H_
+#define P4_VALIDATEPARSEDPROGRAM_H_
 
 #include "ir/ir.h"
 #include "ir/visitor.h"
@@ -37,7 +37,6 @@ namespace P4 {
    - no parser state is named 'accept' or 'reject'
    - constructor parameters are direction-less
    - tables have an actions property
-   - table entries lists are const
    - instantiations appear at the top-level only
    - the default label of a switch statement appears last
    - instantiations do not occur in actions
@@ -94,4 +93,4 @@ class ValidateParsedProgram final : public Inspector {
 
 }  // namespace P4
 
-#endif /* _P4_VALIDATEPARSEDPROGRAM_H_ */
+#endif /* P4_VALIDATEPARSEDPROGRAM_H_ */

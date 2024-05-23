@@ -13,6 +13,7 @@
 #include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
@@ -92,7 +93,7 @@ void Bmv2V1ModelExprStepper::processClone(const ExecutionState &state,
     const auto &preserveIndex = cloneInfo->getPreserveIndex();
     const auto &egressPortVar = programInfo.getTargetOutputPortVar();
     const auto &clonePortVar =
-        ToolsVariables::getSymbolicVariable(egressPortVar->type, 0, "clone_port_var");
+        ToolsVariables::getSymbolicVariable(egressPortVar->type, "clone_port_var");
 
     uint64_t recirculateCount = 0;
     if (state.hasProperty("recirculate_count")) {
@@ -315,7 +316,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
             }
 
             // If the assert/assume condition is tainted, we do not know whether we abort.
-            if (state.hasTaint(cond)) {
+            if (Taint::hasTaint(cond)) {
                 TESTGEN_UNIMPLEMENTED(
                     "Assert/assume can not be executed under a tainted condition.");
             }
@@ -553,7 +554,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                                    });
                      return;
                  }
-                 argsAreTainted = argsAreTainted || state.hasTaint(arg->expression);
+                 argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
              const auto *hashOutput = args->at(0)->expression;
 
@@ -912,7 +913,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
              const auto *meterState =
                  state.getTestObject("meter_values", externInstance->controlPlaneName(), false);
              Bmv2V1ModelMeterValue *meterValue = nullptr;
-             const auto &inputValue = nextState.createSymbolicVariable(
+             const auto &inputValue = ToolsVariables::getSymbolicVariable(
                  meterResult->type, "meter_value" + std::to_string(call->clone_id));
              // Make sure we do not accidentally get "3" as enum assignment...
              auto *cond = new IR::Lss(inputValue, IR::getConstant(meterResult->type, 3));
@@ -1013,7 +1014,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
              const auto *meterState =
                  state.getTestObject("meter_values", externInstance->controlPlaneName(), false);
              Bmv2V1ModelMeterValue *meterValue = nullptr;
-             const auto &inputValue = nextState.createSymbolicVariable(
+             const auto &inputValue = ToolsVariables::getSymbolicVariable(
                  meterResult->type, "meter_value" + std::to_string(call->clone_id));
              // Make sure we do not accidentally get "3" as enum assignment...
              auto *cond = new IR::Lss(inputValue, IR::getConstant(meterResult->type, 3));
@@ -1045,7 +1046,6 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
              result->emplace_back(cond, state, nextState);
              return;
          }},
-
         /* ======================================================================================
          *  digest
          *  Calling digest causes a message containing the values specified in
@@ -1156,7 +1156,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                                    });
                      return;
                  }
-                 argsAreTainted = argsAreTainted || state.hasTaint(arg->expression);
+                 argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
              // If any of the input arguments is tainted, the entire extern is unreliable.
              if (argsAreTainted) {
@@ -1363,7 +1363,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                                    });
                      return;
                  }
-                 argsAreTainted = argsAreTainted || state.hasTaint(arg->expression);
+                 argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
              // If any of the input arguments is tainted, the entire extern is unreliable.
              if (argsAreTainted) {
@@ -1478,7 +1478,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                                    });
                      return;
                  }
-                 argsAreTainted = argsAreTainted || state.hasTaint(arg->expression);
+                 argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
 
              const auto *verifyCond = args->at(0)->expression;
@@ -1488,6 +1488,17 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
              const auto *algo = args->at(3)->expression;
              const auto *oneBitType = IR::getBitType(1);
 
+             // In some cases the condition is false already. No need to do complex processing then.
+             if (const auto *boolVal = verifyCond->to<IR::BoolLiteral>()) {
+                 if (!boolVal->value) {
+                     auto &taintedState = state.clone();
+                     taintedState.popBody();
+                     result->emplace_back(taintedState);
+                     return;
+                 }
+             }
+
+             // Handle the case where the condition might be true.
              // If the condition is tainted or the input data is tainted, the checksum error
              // will not be reliable.
              if (argsAreTainted) {
@@ -1500,8 +1511,6 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                  result->emplace_back(taintedState);
                  return;
              }
-
-             // Handle the case where the condition is true.
 
              // Generate the checksum arguments.
              auto *checksumArgs = new IR::Vector<IR::Argument>();
@@ -1594,7 +1603,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                                    });
                      return;
                  }
-                 argsAreTainted = argsAreTainted || state.hasTaint(arg->expression);
+                 argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
 
              const auto &checksumVar = ToolsVariables::convertReference(args->at(2)->expression);
@@ -1602,6 +1611,20 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
              const auto *checksumVarType = checksumVar->type;
              const auto *data = args->at(1)->expression;
              const auto *algo = args->at(3)->expression;
+
+             // In some cases the condition is false already. No need to do complex processing then.
+             if (const auto *boolVal = updateCond->to<IR::BoolLiteral>()) {
+                 if (!boolVal->value) {
+                     auto &taintedState = state.clone();
+                     taintedState.popBody();
+                     result->emplace_back(taintedState);
+                     return;
+                 }
+             }
+
+             // Handle the case where the condition might be true.
+             // If the condition is tainted or the input data is tainted, the checksum error
+             // will not be reliable.
              // If the condition is tainted or the input data is tainted.
              // The checksum will also be tainted.
              if (argsAreTainted) {
@@ -1672,7 +1695,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                                    });
                      return;
                  }
-                 argsAreTainted = argsAreTainted || state.hasTaint(arg->expression);
+                 argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
 
              const auto &checksumVar = ToolsVariables::convertReference(args->at(2)->expression);
@@ -1751,7 +1774,7 @@ void Bmv2V1ModelExprStepper::evalExternMethodCall(const IR::MethodCallExpression
                                    });
                      return;
                  }
-                 argsAreTainted = argsAreTainted || state.hasTaint(arg->expression);
+                 argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
 
              const auto *verifyCond = args->at(0)->expression;

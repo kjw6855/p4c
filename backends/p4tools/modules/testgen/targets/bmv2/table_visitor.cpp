@@ -48,7 +48,7 @@ const IR::Expression *Bmv2V1ModelTableVisitor::computeTargetMatchType(
         // We can recover from taint by simply not adding the optional match.
         // Create a new symbolic variable that corresponds to the key expression.
         cstring keyName = properties.tableName + "_key_" + keyProperties.name;
-        const auto ctrlPlaneKey = nextState.createSymbolicVariable(keyExpr->type, keyName);
+        const auto ctrlPlaneKey = ToolsVariables::getSymbolicVariable(keyExpr->type, keyName);
         if (keyProperties.isTainted) {
             matches->emplace(keyProperties.name,
                              new Optional(keyProperties.key, ctrlPlaneKey, false));
@@ -78,8 +78,8 @@ const IR::Expression *Bmv2V1ModelTableVisitor::computeTargetMatchType(
             maxKey = IR::getConstant(keyExpr->type, IR::getMaxBvVal(keyExpr->type));
             keyExpr = minKey;
         } else {
-            minKey = nextState.createSymbolicVariable(keyExpr->type, minName);
-            maxKey = nextState.createSymbolicVariable(keyExpr->type, maxName);
+            minKey = ToolsVariables::getSymbolicVariable(keyExpr->type, minName);
+            maxKey = ToolsVariables::getSymbolicVariable(keyExpr->type, maxName);
         }
         matches->emplace(keyProperties.name, new Range(keyProperties.key, minKey, maxKey));
         return new IR::LAnd(hitCondition, new IR::LAnd(new IR::LAnd(new IR::Lss(minKey, maxKey),
@@ -244,7 +244,7 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
             // Getting the unique name is needed to avoid generating duplicate arguments.
             cstring keyName =
                 properties.tableName + "_param_" + actionName + std::to_string(argIdx);
-            const auto &actionArg = nextState.createSymbolicVariable(parameter->type, keyName);
+            const auto &actionArg = ToolsVariables::getSymbolicVariable(parameter->type, keyName);
             arguments->push_back(new IR::Argument(actionArg));
             // We also track the argument we synthesize for the control plane.
             // Note how we use the control plane name for the parameter here.
@@ -331,7 +331,7 @@ void Bmv2V1ModelTableVisitor::evalTableActionSelector(
             // Getting the unique name is needed to avoid generating duplicate arguments.
             cstring keyName =
                 properties.tableName + "_param_" + actionName + std::to_string(argIdx);
-            const auto &actionArg = nextState.createSymbolicVariable(parameter->type, keyName);
+            const auto &actionArg = ToolsVariables::getSymbolicVariable(parameter->type, keyName);
             arguments->push_back(new IR::Argument(actionArg));
             // We also track the argument we synthesize for the control plane.
             // Note how we use the control plane name for the parameter here.

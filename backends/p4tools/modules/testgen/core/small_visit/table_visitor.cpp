@@ -14,6 +14,7 @@
 #include "backends/p4tools/common/lib/constants.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
 #include "ir/id.h"
@@ -91,7 +92,7 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
     const IR::Expression *keyExpr = keyProperties.key->expression;
     // Create a new variable constant that corresponds to the key expression.
     cstring keyName = properties.tableName + "_key_" + keyProperties.name;
-    const auto *ctrlPlaneKey = nextState.createSymbolicVariable(keyExpr->type, keyName);
+    const auto *ctrlPlaneKey = ToolsVariables::getSymbolicVariable(keyExpr->type, keyName);
 
     if (keyProperties.matchType == P4Constants::MATCH_KIND_EXACT) {
         hitCondition = new IR::LAnd(hitCondition, new IR::Equ(keyExpr, ctrlPlaneKey));
@@ -106,7 +107,7 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
             ternaryMask = IR::getConstant(keyExpr->type, 0);
             keyExpr = ternaryMask;
         } else {
-            ternaryMask = nextState.createSymbolicVariable(keyExpr->type, maskName);
+            ternaryMask = ToolsVariables::getSymbolicVariable(keyExpr->type, maskName);
         }
         matches->emplace(keyProperties.name,
                          new Ternary(keyProperties.key, ctrlPlaneKey, ternaryMask));
@@ -117,7 +118,7 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
         const auto *keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
         auto keyWidth = keyType->width_bits();
         cstring maskName = properties.tableName + "_lpm_prefix_" + keyProperties.name;
-        const IR::Expression *maskVar = nextState.createSymbolicVariable(keyExpr->type, maskName);
+        const IR::Expression *maskVar = ToolsVariables::getSymbolicVariable(keyExpr->type, maskName);
         // The maxReturn is the maximum vale for the given bit width. This value is shifted by
         // the mask variable to create a mask (and with that, a prefix).
         auto maxReturn = IR::getMaxBvVal(keyWidth);
@@ -362,7 +363,7 @@ void TableVisitor::setTableDefaultEntries(
             // Getting the unique name is needed to avoid generating duplicate arguments.
             cstring paramName =
                 properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
-            const auto &actionArg = nextState.createSymbolicVariable(parameter->type, paramName);
+            const auto &actionArg = ToolsVariables::getSymbolicVariable(parameter->type, paramName);
             arguments->push_back(new IR::Argument(actionArg));
             // We also track the argument we synthesize for the control plane.
             // Note how we use the control plane name for the parameter here.
@@ -850,7 +851,7 @@ bool TableVisitor::resolveTableKeys() {
         // So we have to stay generic and produce a corresponding variable.
         cstring keyMatchType = keyElement->matchType->toString();
         // We can recover from taint for some match types, which is why we track taint.
-        bool keyHasTaint = state->hasTaint(keyElement->expression);
+        bool keyHasTaint = Taint::hasTaint(keyElement->expression);
 
         // Initialize the standard keyProperties.
         TableUtils::KeyProperties keyProperties(keyElement, fieldName, keyIdx, keyMatchType,
