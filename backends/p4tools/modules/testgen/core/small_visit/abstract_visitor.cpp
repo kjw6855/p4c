@@ -345,8 +345,6 @@ const IR::Literal *AbstractVisitor::evaluateExpression(
 #if 0
     if (solverResult != std::nullopt && *solverResult) {
         auto model = Model(solver.getSymbolicMapping());
-        model.complete(expr);
-        result = model.evaluate(expr);
     }
 #endif
     return result;

@@ -54,31 +54,11 @@ void FinalVisitState::calculatePayload(const ExecutionState &executionState, Mod
     }
 }
 
-Model &FinalVisitState::processModel(const ExecutionState &finalState, Model &model,
-                                 bool postProcess) {
-
-#if 0
-    // Complete the model based on the symbolic environment.
-    auto *finalModel = finalState.getSymbolicEnv().complete(*model);
-
-    // Also complete all the symbolic variables that were collected in this state.
-    const auto &symbolicVars = finalState.getSymbolicVariables();
-    finalModel->complete(symbolicVars);
-
-    // Now that the models initial values are completed evaluate the values that
-    // are part of the constraints that have been added to the solver.
-    auto *evaluatedModel = finalState.getSymbolicEnv().evaluate(*finalModel);
-#endif
+Model &FinalVisitState::processModel(const ExecutionState &finalState, Model &model, bool postProcess) {
     if (postProcess) {
         // Append a payload, if requested.
         calculatePayload(finalState, model);
     }
-
-#if 0
-    for (const auto &event : finalState.getTrace()) {
-        event.get().complete(evaluatedModel);
-    }
-#endif
 
     return model;
 }

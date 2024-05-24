@@ -113,7 +113,7 @@ SmallVisitEvaluator::RVisitEngineType SmallVisitEvaluator::renginePreprocessing(
 class CommandVisitor {
  private:
     std::reference_wrapper<SmallVisitEvaluator> self;
-    std::reference_wrapper<ExecutionState> state;
+    ExecutionStateReference state;
     TestCase& testCase;
     using Branch = SmallStepEvaluator::Branch;
     using Result = SmallStepEvaluator::Result;
@@ -208,8 +208,8 @@ class CommandVisitor {
         std::optional<bool> solverResult = std::nullopt;
 
         // If the guard condition is tainted, treat it equivalent to an invalid state.get().
+        cond = state.get().getSymbolicEnv().subst(cond);
         if (!Taint::hasTaint(cond)) {
-            cond = state.get().getSymbolicEnv().subst(cond);
             cond = P4::optimizeExpression(cond);
             // Check whether the condition is satisfiable in the current execution
             // state.get().

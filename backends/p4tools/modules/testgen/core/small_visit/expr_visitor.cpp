@@ -87,6 +87,8 @@ bool ExprVisitor::preorder(const IR::Member *member) {
     return stepSymbolicValue(state.get(member));
 }
 
+bool ExprVisitor::preorder(const IR::ArrayIndex *arr) { return stepSymbolicValue(state.get(arr)); }
+
 void ExprVisitor::evalActionCall(const IR::P4Action *action, const IR::MethodCallExpression *call) {
     const auto *actionNameSpace = action->to<IR::INamespace>();
     BUG_CHECK(actionNameSpace, "Does not instantiate an INamespace: %1%", actionNameSpace);

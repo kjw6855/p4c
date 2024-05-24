@@ -39,26 +39,35 @@
 namespace P4Tools::P4Testgen::Bmv2 {
 
 const IR::Expression *Bmv2V1ModelTableVisitor::computeTargetMatchType(
-    ExecutionState &nextState, const TableUtils::KeyProperties &keyProperties,
-    TableMatchMap *matches, const IR::Expression *hitCondition) {
+    const TableUtils::KeyProperties &keyProperties, TableMatchMap *matches,
+    const IR::Expression *hitCondition) {
     const IR::Expression *keyExpr = keyProperties.key->expression;
 
     // TODO: We consider optional match types to be a no-op, but we could make them exact matches.
     if (keyProperties.matchType == BMv2Constants::MATCH_KIND_OPT) {
-        // We can recover from taint by simply not adding the optional match.
-        // Create a new symbolic variable that corresponds to the key expression.
         cstring keyName = properties.tableName + "_key_" + keyProperties.name;
         const auto ctrlPlaneKey = ToolsVariables::getSymbolicVariable(keyExpr->type, keyName);
+        // We can recover from taint by simply not adding the optional match.
+        // Create a new symbolic variable that corresponds to the key expression.
+        const IR::Expression *ternaryMask = nullptr;
+        // We can recover from taint by inserting a ternary match that is 0.
+        const auto *wildCard = IR::getConstant(keyExpr->type, 0);
         if (keyProperties.isTainted) {
             matches->emplace(keyProperties.name,
-                             new Optional(keyProperties.key, ctrlPlaneKey, false));
-        } else {
-            const IR::Expression *keyExpr = keyProperties.key->expression;
-            matches->emplace(keyProperties.name,
-                             new Optional(keyProperties.key, ctrlPlaneKey, true));
-            hitCondition = new IR::LAnd(hitCondition, new IR::Equ(keyExpr, ctrlPlaneKey));
+                             new Ternary(keyProperties.key, ctrlPlaneKey, wildCard));
+            return hitCondition;
         }
-        return hitCondition;
+        cstring maskName = properties.tableName + "_mask_" + keyProperties.name;
+        const auto *fullMatch = IR::getMaxValueConstant(keyExpr->type);
+        ternaryMask = ToolsVariables::getSymbolicVariable(keyExpr->type, maskName);
+        auto *maskCond =
+            new IR::LOr(new IR::Equ(ternaryMask, wildCard), new IR::Equ(ternaryMask, fullMatch));
+        matches->emplace(keyProperties.name,
+                         new Ternary(keyProperties.key, ctrlPlaneKey, wildCard));
+        return new IR::LAnd(
+            hitCondition,
+            new IR::LAnd(maskCond, new IR::Equ(new IR::BAnd(keyExpr, ternaryMask),
+                                               new IR::BAnd(ctrlPlaneKey, ternaryMask))));
     }
     // Action selector entries are not part of the match.
     if (keyProperties.matchType == BMv2Constants::MATCH_KIND_SELECTOR) {
@@ -87,7 +96,7 @@ const IR::Expression *Bmv2V1ModelTableVisitor::computeTargetMatchType(
                                                        new IR::Leq(keyExpr, maxKey)));
     }
     // If the custom match type does not match, delete to the core match types.
-    return TableVisitor::computeTargetMatchType(nextState, keyProperties, matches, hitCondition);
+    return TableVisitor::computeTargetMatchType(keyProperties, matches, hitCondition);
 }
 
 void Bmv2V1ModelTableVisitor::evalTableActionProfile(
@@ -355,7 +364,7 @@ void Bmv2V1ModelTableVisitor::evalTableActionSelector(
 
         // Now we compute the hit condition to trigger this particular action call.
         TableMatchMap matches;
-        const auto *hitCondition = computeHit(nextState, &matches);
+        const auto *hitCondition = computeHit(&matches);
 
         // We need to set the table action in the state for eventual switch action_run hits.
         // We also will need it for control plane table entries.

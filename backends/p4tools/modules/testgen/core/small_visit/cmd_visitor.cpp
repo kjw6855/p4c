@@ -335,7 +335,7 @@ bool CmdVisitor::preorder(const IR::P4Program * /*program*/) {
         if (cond == std::nullopt) {
             cond = fixedSizeEqu;
         } else {
-            cond = new IR::LAnd(*cond, fixedSizeEqu);
+            cond = new IR::LAnd(cond.value(), fixedSizeEqu);
         }
     }
 

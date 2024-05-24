@@ -113,9 +113,10 @@ ExprVisitor::PacketCursorAdvanceInfo ExprVisitor::calculateAdvanceExpression(
     auto *minSize = new IR::Sub(packetSizeVarType, advanceSum, bufferSizeConst);
     // The packet size must be larger than the current parser cursor minus what is already
     // present in the buffer. The advance expression, i.e., the size of the advance can be freely
-    // chosen.
-    auto *cond =
-        new IR::Geq(IR::Type::Boolean::get(), ExecutionState::getInputPacketSizeVar(), minSize);
+    // chosen. If bufferSizeConst is larger than the entire advance, this does not hold.
+    auto *cond = new IR::LOr(
+        new IR::Grt(bufferSizeConst, advanceSum),
+        new IR::Geq(IR::Type::Boolean::get(), ExecutionState::getInputPacketSizeVar(), minSize));
 
     // Compute the accept case.
     int advanceVal = 0;
@@ -268,8 +269,9 @@ void ExprVisitor::evalInternalExternMethodCall(const IR::MethodCallExpression *c
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> * /*args*/,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
              auto &nextState = state.clone();
+             const auto *drop = state.getSymbolicEnv().subst(programInfo.dropIsActive());
              // If the drop variable is tainted, we also mark the port tainted.
-             if (Taint::hasTaint(programInfo.dropIsActive())) {
+             if (Taint::hasTaint(drop)) {
                  nextState.set(programInfo.getTargetOutputPortVar(),
                                programInfo.createTargetUninitialized(
                                    programInfo.getTargetOutputPortVar()->type, true));
@@ -724,11 +726,11 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
              const auto *emitOutput = args->at(0)->expression;
              const auto *emitType = emitOutput->type->checkedTo<IR::Type_StructLike>();
-             if (!emitOutput->is<IR::Member>()) {
+             if (!emitOutput->is<IR::Member>() || emitOutput->is<IR::ArrayIndex>()) {
                  TESTGEN_UNIMPLEMENTED("Emit input %1% of type %2% not supported", emitOutput,
                                        emitType);
              }
-             const auto &validVar = ToolsVariables::getHeaderValidity(emitOutput);
+             const auto &validVar = state.get(ToolsVariables::getHeaderValidity(emitOutput));
 
              // Check whether the validity bit of the header is tainted. If it is, the entire
              // emit is tainted. There is not much we can do here, so throw an error.
@@ -784,7 +786,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                  nextState.popBody();
                  // Only when the header is valid, the members are emitted and the packet
                  // delta is adjusted.
-                 result->emplace_back(state.get(validVar), state, nextState);
+                 result->emplace_back(validVar, state, nextState);
              }
              {
                  auto &invalidState = state.clone();

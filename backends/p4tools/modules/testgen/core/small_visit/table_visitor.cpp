@@ -87,8 +87,8 @@ const IR::StateVariable &TableVisitor::getTableReachedVar(const IR::P4Table *tab
 }
 
 const IR::Expression *TableVisitor::computeTargetMatchType(
-    ExecutionState &nextState, const TableUtils::KeyProperties &keyProperties,
-    TableMatchMap *matches, const IR::Expression *hitCondition) {
+    const TableUtils::KeyProperties &keyProperties, TableMatchMap *matches,
+    const IR::Expression *hitCondition) {
     const IR::Expression *keyExpr = keyProperties.key->expression;
     // Create a new variable constant that corresponds to the key expression.
     cstring keyName = properties.tableName + "_key_" + keyProperties.name;
@@ -118,7 +118,8 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
         const auto *keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
         auto keyWidth = keyType->width_bits();
         cstring maskName = properties.tableName + "_lpm_prefix_" + keyProperties.name;
-        const IR::Expression *maskVar = ToolsVariables::getSymbolicVariable(keyExpr->type, maskName);
+        const IR::Expression *maskVar =
+            ToolsVariables::getSymbolicVariable(keyExpr->type, maskName);
         // The maxReturn is the maximum vale for the given bit width. This value is shifted by
         // the mask variable to create a mask (and with that, a prefix).
         auto maxReturn = IR::getMaxBvVal(keyWidth);
@@ -145,10 +146,10 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
     TESTGEN_UNIMPLEMENTED("Match type %s not implemented for table keys.", keyProperties.matchType);
 }
 
-const IR::Expression *TableVisitor::computeHit(ExecutionState &nextState, TableMatchMap *matches) {
+const IR::Expression *TableVisitor::computeHit(TableMatchMap *matches) {
     const IR::Expression *hitCondition = IR::getBoolLiteral(!properties.resolvedKeys.empty());
     for (auto keyProperties : properties.resolvedKeys) {
-        hitCondition = computeTargetMatchType(nextState, keyProperties, matches, hitCondition);
+        hitCondition = computeTargetMatchType(keyProperties, matches, hitCondition);
     }
     return hitCondition;
 }
