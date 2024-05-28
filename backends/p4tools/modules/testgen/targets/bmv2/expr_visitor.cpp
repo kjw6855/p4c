@@ -16,6 +16,7 @@
 #include "backends/p4tools/common/lib/trace_event_types.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
+#include "frontends/p4/optimizeExpressions.h"
 #include "ir/declaration.h"
 #include "ir/indexed_vector.h"
 #include "ir/ir-generated.h"
@@ -42,6 +43,7 @@
 #include "backends/p4tools/modules/testgen/targets/bmv2/table_visitor.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/target.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/contrib/bmv2_hash/calculations.h"
 
 namespace P4Tools::P4Testgen::Bmv2 {
 
@@ -286,6 +288,86 @@ void Bmv2V1ModelExprVisitor::processRecirculate(const ExecutionState &state,
     const auto *topLevelBlocks = progInfo->getPipelineSequence();
     recState.replaceTopBody(topLevelBlocks);
     result->emplace_back(recState);
+}
+
+std::vector<char> Bmv2V1ModelExprVisitor::convertBigIntToBytes(big_int &dataInt, int targetWidthBits) {
+    std::vector<char> bytes;
+    // Convert the input bit width to bytes and round up.
+    size_t targetWidthBytes = (targetWidthBits + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    boost::multiprecision::export_bits(dataInt, std::back_inserter(bytes), CHUNK_SIZE);
+    // If the number of bytes produced by the export is lower than the desired width pad the byte
+    // array with zeroes.
+    auto diff = targetWidthBytes - bytes.size();
+    if (targetWidthBytes > bytes.size() && diff > 0UL) {
+        for (size_t i = 0; i < diff; ++i) {
+            bytes.insert(bytes.begin(), 0);
+        }
+    }
+
+    return bytes;
+}
+
+big_int Bmv2V1ModelExprVisitor::computeChecksum(const std::vector<const IR::Expression *> &exprList,
+                                      int algo) {
+    // Pick a checksum according to the algorithm value.
+    ChecksumFunction checksumFun = nullptr;
+    switch (algo) {
+        case Bmv2HashAlgorithm::csum16: {
+            checksumFun = BMv2Hash::csum16;
+            break;
+        }
+        case Bmv2HashAlgorithm::crc32: {
+            checksumFun = BMv2Hash::crc32;
+            break;
+        }
+        case Bmv2HashAlgorithm::crc16: {
+            checksumFun = BMv2Hash::crc16;
+            break;
+        }
+        case Bmv2HashAlgorithm::identity: {
+            checksumFun = BMv2Hash::identity;
+            break;
+        }
+        case Bmv2HashAlgorithm::xor16: {
+            checksumFun = BMv2Hash::xor16;
+            break;
+        }
+        case Bmv2HashAlgorithm::random: {
+            BUG("Random should not be encountered here");
+        }
+        case Bmv2HashAlgorithm::crc32_custom:
+        case Bmv2HashAlgorithm::crc16_custom:
+        default:
+            TESTGEN_UNIMPLEMENTED("Algorithm %1% not implemented for hash.", algo);
+    }
+
+    std::vector<char> bytes;
+    if (!exprList.empty()) {
+        const auto *concatExpr = exprList.at(0);
+        for (size_t idx = 1; idx < exprList.size(); idx++) {
+            const auto *expr = exprList.at(idx);
+            const auto *newWidth =
+                IR::getBitType(concatExpr->type->width_bits() + expr->type->width_bits());
+            concatExpr = new IR::Concat(newWidth, concatExpr, expr);
+        }
+
+        auto concatWidth = concatExpr->type->width_bits();
+        auto remainder = concatExpr->type->width_bits() % CHUNK_SIZE;
+        // The behavioral model pads widths less than CHUNK_SIZE from the right side.
+        // If we have a remainder, add another concatenation here.
+        if (remainder != 0) {
+            auto fillWidth = CHUNK_SIZE - remainder;
+            concatWidth += fillWidth;
+            const auto *remainderExpr = IR::getConstant(IR::getBitType(fillWidth), 0);
+            concatExpr = new IR::Concat(IR::getBitType(concatWidth), concatExpr, remainderExpr);
+        }
+
+        const auto *expr = P4::optimizeExpression(concatExpr);
+        auto dataInt = IR::getBigIntFromLiteral(expr->checkedTo<IR::Constant>());
+        bytes = convertBigIntToBytes(dataInt, concatWidth);
+    }
+
+    return checksumFun(bytes.data(), bytes.size());
 }
 
 Bmv2V1ModelExprVisitor::Bmv2V1ModelExprVisitor(ExecutionState &state,
@@ -1490,7 +1572,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *data = args->at(1)->expression;
              const auto *checksumValue = args->at(2)->expression;
              const auto *checksumValueType = checksumValue->type;
-             const auto *algo = args->at(3)->expression;
+             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
              const auto *oneBitType = IR::getBitType(1);
 
              // In some cases the condition is false already. No need to do complex processing then.
@@ -1517,22 +1599,20 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  return;
              }
 
-             // Generate the checksum arguments.
-             auto *checksumArgs = new IR::Vector<IR::Argument>();
-             checksumArgs->push_back(new IR::Argument(checksumValue));
-             checksumArgs->push_back(new IR::Argument(algo));
-             checksumArgs->push_back(new IR::Argument(data));
-
+             auto exprList = IR::flattenStructExpression(data->checkedTo<IR::StructExpression>());
+             auto maxHashInt = IR::getMaxBvVal(checksumValueType);
+             big_int computedResult = 0;
+             computedResult = computeChecksum(exprList, algo);
+             computedResult = std::min(computedResult, maxHashInt);
+             auto *computedValue = IR::getConstant(checksumValueType, computedResult);
 
              // The condition is true and the checksum matches.
              {
                  // Try to force the checksum expression to be equal to the result.
                  auto &nextState = state.clone();
-                 const auto *concolicVar = new IR::ConcolicVariable(
-                     checksumValueType, "*method_checksum", checksumArgs, call->clone_id, 0);
                  std::vector<Continuation::Command> replacements;
                  // We use a guard to enforce that the match condition after the call is true.
-                 auto *checksumMatchCond = new IR::Equ(concolicVar, checksumValue);
+                 auto *checksumMatchCond = new IR::Equ(computedValue, checksumValue);
                  nextState.popBody();
                  result->emplace_back(new IR::LAnd(checksumMatchCond, verifyCond), state,
                                       nextState);
@@ -1541,10 +1621,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // The condition is true and the checksum does not match.
              {
                  auto &nextState = state.clone();
-                 auto *concolicVar = new IR::ConcolicVariable(checksumValueType, "*method_checksum",
-                                                              checksumArgs, call->clone_id, 0);
                  std::vector<Continuation::Command> replacements;
-                 auto *checksumMatchCond = new IR::Neq(concolicVar, checksumValue);
+                 auto *checksumMatchCond = new IR::Neq(computedValue, checksumValue);
 
                  const auto *checksumErr = new IR::Member(
                      oneBitType, new IR::PathExpression("*standard_metadata"), "checksum_error");
@@ -1616,7 +1694,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *updateCond = args->at(0)->expression;
              const auto *checksumVarType = checksumVar->type;
              const auto *data = args->at(1)->expression;
-             const auto *algo = args->at(3)->expression;
+             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
 
              // In some cases the condition is false already. No need to do complex processing then.
              if (const auto *boolVal = updateCond->to<IR::BoolLiteral>()) {
@@ -1644,16 +1722,15 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
 
              // Handle the case where the condition is true.
              {
-                 // Generate the checksum arguments.
-                 auto *checksumArgs = new IR::Vector<IR::Argument>();
-                 checksumArgs->push_back(new IR::Argument(checksumVar));
-                 checksumArgs->push_back(new IR::Argument(algo));
-                 checksumArgs->push_back(new IR::Argument(data));
+                 auto exprList = IR::flattenStructExpression(data->checkedTo<IR::StructExpression>());
+                 auto maxHashInt = IR::getMaxBvVal(checksumVarType);
+                 big_int computedResult = 0;
+                 computedResult = computeChecksum(exprList, algo);
+                 computedResult = std::min(computedResult, maxHashInt);
+                 auto *computedValue = IR::getConstant(checksumVarType, computedResult);
 
                  auto &nextState = state.clone();
-                 const auto *concolicVar = new IR::ConcolicVariable(
-                     checksumVarType, "*method_checksum", checksumArgs, call->clone_id, 0);
-                 nextState.set(checksumVar, concolicVar);
+                 nextState.set(checksumVar, computedValue);
                  nextState.popBody();
                  result->emplace_back(updateCond, state, nextState);
              }
@@ -1708,7 +1785,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *updateCond = args->at(0)->expression;
              const auto *checksumVarType = checksumVar->type;
              const auto *data = args->at(1)->expression;
-             const auto *algo = args->at(3)->expression;
+             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
              // If the condition is tainted or the input data is tainted.
              // The checksum will also be tainted.
              if (argsAreTainted) {
@@ -1722,17 +1799,22 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
 
              // Handle the case where the condition is true.
              {
-                 // Generate the checksum arguments.
-                 auto *checksumArgs = new IR::Vector<IR::Argument>();
-                 checksumArgs->push_back(new IR::Argument(checksumVar));
-                 checksumArgs->push_back(new IR::Argument(algo));
-                 checksumArgs->push_back(new IR::Argument(data));
+                 auto exprList = IR::flattenStructExpression(data->checkedTo<IR::StructExpression>());
+             // TODO: Calculate payload
+#if 0
+             // If the payload is present, we need to add it to our checksum calculation.
+             const auto *payloadExpr = finalModel.get(&PacketVars::PAYLOAD_SYMBOL, false);
+             if (payloadExpr != nullptr) {
+                 exprList.push_back(payloadExpr);
+             }
+#endif
+                 auto maxHashInt = IR::getMaxBvVal(checksumVarType);
+                 big_int computedResult = 0;
+                 computedResult = computeChecksum(exprList, algo);
+                 computedResult = std::min(computedResult, maxHashInt);
 
                  auto &nextState = state.clone();
-                 const auto *concolicVar =
-                     new IR::ConcolicVariable(checksumVarType, "*method_checksum_with_payload",
-                                              checksumArgs, call->clone_id, 0);
-                 nextState.set(checksumVar, concolicVar);
+                 nextState.set(checksumVar, IR::getConstant(checksumVarType, computedResult));
                  nextState.popBody();
                  result->emplace_back(updateCond, state, nextState);
              }
@@ -1787,7 +1869,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *data = args->at(1)->expression;
              const auto *checksumValue = args->at(2)->expression;
              const auto *checksumValueType = checksumValue->type;
-             const auto *algo = args->at(3)->expression;
+             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
              const auto *oneBitType = IR::getBitType(1);
              // If the condition is tainted or the input data is tainted, the checksum error
              // will not be reliable.
@@ -1802,21 +1884,27 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  return;
              }
 
-             // Generate the checksum arguments.
-             auto *checksumArgs = new IR::Vector<IR::Argument>();
-             checksumArgs->push_back(new IR::Argument(checksumValue));
-             checksumArgs->push_back(new IR::Argument(algo));
-             checksumArgs->push_back(new IR::Argument(data));
+             auto exprList = IR::flattenStructExpression(data->checkedTo<IR::StructExpression>());
+#if 0
+             // TODO: Calculate payload
+             // If the payload is present, we need to add it to our checksum calculation.
+             const auto *payloadExpr = finalModel.get(&PacketVars::PAYLOAD_SYMBOL, false);
+             if (payloadExpr != nullptr) {
+                 exprList.push_back(payloadExpr);
+             }
+#endif
+             auto maxHashInt = IR::getMaxBvVal(checksumValueType);
+             big_int computedResult = 0;
+             computedResult = computeChecksum(exprList, algo);
+             computedResult = std::min(computedResult, maxHashInt);
+             auto *computedValue = IR::getConstant(checksumValueType, computedResult);
 
              // The condition is true and the checksum matches.
              {
                  // Try to force the checksum expression to be equal to the result.
                  auto &nextState = state.clone();
-                 const auto *concolicVar =
-                     new IR::ConcolicVariable(checksumValueType, "*method_checksum_with_payload",
-                                              checksumArgs, call->clone_id, 0);
                  // We use a guard to enforce that the match condition after the call is true.
-                 auto *checksumMatchCond = new IR::Equ(concolicVar, checksumValue);
+                 auto *checksumMatchCond = new IR::Equ(computedValue, checksumValue);
                  nextState.popBody();
                  result->emplace_back(new IR::LAnd(checksumMatchCond, verifyCond), state,
                                       nextState);
@@ -1825,11 +1913,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // The condition is true and the checksum does not match.
              {
                  auto &nextState = state.clone();
-                 auto *concolicVar =
-                     new IR::ConcolicVariable(checksumValueType, "*method_checksum_with_payload",
-                                              checksumArgs, call->clone_id, 0);
                  std::vector<Continuation::Command> replacements;
-                 auto *checksumMatchCond = new IR::Neq(concolicVar, checksumValue);
+                 auto *checksumMatchCond = new IR::Neq(computedValue, checksumValue);
 
                  const auto *checksumErr = new IR::Member(
                      oneBitType, new IR::PathExpression("*standard_metadata"), "checksum_error");
