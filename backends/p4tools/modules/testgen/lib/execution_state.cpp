@@ -156,7 +156,18 @@ const IR::Expression *ExecutionState::get(const IR::StateVariable &var) const {
             // Both outcomes lead to a tainted write.
             bool isTainted = validVar->is<IR::TaintExpression>();
             if (const auto *validBool = validVar->to<IR::BoolLiteral>()) {
-                isTainted = !validBool->value;
+                bool isValid = validBool->value;
+
+                // If interactive mode, don't mark tainted
+                bool markTainted = !TestgenOptions::get().interactive;
+
+                if (markTainted) {
+                    isTainted = !isValid;
+
+                } else if (!isValid) {
+                    // Set as default
+                    return IR::getDefaultValue(var->type, {}, true);
+                }
             }
             if (isTainted) {
                 return ToolsVariables::getTaintExpression(var->type);

@@ -245,7 +245,9 @@ void AbstractVisitor::setHeaderValidity(const IR::Expression *expr, bool validit
     // The header is going to be invalid. Set all fields to taint constants.
     // TODO: Should we make this target specific? Some targets set the header fields to 0.
     for (const auto &field : fieldsVector) {
-        nextState.set(field, programInfo.createTargetUninitialized(field->type, true));
+        // TODO: check it
+        //nextState.set(field, programInfo.createTargetUninitialized(field->type, true));
+        nextState.set(field, IR::getConstant(field->type, 0));
     }
 }
 
