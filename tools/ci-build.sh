@@ -62,6 +62,9 @@ P4C_DEPS="bison \
           python3 \
           python3-pip \
           python3-setuptools \
+          python3-dev \
+          libxml2-dev \
+          libxslt-dev \
           tcpdump"
 
 P4C_EBPF_DEPS="libpcap-dev \
