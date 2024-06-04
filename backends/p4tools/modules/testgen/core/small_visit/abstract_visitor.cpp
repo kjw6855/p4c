@@ -247,7 +247,7 @@ void AbstractVisitor::setHeaderValidity(const IR::Expression *expr, bool validit
     for (const auto &field : fieldsVector) {
         // TODO: check it
         //nextState.set(field, programInfo.createTargetUninitialized(field->type, true));
-        nextState.set(field, IR::getConstant(field->type, 0));
+        nextState.set(field, IR::getDefaultValue(field->type, {}, true));
     }
 }
 
