@@ -154,13 +154,22 @@ const IR::Expression *Utils::getValExpr(const std::string& strVal, size_t bitWid
     const auto* baseVar = P4::optimizeExpression(IR::getConstant(IR::getBitType(0), 0));
     const auto* baseVarType = IR::getBitType(bitWidth);
 
+    int baseLen = (bitWidth - 1) / 8 + 1;
+    int valLen = std::min(baseLen, (int)strVal.length());
+
     // Int size
     for (size_t w = 0; w < bitWidth; w += 32) {
         int num = 0;
         int subBitWidth = std::min(32, int(bitWidth - w));
         int shl = (subBitWidth - 1) / 8;
         for (int i = 0; i < subBitWidth; i+= 8) {
-            int idx = (i + w) / 8;
+            int baseIdx = (i + w) / 8;
+            // If len(strVal) is shorter than baseLen,
+            // baseIdx beyond strVal should be ignored.
+            int idx = baseIdx - baseLen + valLen;
+            if (idx < 0)
+                continue;
+
             num |= int((unsigned char)(strVal[idx]) << (shl * 8 - i));
         }
 
