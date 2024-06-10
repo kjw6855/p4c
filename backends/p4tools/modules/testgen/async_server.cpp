@@ -243,13 +243,15 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     newTestCase->clear_expected_output_packet();
     if (outputPacketOpt != boost::none) {
         auto outputPacket = outputPacketOpt.get();
-        auto* output = newTestCase->add_expected_output_packet();
-        const auto* payload = outputPacket.getEvaluatedPayload();
-        const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
+        if (outputPacket.getPort() != 0) {
+            auto* output = newTestCase->add_expected_output_packet();
+            const auto* payload = outputPacket.getEvaluatedPayload();
+            const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
 
-        output->set_port(outputPacket.getPort());
-        output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
-        output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+            output->set_port(outputPacket.getPort());
+            output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
+            output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+        }
     }
 
     // Get path coverage
