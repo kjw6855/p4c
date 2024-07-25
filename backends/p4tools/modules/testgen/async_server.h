@@ -59,6 +59,10 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             const P4CoverageRequest* req,
             P4CoverageReply* rep) override;
 
+    Status GenRuleP4Testgen(ServerContext* context,
+            const P4CoverageRequest* req,
+            P4CoverageReply* rep) override;
+
  private:
     std::map<std::string, ConcolicExecutor*> &coverageMap;
     const ProgramInfo *programInfo;

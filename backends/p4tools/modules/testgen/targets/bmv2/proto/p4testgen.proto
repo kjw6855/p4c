@@ -11,6 +11,7 @@ service P4FuzzGuide {
     rpc GetP4Coverage(P4CoverageRequest) returns (P4CoverageReply) {}
     rpc RecordP4Testgen(P4CoverageRequest) returns (P4CoverageReply) {}
     rpc GetP4Statement(P4StatementRequest) returns (P4StatementReply) {}
+    rpc GenRuleP4Testgen(P4CoverageRequest) returns (P4CoverageReply) {}
 }
 
 message HealthCheckRequest {

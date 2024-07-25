@@ -132,6 +132,7 @@ class CommandVisitor {
         auto *visitor =
             TestgenTarget::getCmdVisitor(state, self.get().programInfo, testCase);
         visitor->checkTable = self.get().checkTable;
+        visitor->genRuleMode = self.get().genRuleMode;
         // choose path first, because visitor copies state
         state.get().choosePathInGraph(node);
         auto *result = visitor->step(node);
@@ -163,6 +164,7 @@ class CommandVisitor {
             auto *visitor =
                 TestgenTarget::getExprVisitor(state, self.get().programInfo, testCase);
             visitor->checkTable = self.get().checkTable;
+            visitor->genRuleMode = self.get().genRuleMode;
             // choose path first, because visitor copies state
             state.get().choosePathInGraph(expr);
             auto *result = visitor->step(expr);

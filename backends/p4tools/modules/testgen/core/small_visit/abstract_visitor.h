@@ -34,6 +34,7 @@ class AbstractVisitor : public Inspector {
     using Result = SmallStepEvaluator::Result;
 
     bool checkTable = false;
+    bool genRuleMode = false;
 
     /// Steps on the given node. This is the main entry point into a visitor.
     ///

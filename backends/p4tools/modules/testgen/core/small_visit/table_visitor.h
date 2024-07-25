@@ -135,6 +135,10 @@ class TableVisitor {
     /// @param table the table we invoke.
     void evalTableControlEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
 
+    void genTableControlEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
+
+    ::p4::v1::TableEntry* genMatchFields();
+
     /// This is a special function that handles the case where the key of a table is tainted. This
     /// means that the entire execution of the table is tainted. We can dramatically simplify
     /// execution here and we also do not need control plane entries.
@@ -156,6 +160,7 @@ class TableVisitor {
 
  public:
     bool checkTable = false;
+    bool genRuleMode = false;
 
     /// Table implementations in P4 are rather flexible. Eval is a delegation function that chooses
     /// the right implementation depending on the properties of the table. For example, immutable

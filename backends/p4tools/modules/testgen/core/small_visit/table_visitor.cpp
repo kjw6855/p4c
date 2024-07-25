@@ -17,6 +17,7 @@
 #include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
+#include "backends/p4tools/common/lib/format_int.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
 #include "ir/irutils.h"
@@ -30,6 +31,7 @@
 #include "frontends/p4/optimizeExpressions.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/expr_visitor.h"
+#include "backends/p4tools/modules/testgen/core/small_visit/small_visit.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/testgen/lib/collect_coverable_nodes.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
@@ -39,6 +41,66 @@
 #include "backends/p4tools/modules/testgen/options.h"
 
 namespace P4Tools::P4Testgen {
+
+std::string formatBytes(const big_int& value, int width, bool pad) {
+    std::vector<char> bytes;
+
+    big_int temp = value;
+    while (temp != 0) {
+        char byte = static_cast<unsigned char>(temp & 0xFF);  // Extract the lowest byte
+        bytes.push_back(byte);
+        temp >>= 8;  // Shift right by 8 bits (1 byte)
+    }
+
+    // Calculate the number of bytes required for the given width
+    size_t total_bytes = (width + 7) / 8;
+
+    // Ensure the array is big-endian by reversing it
+    std::reverse(bytes.begin(), bytes.end());
+
+    // Pad the front with zero bytes if necessary
+    if (pad && bytes.size() < total_bytes) {
+        size_t padding_size = total_bytes - bytes.size();
+        std::vector<char> padding(padding_size, 0);
+        bytes.insert(bytes.begin(), padding.begin(), padding.end());
+    }
+
+    std::string byte_string(bytes.begin(), bytes.end());
+    return byte_string;
+}
+
+std::string formatBytesExpr(const IR::Expression *expr, bool pad) {
+    if (const auto *constant = expr->to<IR::Constant>()) {
+        auto val = constant->value;
+        if (const auto *type = constant->type->to<IR::Type::Bits>()) {
+            if (type->isSigned && val < 0) {
+                // Invert a negative value by subtracting it from the maximum possible value
+                // respective to the width.
+                auto limit = big_int(1);
+                limit <<= type->width_bits();
+                val = limit + val;
+            }
+            return formatBytes(val, type->width_bits(), pad);
+        }
+    }
+
+    if (const auto *boolExpr = expr->to<IR::BoolLiteral>()) {
+        std::stringstream out;
+        if (boolExpr->value)
+            out << '\1';
+        else
+            out << '\0';
+        return out.str();
+    }
+
+    if (const auto *stringExpr = expr->to<IR::StringLiteral>()) {
+        // TODO: Include the quotes here?
+        return stringExpr->value.c_str();
+    }
+
+    P4C_UNIMPLEMENTED("Bytes formatting for expression %1% of type %2% not supported.", expr,
+                      expr->type);
+}
 
 const ExecutionState *TableVisitor::getExecutionState() { return &visitor->state; }
 
@@ -589,6 +651,174 @@ void TableVisitor::verifyTableControlEntries(
     }
 }
 
+::p4::v1::TableEntry* TableVisitor::genMatchFields() {
+    auto* newTableEntry = new ::p4::v1::TableEntry();
+    const auto *keys = table->getKey();
+
+    // 1. Get all variables in keys and create matches
+    for (const auto* key : keys->keyElements) {
+        const IR::Expression* keyExpr = key->expression;
+        const auto *keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+        auto keyWidth = keyType->width_bits();
+
+        std::string keyValStr;
+        if (!SymbolicEnv::isSymbolicValue(keyExpr)) {
+            // skip unknown variables
+            continue;
+        } else if (const auto *constVal = keyExpr->to<IR::BoolLiteral>()) {
+            keyValStr = formatBytesExpr(constVal, true);
+        } else if (const auto *constVal = keyExpr->to<IR::Constant>()) {
+            keyValStr = formatBytesExpr(constVal, true);
+        } else {
+            // skip unknown variables
+            continue;
+        }
+
+        auto* newMatch = newTableEntry->add_match();
+        const auto *nameAnnot = key->getAnnotation("name");
+        newMatch->set_field_name(nameAnnot->getName());
+        cstring keyMatchType = key->matchType->toString();
+
+        if (keyMatchType == P4Constants::MATCH_KIND_EXACT) {
+            newMatch->mutable_exact()->set_value(keyValStr);
+
+        } else if (keyMatchType == P4Constants::MATCH_KIND_TERNARY) {
+            newMatch->mutable_ternary()->set_value(keyValStr);
+
+            auto maskValStr = formatBytes(IR::getMaxBvVal(keyWidth),
+                        keyWidth, true);
+
+            newMatch->mutable_ternary()->set_mask(maskValStr);
+
+        } else if (keyMatchType == P4Constants::MATCH_KIND_LPM) {
+            newMatch->mutable_lpm()->set_value(keyValStr);
+            newMatch->mutable_lpm()->set_prefix_len(keyWidth);
+
+        } else {
+            continue;
+        }
+
+    }
+
+    return newTableEntry;
+}
+
+void TableVisitor::genTableControlEntries(
+    const std::vector<const IR::ActionListElement *> &tableActionList) {
+    const IR::MethodCallExpression *tableAction = nullptr;
+    const IR::P4Action *actionType = nullptr;
+    bool actionFound = false;
+
+    auto* newTableEntry = genMatchFields();
+    if (newTableEntry->match_size() == 0) {
+        LOG_FEATURE("small_visit", 2, "** No match on " << properties.tableName
+                << " ** ");
+        return;
+    }
+
+    for (auto &entity : *testCase.mutable_entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        auto *entry = entity.mutable_table_entry();
+
+        // Find same table name
+        if (entry->table_name() != properties.tableName)
+            continue;
+
+        if (!entry->has_action())
+            continue;
+
+        // Find same action name
+        ::p4::v1::Action *p4v1Action;
+        if (entry->action().has_action()) {
+            p4v1Action = entry->mutable_action()->mutable_action();
+        } else if (entry->action().has_action_profile_action_set()) {
+            // TODO: multiple actions
+            p4v1Action = entry->mutable_action()->mutable_action_profile_action_set()
+                ->mutable_action_profile_actions(0)->mutable_action();
+        } else {
+            continue;
+        }
+
+        auto &nextState = visitor->state.clone();
+        P4::Coverage::CoverageSet coveredNodes;
+        auto* arguments = new IR::Vector<IR::Argument>();
+        std::vector<ActionArg> ctrlPlaneArgs;
+
+        for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+            const auto* action = tableActionList.at(idx);
+            tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+            actionType = visitor->state.getP4Action(tableAction);
+            CHECK_NULL(actionType);
+            cstring actionName = actionType->controlPlaneName();
+
+            if (actionName != p4v1Action->action_name())
+                continue;
+
+            actionFound = true;
+
+            // TODO: generate actionParams
+            for (auto& param : p4v1Action->params()) {
+                // TODO: check param_name comparison
+                size_t argIdx = (size_t)(param.param_id() - 1);
+                BUG_CHECK(argIdx < actionType->parameters->size(),
+                        "given argIdx %1% is out of size %2%",
+                        argIdx, actionType->parameters->size());
+                const auto* parameter = actionType->parameters->getParameter(argIdx);
+                const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+                auto paramWidth = paramType->width_bits();
+
+                // change to constant value
+                const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
+                const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                //cstring paramName =
+                //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
+                //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
+                //const auto* actionArgVar = new IR::Member(parameter->type, new IR::PathExpression("*"), paramName);
+                nextState.set(actionDataVar, paramExpr);
+                arguments->push_back(new IR::Argument(paramExpr));
+                ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+            }
+            break;
+        }
+
+        if (actionFound) {
+            // Fill out match fields
+            entry->clear_match();
+            for (const auto& srcMatch : newTableEntry->match()) {
+                auto* dstMatch = entry->add_match();
+                dstMatch->CopyFrom(srcMatch);
+            }
+
+            auto* synthesizedAction = tableAction->clone();
+            synthesizedAction->arguments = arguments;
+            setTableAction(nextState, tableAction);
+
+            std::vector<Continuation::Command> replacements;
+            replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
+
+            // ??
+            nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
+            nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+            nextState.replaceTopBody(&replacements);
+
+            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
+                auto collector = CoverableNodesScanner(visitor->state);
+                collector.updateNodeCoverage(actionType, coveredNodes);
+            }
+
+            visitor->result->emplace_back(IR::getBoolLiteral(true), visitor->state, nextState, coveredNodes);
+            entry->set_matched_idx(nextState.getMatchedIdx());
+            nextState.markAction(actionType);
+            nextState.chooseEntryInGraph(entity.table_entry());
+
+            // XXX: allow only one rule for each table
+            break;
+        }
+    }
+}
+
 void TableVisitor::evalTableControlEntries(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     const auto *key = table->getKey();
@@ -623,6 +853,7 @@ void TableVisitor::evalTableControlEntries(
             continue;
         }
 
+        // TODO: priority over max should be removed
         entityQueue.push(&entity);
     }
 
@@ -808,7 +1039,6 @@ bool TableVisitor::resolveTableKeys() {
         return false;
     }
 
-    const auto *state = getExecutionState();
     auto keyElements = key->keyElements;
     for (size_t keyIdx = 0; keyIdx < keyElements.size(); ++keyIdx) {
         const auto *keyElement = keyElements.at(keyIdx);
@@ -904,6 +1134,8 @@ void TableVisitor::evalTargetTable(
         // If the entries properties is constant it means the entries are fixed.
         // We cannot add or remove table entries.
         tableMissCondition = evalTableConstEntries();
+    } else if (genRuleMode) {
+        genTableControlEntries(tableActionList);
     } else {
         evalTableControlEntries(tableActionList);
     }
@@ -977,6 +1209,7 @@ TableVisitor::TableVisitor(ExprVisitor *visitor, const IR::P4Table *table, TestC
     : visitor(visitor), table(table), testCase(testCase) {
     properties.tableName = table->controlPlaneName();
     checkTable = visitor->checkTable;
+    genRuleMode = visitor->genRuleMode;
 }
 
 }  // namespace P4Tools::P4Testgen

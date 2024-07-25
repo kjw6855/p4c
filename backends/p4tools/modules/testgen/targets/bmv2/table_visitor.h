@@ -51,6 +51,8 @@ class Bmv2V1ModelTableVisitor : public TableVisitor {
     /// accordingly. Entries will use indices to refer to actions instead of their labels.
     void evalTableActionProfile(const std::vector<const IR::ActionListElement *> &tableActionList);
 
+    void genTableActionProfile(const std::vector<const IR::ActionListElement *> &tableActionList);
+
     /// If the table has an action selector implementation, evaluate the match-action list
     /// accordingly. Entries will use indices to refer to actions instead of their labels.
     void evalTableActionSelector(const std::vector<const IR::ActionListElement *> &tableActionList);

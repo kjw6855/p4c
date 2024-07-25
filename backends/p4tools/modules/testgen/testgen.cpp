@@ -231,6 +231,7 @@ int Testgen::mainImpl(const IR::P4Program *program) {
         auto *concExec = new ConcolicExecutor(*programInfo, tableCollector, top,
                 &midEnd.refMap, &midEnd.typeMap);
         TestCase *testCase = new TestCase();
+        concExec->setGenRuleMode(false);
         int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
 
         if (fd < 0) {

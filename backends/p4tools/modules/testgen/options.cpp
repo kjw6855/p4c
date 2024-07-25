@@ -445,6 +445,14 @@ TestgenOptions::TestgenOptions()
         },
         "Produce only tests that violate the condition defined in assert calls. This will either "
         "produce no tests or only tests that contain counter examples.");
+
+    registerOption(
+        "--measure-path", nullptr,
+        [this](const char *) {
+            measurePath = true;
+            return true;
+        },
+        R"(Measure path)");
 }
 
 }  // namespace P4Tools::P4Testgen

@@ -206,6 +206,10 @@ uint64_t getNumeric(const std::string& str) {
 }
 */
 
+void ConcolicExecutor::setGenRuleMode(bool genRuleMode) {
+    evaluator.genRuleMode = genRuleMode;
+}
+
 ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollector &tableCollector, const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
     : programInfo(programInfo),
       tableCollector(tableCollector),

@@ -23,6 +23,7 @@ limitations under the License.
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/tableApply.h"
 #include "backends/p4tools/modules/testgen/lib/graphs/graphs.h"
+#include "backends/p4tools/modules/testgen/options.h"
 #include "lib/log.h"
 #include "lib/nullstream.h"
 
@@ -303,6 +304,38 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
         return false;
     }
     auto actions = actList->actionList;
+
+    if (TestgenOptions::get().measurePath) {
+        // Add all actions
+        for (auto action : actions) {
+            parents = keyNode;
+
+            auto v = add_and_connect_vertex(action->getName(), action, VertexType::ACTION);
+
+            parents = {{v, new EdgeUnconditional()}};
+
+            if (action->expression->is<IR::MethodCallExpression>()) {
+                auto mce = action->expression->to<IR::MethodCallExpression>();
+
+                // needed for visiting body of P4Action
+                auto resolved = P4::MethodInstance::resolve(mce, refMap, typeMap);
+
+                if (resolved->is<P4::ActionCall>()) {
+                    auto ac = resolved->to<P4::ActionCall>();
+                    if (ac->action->is<IR::P4Action>()) {
+                        visit(ac->action->to<IR::P4Action>());
+                    }
+                }
+            }
+
+            merge_other_statements_into_vertex();
+
+            new_parents.insert(new_parents.end(), parents.begin(), parents.end());
+            parents.clear();
+        }
+        parents = new_parents;
+        return false;
+    }
 
     // 1. Get actions from testCase
     for (auto &entity : *testCase.mutable_entities()) {

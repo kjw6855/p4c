@@ -34,6 +34,7 @@ class SmallVisitEvaluator {
     /// error.
     static constexpr uint64_t MAX_GUARD_VIOLATIONS = 100;
     bool checkTable = false;
+    bool genRuleMode = false;
 
  private:
     /// Target-specific information about the P4 program being evaluated.

@@ -186,6 +186,106 @@ Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
     return Status::OK;
 }
 
+Status P4FuzzGuideImpl::GenRuleP4Testgen(ServerContext* context,
+        const P4CoverageRequest* req,
+        P4CoverageReply* rep) {
+
+    auto devId = req->device_id();
+    std::cout << "Record P4 Coverage of device: " << devId << std::endl;
+
+    auto testCase = req->test_case();
+    testCase.set_unsupported(0);
+    for (auto &entity : *testCase.mutable_entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        entity.mutable_table_entry()->set_is_valid_entry(0);
+        entity.mutable_table_entry()->set_matched_idx(-1);
+    }
+
+    if (coverageMap.count(devId) == 0) {
+        coverageMap.insert(std::make_pair(devId,
+                    new ConcolicExecutor(*programInfo, tableCollector, top, refMap, typeMap)));
+    }
+
+    auto *stateMgr = coverageMap.at(devId);
+    try {
+        stateMgr->setGenRuleMode(true);
+        stateMgr->run(testCase);
+
+    } catch (const Util::CompilerBug &e) {
+        std::cerr << "Internal compiler error: " << e.what() << std::endl;
+        std::cerr << "Please submit a bug report with your code." << std::endl;
+        return Status::CANCELLED;
+
+    } catch (const Util::CompilationError &e) {
+        std::cerr << "Compilation error: " << e.what() << std::endl;
+        return Status::CANCELLED;
+
+    } catch (TestgenUnimplemented &e) {
+        std::cerr << "Unimplemented error: " << e.what() << std::endl;
+        return Status(StatusCode::UNIMPLEMENTED, "unimplemented");
+
+    } catch (const std::exception &e) {
+        std::cerr << "Internal error: " << e.what() << std::endl;
+        std::cerr << "Please submit a bug report with your code." << std::endl;
+        return Status::CANCELLED;
+    }
+
+    auto *newTestCase = new TestCase(testCase);
+    newTestCase->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
+    newTestCase->set_stmt_cov_size(stateMgr->statementBitmapSize);
+    newTestCase->set_action_cov_bitmap(stateMgr->getActionBitmapStr());
+    newTestCase->set_action_cov_size(stateMgr->actionBitmapSize);
+    newTestCase->set_table_size(tableCollector.getP4Tables().size());
+
+    // TODO: multiple output Packets
+    auto outputPacketOpt = stateMgr->getOutputPacket();
+    newTestCase->clear_expected_output_packet();
+    if (outputPacketOpt != boost::none) {
+        auto outputPacket = outputPacketOpt.get();
+        if (outputPacket.getPort() != 0) {
+            auto* output = newTestCase->add_expected_output_packet();
+            const auto* payload = outputPacket.getEvaluatedPayload();
+            const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
+
+            output->set_port(outputPacket.getPort());
+            output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
+            output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+        }
+    }
+
+    // Get path coverage
+    newTestCase->clear_path_cov();
+    std::set<cstring> visitedPath;
+    for (auto blockName : stateMgr->visitedPathComponents) {
+        // Skip if blockName exists
+        if (visitedPath.find(blockName) != visitedPath.end())
+            continue;
+
+        // Fill path coverage in testCase
+        auto *pathCov = newTestCase->add_path_cov();
+        pathCov->set_block_name(blockName);
+        big_int totalPathNum = stateMgr->totalPaths[blockName];
+        int width;
+        for (width = 0; totalPathNum != 0; width++)
+            totalPathNum >>= 1;
+
+        pathCov->set_path_val(hexToByteString(
+                    formatHex(stateMgr->visitedPaths[blockName], width,
+                        false, true, false)));
+        pathCov->set_path_size(hexToByteString(
+                    formatHex(stateMgr->totalPaths[blockName], width,
+                        false, true, false)));
+
+        visitedPath.insert(blockName);
+    }
+
+    rep->set_allocated_test_case(newTestCase);
+
+    return Status::OK;
+}
+
 Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
         const P4CoverageRequest* req,
         P4CoverageReply* rep) {
@@ -210,6 +310,7 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
 
     auto *stateMgr = coverageMap.at(devId);
     try {
+        stateMgr->setGenRuleMode(false);
         stateMgr->run(testCase);
 
     } catch (const Util::CompilerBug &e) {

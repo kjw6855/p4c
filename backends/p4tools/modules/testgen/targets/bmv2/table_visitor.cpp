@@ -99,6 +99,119 @@ const IR::Expression *Bmv2V1ModelTableVisitor::computeTargetMatchType(
     return TableVisitor::computeTargetMatchType(keyProperties, matches, hitCondition);
 }
 
+void Bmv2V1ModelTableVisitor::genTableActionProfile(
+        const std::vector<const IR::ActionListElement *> &tableActionList) {
+    const auto *state = getExecutionState();
+    auto* newTableEntry = genMatchFields();
+    if (newTableEntry->match_size() == 0) {
+        LOG_FEATURE("small_visit", 2, "** No match on " << properties.tableName
+                << " ** ");
+        return;
+    }
+
+    for (auto &entity : *testCase.mutable_entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        auto *entry = entity.mutable_table_entry();
+        if (!entry->is_valid_entry())
+            continue;
+
+        if (entry->table_name() != properties.tableName)
+            continue;
+
+        auto &nextState = state->clone();
+        bool actionFound = false;
+        P4::Coverage::CoverageSet coveredNodes;
+
+        const IR::MethodCallExpression *tableAction = nullptr;
+        const IR::P4Action *actionType = nullptr;
+        auto* arguments = new IR::Vector<IR::Argument>();
+
+        // Don't allow default action
+        if (!entry->has_action() || !entry->action().has_action_profile_action_set())
+            continue;
+
+        for (const auto& profileAction : entry->action().action_profile_action_set().action_profile_actions()) {
+            const auto& p4v1Action = profileAction.action();
+            for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+                const auto* action = tableActionList.at(idx);
+                tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+                actionType = state->getP4Action(tableAction);
+                cstring actionName = actionType->controlPlaneName();
+
+                if (actionName != p4v1Action.action_name()) {
+                    continue;
+                }
+
+                // FOUND!
+                actionFound = true;
+                const auto &parameters = actionType->parameters;
+                std::vector<ActionArg> ctrlPlaneArgs;
+                for (auto& param : p4v1Action.params()) {
+                    size_t argIdx = (size_t)(param.param_id() - 1);
+                    BUG_CHECK(argIdx < parameters->size(),
+                            "given argIdx %1% is out of size %2%",
+                            argIdx, actionType->parameters->size());
+                    const auto* parameter = parameters->getParameter(argIdx);
+                    const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+                    auto paramWidth = paramType->width_bits();
+
+                    // change to constant value
+                    const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
+                    const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                    nextState.set(actionDataVar, paramExpr);
+                    arguments->push_back(new IR::Argument(paramExpr));
+                    // We also track the argument we synthesize for the control plane.
+                    // Note how we use the control plane name for the parameter here.
+                    ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+                }
+                break;
+            }
+        }
+
+        if (actionFound) {
+            // Fill out match fields
+            entry->clear_match();
+            for (const auto& srcMatch : newTableEntry->match()) {
+                auto* dstMatch = entry->add_match();
+                dstMatch->CopyFrom(srcMatch);
+            }
+
+            auto* synthesizedAction = tableAction->clone();
+            synthesizedAction->arguments = arguments;
+            setTableAction(nextState, tableAction);
+
+            std::vector<Continuation::Command> replacements;
+            replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
+
+            // ??
+            nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
+            nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+            std::stringstream tableStream;
+            tableStream << "Table Branch: " << properties.tableName;
+            tableStream << " Chosen action: " << actionType->controlPlaneName();
+            nextState.add(*new TraceEvents::Generic(tableStream.str()));
+            nextState.replaceTopBody(&replacements);
+
+            // Set nodeCoverage
+            if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
+                auto collector = CoverableNodesScanner(*state);
+                collector.updateNodeCoverage(actionType, coveredNodes);
+            }
+
+            // put matched idx on entity
+            getResult()->emplace_back(IR::getBoolLiteral(true), *state, nextState, coveredNodes);
+            entry->set_matched_idx(nextState.getMatchedIdx());
+            nextState.markAction(actionType);
+            nextState.chooseEntryInGraph(entity.table_entry());
+
+            // XXX: allow only one rule for each table
+            break;
+        }
+    }
+}
+
 void Bmv2V1ModelTableVisitor::evalTableActionProfile(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     const auto *state = getExecutionState();
@@ -229,87 +342,6 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
     }
 
     return;
-
-#if 0
-    for (const auto *action : tableActionList) {
-        // Grab the path from the method call.
-        const auto *tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
-        // Try to find the action declaration corresponding to the path reference in the table.
-        const auto *actionType = state->getP4Action(tableAction);
-
-        auto &nextState = state->clone();
-        // We get the control plane name of the action we are calling.
-        cstring actionName = actionType->controlPlaneName();
-        // Copy the previous action profile.
-        auto *actionProfile = new Bmv2V1ModelActionProfile(*bmv2V1ModelProperties.actionProfile);
-        // Synthesize arguments for the call based on the action parameters.
-        const auto &parameters = actionType->parameters;
-        auto *arguments = new IR::Vector<IR::Argument>();
-        std::vector<ActionArg> ctrlPlaneArgs;
-        for (size_t argIdx = 0; argIdx < parameters->size(); ++argIdx) {
-            const auto *parameter = parameters->getParameter(argIdx);
-            // Synthesize a symbolic variable here that corresponds to a control plane argument.
-            // We get the unique name of the table coupled with the unique name of the action.
-            // Getting the unique name is needed to avoid generating duplicate arguments.
-            cstring keyName =
-                properties.tableName + "_param_" + actionName + std::to_string(argIdx);
-            const auto &actionArg = ToolsVariables::getSymbolicVariable(parameter->type, keyName);
-            arguments->push_back(new IR::Argument(actionArg));
-            // We also track the argument we synthesize for the control plane.
-            // Note how we use the control plane name for the parameter here.
-            ctrlPlaneArgs.emplace_back(parameter, actionArg);
-        }
-        // Add the chosen action to the profile (it will create a new index.)
-        // TODO: Should we check if we exceed the maximum number of possible profile entries?
-        actionProfile->addToActionMap(actionName, ctrlPlaneArgs);
-        // Update the action profile in the execution state.
-        nextState.addTestObject("action_profile", actionProfile->getObjectName(), actionProfile);
-
-        // We add the arguments to our action call, effectively creating a const entry call.
-        auto *synthesizedAction = tableAction->clone();
-        synthesizedAction->arguments = arguments;
-
-        // Now we compute the hit condition to trigger this particular action call.
-        TableMatchMap matches;
-        const auto *hitCondition = computeHit(nextState, &matches);
-
-        // We need to set the table action in the state for eventual switch action_run hits.
-        // We also will need it for control plane table entries.
-        setTableAction(nextState, tableAction);
-
-        // Finally, add all the new rules to the execution state.
-        const ActionCall ctrlPlaneActionCall(actionName, actionType, ctrlPlaneArgs);
-        auto tableRule =
-            TableRule(matches, TestSpec::LOW_PRIORITY, ctrlPlaneActionCall, TestSpec::TTL);
-        auto *tableConfig = new TableConfig(table, {tableRule});
-
-        // Add the action profile to the table.
-        // This implies a slightly different implementation to usual control plane table behavior.
-        tableConfig->addTableProperty("action_profile", actionProfile);
-        nextState.addTestObject("tableconfigs", table->controlPlaneName(), tableConfig);
-
-        // Update all the tracking variables for tables.
-        std::vector<Continuation::Command> replacements;
-        replacements.emplace_back(
-            new IR::MethodCallStatement(Util::SourceInfo(), synthesizedAction));
-        // Some path selection strategies depend on looking ahead and collecting potential
-        // statements. If that is the case, apply the CoverableNodesScanner visitor.
-        P4::Coverage::CoverageSet coveredNodes;
-        if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
-            auto collector = CoverableNodesScanner(*state);
-            collector.updateNodeCoverage(actionType, coveredNodes);
-        }
-
-        nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-        nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
-        std::stringstream tableStream;
-        tableStream << "Table Branch: " << properties.tableName;
-        tableStream << " Chosen action: " << actionName;
-        nextState.add(*new TraceEvents::Generic(tableStream.str()));
-        nextState.replaceTopBody(&replacements);
-        getResult()->emplace_back(hitCondition, *state, nextState, coveredNodes);
-    }
-#endif
 }
 
 void Bmv2V1ModelTableVisitor::evalTableActionSelector(
@@ -569,7 +601,10 @@ void Bmv2V1ModelTableVisitor::evalTargetTable(
             // If an action profile is attached to the table, do not assume normal control plane
             // behavior.
             if (TestgenOptions::get().testBackend != "STF") {
-                evalTableActionProfile(tableActionList);
+                if (genRuleMode)
+                    genTableActionProfile(tableActionList);
+                else
+                    evalTableActionProfile(tableActionList);
             } else {
                 // We can only generate profile entries for PTF and Protobuf tests.
                 ::warning(
@@ -588,7 +623,10 @@ void Bmv2V1ModelTableVisitor::evalTargetTable(
             break;
         };
         default: {
-            evalTableControlEntries(tableActionList);
+            if (genRuleMode)
+                genTableControlEntries(tableActionList);
+            else
+                evalTableControlEntries(tableActionList);
         }
     }
 

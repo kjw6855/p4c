@@ -99,6 +99,7 @@ class ConcolicExecutor {
     void run(TestCase &testCase);
 
     const P4::Coverage::CoverageSet &getVisitedStatements();
+    void setGenRuleMode(bool genRuleMode);
 
     const std::string getStatementBitmapStr();
     const std::string getActionBitmapStr();

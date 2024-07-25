@@ -202,6 +202,7 @@ bool ExprVisitor::preorder(const IR::P4Table *table) {
     TableVisitor tableVisitor(this, table, testCase);
 
     tableVisitor.checkTable = checkTable;
+    tableVisitor.genRuleMode = genRuleMode;
 
     return tableVisitor.eval();
 }
