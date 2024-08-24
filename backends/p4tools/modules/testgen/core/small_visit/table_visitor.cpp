@@ -656,7 +656,8 @@ void TableVisitor::verifyTableControlEntries(
     const auto *keys = table->getKey();
 
     // 1. Get all variables in keys and create matches
-    for (const auto* key : keys->keyElements) {
+    for (size_t i = 0; i < keys->keyElements.size(); i++) {
+        const auto *key = keys->keyElements.at(i);
         const IR::Expression* keyExpr = key->expression;
         const auto *keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
         auto keyWidth = keyType->width_bits();
@@ -676,6 +677,7 @@ void TableVisitor::verifyTableControlEntries(
 
         auto* newMatch = newTableEntry->add_match();
         const auto *nameAnnot = key->getAnnotation("name");
+        newMatch->set_field_id(i + 1);
         newMatch->set_field_name(nameAnnot->getName());
         cstring keyMatchType = key->matchType->toString();
 
@@ -816,6 +818,14 @@ void TableVisitor::genTableControlEntries(
             // XXX: allow only one rule for each table
             break;
         }
+    }
+
+    if (!actionFound) {
+        const auto *defaultAction = table->getDefaultAction();
+        const auto *tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
+        const auto *actionType = visitor->state.getP4Action(tableAction);
+        visitor->state.choosePathInGraph(defaultAction);
+        visitor->state.markAction(actionType);
     }
 }
 
