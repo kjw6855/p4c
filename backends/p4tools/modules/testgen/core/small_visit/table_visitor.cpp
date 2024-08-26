@@ -658,7 +658,8 @@ void TableVisitor::verifyTableControlEntries(
     // 1. Get all variables in keys and create matches
     for (size_t i = 0; i < keys->keyElements.size(); i++) {
         const auto *key = keys->keyElements.at(i);
-        const IR::Expression* keyExpr = key->expression;
+        const IR::Expression* keyOrigExpr = key->expression;
+        const auto *keyExpr = P4::optimizeExpression(keyOrigExpr);
         const auto *keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
         auto keyWidth = keyType->width_bits();
 
