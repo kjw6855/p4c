@@ -57,6 +57,11 @@ set(
   core/small_visit/extern_visitor.cpp
   core/small_visit/table_visitor.cpp
   core/small_visit/small_visit.cpp
+  core/small_parse_get/abstract_parse_getter.cpp
+  core/small_parse_get/cmd_parse_getter.cpp
+  core/small_parse_get/expr_parse_getter.cpp
+  core/small_parse_get/extern_parse_getter.cpp
+  core/small_parse_get/small_parse_get.cpp
   core/symbolic_executor/depth_first.cpp
   core/symbolic_executor/selected_branches.cpp
   core/symbolic_executor/random_backtrack.cpp
@@ -64,6 +69,7 @@ set(
   core/symbolic_executor/max_stmt_cov.cpp
   core/symbolic_executor/symbolic_executor.cpp
   core/concolic_executor/concolic_executor.cpp
+  core/parser_collector/parser_collector.cpp
   core/target.cpp
 
   lib/collect_coverable_nodes.cpp

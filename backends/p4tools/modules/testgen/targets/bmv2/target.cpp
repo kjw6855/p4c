@@ -95,6 +95,16 @@ Bmv2V1ModelExprVisitor *Bmv2V1ModelTestgenTarget::getExprVisitorImpl(
     return new Bmv2V1ModelExprVisitor(state, programInfo, testCase);
 }
 
+Bmv2V1ModelCmdParseGetter *Bmv2V1ModelTestgenTarget::getCmdParseGetterImpl(
+    ExecutionState &state, const ProgramInfo &programInfo) const {
+    return new Bmv2V1ModelCmdParseGetter(state, programInfo);
+}
+
+Bmv2V1ModelExprParseGetter *Bmv2V1ModelTestgenTarget::getExprParseGetterImpl(
+    ExecutionState &state, const ProgramInfo &programInfo) const {
+    return new Bmv2V1ModelExprParseGetter(state, programInfo);
+}
+
 const ArchSpec Bmv2V1ModelTestgenTarget::ARCH_SPEC =
     ArchSpec("V1Switch", {// parser Parser<H, M>(packet_in b,
                           //                     out H parsedHdr,

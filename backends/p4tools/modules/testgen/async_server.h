@@ -11,6 +11,7 @@
 
 #include "backends/p4tools/modules/testgen/core/concolic_executor/concolic_executor.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
+#include "backends/p4tools/modules/testgen/core/parser_collector/parser_collector.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/p4testgen.grpc.pb.h"
 
@@ -31,6 +32,8 @@ using p4testgen::P4CoverageRequest;
 using p4testgen::P4CoverageReply;
 using p4testgen::P4StatementRequest;
 using p4testgen::P4StatementReply;
+using p4testgen::P4ParserGraphRequest;
+using p4testgen::P4ParserGraphReply;
 using p4testgen::TestCase;
 
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
@@ -62,6 +65,10 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
     Status GenRuleP4Testgen(ServerContext* context,
             const P4CoverageRequest* req,
             P4CoverageReply* rep) override;
+
+    Status GetP4ParserGraph(ServerContext* context,
+            const P4ParserGraphRequest* req,
+            P4ParserGraphReply* rep) override;
 
  private:
     std::map<std::string, ConcolicExecutor*> &coverageMap;

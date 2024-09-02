@@ -186,6 +186,20 @@ Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
     return Status::OK;
 }
 
+Status P4FuzzGuideImpl::GetP4ParserGraph(ServerContext* context,
+        const P4ParserGraphRequest* req,
+        P4ParserGraphReply* rep) {
+
+    auto *parserGraph = new P4ParserGraph();
+    auto *parserCollector = new ParserCollector(*programInfo, top, refMap, typeMap, parserGraph);
+    parserCollector->run();
+
+    rep->set_req_id(req->req_id());
+    rep->set_allocated_parser_graph(parserGraph);
+
+    return Status::OK;
+}
+
 Status P4FuzzGuideImpl::GenRuleP4Testgen(ServerContext* context,
         const P4CoverageRequest* req,
         P4CoverageReply* rep) {

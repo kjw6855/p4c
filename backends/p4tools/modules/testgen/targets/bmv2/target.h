@@ -17,6 +17,8 @@
 #include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/cmd_visitor.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/expr_visitor.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/cmd_parse_getter.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/expr_parse_getter.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/program_info.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/test_backend.h"
 
@@ -45,6 +47,12 @@ class Bmv2V1ModelTestgenTarget : public TestgenTarget {
 
     Bmv2V1ModelExprVisitor *getExprVisitorImpl(ExecutionState &state,
                                                const ProgramInfo &programInfo, TestCase &testCase) const override;
+
+    Bmv2V1ModelCmdParseGetter *getCmdParseGetterImpl(ExecutionState &state,
+                                             const ProgramInfo &programInfo) const override;
+
+    Bmv2V1ModelExprParseGetter *getExprParseGetterImpl(ExecutionState &state,
+                                               const ProgramInfo &programInfo) const override;
 
     [[nodiscard]] const ArchSpec *getArchSpecImpl() const override;
 

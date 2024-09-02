@@ -44,6 +44,12 @@ class PnaDpdkTestgenTarget : public TestgenTarget {
     ExprVisitor *getExprVisitorImpl(ExecutionState &state,
                                            const ProgramInfo &programInfo, TestCase &testCase) const override;
 
+    CmdParseGetter *getCmdParseGetterImpl(ExecutionState &state,
+                                             const ProgramInfo &programInfo) const override;
+
+    ExprParseGetter *getExprParseGetterImpl(ExecutionState &state,
+                                               const ProgramInfo &programInfo) const override;
+
     [[nodiscard]] const ArchSpec *getArchSpecImpl() const override;
 
  private:

@@ -88,6 +88,18 @@ ExprVisitor *PnaDpdkTestgenTarget::getExprVisitorImpl(ExecutionState &state,
     // TODO
     return nullptr;
 }
+CmdParseGetter *PnaDpdkTestgenTarget::getCmdParseGetterImpl(ExecutionState &state,
+                                                           const ProgramInfo &programInfo) const {
+    // TODO
+    return nullptr;
+}
+
+ExprParseGetter *PnaDpdkTestgenTarget::getExprParseGetterImpl(ExecutionState &state,
+                                                             const ProgramInfo &programInfo) const {
+    // TODO
+    return nullptr;
+}
+
 
 const ArchSpec PnaDpdkTestgenTarget::ARCH_SPEC = ArchSpec(
     "PNA_NIC", {

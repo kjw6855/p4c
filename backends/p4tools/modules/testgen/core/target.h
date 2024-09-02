@@ -18,6 +18,8 @@
 #include "backends/p4tools/modules/testgen/core/small_step/expr_stepper.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/cmd_visitor.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/expr_visitor.h"
+#include "backends/p4tools/modules/testgen/core/small_parse_get/cmd_parse_getter.h"
+#include "backends/p4tools/modules/testgen/core/small_parse_get/expr_parse_getter.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
@@ -52,6 +54,10 @@ class TestgenTarget : public Target {
     static ExprVisitor *getExprVisitor(ExecutionState &state,
                                        const ProgramInfo &programInfo, TestCase &testCase);
 
+    static ExprParseGetter *getExprParseGetter(ExecutionState &state, const ProgramInfo &programInfo);
+
+    static CmdParseGetter *getCmdParseGetter(ExecutionState &state, const ProgramInfo &programInfo);
+
     /// A vector that maps the architecture parameters of each pipe to the corresponding
     /// global architecture variables. For example, this map specifies which parameter of each pipe
     /// refers to the input header.
@@ -80,13 +86,19 @@ class TestgenTarget : public Target {
     virtual ExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                             const ProgramInfo &programInfo) const = 0;
 
-    /// @see getCmdStepper.
+    /// @see getCmdVisitor.
     virtual CmdVisitor *getCmdVisitorImpl(ExecutionState &state,
                                           const ProgramInfo &programInfo, TestCase &testCase) const = 0;
 
     /// @see getExprVisitor.
     virtual ExprVisitor *getExprVisitorImpl(ExecutionState &state,
                                             const ProgramInfo &programInfo, TestCase &testCase) const = 0;
+
+    virtual CmdParseGetter *getCmdParseGetterImpl(ExecutionState &state,
+        const ProgramInfo &programInfo) const = 0;
+
+    virtual ExprParseGetter *getExprParseGetterImpl(ExecutionState &state,
+        const ProgramInfo &programInfo) const = 0;
 
     /// @see getArchSpec
     [[nodiscard]] virtual const ArchSpec *getArchSpecImpl() const = 0;

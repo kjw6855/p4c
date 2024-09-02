@@ -69,6 +69,14 @@ CmdVisitor *TestgenTarget::getCmdVisitor(ExecutionState &state,
     return get().getCmdVisitorImpl(state, programInfo, testCase);
 }
 
+ExprParseGetter *TestgenTarget::getExprParseGetter(ExecutionState &state, const ProgramInfo &programInfo) {
+    return get().getExprParseGetterImpl(state, programInfo);
+}
+
+CmdParseGetter *TestgenTarget::getCmdParseGetter(ExecutionState &state, const ProgramInfo &programInfo) {
+    return get().getCmdParseGetterImpl(state, programInfo);
+}
+
 void TestgenTarget::argumentsToTypeDeclarations(
     const IR::IGeneralNamespace *ns, const IR::Vector<IR::Argument> *inputArgs,
     std::vector<const IR::Type_Declaration *> &resultDecls) {

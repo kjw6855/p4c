@@ -95,6 +95,16 @@ const TnaProgramInfo *TnaTestgenTarget::initProgramImpl(
         return new TnaExprVisitor(state, programInfo, testCase);
     }
 
+    CmdParseGetter *TnaTestgenTarget::getCmdParseGetterImpl(
+        ExecutionState &state, const ProgramInfo &programInfo) const {
+        return nullptr;     // TODO
+    }
+
+    ExprParseGetter *TnaTestgenTarget::getExprParseGetterImpl(
+        ExecutionState &state, const ProgramInfo &programInfo) const {
+        return nullptr;     // TODO
+    }
+
     const ArchSpec TnaTestgenTarget::ARCH_SPEC =
         ArchSpec("Pipeline", {// parser Parser<H, M>(packet_in b,
                               //                     out H parsedHdr,

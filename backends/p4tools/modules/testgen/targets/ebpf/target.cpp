@@ -97,6 +97,18 @@ ExprVisitor *EBPFTestgenTarget::getExprVisitorImpl(ExecutionState &state,
     return nullptr;
 }
 
+CmdParseGetter *EBPFTestgenTarget::getCmdParseGetterImpl(ExecutionState &state,
+                                                     const ProgramInfo &programInfo) const {
+    // TODO
+    return nullptr;
+}
+
+ExprParseGetter *EBPFTestgenTarget::getExprParseGetterImpl(ExecutionState &state,
+                                                       const ProgramInfo &programInfo) const {
+    // TODO
+    return nullptr;
+}
+
 const ArchSpec EBPFTestgenTarget::archSpec =
     ArchSpec("ebpfFilter", {// parser parse<H>(packet_in packet, out H headers);
                             {"parse", {nullptr, "*hdr"}},
