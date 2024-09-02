@@ -676,11 +676,18 @@ void TableVisitor::verifyTableControlEntries(
             continue;
         }
 
+        cstring keyMatchType = key->matchType->toString();
+        if (keyMatchType != P4Constants::MATCH_KIND_EXACT &&
+                keyMatchType != P4Constants::MATCH_KIND_TERNARY &&
+                keyMatchType != P4Constants::MATCH_KIND_LPM) {
+            // TODO: support other types
+            continue;
+        }
+
         auto* newMatch = newTableEntry->add_match();
         const auto *nameAnnot = key->getAnnotation("name");
         newMatch->set_field_id(i + 1);
         newMatch->set_field_name(nameAnnot->getName());
-        cstring keyMatchType = key->matchType->toString();
 
         if (keyMatchType == P4Constants::MATCH_KIND_EXACT) {
             newMatch->mutable_exact()->set_value(keyValStr);
@@ -696,11 +703,7 @@ void TableVisitor::verifyTableControlEntries(
         } else if (keyMatchType == P4Constants::MATCH_KIND_LPM) {
             newMatch->mutable_lpm()->set_value(keyValStr);
             newMatch->mutable_lpm()->set_prefix_len(keyWidth);
-
-        } else {
-            continue;
         }
-
     }
 
     return newTableEntry;
