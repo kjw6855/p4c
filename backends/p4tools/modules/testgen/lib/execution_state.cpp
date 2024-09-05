@@ -201,8 +201,13 @@ void ExecutionState::markAction(const IR::Node *node) {
     visitedActions.emplace(node);
 }
 
+void ExecutionState::markParserState(cstring stateName) {
+    visitedParserStates.push_back(stateName);
+}
+
 const P4::Coverage::CoverageSet &ExecutionState::getVisited() const { return visitedNodes; }
 const P4::Coverage::CoverageSet &ExecutionState::getVisitedActions() const { return visitedActions; }
+const std::list<cstring> &ExecutionState::getVisitedParserStates() const { return visitedParserStates; }
 
 void ExecutionState::set(const IR::StateVariable &var, const IR::Expression *value) {
     if (getProperty<bool>("inUndefinedState")) {

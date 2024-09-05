@@ -149,6 +149,7 @@ class ConcolicExecutor {
     unsigned char* statementBitmap;
     unsigned char* actionBitmap;
     std::list<cstring> visitedPathComponents;
+    std::list<cstring> visitedParserStates;
     std::map<cstring, big_int> visitedPaths;
     std::map<cstring, big_int> totalPaths;
     //const int tableEntryBitmapSize;

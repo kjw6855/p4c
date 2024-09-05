@@ -90,6 +90,7 @@ class ExecutionState : public AbstractExecutionState {
     P4::Coverage::CoverageSet visitedActions;
     std::map<cstring, big_int> visitedPaths;
     std::list<cstring> visitedPathComponents;
+    std::list<cstring> visitedParserStates;
 
     /// The remaining body of the current function being executed.
     ///
@@ -203,6 +204,7 @@ class ExecutionState : public AbstractExecutionState {
     /// Checks whether the node has been visited in this state.
     void markVisited(const IR::Node *node);
     void markAction(const IR::Node *node);
+    void markParserState(const cstring stateName);
 
     /// @returns list of all statements visited before reaching this state.
     [[nodiscard]] const P4::Coverage::CoverageSet &getVisited() const;
@@ -455,6 +457,7 @@ class ExecutionState : public AbstractExecutionState {
 
     const std::map<cstring, big_int> &getVisitedPaths() const;
     const std::list<cstring> &getVisitedPathComponents() const;
+    const std::list<cstring> &getVisitedParserStates() const;
 
     /* =========================================================================================
 =======

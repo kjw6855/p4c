@@ -301,6 +301,11 @@ bool ConcolicExecutor::testHandleTerminalState(const ExecutionState &terminalSta
             << totalPaths[blockName] << "\n";
     }
 
+    visitedParserStates.clear();
+    for (auto stateName : terminalState.getVisitedParserStates()) {
+        visitedParserStates.push_back(stateName);
+    }
+
     finalState = new FinalVisitState(terminalState);
 
     return true;

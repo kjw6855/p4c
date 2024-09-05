@@ -255,6 +255,11 @@ Status P4FuzzGuideImpl::GenRuleP4Testgen(ServerContext* context,
         }
     }
 
+    newTestCase->clear_parser_states();
+    for (auto stateName : stateMgr->visitedParserStates) {
+        newTestCase->add_parser_states(stateName);
+    }
+
     // Get path coverage
     newTestCase->clear_path_cov();
     std::set<cstring> visitedPath;
@@ -353,6 +358,11 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
             output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
             output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
         }
+    }
+
+    newTestCase->clear_parser_states();
+    for (auto stateName : stateMgr->visitedParserStates) {
+        newTestCase->add_parser_states(stateName);
     }
 
     // Get path coverage

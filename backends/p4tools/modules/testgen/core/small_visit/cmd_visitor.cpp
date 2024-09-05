@@ -369,6 +369,9 @@ bool CmdVisitor::preorder(const IR::ParserState *parserState) {
 
     auto &nextState = state.clone();
 
+    // startParserGraph
+    nextState.markParserState(parserState->name);
+
     nextState.add(*new TraceEvents::ParserState(parserState));
 
     if (parserState->name == IR::ParserState::accept) {

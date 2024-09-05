@@ -99,4 +99,5 @@ message TestCase {
     int32 table_size = 10;
     repeated PathCoverage path_cov = 11;
     int32 unsupported = 12;
+    repeated string parser_states = 13;
 }
