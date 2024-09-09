@@ -207,6 +207,7 @@ uint64_t getNumeric(const std::string& str) {
 */
 
 void ConcolicExecutor::setGenRuleMode(bool genRuleMode) {
+    tableEvaluator.genRuleMode = genRuleMode;
     evaluator.genRuleMode = genRuleMode;
 }
 

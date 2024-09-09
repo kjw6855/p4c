@@ -637,12 +637,15 @@ void TableVisitor::verifyTableControlEntries(
                 continue;
         }
 
-        // Match check
         bool found = true;
-        for (auto &p4v1Match : *entry->mutable_match()) {
-            if (!verifyMatch(&p4v1Match, keys)) {
-                found = false;
-                break;
+
+        // Match check
+        if (!genRuleMode || entity.is_default_entry()) {
+            for (auto &p4v1Match : *entry->mutable_match()) {
+                if (!verifyMatch(&p4v1Match, keys)) {
+                    found = false;
+                    break;
+                }
             }
         }
 
@@ -711,9 +714,42 @@ void TableVisitor::verifyTableControlEntries(
 
 void TableVisitor::genTableControlEntries(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
+    const auto *keys = table->getKey();
     const IR::MethodCallExpression *tableAction = nullptr;
     const IR::P4Action *actionType = nullptr;
     bool actionFound = false;
+    bool genMatch = false;
+
+    auto cmp = [](::p4::v1::Entity *left, ::p4::v1::Entity *right) {
+        return (left->table_entry().priority() < right->table_entry().priority());
+    };
+
+    std::priority_queue<::p4::v1::Entity*,
+        std::vector<::p4::v1::Entity*>,
+        decltype(cmp)> entityQueue(cmp);
+
+    // Sort entries in order of priority
+    // XXX: In P4, rules with same priority are not deterministic.
+    for (auto &entity : *testCase.mutable_entities()) {
+        if (!entity.has_table_entry())
+            continue;
+
+        auto *entry = entity.mutable_table_entry();
+
+        // Skip invalid entry!
+        if (!entry->is_valid_entry()) {
+            LOG_FEATURE("small_visit", 4, "Invalid table entry in "
+                << entry->table_name());
+            continue;
+        }
+
+        if (entry->table_name() != properties.tableName) {
+            continue;
+        }
+
+        // TODO: priority over max should be removed
+        entityQueue.push(&entity);
+    }
 
     auto* newTableEntry = genMatchFields();
     if (newTableEntry->match_size() == 0) {
@@ -722,79 +758,129 @@ void TableVisitor::genTableControlEntries(
         return;
     }
 
-    for (auto &entity : *testCase.mutable_entities()) {
-        if (!entity.has_table_entry())
-            continue;
+    /*
+     * Main loop for rule check.
+     * Select only one rule for each table.
+     * Unlike evalTableControlEntries(), it pops all rules in queue,
+     * to reset validity for wrong match fields.
+     */
+    auto &nextState = visitor->state.clone();
+    auto* arguments = new IR::Vector<IR::Argument>();
+    P4::Coverage::CoverageSet coveredNodes;
 
-        auto *entry = entity.mutable_table_entry();
+    while (!entityQueue.empty()) {
+        auto *entity = entityQueue.top();
+        entityQueue.pop();
 
-        // Find same table name
-        if (entry->table_name() != properties.tableName)
+        auto *entry = entity->mutable_table_entry();
+        // a rule is already found
+        if (actionFound) {
+            if (!entity->is_default_entry()) {
+                /* reset validity for wrong match rules */
+                for (auto &p4v1Match : *entry->mutable_match()) {
+                    if (!verifyMatch(&p4v1Match, keys)) {
+                        entry->set_is_valid_entry(0);
+                        break;
+                    }
+                }
+            }
             continue;
+        }
 
-        if (!entry->has_action())
-            continue;
+        genMatch = true;
+        if (entity->is_default_entry()) {
+            // Don't generate rule, but evaluate it.
+            const IR::Expression* hitCondition = computeHitFromTestCase(*entry);
+            if (hitCondition == nullptr)
+                continue;
+
+            const auto *expr = P4::optimizeExpression(hitCondition);
+            if (const auto *constVal = expr->to<IR::BoolLiteral>()) {
+                // If not matched, do not generate matches of default rule.
+                if (!constVal->value)
+                    continue;
+
+                // MATCHED!
+                genMatch = false;
+
+            } else {
+                // hitCondition cannot be evaluated
+                TESTGEN_UNIMPLEMENTED("Unsupported type %1%", expr);
+                continue;
+            }
+        }
 
         // Find same action name
         ::p4::v1::Action *p4v1Action;
-        if (entry->action().has_action()) {
+        if (!entry->has_action()) {
+            actionFound = true;     /* default */
+
+        } else if (entry->action().has_action()) {
             p4v1Action = entry->mutable_action()->mutable_action();
         } else if (entry->action().has_action_profile_action_set()) {
             // TODO: multiple actions
             p4v1Action = entry->mutable_action()->mutable_action_profile_action_set()
                 ->mutable_action_profile_actions(0)->mutable_action();
         } else {
-            continue;
+            actionFound = true;     /* default */
         }
 
-        auto &nextState = visitor->state.clone();
-        P4::Coverage::CoverageSet coveredNodes;
-        auto* arguments = new IR::Vector<IR::Argument>();
-        std::vector<ActionArg> ctrlPlaneArgs;
-
-        for (size_t idx = 0; idx < tableActionList.size(); idx++) {
-            const auto* action = tableActionList.at(idx);
-            tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+        if (actionFound) {
+            // Set found (default) action then return
+            const auto *defaultAction = table->getDefaultAction();
+            tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
             actionType = visitor->state.getP4Action(tableAction);
-            CHECK_NULL(actionType);
-            cstring actionName = actionType->controlPlaneName();
 
-            if (actionName != p4v1Action->action_name())
-                continue;
+        } else {
+            std::vector<ActionArg> ctrlPlaneArgs;
 
-            actionFound = true;
+            for (size_t idx = 0; idx < tableActionList.size(); idx++) {
+                const auto* action = tableActionList.at(idx);
+                tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+                actionType = visitor->state.getP4Action(tableAction);
+                CHECK_NULL(actionType);
+                cstring actionName = actionType->controlPlaneName();
 
-            // TODO: generate actionParams
-            for (auto& param : p4v1Action->params()) {
-                // TODO: check param_name comparison
-                size_t argIdx = (size_t)(param.param_id() - 1);
-                BUG_CHECK(argIdx < actionType->parameters->size(),
-                        "given argIdx %1% is out of size %2%",
-                        argIdx, actionType->parameters->size());
-                const auto* parameter = actionType->parameters->getParameter(argIdx);
-                const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
-                auto paramWidth = paramType->width_bits();
+                if (actionName != p4v1Action->action_name())
+                    continue;
 
-                // change to constant value
-                const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
-                const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
-                //cstring paramName =
-                //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
-                //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
-                //const auto* actionArgVar = new IR::Member(parameter->type, new IR::PathExpression("*"), paramName);
-                nextState.set(actionDataVar, paramExpr);
-                arguments->push_back(new IR::Argument(paramExpr));
-                ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+                actionFound = true;
+
+                // TODO: generate actionParams
+                for (auto& param : p4v1Action->params()) {
+                    // TODO: check param_name comparison
+                    size_t argIdx = (size_t)(param.param_id() - 1);
+                    BUG_CHECK(argIdx < actionType->parameters->size(),
+                            "given argIdx %1% is out of size %2%",
+                            argIdx, actionType->parameters->size());
+                    const auto* parameter = actionType->parameters->getParameter(argIdx);
+                    const auto* paramType = parameter->type->checkedTo<IR::Type_Bits>();
+                    auto paramWidth = paramType->width_bits();
+
+                    // change to constant value
+                    const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
+                    const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                    //cstring paramName =
+                    //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
+                    //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
+                    //const auto* actionArgVar = new IR::Member(parameter->type, new IR::PathExpression("*"), paramName);
+                    nextState.set(actionDataVar, paramExpr);
+                    arguments->push_back(new IR::Argument(paramExpr));
+                    ctrlPlaneArgs.emplace_back(parameter, paramExpr);
+                }
+                break;
             }
-            break;
         }
 
         if (actionFound) {
             // Fill out match fields
-            entry->clear_match();
-            for (const auto& srcMatch : newTableEntry->match()) {
-                auto* dstMatch = entry->add_match();
-                dstMatch->CopyFrom(srcMatch);
+            if (genMatch) {
+                entry->clear_match();
+                for (const auto& srcMatch : newTableEntry->match()) {
+                    auto* dstMatch = entry->add_match();
+                    dstMatch->CopyFrom(srcMatch);
+                }
+                entry->set_is_valid_entry(1);
             }
 
             auto* synthesizedAction = tableAction->clone();
@@ -817,14 +903,12 @@ void TableVisitor::genTableControlEntries(
             visitor->result->emplace_back(IR::getBoolLiteral(true), visitor->state, nextState, coveredNodes);
             entry->set_matched_idx(nextState.getMatchedIdx());
             nextState.markAction(actionType);
-            nextState.chooseEntryInGraph(entity.table_entry());
-
-            // XXX: allow only one rule for each table
-            break;
+            nextState.chooseEntryInGraph(entity->table_entry());
         }
     }
 
     if (!actionFound) {
+        // default action
         const auto *defaultAction = table->getDefaultAction();
         const auto *tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
         const auto *actionType = visitor->state.getP4Action(tableAction);
@@ -871,18 +955,19 @@ void TableVisitor::evalTableControlEntries(
         entityQueue.push(&entity);
     }
 
+    auto &nextState = visitor->state.clone();
+    auto* arguments = new IR::Vector<IR::Argument>();
+    P4::Coverage::CoverageSet coveredNodes;
+
     while (!entityQueue.empty()) {
         auto *entity = entityQueue.top();
         entityQueue.pop();
 
         auto *entry = entity->mutable_table_entry();
-        auto &nextState = visitor->state.clone();
         bool actionFound = false;
-        P4::Coverage::CoverageSet coveredNodes;
 
         const IR::MethodCallExpression *tableAction = nullptr;
         const IR::P4Action *actionType = nullptr;
-        auto* arguments = new IR::Vector<IR::Argument>();
 
         if (!entry->has_action()) {
             const auto *defaultAction = table->getDefaultAction();
