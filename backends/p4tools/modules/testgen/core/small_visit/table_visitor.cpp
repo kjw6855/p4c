@@ -764,10 +764,6 @@ void TableVisitor::genTableControlEntries(
      * Unlike evalTableControlEntries(), it pops all rules in queue,
      * to reset validity for wrong match fields.
      */
-    auto &nextState = visitor->state.clone();
-    auto* arguments = new IR::Vector<IR::Argument>();
-    P4::Coverage::CoverageSet coveredNodes;
-
     while (!entityQueue.empty()) {
         auto *entity = entityQueue.top();
         entityQueue.pop();
@@ -824,6 +820,10 @@ void TableVisitor::genTableControlEntries(
         } else {
             actionFound = true;     /* default */
         }
+
+        auto &nextState = visitor->state.clone();
+        auto* arguments = new IR::Vector<IR::Argument>();
+        P4::Coverage::CoverageSet coveredNodes;
 
         if (actionFound) {
             // Set found (default) action then return
@@ -955,19 +955,18 @@ void TableVisitor::evalTableControlEntries(
         entityQueue.push(&entity);
     }
 
-    auto &nextState = visitor->state.clone();
-    auto* arguments = new IR::Vector<IR::Argument>();
-    P4::Coverage::CoverageSet coveredNodes;
-
     while (!entityQueue.empty()) {
         auto *entity = entityQueue.top();
         entityQueue.pop();
 
         auto *entry = entity->mutable_table_entry();
+        auto &nextState = visitor->state.clone();
         bool actionFound = false;
+        P4::Coverage::CoverageSet coveredNodes;
 
         const IR::MethodCallExpression *tableAction = nullptr;
         const IR::P4Action *actionType = nullptr;
+        auto* arguments = new IR::Vector<IR::Argument>();
 
         if (!entry->has_action()) {
             const auto *defaultAction = table->getDefaultAction();
