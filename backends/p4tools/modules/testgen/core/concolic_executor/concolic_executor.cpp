@@ -186,6 +186,40 @@ void ConcolicExecutor::run(TestCase& testCase) {
         executionState = *next;
     }
 
+    if (checkGenTableEval) {
+        Continuation::Body body(tableCollector.getP4Tables());
+        const auto actionNodes = tableCollector.getActionNodes();
+        body.push(programInfo.program);
+
+        tableState = ExecutionState::create(programInfo.program, body);
+
+        genTableEvaluator.violatedGuardConditions = 0;
+        evaluator.violatedGuardConditions = 0;
+
+        // Verify validity again
+        while (!tableState.get().isTerminal()) {
+            LOG_FEATURE("small_visit", 4, " [T/2] stack/body size: " << tableState.get().getStackSize() << "/" << tableState.get().getBodySize());
+
+            Result successors = genTableEvaluator.step(tableState, testCase);
+
+            if (successors->size() == 1) {
+                // Non-branching states are not recorded by selected branches.
+                tableState = (*successors)[0].nextState;
+                continue;
+            } else if (successors->size() == 0) {
+                continue;
+            }
+
+            // If there are multiple, pop one branch decision from the input list and pick
+            // successor matching the given branch decision.
+            auto* next = chooseBranch(*successors, 0);
+            if (next == nullptr) {
+                break;
+            }
+        }
+
+    }
+
     if (executionState.get().isTerminal()) {
         // We've reached the end of the program. Call back and (if desired) end execution.
         executionState.get().storeGraphPath();
@@ -209,6 +243,7 @@ uint64_t getNumeric(const std::string& str) {
 void ConcolicExecutor::setGenRuleMode(bool genRuleMode) {
     tableEvaluator.genRuleMode = genRuleMode;
     evaluator.genRuleMode = genRuleMode;
+    checkGenTableEval = genRuleMode;
 }
 
 ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollector &tableCollector, const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
@@ -224,9 +259,12 @@ ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollecto
       cgenCache(new lru_cache(16)),
       actionBitmapSize(tableCollector.getActionNodes().size()),
       evaluator(programInfo),
-      tableEvaluator(programInfo) {
+      tableEvaluator(programInfo),
+      genTableEvaluator(programInfo) {
 
     tableEvaluator.checkTable = true;
+    genTableEvaluator.checkTable = true;
+
     int allocLen = (statementBitmapSize / 8) + 1;
     statementBitmap = (unsigned char *)malloc(allocLen);
     memset(statementBitmap, 0, allocLen);

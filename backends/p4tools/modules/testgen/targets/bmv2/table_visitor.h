@@ -68,6 +68,9 @@ class Bmv2V1ModelTableVisitor : public TableVisitor {
     void evalTargetTable(
         const std::vector<const IR::ActionListElement *> &tableActionList) override;
 
+    void verifyTargetTable(
+        const std::vector<const IR::ActionListElement *> &tableActionList) override;
+
  public:
     explicit Bmv2V1ModelTableVisitor(Bmv2V1ModelExprVisitor *visitor, const IR::P4Table *table, TestCase &testCase);
 };

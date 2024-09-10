@@ -67,6 +67,9 @@ class TnaTableVisitor : public TableVisitor {
     void evalTargetTable(
         const std::vector<const IR::ActionListElement *> &tableActionList) override;
 
+    void verifyTargetTable(
+        const std::vector<const IR::ActionListElement *> &tableActionList) override;
+
  public:
     explicit TnaTableVisitor(TnaExprVisitor *visitor, const IR::P4Table *table, TestCase &testCase);
 };

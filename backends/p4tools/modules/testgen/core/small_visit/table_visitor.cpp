@@ -641,6 +641,10 @@ void TableVisitor::verifyTableControlEntries(
 
         // Match check
         if (!genRuleMode || entity.is_default_entry()) {
+            if (entry->match_size() == 0) {
+                found = false;
+            }
+
             for (auto &p4v1Match : *entry->mutable_match()) {
                 if (!verifyMatch(&p4v1Match, keys)) {
                     found = false;
@@ -651,6 +655,8 @@ void TableVisitor::verifyTableControlEntries(
 
         if (found)
             entry->set_is_valid_entry(1);
+        else
+            entry->set_is_valid_entry(0);
     }
 }
 
@@ -1242,6 +1248,13 @@ void TableVisitor::evalTargetTable(
     addDefaultAction(tableMissCondition);
 }
 
+void TableVisitor::verifyTargetTable(
+    const std::vector<const IR::ActionListElement *> &tableActionList) {
+    if (!properties.tableIsImmutable) {
+        verifyTableControlEntries(tableActionList);
+    }
+}
+
 bool TableVisitor::eval() {
     // Set the appropriate properties when the table is immutable, meaning it has constant entries.
     LOG_FEATURE("small_visit", 4,
@@ -1274,7 +1287,7 @@ bool TableVisitor::eval() {
         checkTargetProperties(tableActionList);
 
         if (!properties.tableIsTainted && !properties.tableIsImmutable)
-            verifyTableControlEntries(tableActionList);
+            verifyTargetTable(tableActionList);
 
         visitor->state.popBody();
 

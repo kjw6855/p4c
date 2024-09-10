@@ -552,6 +552,40 @@ void TnaTableVisitor::evalTargetTable(
     addDefaultAction(tableMissCondition);
 }
 
+void TnaTableVisitor::verifyTargetTable(
+    const std::vector<const IR::ActionListElement *> &tableActionList) {
+    const auto *keys = table->getKey();
+
+    if (keys == nullptr) {
+        // Do nothing
+        return;
+    }
+
+    switch (bmv2V1ModelProperties.implementaton) {
+        case TableImplementation::selector: {
+            if (TestgenOptions::get().testBackend != "STF") {
+                // XXX
+                verifyTableControlEntries(tableActionList);
+            }
+        }
+        case TableImplementation::profile: {
+            if (TestgenOptions::get().testBackend != "STF") {
+                // XXX
+                verifyTableControlEntries(tableActionList);
+            }
+        }
+        case TableImplementation::skip: {
+            break;
+        };
+        case TableImplementation::constant: {
+            break;
+        };
+        default: {
+            verifyTableControlEntries(tableActionList);
+        }
+    }
+}
+
 TnaTableVisitor::TnaTableVisitor(TnaExprVisitor *visitor,
                                                  const IR::P4Table *table,
                                                  TestCase &testCase)

@@ -158,6 +158,9 @@ class TableVisitor {
 
     void verifyTableControlEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
 
+    virtual void verifyTargetTable(
+        const std::vector<const IR::ActionListElement *> &tableActionList);
+
  public:
     bool checkTable = false;
     bool genRuleMode = false;

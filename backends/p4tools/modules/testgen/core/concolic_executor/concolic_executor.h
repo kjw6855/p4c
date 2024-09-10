@@ -142,6 +142,7 @@ class ConcolicExecutor {
 
     lru_cache *cgenCache = nullptr;
     ParserGraphs *pgg = nullptr;
+    bool checkGenTableEval = false;
 
  public:
     const int statementBitmapSize;
@@ -159,6 +160,7 @@ class ConcolicExecutor {
  private:
     SmallVisitEvaluator evaluator;
     SmallVisitEvaluator tableEvaluator;
+    SmallVisitEvaluator genTableEvaluator;
 };
 
 }  // namespace P4Tools::P4Testgen
