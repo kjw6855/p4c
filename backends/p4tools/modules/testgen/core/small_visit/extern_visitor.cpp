@@ -62,7 +62,7 @@ std::vector<std::pair<IR::StateVariable, const IR::Expression *>> ExprVisitor::s
             continue;
         }
         // Slice from the buffer and append to the packet, if necessary.
-        const auto *pktVar = nextState.slicePacketBuffer(fieldWidth);
+        const auto *pktVar = nextState.slicePacket(fieldWidth);
         // We need to cast the generated variable to the appropriate type.
         if (fieldType->is<IR::Extracted_Varbits>()) {
             pktVar = new IR::Cast(fieldType, pktVar);
@@ -92,13 +92,11 @@ std::vector<std::pair<IR::StateVariable, const IR::Expression *>> ExprVisitor::s
 ExprVisitor::PacketCursorAdvanceInfo ExprVisitor::calculateSuccessfulParserAdvance(
     const ExecutionState &state, int advanceSize) const {
     // Calculate the necessary size of the packet to extract successfully.
-    // The minimum required size for a packet is the current cursor and the amount we are
-    // advancing into the packet minus whatever has been buffered in the current buffer.
-    auto minSize =
-        std::max(0, state.getInputPacketCursor() + advanceSize - state.getPacketBufferSize());
+    // The minimum required size for a packet is the current amount in the buffer.
+    auto remainderSize = std::max(0, state.getPacketBufferSize());
     auto *cond = new IR::Geq(IR::Type::Boolean::get(),
-                             IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, state.getInputPacketSize()),
-                             IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, minSize));
+                             IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, remainderSize),
+                             IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, advanceSize));
     return {advanceSize, cond, advanceSize, new IR::LNot(cond)};
 }
 
@@ -488,7 +486,7 @@ void ExprVisitor::evalExternMethodCall(const IR::MethodCallExpression *call,
                  } else {
                      auto &nextState = state.clone();
                      // Slice from the buffer and append to the packet, if necessary.
-                     nextState.slicePacketBuffer(condInfo.advanceSize);
+                     nextState.slicePacket(condInfo.advanceSize);
 
                      // Record the condition we are passing at this at this point.
                      nextState.add(*new TraceEvents::Generic(condStream.str()));

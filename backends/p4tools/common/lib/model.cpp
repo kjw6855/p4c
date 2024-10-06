@@ -28,8 +28,10 @@ const IR::Literal *Model::SubstVisitor::preorder(IR::SymbolicVariable *var) {
     if (varIt == self.symbolicMap.end()) {
         if (doComplete) {
             return IR::getDefaultValue(var->type, var->srcInfo, true)->checkedTo<IR::Literal>();
+        } else {
+            return IR::getConstant(IR::getBitType(0), 0);
         }
-        BUG("Variable not bound in model: %1%", var);
+        //BUG("Variable not bound in model: %1%", var);
     }
     prune();
     return varIt->second->checkedTo<IR::Literal>();

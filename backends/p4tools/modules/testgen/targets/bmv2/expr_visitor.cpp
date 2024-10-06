@@ -1737,18 +1737,13 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // Handle the case where the condition is true.
              {
                  auto exprList = IR::flattenStructExpression(data->checkedTo<IR::StructExpression>());
-                 for (size_t idx = 0; idx < exprList.size(); ++idx) {
-                     const auto *expr = exprList.at(idx);
-                     if (!expr->is<IR::Constant>()) {
-                         // If packet is too short in verify_checksum
-                         // simply drop packet
-                         auto &rejectState = state.clone();
-                         rejectState.add(*new TraceEvents::Generic("verify: Packet too short"));
-                         rejectState.replaceTopBody(Continuation::Exception::Drop);
-                         result->emplace_back(rejectState);
-                         return;
-                     }
-                 }
+
+                 // If packet is too short in update_checksum,
+                 // neglect such variables
+                 exprList.erase(std::remove_if(exprList.begin(), exprList.end(),
+                             [](const IR::Expression *expr) {
+                                return !expr->is<IR::Constant>();
+                             }), exprList.end());
 
                  auto maxHashInt = IR::getMaxBvVal(checksumVarType);
                  big_int computedResult = 0;

@@ -515,6 +515,51 @@ const IR::Expression *ExecutionState::slicePacketBuffer(int amount) {
     return slice;
 }
 
+const IR::Expression *ExecutionState::slicePacket(int amount) {
+    BUG_CHECK(amount > 0, "Sliced amount \"%1%\" should be larger than 0.", amount);
+
+    const auto *buffer = getPacketBuffer();
+    auto bufferSize = buffer->type->width_bits();
+    auto inputPktSize = getInputPacketSize();
+
+    if (inputPacketCursor < inputPktSize) {
+        inputPacketCursor += std::min(amount, inputPktSize - inputPacketCursor);
+    }
+
+    auto diff = amount - bufferSize;
+    const auto *amountType = IR::getBitType(amount);
+    if (diff > 0) {
+        // The input packet is fixed. While exceeding the buffer, create temp pktVar.
+        const IR::Expression *newVar = createPacketVariable(IR::getBitType(diff));
+        //appendToPacketBuffer(newVar);
+
+        if (bufferSize > 0) {
+            auto *slice = new IR::Slice(buffer, bufferSize - 1, 0);
+            slice->type = IR::getBitType(amount);
+            newVar = new IR::Concat(amountType, slice, newVar);
+            resetPacketBuffer();
+        }
+
+        inputPacketCursor += diff;
+        return newVar;
+    }
+
+    // The buffer is large enough and we can grab a slice
+    auto *slice = new IR::Slice(buffer, bufferSize - 1, bufferSize - amount);
+    slice->type = amountType;
+    // If the buffer is larger, update the buffer with its remainder.
+    if (diff < 0) {
+        auto *remainder = new IR::Slice(buffer, bufferSize - amount - 1, 0);
+        remainder->type = IR::getBitType(bufferSize - amount);
+        env.set(&PacketVars::PACKET_BUFFER_LABEL, remainder);
+    }
+
+    if (diff == 0) {
+        resetPacketBuffer();
+    }
+    return slice;
+}
+
 void ExecutionState::appendToPacketBuffer(const IR::Expression *expr) {
     const auto *buffer = getPacketBuffer();
     const auto *width = IR::getBitType(expr->type->width_bits() + buffer->type->width_bits());

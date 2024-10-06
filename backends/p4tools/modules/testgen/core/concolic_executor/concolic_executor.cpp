@@ -410,7 +410,7 @@ boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
 
 
     const auto &finalModel = replacedState.getFinalModel();
-    const auto* outPacket = finalModel.evaluate(outPacketExpr, true);
+    const auto* outPacket = finalModel.evaluate(outPacketExpr, false);
 
     const auto* outEvalMask = Taint::buildTaintMask(&finalModel, outPacketExpr);
             //newExecState->getSymbolicEnv().getInternalMap(),

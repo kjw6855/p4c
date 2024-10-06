@@ -398,6 +398,8 @@ class ExecutionState : public AbstractExecutionState {
     /// advance.
     const IR::Expression *slicePacketBuffer(int amount);
 
+    const IR::Expression *slicePacket(int amount);
+
     /// Peeks ahead into the packet buffer. Works similarly to slicePacketBuffer but does NOT
     /// advance the parser cursor or removes content from the packet buffer. However, because
     /// functions such as lookahead may still produce a parser error, this function can also enlarge
