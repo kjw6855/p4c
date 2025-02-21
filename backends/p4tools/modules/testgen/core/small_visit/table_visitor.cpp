@@ -718,6 +718,13 @@ void TableVisitor::verifyTableControlEntries(
     return newTableEntry;
 }
 
+struct EntityElement {
+    ::p4::v1::Entity *entity;
+    int order;
+
+    EntityElement(::p4::v1::Entity *e, int o): entity(e), order(o) {}
+};
+
 void TableVisitor::genTableControlEntries(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     const auto *keys = table->getKey();
@@ -726,16 +733,23 @@ void TableVisitor::genTableControlEntries(
     bool actionFound = false;
     bool genMatch = false;
 
-    auto cmp = [](::p4::v1::Entity *left, ::p4::v1::Entity *right) {
-        return (left->table_entry().priority() < right->table_entry().priority());
+    auto cmp = [](EntityElement& left, EntityElement& right) {
+        auto leftPrio = left.entity->table_entry().priority();
+        auto rightPrio = right.entity->table_entry().priority();
+
+        if (leftPrio == rightPrio) {
+            return left.order < right.order;
+        }
+        return leftPrio < rightPrio;
     };
 
-    std::priority_queue<::p4::v1::Entity*,
-        std::vector<::p4::v1::Entity*>,
+    std::priority_queue<EntityElement,
+        std::vector<EntityElement>,
         decltype(cmp)> entityQueue(cmp);
 
     // Sort entries in order of priority
     // XXX: In P4, rules with same priority are not deterministic.
+    int order = 0;
     for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
@@ -754,7 +768,8 @@ void TableVisitor::genTableControlEntries(
         }
 
         // TODO: priority over max should be removed
-        entityQueue.push(&entity);
+        //entityQueue.push(&entity);
+        entityQueue.emplace(&entity, order++);
     }
 
     auto* newTableEntry = genMatchFields();
@@ -771,7 +786,7 @@ void TableVisitor::genTableControlEntries(
      * to reset validity for wrong match fields.
      */
     while (!entityQueue.empty()) {
-        auto *entity = entityQueue.top();
+        auto *entity = entityQueue.top().entity;
         entityQueue.pop();
 
         auto *entry = entity->mutable_table_entry();
@@ -930,16 +945,23 @@ void TableVisitor::evalTableControlEntries(
 
     bool isDefaultAction = true;
 
-    auto cmp = [](::p4::v1::Entity *left, ::p4::v1::Entity *right) {
-        return (left->table_entry().priority() < right->table_entry().priority());
+    auto cmp = [](EntityElement& left, EntityElement& right) {
+        auto leftPrio = left.entity->table_entry().priority();
+        auto rightPrio = right.entity->table_entry().priority();
+
+        if (leftPrio == rightPrio) {
+            return left.order < right.order;
+        }
+        return leftPrio < rightPrio;
     };
 
-    std::priority_queue<::p4::v1::Entity*,
-        std::vector<::p4::v1::Entity*>,
+    std::priority_queue<EntityElement,
+        std::vector<EntityElement>,
         decltype(cmp)> entityQueue(cmp);
 
     // Sort entries in order of priority
     // XXX: In P4, rules with same priority are not deterministic.
+    int order = 0;
     for (auto &entity : *testCase.mutable_entities()) {
         if (!entity.has_table_entry())
             continue;
@@ -958,11 +980,11 @@ void TableVisitor::evalTableControlEntries(
         }
 
         // TODO: priority over max should be removed
-        entityQueue.push(&entity);
+        entityQueue.emplace(&entity, order++);
     }
 
     while (!entityQueue.empty()) {
-        auto *entity = entityQueue.top();
+        auto *entity = entityQueue.top().entity;
         entityQueue.pop();
 
         auto *entry = entity->mutable_table_entry();
