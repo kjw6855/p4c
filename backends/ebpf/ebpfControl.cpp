@@ -22,6 +22,7 @@ limitations under the License.
 #include "frontends/p4/parameterSubstitution.h"
 #include "frontends/p4/tableApply.h"
 #include "frontends/p4/typeMap.h"
+#include "lib/cstring.h"
 #include "lib/error.h"
 
 namespace EBPF {
@@ -67,7 +68,7 @@ void ControlBodyTranslator::processCustomExternFunction(const P4::ExternFunction
             builder->append("(const ");
             auto type = typeMap->getType(arg);
             auto ebpfType = typeFactory->create(type);
-            ebpfType->declare(builder, "", false);
+            ebpfType->declare(builder, cstring::empty, false);
             builder->append(") ");
         }
         visit(arg);
@@ -142,7 +143,7 @@ bool ControlBodyTranslator::preorder(const IR::MethodCallExpression *expression)
         BUG_CHECK(expression->arguments->size() == 0, "%1%: unexpected arguments for action call",
                   expression);
         cstring msg =
-            Util::printf_format("Control: explicit calling action %s()", ac->action->name.name);
+            absl::StrFormat("Control: explicit calling action %s()", ac->action->name.name);
         builder->target->emitTraceMessage(builder, msg.c_str());
         visit(ac->action->body);
         return false;
@@ -153,13 +154,14 @@ bool ControlBodyTranslator::preorder(const IR::MethodCallExpression *expression)
 }
 
 void ControlBodyTranslator::compileEmitField(const IR::Expression *expr, cstring field,
-                                             unsigned alignment, EBPFType *type) {
-    unsigned widthToEmit = dynamic_cast<IHasWidth *>(type)->widthInBits();
-    cstring swap = "";
+                                             unsigned hdrOffsetBits, EBPFType *type) {
+    unsigned alignment = hdrOffsetBits % 8;
+    unsigned widthToEmit = type->as<IHasWidth>().widthInBits();
+    cstring swap = cstring::empty;
     if (widthToEmit == 16)
-        swap = "htons";
+        swap = "htons"_cs;
     else if (widthToEmit == 32)
-        swap = "htonl";
+        swap = "htonl"_cs;
     if (!swap.isNullOrEmpty()) {
         builder->emitIndent();
         visit(expr);
@@ -188,21 +190,21 @@ void ControlBodyTranslator::compileEmitField(const IR::Expression *expr, cstring
         BUG_CHECK((bitsToWrite > 0) && (bitsToWrite <= 8), "invalid bitsToWrite %d", bitsToWrite);
         builder->emitIndent();
         if (alignment == 0)
-            builder->appendFormat("write_byte(%s, BYTES(%s) + %d, (%s) << %d)",
-                                  program->packetStartVar.c_str(), program->offsetVar.c_str(), i,
+            builder->appendFormat("write_byte(%s, BYTES(%u) + %d, (%s) << %d)",
+                                  program->headerStartVar.c_str(), hdrOffsetBits, i,
                                   program->byteVar.c_str(), 8 - bitsToWrite);
-        else
-            builder->appendFormat("write_partial(%s + BYTES(%s) + %d, %d, (%s) << %d)",
-                                  program->packetStartVar.c_str(), program->offsetVar.c_str(), i,
-                                  alignment, program->byteVar.c_str(), 8 - bitsToWrite);
+        else  // FIXME change to use write_partial_ex
+            builder->appendFormat("write_partial(%s + BYTES(%u) + %d, %d, (%s) << %d)",
+                                  program->headerStartVar.c_str(), hdrOffsetBits, i, alignment,
+                                  program->byteVar.c_str(), 8 - bitsToWrite);
         builder->endOfStatement(true);
         left -= bitsToWrite;
         bitsInCurrentByte -= bitsToWrite;
 
         if (bitsInCurrentByte > 0) {
             builder->emitIndent();
-            builder->appendFormat("write_byte(%s, BYTES(%s) + %d + 1, (%s << %d))",
-                                  program->packetStartVar.c_str(), program->offsetVar.c_str(), i,
+            builder->appendFormat("write_byte(%s, BYTES(%u) + %d + 1, (%s << %d))",
+                                  program->headerStartVar.c_str(), hdrOffsetBits, i,
                                   program->byteVar.c_str(), 8 - alignment % 8);
             builder->endOfStatement(true);
             left -= bitsInCurrentByte;
@@ -211,10 +213,6 @@ void ControlBodyTranslator::compileEmitField(const IR::Expression *expr, cstring
         alignment = (alignment + bitsToWrite) % 8;
         bitsInCurrentByte = left >= 8 ? 8 : left;
     }
-
-    builder->emitIndent();
-    builder->appendFormat("%s += %d", program->offsetVar.c_str(), widthToEmit);
-    builder->endOfStatement(true);
 }
 
 void ControlBodyTranslator::compileEmit(const IR::Vector<IR::Argument> *args) {
@@ -235,10 +233,17 @@ void ControlBodyTranslator::compileEmit(const IR::Vector<IR::Argument> *args) {
     builder->append(".ebpf_valid) ");
     builder->blockStart();
 
+    // We expect all headers to start on a byte boundary.
     unsigned width = ht->width_bits();
+    if (width % 8 != 0) {
+        ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
+                "Header %1% size %2% is not a multiple of 8 bits.", expr, width);
+        return;
+    }
+
     builder->emitIndent();
-    builder->appendFormat("if (%s < %s + BYTES(%s + %d)) ", program->packetEndVar.c_str(),
-                          program->packetStartVar.c_str(), program->offsetVar.c_str(), width);
+    builder->appendFormat("if (%s < %s + BYTES(%d)) ", program->packetEndVar.c_str(),
+                          program->headerStartVar.c_str(), width);
     builder->blockStart();
 
     builder->emitIndent();
@@ -250,20 +255,24 @@ void ControlBodyTranslator::compileEmit(const IR::Vector<IR::Argument> *args) {
     builder->newline();
     builder->blockEnd(true);
 
-    unsigned alignment = 0;
+    unsigned hdrOffsetBits = 0;
     for (auto f : ht->fields) {
         auto ftype = typeMap->getType(f);
         auto etype = EBPFTypeFactory::instance->create(ftype);
-        auto et = dynamic_cast<IHasWidth *>(etype);
+        auto et = etype->to<IHasWidth>();
         if (et == nullptr) {
             ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                     "Only headers with fixed widths supported %1%", f);
             return;
         }
-        compileEmitField(expr, f->name, alignment, etype);
-        alignment += et->widthInBits();
-        alignment %= 8;
+        compileEmitField(expr, f->name, hdrOffsetBits, etype);
+        hdrOffsetBits += et->widthInBits();
     }
+
+    // Increment header pointer
+    builder->emitIndent();
+    builder->appendFormat("%s += BYTES(%d);", program->headerStartVar.c_str(), width);
+    builder->newline();
 
     builder->blockEnd(true);
     return;
@@ -295,7 +304,7 @@ void ControlBodyTranslator::processApply(const P4::ApplyMethod *method) {
     auto table = control->getTable(method->object->getName().name);
     BUG_CHECK(table != nullptr, "No table for %1%", method->expr);
 
-    msgStr = Util::printf_format("Control: applying %s", method->object->getName().name);
+    msgStr = absl::StrFormat("Control: applying %s", method->object->getName().name);
     builder->target->emitTraceMessage(builder, msgStr.c_str());
 
     builder->emitIndent();
@@ -310,7 +319,7 @@ void ControlBodyTranslator::processApply(const P4::ApplyMethod *method) {
     builder->blockStart();
 
     BUG_CHECK(method->expr->arguments->size() == 0, "%1%: table apply with arguments", method);
-    cstring keyname = "key";
+    cstring keyname = "key"_cs;
     if (table->keyGenerator != nullptr) {
         builder->emitIndent();
         builder->appendLine("/* construct key */");
@@ -322,7 +331,7 @@ void ControlBodyTranslator::processApply(const P4::ApplyMethod *method) {
     builder->emitIndent();
     builder->appendLine("/* value */");
     builder->emitIndent();
-    cstring valueName = "value";
+    cstring valueName = "value"_cs;
     builder->appendFormat("struct %s *%s = NULL", table->valueTypeName.c_str(), valueName.c_str());
     builder->endOfStatement(true);
 
@@ -384,7 +393,7 @@ void ControlBodyTranslator::processApply(const P4::ApplyMethod *method) {
     builder->blockEnd(true);
     builder->blockEnd(true);
 
-    msgStr = Util::printf_format("Control: %s applied", method->object->getName().name);
+    msgStr = absl::StrFormat("Control: %s applied", method->object->getName().name);
     builder->target->emitTraceMessage(builder, msgStr.c_str());
 }
 
@@ -501,6 +510,8 @@ EBPFControl::EBPFControl(const EBPFProgram *program, const IR::ControlBlock *blo
       controlBlock(block),
       headers(nullptr),
       accept(nullptr),
+      xdpInputMeta(nullptr),
+      xdpOutputMeta(nullptr),
       parserHeaders(parserHeaders),
       codeGen(nullptr),
       emitExterns(program->options.emitExterns) {}
@@ -532,15 +543,29 @@ void EBPFControl::scanConstants() {
 bool EBPFControl::build() {
     hitVariable = program->refMap->newName("hit");
     auto pl = controlBlock->container->type->applyParams;
-    if (pl->size() != 2) {
-        ::error(ErrorType::ERR_EXPECTED, "Expected control block to have exactly 2 parameters");
-        return false;
-    }
-
     auto it = pl->parameters.begin();
-    headers = *it;
-    ++it;
-    accept = *it;
+
+    if (program->model.arch == ModelArchitecture::XdpSwitch) {
+        if (pl->size() != 3) {
+            ::error(ErrorType::ERR_EXPECTED,
+                    "Expected control block %s to have exactly 3 parameters",
+                    controlBlock->getName());
+            return false;
+        }
+        headers = *it;
+        ++it;
+        xdpInputMeta = *it;
+        ++it;
+        xdpOutputMeta = *it;
+    } else {
+        if (pl->size() != 2) {
+            ::error(ErrorType::ERR_EXPECTED, "Expected control block to have exactly 2 parameters");
+            return false;
+        }
+        headers = *it;
+        ++it;
+        accept = *it;
+    }
 
     codeGen = new ControlBodyTranslator(this);
     codeGen->substitute(headers, parserHeaders);

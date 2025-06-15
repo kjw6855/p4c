@@ -17,15 +17,9 @@ limitations under the License.
 #ifndef TYPECHECKING_TYPECONSTRAINTS_H_
 #define TYPECHECKING_TYPECONSTRAINTS_H_
 
-#include <optional>
-#include <sstream>
-
-#include <boost/algorithm/string.hpp>
-
 #include "ir/ir.h"
 #include "lib/castable.h"
 #include "lib/error_helper.h"
-#include "typeConstraints.h"
 #include "typeSubstitution.h"
 #include "typeSubstitutionVisitor.h"
 #include "typeUnification.h"
@@ -66,6 +60,9 @@ class TypeConstraint : public IHasDbPrint, public ICastable {
     cstring errFormat;
     std::vector<const IR::Node *> errArguments;
 
+ private:
+    bool reportErrorImpl(const TypeVariableSubstitution *subst, std::string message) const;
+
  protected:
     /// Constraint which produced this one.  May be nullptr.
     const TypeConstraint *derivedFrom = nullptr;
@@ -76,95 +73,34 @@ class TypeConstraint : public IHasDbPrint, public ICastable {
         : id(crtid++), derivedFrom(derivedFrom) {}
     explicit TypeConstraint(const IR::Node *origin) : id(crtid++), origin(origin) {}
     std::string explain(size_t index, Explain *explainer) const {
-        auto node = errArguments.at(index);
+        const auto *node = errArguments.at(index);
         node->apply(*explainer);
         return explainer->explanation;
     }
-    cstring localError(Explain *explainer) const {
-        if (errFormat.isNullOrEmpty()) return "";
-        std::string message, explanation;
-        boost::format fmt = boost::format(errFormat);
-        switch (errArguments.size()) {
-            case 0:
-                message = boost::str(fmt);
-                break;
-            case 1:
-                explanation += explain(0, explainer);
-                message = ::error_helper(fmt, errArguments.at(0)).toString();
-                break;
-            case 2:
-                explanation += explain(0, explainer);
-                explanation += explain(1, explainer);
-                message = ::error_helper(fmt, errArguments.at(0), errArguments.at(1)).toString();
-                break;
-            case 3:
-                explanation += explain(0, explainer);
-                explanation += explain(1, explainer);
-                explanation += explain(2, explainer);
-                message =
-                    ::error_helper(fmt, errArguments.at(0), errArguments.at(1), errArguments.at(2))
-                        .toString();
-                break;
-            case 4:
-                explanation += explain(0, explainer);
-                explanation += explain(1, explainer);
-                explanation += explain(2, explainer);
-                explanation += explain(3, explainer);
-                message = ::error_helper(fmt, errArguments.at(0), errArguments.at(1),
-                                         errArguments.at(2), errArguments.at(3))
-                              .toString();
-                break;
-            default:
-                BUG("Unexpected argument count for error message");
-        }
-        return cstring(message) + explanation;
-    }
+    std::string localError(Explain *explainer) const;
 
  public:
-    void setError(cstring format, std::initializer_list<const IR::Node *> nodes) {
-        errFormat = format;
+    void setError(std::string_view format, std::initializer_list<const IR::Node *> nodes) {
+        errFormat = cstring(format);
         errArguments = nodes;
     }
-    template <typename... T>
+    template <typename... Args>
     // Always return false.
-    bool reportError(const TypeVariableSubstitution *subst, const char *format, T... args) const {
-        /// The Constraints actually form a stack and the error message
-        /// is composed in reverse order, from bottom to top.
-        /// The top of the stack has no 'derivedFrom' field,
-        /// and it contains the actual source position where
-        /// the analysis started.
+    bool reportError(const TypeVariableSubstitution *subst, const char *format,
+                     Args &&...args) const {
+        /// The Constraints actually form a stack and the error message is
+        /// composed in reverse order, from bottom to top.  The top of the stack
+        /// has no 'derivedFrom' field, and it contains the actual source
+        /// position where the analysis started.
         boost::format fmt(format);
-        cstring message =
-            cstring("  ---- Actual error:\n") + ::error_helper(fmt, args...).toString();
-        auto o = origin;
-        auto constraint = this;
-        Explain explainer(subst);
-        while (constraint) {
-            cstring local = constraint->localError(&explainer);
-            if (!local.isNullOrEmpty()) {
-                message += "---- Originating from:\n";
-                message += local;
-            }
-            o = constraint->origin;
-            constraint = constraint->derivedFrom;
-        }
-        // Indent each string in the message
-        std::string s = message.c_str();
-        std::vector<std::string> lines;
-        boost::split(lines, s, [](char c) { return c == '\n'; });
-        bool lastIsEmpty = lines.at(lines.size() - 1) == "";
-        if (lastIsEmpty)
-            // We don't want to indent an empty line.
-            lines.pop_back();
-        message = cstring::join(lines.begin(), lines.end(), "\n  ");
-        if (lastIsEmpty) message += "\n";
-
-        CHECK_NULL(o);
-        ::errorWithSuffix(ErrorType::ERR_TYPE_ERROR, "%1%", message.c_str(), o);
-        return false;
+        return reportErrorImpl(
+            subst,
+            "  ---- Actual error:\n" + ::error_helper(fmt, std::forward<Args>(args)...).toString());
     }
     // Default error message; returns 'false'
     virtual bool reportError(const TypeVariableSubstitution *subst) const = 0;
+
+    DECLARE_TYPEINFO(TypeConstraint);
 };
 
 /// Base class for EqualityConstraint and CanBeImplicitlyCastConstraint
@@ -190,8 +126,9 @@ class BinaryConstraint : public TypeConstraint {
     }
 
  public:
-    virtual void dbprint(std::ostream &out) const = 0;
     virtual BinaryConstraint *create(const IR::Type *left, const IR::Type *right) const = 0;
+
+    DECLARE_TYPEINFO(BinaryConstraint, TypeConstraint);
 };
 
 /// Requires two types to be equal.
@@ -212,6 +149,8 @@ class EqualityConstraint : public BinaryConstraint {
     BinaryConstraint *create(const IR::Type *left, const IR::Type *right) const override {
         return new EqualityConstraint(left, right, this);
     }
+
+    DECLARE_TYPEINFO(EqualityConstraint, BinaryConstraint);
 };
 
 /// The right type can be implicitly cast to the left type.
@@ -233,6 +172,8 @@ class CanBeImplicitlyCastConstraint : public BinaryConstraint {
     BinaryConstraint *create(const IR::Type *left, const IR::Type *right) const override {
         return new CanBeImplicitlyCastConstraint(left, right, this);
     }
+
+    DECLARE_TYPEINFO(CanBeImplicitlyCastConstraint, BinaryConstraint);
 };
 
 // A list of equality constraints on types.
@@ -280,6 +221,8 @@ class TypeConstraints final : public IHasDbPrint {
         constraints.push_back(constraint);
     }
     void addEqualityConstraint(const IR::Node *source, const IR::Type *left, const IR::Type *right);
+    void addImplicitCastConstraint(const IR::Node *source, const IR::Type *left,
+                                   const IR::Type *right);
     /*
      * Solve the specified constraint.
      * @param subst      Variable substitution which is updated with new constraints.

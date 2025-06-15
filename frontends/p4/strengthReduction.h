@@ -25,6 +25,8 @@ limitations under the License.
 
 namespace P4 {
 
+using namespace literals;
+
 /** Implements a pass that replaces expensive arithmetic and boolean
  * operations with cheaper ones -- i.e., strength reduction
  *
@@ -43,6 +45,11 @@ namespace P4 {
  *
  */
 class DoStrengthReduction final : public Transform {
+ protected:
+    /// Enable the subtract constant to add negative constant transform.
+    /// Replaces `a - constant` with `a + (-constant)`.
+    bool enableSubConstToAddTransform = true;
+
     /// @returns `true` if @p expr is the constant `1`.
     bool isOne(const IR::Expression *expr) const;
     /// @returns `true` if @p expr is the constant `0`.
@@ -68,6 +75,12 @@ class DoStrengthReduction final : public Transform {
     DoStrengthReduction() {
         visitDagOnce = true;
         setName("StrengthReduction");
+    }
+
+    explicit DoStrengthReduction(bool enableSubConstToAddTransform)
+        : enableSubConstToAddTransform(enableSubConstToAddTransform) {
+        // FIXME: This does not call a constructor
+        DoStrengthReduction();
     }
 
     using Transform::postorder;
@@ -97,21 +110,24 @@ class DoStrengthReduction final : public Transform {
     const IR::Node *postorder(IR::ArrayIndex *expr) override;
 
     const IR::BlockStatement *preorder(IR::BlockStatement *bs) override {
-        if (bs->annotations->getSingle("disable_optimization")) prune();
+        if (bs->annotations->getSingle("disable_optimization"_cs)) prune();
         return bs;
     }
 };
 
 class StrengthReduction : public PassManager {
  public:
-    StrengthReduction(ReferenceMap *refMap, TypeMap *typeMap,
-                      TypeChecking *typeChecking = nullptr) {
+    explicit StrengthReduction(TypeMap *typeMap, TypeChecking *typeChecking = nullptr,
+                               bool enableSubConstToAddTransform = true) {
         if (typeMap != nullptr) {
-            if (!typeChecking) typeChecking = new TypeChecking(refMap, typeMap, true);
+            if (!typeChecking) typeChecking = new TypeChecking(nullptr, typeMap, true);
             passes.push_back(typeChecking);
         }
-        passes.push_back(new DoStrengthReduction());
+        passes.push_back(new DoStrengthReduction(enableSubConstToAddTransform));
     }
+
+    explicit StrengthReduction(TypeMap *typeMap, bool enableSubConstToAddTransform)
+        : StrengthReduction(typeMap, nullptr, enableSubConstToAddTransform) {}
 };
 
 }  // namespace P4

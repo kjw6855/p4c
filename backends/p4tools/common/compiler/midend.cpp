@@ -1,5 +1,6 @@
 #include "backends/p4tools/common/compiler/midend.h"
 
+#include "backends/p4tools/common/compiler/convert_struct_expr.h"
 #include "backends/p4tools/common/compiler/convert_varbits.h"
 #include "frontends/common/constantFolding.h"
 #include "frontends/common/options.h"
@@ -15,6 +16,7 @@
 #include "midend/convertEnums.h"
 #include "midend/convertErrors.h"
 #include "midend/copyStructures.h"
+#include "midend/eliminateInvalidHeaders.h"
 #include "midend/eliminateNewtype.h"
 #include "midend/eliminateSerEnums.h"
 #include "midend/eliminateSwitch.h"
@@ -30,7 +32,6 @@
 #include "midend/orderArguments.h"
 #include "midend/parserUnroll.h"
 #include "midend/removeLeftSlices.h"
-#include "midend/removeMiss.h"
 #include "midend/removeSelectBooleans.h"
 #include "midend/replaceSelectRange.h"
 #include "midend/simplifyBitwise.h"
@@ -42,7 +43,7 @@ namespace P4Tools {
 
 MidEnd::MidEnd(const CompilerOptions &options) {
     setName("MidEnd");
-    refMap.setIsV1(options.langVersion == CompilerOptions::FrontendVersion::P4_14);
+    refMap.setIsV1(options.langVersion == CompilerOptions::FrontendVersion::P4_16);
 }
 
 Visitor *MidEnd::mkFillEnums() {
@@ -107,19 +108,21 @@ void MidEnd::addDefaultPasses(bool loadIRFromJson) {
         new P4::EliminateSwitch(&refMap, &typeMap),
         // Replace types introduced by 'type' with 'typedef'.
         new P4::EliminateNewtype(&refMap, &typeMap),
+        // Remove the invalid header / header-union literal, except for constant expressions
+        new P4::EliminateInvalidHeaders(&refMap, &typeMap),
         // Replace serializable enum constants with their values.
         new P4::EliminateSerEnums(&refMap, &typeMap),
         // Make sure that we have no TypeDef left in the program.
         new P4::EliminateTypedef(&refMap, &typeMap),
         // Remove in/inout/out action parameters.
-        new P4::RemoveActionParameters(&refMap, &typeMap),
+        new P4::RemoveActionParameters(&typeMap),
         // Sort call arguments according to the order of the function's parameters.
         new P4::OrderArguments(&refMap, &typeMap),
         new P4::TypeChecking(&refMap, &typeMap),
         mkConvertKeys(),
         mkConvertEnums(),
         new P4::ConstantFolding(&refMap, &typeMap),
-        new P4::SimplifyControlFlow(&refMap, &typeMap),
+        new P4::SimplifyControlFlow(&typeMap),
         // Eliminate extraneous cases in select statements.
         new P4::SimplifySelectCases(&refMap, &typeMap, false),
         // Expand lookahead assignments into sequences of field assignments.
@@ -134,7 +137,7 @@ void MidEnd::addDefaultPasses(bool loadIRFromJson) {
         new PassRepeated({
             new P4::CopyStructures(&refMap, &typeMap, false, true, nullptr),
         }),
-        new P4::RemoveParserControlFlow(&refMap, &typeMap),
+        new P4::RemoveParserControlFlow(&typeMap),
         // Flatten nested list expressions.
         new P4::SimplifySelectList(&refMap, &typeMap),
         // Convert booleans in selects into bit<1>.
@@ -156,7 +159,7 @@ void MidEnd::addDefaultPasses(bool loadIRFromJson) {
             }),
         new P4::ConstantFolding(&refMap, &typeMap),
         new P4::MoveDeclarations(),
-        new P4::SimplifyControlFlow(&refMap, &typeMap),
+        new P4::SimplifyControlFlow(&typeMap),
         // Replace any slices in the left side of assignments and convert them to casts.
         new P4::RemoveLeftSlices(&refMap, &typeMap),
         // Remove loops from parsers by unrolling them as far as the stack indices allow.
@@ -166,11 +169,13 @@ void MidEnd::addDefaultPasses(bool loadIRFromJson) {
         // Convert tuples into structs.
         new P4::EliminateTuples(&refMap, &typeMap),
         new P4::ConstantFolding(&refMap, &typeMap),
-        new P4::SimplifyControlFlow(&refMap, &typeMap),
+        new P4::SimplifyControlFlow(&typeMap),
         // Simplify header stack assignments with runtime indices into conditional statements.
         new P4::HSIndexSimplifier(&refMap, &typeMap),
         // Convert Type_Varbits into a type that contains information about the assigned width.
         new ConvertVarbits(),
+        // Convert any StructExpressions with Type_Header into a HeaderExpression.
+        new ConvertStructExpr(&typeMap),
         // Cast all boolean table keys with a bit<1>.
         new P4::CastBooleanTableKeys(),
     });

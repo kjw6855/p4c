@@ -36,7 +36,7 @@ class ControlGraphs : public Graphs {
         std::vector<Graph *> subgraphs{};
     };
 
-    ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap, const cstring &graphsDir);
+    ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap, std::filesystem::path graphsDir);
 
     bool preorder(const IR::PackageBlock *block) override;
     bool preorder(const IR::ControlBlock *block) override;
@@ -59,9 +59,9 @@ class ControlGraphs : public Graphs {
     P4::TypeMap *typeMap;
     const cstring graphsDir;
     Parents return_parents{};
-    // we keep a stack of subgraphs; every time we visit a control, we create a
-    // new subgraph and push it to the stack; this new graph becomes the
-    // "current graph" to which we add vertices (e.g. tables).
+    /// We keep a stack of subgraphs; every time we visit a control, we create a
+    /// new subgraph and push it to the stack; this new graph becomes the
+    /// "current graph" to which we add vertices (e.g. tables).
     ControlStack controlStack{};
     std::optional<cstring> instanceName{};
 };

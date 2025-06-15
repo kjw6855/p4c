@@ -16,61 +16,56 @@ limitations under the License.
 
 #include <cstddef>
 #include <map>
-#include <string>
 #include <utility>
-#include <vector>
-
-#include <boost/format.hpp>
 
 #include "frontends/common/parser_options.h"
 #include "ir/configuration.h"
 #include "ir/id.h"
-#include "ir/indexed_vector.h"
+#include "ir/ir-generated.h"
 #include "ir/ir.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/error_catalog.h"
 #include "lib/exceptions.h"
-#include "lib/safe_vector.h"
 #include "lib/source_file.h"
 
 namespace IR {
 
-const cstring IR::Type_Stack::next = "next";
-const cstring IR::Type_Stack::last = "last";
-const cstring IR::Type_Stack::arraySize = "size";
-const cstring IR::Type_Stack::lastIndex = "lastIndex";
-const cstring IR::Type_Stack::push_front = "push_front";
-const cstring IR::Type_Stack::pop_front = "pop_front";
-const cstring IR::Type_Header::isValid = "isValid";
-const cstring IR::Type_Header::setValid = "setValid";
-const cstring IR::Type_Header::setInvalid = "setInvalid";
-const cstring IR::Type::minSizeInBits = "minSizeInBits";
-const cstring IR::Type::minSizeInBytes = "minSizeInBytes";
-const cstring IR::Type::maxSizeInBits = "maxSizeInBits";
-const cstring IR::Type::maxSizeInBytes = "maxSizeInBytes";
+const cstring IR::Type_Stack::next = "next"_cs;
+const cstring IR::Type_Stack::last = "last"_cs;
+const cstring IR::Type_Stack::arraySize = "size"_cs;
+const cstring IR::Type_Stack::lastIndex = "lastIndex"_cs;
+const cstring IR::Type_Stack::push_front = "push_front"_cs;
+const cstring IR::Type_Stack::pop_front = "pop_front"_cs;
+const cstring IR::Type_Header::isValid = "isValid"_cs;
+const cstring IR::Type_Header::setValid = "setValid"_cs;
+const cstring IR::Type_Header::setInvalid = "setInvalid"_cs;
+const cstring IR::Type::minSizeInBits = "minSizeInBits"_cs;
+const cstring IR::Type::minSizeInBytes = "minSizeInBytes"_cs;
+const cstring IR::Type::maxSizeInBits = "maxSizeInBits"_cs;
+const cstring IR::Type::maxSizeInBytes = "maxSizeInBytes"_cs;
 
 const IR::ID IR::Type_Table::hit = ID("hit");
 const IR::ID IR::Type_Table::miss = ID("miss");
 const IR::ID IR::Type_Table::action_run = ID("action_run");
 
-const cstring IR::Annotation::nameAnnotation = "name";
-const cstring IR::Annotation::tableOnlyAnnotation = "tableonly";
-const cstring IR::Annotation::defaultOnlyAnnotation = "defaultonly";
-const cstring IR::Annotation::atomicAnnotation = "atomic";
-const cstring IR::Annotation::hiddenAnnotation = "hidden";
-const cstring IR::Annotation::lengthAnnotation = "length";
-const cstring IR::Annotation::optionalAnnotation = "optional";
-const cstring IR::Annotation::pkginfoAnnotation = "pkginfo";
-const cstring IR::Annotation::deprecatedAnnotation = "deprecated";
-const cstring IR::Annotation::synchronousAnnotation = "synchronous";
-const cstring IR::Annotation::pureAnnotation = "pure";
-const cstring IR::Annotation::noSideEffectsAnnotation = "noSideEffects";
-const cstring IR::Annotation::noWarnAnnotation = "noWarn";
-const cstring IR::Annotation::matchAnnotation = "match";
-const cstring IR::Annotation::fieldListAnnotation = "field_list";
-const cstring IR::Annotation::debugLoggingAnnotation = "__debug";
+const cstring IR::Annotation::nameAnnotation = "name"_cs;
+const cstring IR::Annotation::tableOnlyAnnotation = "tableonly"_cs;
+const cstring IR::Annotation::defaultOnlyAnnotation = "defaultonly"_cs;
+const cstring IR::Annotation::atomicAnnotation = "atomic"_cs;
+const cstring IR::Annotation::hiddenAnnotation = "hidden"_cs;
+const cstring IR::Annotation::lengthAnnotation = "length"_cs;
+const cstring IR::Annotation::optionalAnnotation = "optional"_cs;
+const cstring IR::Annotation::pkginfoAnnotation = "pkginfo"_cs;
+const cstring IR::Annotation::deprecatedAnnotation = "deprecated"_cs;
+const cstring IR::Annotation::synchronousAnnotation = "synchronous"_cs;
+const cstring IR::Annotation::pureAnnotation = "pure"_cs;
+const cstring IR::Annotation::noSideEffectsAnnotation = "noSideEffects"_cs;
+const cstring IR::Annotation::noWarnAnnotation = "noWarn"_cs;
+const cstring IR::Annotation::matchAnnotation = "match"_cs;
+const cstring IR::Annotation::fieldListAnnotation = "field_list"_cs;
+const cstring IR::Annotation::debugLoggingAnnotation = "__debug"_cs;
 
 long Type_Declaration::nextId = 0;
 long Type_InfInt::nextId = 0;
@@ -93,16 +88,45 @@ const Type_Bits *Type_Bits::get(int width, bool isSigned) {
     return result;
 }
 
-const Type::Unknown *Type::Unknown::get() {
-    static const Type::Unknown *singleton = nullptr;
-    if (!singleton) singleton = (new Type::Unknown());
+const Type_Bits *Type_Bits::get(const Util::SourceInfo &si, int sz, bool isSigned) {
+    if (sz < 0) {
+        ::error(ErrorType::ERR_INVALID, "%1%Width %2% of type cannot be negative", si, sz);
+        // Return a value that will not cause crashes later on
+        return new IR::Type_Bits(si, 1024, isSigned);
+    }
+    if (sz == 0 && isSigned) {
+        ::error(ErrorType::ERR_INVALID, "%1%Width of signed type cannot be zero", si);
+        // Return a value that will not cause crashes later on
+        return new IR::Type_Bits(si, 1024, isSigned);
+    }
+    return new IR::Type_Bits(si, sz, isSigned);
+}
+
+const Type_Bits *Type_Bits::get(const Util::SourceInfo &si, const IR::Expression *expression,
+                                bool isSigned) {
+    return new IR::Type_Bits(si, expression, isSigned);
+}
+
+const Type_Unknown *Type_Unknown::get() {
+    static const Type_Unknown *singleton = nullptr;
+    if (!singleton) singleton = (new Type_Unknown());
     return singleton;
 }
 
-const Type::Boolean *Type::Boolean::get() {
-    static const Type::Boolean *singleton = nullptr;
-    if (!singleton) singleton = (new Type::Boolean());
+const Type_Unknown *Type_Unknown::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info (yet).
+    return new Type_Unknown(si);
+}
+
+const Type_Boolean *Type_Boolean::get() {
+    static const Type_Boolean *singleton = nullptr;
+    if (!singleton) singleton = (new Type_Boolean());
     return singleton;
+}
+
+const Type_Boolean *Type_Boolean::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info (yet).
+    return new Type_Boolean(si);
 }
 
 const Type_String *Type_String::get() {
@@ -111,23 +135,17 @@ const Type_String *Type_String::get() {
     return singleton;
 }
 
-const Type::Bits *Type::Bits::get(Util::SourceInfo si, int sz, bool isSigned) {
-    auto result = new IR::Type_Bits(si, sz, isSigned);
-    if (sz < 0) {
-        ::error(ErrorType::ERR_INVALID, "%1%: Width of type cannot be negative", result);
-        // Return a value that will not cause crashes later on
-        return new IR::Type_Bits(si, 1024, isSigned);
-    }
-    if (sz == 0 && isSigned) {
-        ::error(ErrorType::ERR_INVALID, "%1%: Width of signed type cannot be zero", result);
-        // Return a value that will not cause crashes later on
-        return new IR::Type_Bits(si, 1024, isSigned);
-    }
-    return result;
+const Type_String *Type_String::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info (yet).
+    return new Type_String(si);
 }
 
-const Type::Varbits *Type::Varbits::get(Util::SourceInfo si, int sz) {
-    auto result = new Type::Varbits(si, sz);
+const Type_Varbits *Type_Varbits::get(const Util::SourceInfo &si, const IR::Expression *expr) {
+    return new Type_Varbits(si, expr);
+}
+
+const Type_Varbits *Type_Varbits::get(const Util::SourceInfo &si, int sz) {
+    auto result = new Type_Varbits(si, sz);
     if (sz < 0) {
         ::error(ErrorType::ERR_INVALID, "%1%: Width cannot be negative or zero", result);
         // Return a value that will not cause crashes later on
@@ -136,12 +154,29 @@ const Type::Varbits *Type::Varbits::get(Util::SourceInfo si, int sz) {
     return result;
 }
 
-const Type::Varbits *Type::Varbits::get() { return new Type::Varbits(0); }
+const Type_Varbits *Type_Varbits::get(int sz) { return new Type_Varbits(sz); }
+
+const Type_Varbits *Type_Varbits::get() { return new Type_Varbits(0); }
+
+const Type_InfInt *Type_InfInt::get() {
+    // We do not cache types with declaration IDs (yet).
+    return new Type_InfInt();
+}
+
+const Type_InfInt *Type_InfInt::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info and declaration IDs (yet).
+    return new Type_InfInt(si);
+}
 
 const Type_Dontcare *Type_Dontcare::get() {
     static const Type_Dontcare *singleton;
     if (!singleton) singleton = (new Type_Dontcare());
     return singleton;
+}
+
+const Type_Dontcare *Type_Dontcare::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info (yet).
+    return new Type_Dontcare(si);
 }
 
 const Type_State *Type_State::get() {
@@ -150,16 +185,41 @@ const Type_State *Type_State::get() {
     return singleton;
 }
 
+const Type_State *Type_State::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info (yet).
+    return new Type_State(si);
+}
+
 const Type_Void *Type_Void::get() {
     static const Type_Void *singleton;
     if (!singleton) singleton = (new Type_Void());
     return singleton;
 }
 
+const Type_Void *Type_Void::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info (yet).
+    return new Type_Void(si);
+}
+
 const Type_MatchKind *Type_MatchKind::get() {
     static const Type_MatchKind *singleton;
     if (!singleton) singleton = (new Type_MatchKind());
     return singleton;
+}
+
+const Type_MatchKind *Type_MatchKind::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info (yet).
+    return new Type_MatchKind(si);
+}
+
+const Type_Any *Type_Any::get() {
+    // We do not cache types with declaration IDs (yet).
+    return new Type_Any();
+}
+
+const Type_Any *Type_Any::get(const Util::SourceInfo &si) {
+    // We do not cache types with source info and declaration IDs (yet).
+    return new Type_Any(si);
 }
 
 bool Type_ActionEnum::contains(cstring name) const {

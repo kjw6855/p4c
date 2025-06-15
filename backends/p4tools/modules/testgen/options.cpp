@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <iostream>
 #include <iterator>
 #include <map>
 #include <stdexcept>
@@ -12,11 +11,13 @@
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/options.h"
 #include "lib/error.h"
-#include "lib/exceptions.h"
 
 #include "backends/p4tools/modules/testgen/lib/logging.h"
+#include "backends/p4tools/modules/testgen/toolname.h"
 
 namespace P4Tools::P4Testgen {
+
+using namespace P4::literals;
 
 TestgenOptions &TestgenOptions::get() {
     static TestgenOptions INSTANCE;
@@ -27,10 +28,10 @@ const char *TestgenOptions::getIncludePath() {
     P4C_UNIMPLEMENTED("getIncludePath not implemented for P4Testgen.");
 }
 
-const std::set<cstring> TestgenOptions::SUPPORTED_STOP_METRICS = {"MAX_STATEMENT_COVERAGE"};
+const std::set<cstring> TestgenOptions::SUPPORTED_STOP_METRICS = {"MAX_NODE_COVERAGE"_cs};
 
 TestgenOptions::TestgenOptions()
-    : AbstractP4cToolOptions("Generate packet tests for a P4 program.") {
+    : AbstractP4cToolOptions(TOOL_NAME, "Generate packet tests for a P4 program.") {
     registerOption(
         "--strict", nullptr,
         [this](const char *) {
@@ -142,7 +143,7 @@ TestgenOptions::TestgenOptions()
             return true;
         },
         "Stops generating tests when a particular metric is satisifed. Currently supported options "
-        "are:\n\"MAX_STATEMENT_COVERAGE\".");
+        "are:\n\"MAX_NODE_COVERAGE\".");
 
     registerOption(
         "--packet-size-range", "packetSizeRange",
@@ -185,9 +186,8 @@ TestgenOptions::TestgenOptions()
             // Each element is then again split by colon (':').
             std::stringstream argStream(arg);
             while (argStream.good()) {
-                std::string substr;
-                std::getline(argStream, substr, ',');
-                auto rangeStr = std::string(arg);
+                std::string rangeStr;
+                std::getline(argStream, rangeStr, ',');
                 size_t portStr = rangeStr.find_first_of(':');
                 try {
                     auto loPortStr = rangeStr.substr(0, portStr);
@@ -227,6 +227,22 @@ TestgenOptions::TestgenOptions()
         "test back end. Some test back ends may restrict the available port ranges.");
 
     registerOption(
+        "--skip-control-plane-entities", "skippedControlPlaneEntities",
+        [this](const char *arg) {
+            // Convert the input into a StringStream and split by comma (',').
+            std::stringstream argStream(arg);
+            while (argStream.good()) {
+                std::string substr;
+                std::getline(argStream, substr, ',');
+                skippedControlPlaneEntities.emplace(substr);
+            }
+            return true;
+        },
+        "Specify the set of control plane entities for which P4Testgen should not generate a "
+        "configuration for. For example, if a particular table is in the set, P4Testgen will "
+        "assume that only the default action or constant entries can be executed. ");
+
+    registerOption(
         "--out-dir", "outputDir",
         [this](const char *arg) {
             outputDir = arg;
@@ -239,7 +255,7 @@ TestgenOptions::TestgenOptions()
     registerOption(
         "--test-backend", "testBackend",
         [this](const char *arg) {
-            testBackend = arg;
+            testBackend = cstring(arg);
             testBackend = testBackend.toUpper();
             return true;
         },
@@ -252,14 +268,14 @@ TestgenOptions::TestgenOptions()
             selectedBranches = arg;
             // These options are mutually exclusive.
             if (trackBranches) {
-                std::cerr << "--input-branches and --track-branches are mutually exclusive. Choose "
-                             "one or the other."
-                          << std::endl;
-                exit(1);
+                ::error(
+                    "--input-branches and --track-branches are mutually exclusive. Choose "
+                    "one or the other.");
+                return false;
             }
             return true;
         },
-        "List of the selected branches which should be chosen for selection.");
+        "[EXPERIMENTAL] List of the selected branches which should be chosen for selection.");
 
     registerOption(
         "--track-branches", nullptr,
@@ -267,29 +283,43 @@ TestgenOptions::TestgenOptions()
             trackBranches = true;
             // These options are mutually exclusive.
             if (!selectedBranches.empty()) {
-                std::cerr << "--input-branches and --track-branches are mutually exclusive. Choose "
-                             "one or the other."
-                          << std::endl;
-                exit(1);
+                ::error(
+                    "--input-branches and --track-branches are mutually exclusive. Choose "
+                    "one or the other.");
+                return false;
             }
             return true;
         },
-        "Track the branches that are chosen in the symbolic executor. This can be used for "
-        "deterministic replay.");
+        "[EXPERIMENTAL] Track the branches that are chosen in the symbolic executor. This can be "
+        "used for deterministic replay.");
 
     registerOption(
-        "--with-output-packet", nullptr,
+        "--output-packet-only", nullptr,
         [this](const char *) {
-            withOutputPacket = true;
+            outputPacketOnly = true;
             if (!selectedBranches.empty()) {
-                std::cerr << "--input-branches cannot guarantee --with-output-packet."
-                             " Aborting."
-                          << std::endl;
-                exit(1);
+                ::error(
+                    "--input-branches cannot guarantee --output-packet-only."
+                    " Aborting.");
+                return false;
             }
             return true;
         },
-        "Produced tests must have an output packet.");
+        "Produced tests must have an output packet as outcome.");
+
+    registerOption(
+        "--dropped-packet-only", nullptr,
+        [this](const char *) {
+            droppedPacketOnly = true;
+            if (!selectedBranches.empty()) {
+                ::error(
+                    "--input-branches cannot guarantee --dropped-packet-only."
+                    " Aborting.");
+                return false;
+            }
+            return true;
+        },
+        "Produced tests must have a dropped packet as outcome.");
 
     registerOption(
         "--path-selection", "pathSelectionPolicy",
@@ -297,10 +327,9 @@ TestgenOptions::TestgenOptions()
             using P4Testgen::PathSelectionPolicy;
 
             static std::map<cstring, PathSelectionPolicy> const PATH_SELECTION_OPTIONS = {
-                {"DEPTH_FIRST", PathSelectionPolicy::DepthFirst},
-                {"RANDOM_BACKTRACK", PathSelectionPolicy::RandomBacktrack},
-                {"GREEDY_STATEMENT_SEARCH", PathSelectionPolicy::GreedyStmtCoverage},
-                {"RANDOM_STATEMENT_SEARCH", PathSelectionPolicy::RandomMaxStmtCoverage},
+                {"DEPTH_FIRST"_cs, PathSelectionPolicy::DepthFirst},
+                {"RANDOM_BACKTRACK"_cs, PathSelectionPolicy::RandomBacktrack},
+                {"GREEDY_STATEMENT_SEARCH"_cs, PathSelectionPolicy::GreedyStmtCoverage},
             };
             auto selectionString = cstring(arg).toUpper();
             auto it = PATH_SELECTION_OPTIONS.find(selectionString);
@@ -321,16 +350,15 @@ TestgenOptions::TestgenOptions()
             return false;
         },
         "Selects a specific path selection strategy for test generation. Options are: "
-        "DEPTH_FIRST, RANDOM_BACKTRACK, GREEDY_STATEMENT_SEARCH, and RANDOM_STATEMENT_SEARCH. "
+        "DEPTH_FIRST, RANDOM_BACKTRACK, and GREEDY_STATEMENT_SEARCH. "
         "Defaults to DEPTH_FIRST.");
 
     registerOption(
         "--track-coverage", "coverageItem",
         [this](const char *arg) {
-            static std::set<cstring> const COVERAGE_OPTIONS = {
-                "STATEMENTS",
-                "TABLE_ENTRIES",
-            };
+            static std::set<cstring> const COVERAGE_OPTIONS = {"STATEMENTS"_cs, "TABLE_ENTRIES"_cs,
+                                                               "ACTIONS"_cs};
+            hasCoverageTracking = true;
             auto selectionString = cstring(arg).toUpper();
             auto it = COVERAGE_OPTIONS.find(selectionString);
             if (it != COVERAGE_OPTIONS.end()) {
@@ -342,6 +370,10 @@ TestgenOptions::TestgenOptions()
                     coverageOptions.coverTableEntries = true;
                     return true;
                 }
+                if (selectionString == "ACTIONS") {
+                    coverageOptions.coverActions = true;
+                    return true;
+                }
             }
             ::error(
                 "Coverage tracking for label %1% not supported. Supported coverage tracking "
@@ -351,31 +383,39 @@ TestgenOptions::TestgenOptions()
             return false;
         },
         "Specifies, which IR nodes to track for coverage in the targeted P4 program. Multiple "
-        "options are possible: Currently supported: STATEMENTS, TABLE_ENTRIES "
+        "options are possible: Currently supported: STATEMENTS, TABLE_ENTRIES (table rules encoded "
+        "in the table entries in P4), ACTIONS (actions invoked, directly or by tables). "
         "Defaults to no coverage.");
 
     registerOption(
-        "--saddle-point", "saddlePoint",
+        "--only-covering-tests", nullptr,
+        [this](const char *) {
+            coverageOptions.onlyCoveringTests = true;
+            return true;
+        },
+        "If coverage tracking is enabled only generate tests which update the total number of "
+        "covered nodes.");
+
+    registerOption(
+        "--assert-min-coverage", "minCoverage",
         [this](const char *arg) {
-            int64_t saddlePointTmp = 0;
             try {
-                // Unfortunately, we can not use std::stoul because negative inputs are okay
-                // according to the C++ standard.
-                saddlePointTmp = std::stoll(arg);
-                if (saddlePointTmp <= 1) {
+                minCoverage = std::stof(arg);
+                if (minCoverage < 0 || minCoverage > 1) {
                     throw std::invalid_argument("Invalid input.");
                 }
             } catch (std::invalid_argument &) {
                 ::error(
-                    "Invalid input value %1% for --saddle-point. Expected an integer greater than "
-                    "1.",
+                    "Invalid input value %1% for --assert-min-coverage. "
+                    "Expected float in range [0, 1].",
                     arg);
                 return false;
             }
-            saddlePoint = saddlePointTmp;
             return true;
         },
-        "Threshold to invoke multiPop on RANDOM_STATEMENT_SEARCH.");
+        "Specifies minimum coverage that needs to be achieved for P4Testgen to exit successfully. "
+        "The input needs to be value in range [0, 1] (where 1 means the metric is fully covered). "
+        "Defaults to 0 which means no checking.");
 
     registerOption(
         "--print-traces", nullptr,
@@ -406,7 +446,7 @@ TestgenOptions::TestgenOptions()
     registerOption(
         "--print-performance-report", nullptr,
         [](const char *) {
-            P4Testgen::enablePerformanceLogging();
+            enablePerformanceLogging();
             return true;
         },
         "Print timing report summary at the end of the program.");
@@ -417,8 +457,8 @@ TestgenOptions::TestgenOptions()
             dcg = true;
             return true;
         },
-        R"(Build a DCG for input graph. This control flow graph directed cyclic graph can be used
-        for statement reachability analysis.)");
+        "[EXPERIMENTAL] Build a DCG for input graph. This control flow graph directed cyclic graph "
+        "can be used for statement reachability analysis.");
 
     registerOption(
         "--pattern", "pattern",
@@ -427,6 +467,14 @@ TestgenOptions::TestgenOptions()
             return true;
         },
         "List of the selected branches which should be chosen for selection.");
+
+    registerOption(
+        "--test-name", "testBaseName",
+        [this](const char *arg) {
+            testBaseName = cstring(arg);
+            return true;
+        },
+        "The base name of the tests which are generated.");
 
     registerOption(
         "--disable-assumption-mode", nullptr,
@@ -453,6 +501,18 @@ TestgenOptions::TestgenOptions()
             return true;
         },
         R"(Measure path)");
+}
+
+bool TestgenOptions::validateOptions() const {
+    if (minCoverage > 0 && !hasCoverageTracking) {
+        ::error(
+            ErrorType::ERR_INVALID,
+            "It is not allowed to have --assert-min-coverage set to non-zero without a coverage "
+            "tracking enabled with --track-coverage option. Without coverage tracking, the "
+            "--assert-min-coverage is meaningless.");
+        return false;
+    }
+    return true;
 }
 
 }  // namespace P4Tools::P4Testgen

@@ -17,16 +17,22 @@ limitations under the License.
 #ifndef TEST_GTEST_HELPERS_H_
 #define TEST_GTEST_HELPERS_H_
 
+#include <gtest/gtest.h>
+
+#include <filesystem>
 #include <optional>
 #include <string>
 
 #include "frontends/common/options.h"
 #include "frontends/p4/parseAnnotations.h"
-#include "gtest/gtest.h"
 
 namespace IR {
 class P4Program;
 }  // namespace IR
+
+namespace P4 {
+class FrontEndPolicy;
+}  // namespace P4
 
 /// Specifies which standard headers should be included by a GTest.
 enum class P4Headers {
@@ -36,7 +42,7 @@ enum class P4Headers {
     PSA       // Both core.p4 and psa.p4
 };
 
-namespace detail {
+namespace TestDetail {
 
 /**
  * Transforms the P4 program (or program fragment) in @rawSource to turn it into
@@ -59,12 +65,12 @@ std::string makeP4Source(const char *file, unsigned line, P4Headers headers, con
 /// `makeP4Source(file, line, P4Headers::NONE, rawSource);`.
 std::string makeP4Source(const char *file, unsigned line, const char *rawSource);
 
-}  // namespace detail
+}  // namespace TestDetail
 
 // A macro which should be used by unit tests to define P4 source code. It adds
 // additional information to the source code to aid in debugging; see
 // makeP4Source for more information and parameter details.
-#define P4_SOURCE(...) detail::makeP4Source(__FILE__, __LINE__, __VA_ARGS__)
+#define P4_SOURCE(...) TestDetail::makeP4Source(__FILE__, __LINE__, __VA_ARGS__)
 
 class P4CTestEnvironment {
     // XXX(seth): Ideally this would be a ::testing::Environment subclass, but
@@ -86,6 +92,9 @@ class P4CTestEnvironment {
 
     /// @return a string containing the "psa.p4" P4 standard header.
     const std::string &psaP4() const { return _psaP4; }
+
+    /// @return the path to the P4C project root.
+    static std::filesystem::path getProjectRoot();
 
  private:
     P4CTestEnvironment();
@@ -113,18 +122,45 @@ struct FrontendTestCase {
     static const CompilerOptions::FrontendVersion defaultVersion =
         CompilerOptions::FrontendVersion::P4_16;
 
-    /// Create a test case that only requires the frontend to run.
+    /// Create a test case that only requires the frontend to run. If policy is nullptr the default
+    /// FrontEndPolicy is used.
     static std::optional<FrontendTestCase> create(
         const std::string &source, CompilerOptions::FrontendVersion langVersion = defaultVersion,
-        P4::ParseAnnotations parseAnnotations = P4::ParseAnnotations());
+        P4::FrontEndPolicy *policy = nullptr);
 
     static std::optional<FrontendTestCase> create(const std::string &source,
-                                                  P4::ParseAnnotations parseAnnotations) {
-        return create(source, defaultVersion, parseAnnotations);
+                                                  P4::FrontEndPolicy *policy) {
+        return create(source, defaultVersion, policy);
     }
 
     /// The output of the frontend.
     const IR::P4Program *program;
+};
+
+/// Redirects std::cerr temporarily
+struct RedirectStderr {
+    RedirectStderr() : old(std::cerr.rdbuf(stream.rdbuf())) {}
+    ~RedirectStderr() { reset(); }
+
+    std::string str() { return stream.str(); }
+
+    bool contains(std::string other) { return stream.str().find(other) != std::string::npos; }
+
+    void reset() {
+        if (old) {
+            std::cerr.rdbuf(old);
+        }
+        old = nullptr;
+    }
+
+    void dumpAndReset() {
+        reset();
+        std::cerr << stream.str();
+    }
+
+ private:
+    std::stringstream stream;
+    std::streambuf *old = nullptr;
 };
 
 }  // namespace Test

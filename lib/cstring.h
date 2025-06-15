@@ -20,9 +20,11 @@ limitations under the License.
 #include <cstddef>
 #include <cstring>
 #include <functional>
-#include <iomanip>
 #include <sstream>
 #include <string>
+#include <string_view>
+
+#include "hash.h"
 
 /**
  * A cstring is a reference to a zero-terminated, immutable, interned string.
@@ -68,13 +70,20 @@ limitations under the License.
  * This is convenient, but in performance-sensitive code it's good to be aware
  * that mixing the two types of strings can trigger a lot of implicit copies.
  */
+
+class cstring;
+
+namespace P4::literals {
+inline cstring operator""_cs(const char *str, std::size_t len);
+}
+
 class cstring {
     const char *str = nullptr;
 
  public:
     cstring() = default;
-    // TODO (DanilLutsenko): Enable when initialization with 0 will be eliminated
-    // cstring(std::nullptr_t) {} // NOLINT(runtime/explicit)
+
+    cstring(std::nullptr_t) {}  // NOLINT(runtime/explicit)
 
     // Copy and assignment from other kinds of strings
 
@@ -90,7 +99,7 @@ class cstring {
     // Owner of string is someone else, we do not know size of string.
     // Do not use if possible, this is linear time operation if string
     // not exists in table, because the underlying string must be copied.
-    cstring(const char *string) {  // NOLINT(runtime/explicit)
+    explicit cstring(const char *string) {
         if (string != nullptr) {
             construct_from_shared(string, std::strlen(string));
         }
@@ -99,6 +108,12 @@ class cstring {
     // construct cstring from std::string. Do not use if possible, this is linear
     // time operation if string not exists in table, because the underlying string must be copied.
     cstring(const std::string &string) {  // NOLINT(runtime/explicit)
+        construct_from_shared(string.data(), string.length());
+    }
+
+    // construct cstring from std::string_view. Do not use if possible, this is linear
+    // time operation if string not exists in table, because the underlying string must be copied.
+    explicit cstring(std::string_view string) {  // NOLINT(runtime/explicit)
         construct_from_shared(string.data(), string.length());
     }
 
@@ -143,6 +158,8 @@ class cstring {
     // string is literal
     void construct_from_literal(const char *string, std::size_t length);
 
+    friend cstring P4::literals::operator""_cs(const char *str, std::size_t len);
+
  public:
     /// @return a version of the string where all necessary characters
     /// are properly escaped to make this into a json string (without
@@ -157,6 +174,14 @@ class cstring {
     char get(unsigned index) const { return (index < size()) ? str[index] : 0; }
     const char *c_str() const { return str; }
     operator const char *() const { return str; }
+
+    std::string string() const { return str ? std::string(str) : std::string(""); }
+    explicit operator std::string() const { return string(); }
+
+    std::string_view string_view() const {
+        return str ? std::string_view(str) : std::string_view("");
+    }
+    explicit operator std::string_view() const { return string_view(); }
 
     // Size tests. Constant time except for size(), which is linear time.
     size_t size() const {
@@ -183,6 +208,9 @@ class cstring {
     bool operator==(cstring a) const { return str == a.str; }
     bool operator!=(cstring a) const { return str != a.str; }
 
+    bool operator==(std::nullptr_t) const { return str == nullptr; }
+    bool operator!=(std::nullptr_t) const { return str != nullptr; }
+
     // Other comparisons and tests. Linear time.
     bool operator==(const char *a) const { return str ? a && !strcmp(str, a) : !a; }
     bool operator!=(const char *a) const { return str ? !a || !!strcmp(str, a) : !!a; }
@@ -194,6 +222,8 @@ class cstring {
     bool operator>(const char *a) const { return str ? !a || strcmp(str, a) > 0 : false; }
     bool operator>=(cstring a) const { return *this >= a.str; }
     bool operator>=(const char *a) const { return str ? !a || strcmp(str, a) >= 0 : !a; }
+    bool operator==(std::string_view a) const { return str ? a.compare(str) == 0 : a.empty(); }
+    bool operator!=(std::string_view a) const { return str ? a.compare(str) != 0 : !a.empty(); }
 
     bool operator==(const std::string &a) const { return *this == a.c_str(); }
     bool operator!=(const std::string &a) const { return *this != a.c_str(); }
@@ -202,8 +232,8 @@ class cstring {
     bool operator>(const std::string &a) const { return *this > a.c_str(); }
     bool operator>=(const std::string &a) const { return *this >= a.c_str(); }
 
-    bool startsWith(const cstring &prefix) const;
-    bool endsWith(const cstring &suffix) const;
+    bool startsWith(std::string_view prefix) const;
+    bool endsWith(std::string_view suffix) const;
 
     // FIXME (DanilLutsenko): We really need mutations for immutable string?
     // Probably better do transformation in std::string-like containter and
@@ -220,21 +250,15 @@ class cstring {
 
     cstring before(const char *at) const;
     cstring substr(size_t start) const {
-        return (start >= size()) ? "" : substr(start, size() - start);
+        return (start >= size()) ? cstring::literal("") : substr(start, size() - start);
     }
     cstring substr(size_t start, size_t length) const;
     cstring replace(char find, char replace) const;
-    cstring replace(cstring find, cstring replace) const;
+    cstring replace(std::string_view find, std::string_view replace) const;
     cstring exceptLast(size_t count) { return substr(0, size() - count); }
 
     // trim leading and trailing whitespace (or other)
-    cstring trim(const char *ws = " \t\r\n") const {
-        if (!str) return *this;
-        const char *start = str + strspn(str, ws);
-        size_t len = strlen(start);
-        while (len > 0 && strchr(ws, start[len - 1])) --len;
-        return cstring(start, len);
-    }
+    cstring trim(const char *ws = " \t\r\n") const;
 
     // Useful singletons.
     static cstring newline;
@@ -265,9 +289,11 @@ class cstring {
     /// to the total number of interned strings.
     static size_t cache_size(size_t &count);
 
-    /// convert the cstring to upper case
+    /// Convert the cstring to uppercase.
     cstring toUpper() const;
-    /// capitalize the first symbol
+    /// Convert the cstring to lowercase.
+    cstring toLower() const;
+    /// Capitalize the first symbol.
     cstring capitalize() const;
     /// Append this many spaces after each newline (and before the first string).
     cstring indent(size_t amount) const;
@@ -275,6 +301,8 @@ class cstring {
 
 inline bool operator==(const char *a, cstring b) { return b == a; }
 inline bool operator!=(const char *a, cstring b) { return b != a; }
+inline bool operator==(const std::string &a, cstring b) { return b == a; }
+inline bool operator!=(const std::string &a, cstring b) { return b != a; }
 
 inline std::string operator+(cstring a, cstring b) {
     std::string rv(a);
@@ -356,14 +384,37 @@ inline std::ostream &operator<<(std::ostream &out, cstring s) {
     return out << (s ? s.c_str() : "<null>");
 }
 
+/// Let's prevent literal clashes. A user wishing to use the literal can do using namespace
+/// P4::literals, similarly as they can do using namespace std::literals for the standard once.
+namespace P4::literals {
+
+/// A user-provided literal suffix to allow creation of cstring from literals: "foo"_cs.
+/// Note that the C++ standard mandates that all user-defined literal suffixes defined outside of
+/// the standard library must start with underscore.
+inline cstring operator""_cs(const char *str, std::size_t len) {
+    cstring result;
+    result.construct_from_literal(str, len);
+    return result;
+}
+}  // namespace P4::literals
+
 namespace std {
 template <>
 struct hash<cstring> {
     std::size_t operator()(const cstring &c) const {
-        // This implementation is good for cstring, since the strings are internalized
-        return hash<const void *>()(c.c_str());
+        // cstrings are internalized, therefore their addresses are unique; we
+        // can just use their address to produce hash.
+        return Util::Hash{}(c.c_str());
     }
 };
 }  // namespace std
+
+namespace Util {
+template <>
+struct Hasher<cstring> {
+    size_t operator()(const cstring &c) const { return Util::Hash{}(c.c_str()); }
+};
+
+}  // namespace Util
 
 #endif /* LIB_CSTRING_H_ */

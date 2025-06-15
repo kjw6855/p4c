@@ -19,16 +19,11 @@ limitations under the License.
 #include <strings.h>
 
 #include <functional>
-#include <iterator>
 #include <list>
 #include <map>
-#include <sstream>
-#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include <boost/format.hpp>
 
 #include "ir/declaration.h"
 #include "ir/id.h"
@@ -43,23 +38,22 @@ limitations under the License.
 #include "lib/log.h"
 #include "lib/null.h"
 #include "lib/ordered_map.h"
-#include "lib/safe_vector.h"
 
 namespace IR {
 
-const cstring ParserState::accept = "accept";
-const cstring ParserState::reject = "reject";
-const cstring ParserState::start = "start";
-const cstring ParserState::verify = "verify";
+const cstring ParserState::accept = "accept"_cs;
+const cstring ParserState::reject = "reject"_cs;
+const cstring ParserState::start = "start"_cs;
+const cstring ParserState::verify = "verify"_cs;
 
-const cstring TableProperties::actionsPropertyName = "actions";
-const cstring TableProperties::keyPropertyName = "key";
-const cstring TableProperties::defaultActionPropertyName = "default_action";
-const cstring TableProperties::entriesPropertyName = "entries";
-const cstring TableProperties::sizePropertyName = "size";
-const cstring IApply::applyMethodName = "apply";
-const cstring P4Program::main = "main";
-const cstring Type_Error::error = "error";
+const cstring TableProperties::actionsPropertyName = "actions"_cs;
+const cstring TableProperties::keyPropertyName = "key"_cs;
+const cstring TableProperties::defaultActionPropertyName = "default_action"_cs;
+const cstring TableProperties::entriesPropertyName = "entries"_cs;
+const cstring TableProperties::sizePropertyName = "size"_cs;
+const cstring IApply::applyMethodName = "apply"_cs;
+const cstring P4Program::main = "main"_cs;
+const cstring Type_Error::error = "error"_cs;
 
 long IR::Declaration::nextId = 0;
 long IR::This::nextId = 0;
@@ -77,22 +71,18 @@ const Type_Method *Type_Package::getConstructorMethodType() const {
 }
 
 Util::Enumerator<const IR::IDeclaration *> *IGeneralNamespace::getDeclsByName(cstring name) const {
-    std::function<bool(const IDeclaration *)> filter = [name](const IDeclaration *d) {
+    return getDeclarations()->where([name](const IDeclaration *d) {
         CHECK_NULL(d);
         return name == d->getName().name;
-    };
-    return getDeclarations()->where(filter);
+    });
 }
 
 Util::Enumerator<const IDeclaration *> *INestedNamespace::getDeclarations() const {
     Util::Enumerator<const IDeclaration *> *rv = nullptr;
-    for (auto nested : getNestedNamespaces()) {
-        if (nested) {
-            if (rv)
-                rv = rv->concat(nested->getDeclarations());
-            else
-                rv = nested->getDeclarations();
-        }
+    for (const auto *nested : getNestedNamespaces()) {
+        if (nested == nullptr) continue;
+
+        rv = rv ? rv->concat(nested->getDeclarations()) : nested->getDeclarations();
     }
     return rv ? rv : new Util::EmptyEnumerator<const IDeclaration *>;
 }
@@ -120,8 +110,7 @@ bool IFunctional::callMatches(const Vector<Argument> *arguments) const {
     }
     // Check if all remaining parameters have default values
     // or are optional.
-    for (auto it : paramNames) {
-        auto param = it.second;
+    for (const auto &[_, param] : paramNames) {
         if (!param->isOptional() && !param->defaultValue) return false;
     }
     return true;
@@ -158,8 +147,11 @@ size_t Type_Stack::getSize() const {
         ::error(ErrorType::ERR_OVERLIMIT, "Index too large: %1%", cst);
         return 0;
     }
-    int size = cst->asInt();
-    if (size < 0) ::error(ErrorType::ERR_OVERLIMIT, "Illegal array size: %1%", cst);
+    auto size = cst->asInt();
+    if (size < 0) {
+        ::error(ErrorType::ERR_OVERLIMIT, "Illegal array size: %1%", cst);
+        return 0;
+    }
     return static_cast<size_t>(size);
 }
 
@@ -220,6 +212,25 @@ const Type_Method *P4Table::getApplyMethodType() const {
 
 const Type_Method *Type_Table::getApplyMethodType() const { return table->getApplyMethodType(); }
 
+void BlockStatement::append(const StatOrDecl *stmt) {
+    srcInfo += stmt->srcInfo;
+    if (auto bs = stmt->to<BlockStatement>()) {
+        bool merge = true;
+        for (auto annot : bs->annotations->annotations) {
+            auto a = annotations->getSingle(annot->name);
+            if (!a || !a->equiv(*annot)) {
+                merge = false;
+                break;
+            }
+        }
+        if (merge) {
+            components.append(bs->components);
+            return;
+        }
+    }
+    components.push_back(stmt);
+}
+
 void Block::setValue(const Node *node, const CompileTimeValue *value) {
     CHECK_NULL(node);
     auto it = constantValue.find(node);
@@ -266,24 +277,27 @@ Util::Enumerator<const IDeclaration *> *P4Program::getDeclarations() const {
 const IR::PackageBlock *ToplevelBlock::getMain() const {
     auto program = getProgram();
     auto mainDecls = program->getDeclsByName(IR::P4Program::main)->toVector();
-    if (mainDecls->size() == 0) {
+    if (mainDecls.empty()) {
         ::warning(ErrorType::WARN_MISSING, "Program does not contain a `%s' module",
                   IR::P4Program::main);
         return nullptr;
     }
-    auto main = mainDecls->at(0);
-    if (mainDecls->size() > 1) {
+    auto main = mainDecls[0];
+    if (mainDecls.size() > 1) {
         ::error(ErrorType::ERR_DUPLICATE, "Program has multiple `%s' instances: %1%, %2%",
-                IR::P4Program::main, main->getNode(), mainDecls->at(1)->getNode());
+                IR::P4Program::main, main->getNode(), mainDecls[1]->getNode());
         return nullptr;
     }
     if (!main->is<IR::Declaration_Instance>()) {
-        ::error(ErrorType::ERR_INVALID, "%1$: must be a package declaration", main->getNode());
+        ::error(ErrorType::ERR_INVALID, "%1%: must be a package declaration", main->getNode());
         return nullptr;
     }
     auto block = getValue(main->getNode());
     if (block == nullptr) return nullptr;
-    BUG_CHECK(block->is<IR::PackageBlock>(), "%1%: toplevel block is not a package", block);
+    if (!block->is<IR::PackageBlock>()) {
+        ::error(ErrorType::ERR_EXPECTED, "%1%: expected package declaration", block);
+        return nullptr;
+    }
     return block->to<IR::PackageBlock>();
 }
 

@@ -151,7 +151,7 @@ class ParserStructure {
     std::map<cstring, size_t> callsIndexes;  // map for curent calls of state insite current one
     void setParser(const IR::P4Parser *parser) {
         CHECK_NULL(parser);
-        callGraph = new StateCallGraph(parser->name);
+        callGraph = new StateCallGraph(parser->name.name.string_view());
         this->parser = parser;
         start = nullptr;
     }
@@ -254,8 +254,7 @@ class RewriteAllParsers : public Transform {
         if (rewriter->hasOutOfboundState) {
             // generating state with verify(false, error.StackOutOfBounds)
             IR::Vector<IR::Argument> *arguments = new IR::Vector<IR::Argument>();
-            arguments->push_back(
-                new IR::Argument(new IR::BoolLiteral(IR::Type::Boolean::get(), false)));
+            arguments->push_back(new IR::Argument(IR::BoolLiteral::get(false)));
             arguments->push_back(new IR::Argument(
                 new IR::Member(new IR::TypeNameExpression(new IR::Type_Name(IR::ID("error"))),
                                IR::ID("StackOutOfBounds"))));
@@ -269,12 +268,12 @@ class RewriteAllParsers : public Transform {
                 IR::Type::Void::get(),
                 new IR::PathExpression(
                     new IR::Type_Method(IR::Type::Void::get(), new IR::ParameterList(parameters),
-                                        "*method"),
+                                        "*method"_cs),
                     new IR::Path(IR::ID("verify"))),
                 arguments)));
             auto *outOfBoundsState = new IR::ParserState(
                 IR::ID(outOfBoundsStateName), components,
-                new IR::PathExpression(new IR::Type_State(),
+                new IR::PathExpression(IR::Type_State::get(),
                                        new IR::Path(IR::ParserState::reject, false)));
             newParser->states.push_back(outOfBoundsState);
         }
@@ -299,7 +298,7 @@ class ParsersUnroll : public PassManager {
  public:
     ParsersUnroll(bool unroll, ReferenceMap *refMap, TypeMap *typeMap) {
         // remove block statements
-        passes.push_back(new SimplifyControlFlow(refMap, typeMap));
+        passes.push_back(new SimplifyControlFlow(typeMap));
         passes.push_back(new TypeChecking(refMap, typeMap));
         passes.push_back(new RewriteAllParsers(refMap, typeMap, unroll));
         setName("ParsersUnroll");

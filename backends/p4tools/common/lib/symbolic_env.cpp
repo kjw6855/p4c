@@ -1,18 +1,14 @@
 #include "backends/p4tools/common/lib/symbolic_env.h"
 
 #include <algorithm>
-#include <string>
 #include <utility>
-#include <vector>
 
 #include <boost/container/vector.hpp>
 
 #include "backends/p4tools/common/lib/model.h"
-#include "frontends/p4/optimizeExpressions.h"
 #include "ir/indexed_vector.h"
 #include "ir/vector.h"
 #include "ir/visitor.h"
-#include "lib/cstring.h"
 #include "lib/exceptions.h"
 
 namespace P4Tools {
@@ -28,7 +24,10 @@ const IR::Expression *SymbolicEnv::get(const IR::StateVariable &var) const {
 bool SymbolicEnv::exists(const IR::StateVariable &var) const { return map.find(var) != map.end(); }
 
 void SymbolicEnv::set(const IR::StateVariable &var, const IR::Expression *value) {
-    map[var] = P4::optimizeExpression(value);
+    BUG_CHECK(value->type && !value->type->is<IR::Type_Unknown>(),
+              "Cannot set value for node %1% with unspecified type: %2%", value->node_type_name(),
+              value);
+    map[var] = value;
 }
 
 const IR::Expression *SymbolicEnv::subst(const IR::Expression *expr) const {
@@ -87,11 +86,14 @@ bool SymbolicEnv::isSymbolicValue(const IR::Node *node) {
 
     // Concrete constants and symbolic constants form the basis of symbolic values.
     //
-    // Constants and BoolLiterals are concrete constants.
+    // Constants, StringLiterals, and BoolLiterals are concrete constants.
     if (expr->is<IR::Constant>()) {
         return true;
     }
     if (expr->is<IR::BoolLiteral>()) {
+        return true;
+    }
+    if (expr->is<IR::StringLiteral>()) {
         return true;
     }
     // Tainted expressions are symbolic values.
@@ -102,11 +104,14 @@ bool SymbolicEnv::isSymbolicValue(const IR::Node *node) {
     if (expr->is<IR::ConcolicVariable>()) {
         return true;
     }
-    // DefaultExpresssions are symbolic values.
+    // DefaultExpressions are symbolic values.
     if (expr->is<IR::DefaultExpression>()) {
         return true;
     }
-
+    // InOut references are symbolic when the resolved input argument is symbolic.
+    if (const auto *inout = expr->to<IR::InOutReference>()) {
+        return isSymbolicValue(inout->resolvedRef);
+    }
     // Symbolic values can be composed using several IR nodes.
     if (const auto *unary = expr->to<IR::Operation_Unary>()) {
         return (unary->is<IR::Neg>() || unary->is<IR::LNot>() || unary->is<IR::Cmpl>() ||
@@ -114,9 +119,6 @@ bool SymbolicEnv::isSymbolicValue(const IR::Node *node) {
                isSymbolicValue(unary->expr);
     }
     if (const auto *binary = expr->to<IR::Operation_Binary>()) {
-        if (binary->is<IR::ArrayIndex>()) {
-            return isSymbolicValue(binary->right);
-        }
         return (binary->is<IR::Add>() || binary->is<IR::Sub>() || binary->is<IR::Mul>() ||
                 binary->is<IR::Div>() || binary->is<IR::Mod>() || binary->is<IR::Equ>() ||
                 binary->is<IR::Neq>() || binary->is<IR::Lss>() || binary->is<IR::Leq>() ||
@@ -130,16 +132,22 @@ bool SymbolicEnv::isSymbolicValue(const IR::Node *node) {
         return isSymbolicValue(slice->e0) && isSymbolicValue(slice->e1) &&
                isSymbolicValue(slice->e2);
     }
-    if (const auto *listExpr = expr->to<IR::ListExpression>()) {
+    if (const auto *listExpr = expr->to<IR::BaseListExpression>()) {
         return std::all_of(
             listExpr->components.begin(), listExpr->components.end(),
             [](const IR::Expression *component) { return isSymbolicValue(component); });
     }
     if (const auto *structExpr = expr->to<IR::StructExpression>()) {
-        return std::all_of(structExpr->components.begin(), structExpr->components.end(),
-                           [](const IR::NamedExpression *component) {
-                               return isSymbolicValue(component->expression);
-                           });
+        auto symbolicMembers =
+            std::all_of(structExpr->components.begin(), structExpr->components.end(),
+                        [](const IR::NamedExpression *component) {
+                            return isSymbolicValue(component->expression);
+                        });
+        if (const auto *headerExpr = structExpr->to<IR::HeaderExpression>()) {
+            auto isValid = isSymbolicValue(headerExpr->validity);
+            return isValid && symbolicMembers;
+        }
+        return symbolicMembers;
     }
 
     return false;

@@ -20,11 +20,12 @@ limitations under the License.
 #include "ebpfObject.h"
 #include "ir/ir.h"
 #include "lib/algorithm.h"
+#include "lib/rtti.h"
 #include "lib/sourceCodeBuilder.h"
 
 namespace EBPF {
 
-// Base class for EBPF types
+/// Base class for EBPF types
 class EBPFType : public EBPFObject {
  protected:
     explicit EBPFType(const IR::Type *type) : type(type) {}
@@ -38,24 +39,20 @@ class EBPFType : public EBPFObject {
     virtual void declareArray(CodeBuilder * /*builder*/, cstring /*id*/, unsigned /*size*/) {
         BUG("%1%: unsupported array", type);
     }
-    template <typename T>
-    bool is() const {
-        return dynamic_cast<const T *>(this) != nullptr;
-    }
-    template <typename T>
-    T *to() {
-        return dynamic_cast<T *>(this);
-    }
+
+    DECLARE_TYPEINFO(EBPFType, EBPFObject);
 };
 
-class IHasWidth {
+class IHasWidth : public ICastable {
  public:
     virtual ~IHasWidth() {}
-    // P4 width
-    virtual unsigned widthInBits() = 0;
-    // Width in the target implementation.
-    // Currently a multiple of 8.
-    virtual unsigned implementationWidthInBits() = 0;
+    /// P4 width
+    virtual unsigned widthInBits() const = 0;
+    /// Width in the target implementation.
+    /// Currently a multiple of 8.
+    virtual unsigned implementationWidthInBits() const = 0;
+
+    DECLARE_TYPEINFO(IHasWidth);
 };
 
 class EBPFTypeFactory {
@@ -78,8 +75,10 @@ class EBPFBoolType : public EBPFType, public IHasWidth {
     void declare(CodeBuilder *builder, cstring id, bool asPointer) override;
     void declareInit(CodeBuilder *builder, cstring id, bool asPointer) override;
     void emitInitializer(CodeBuilder *builder) override { builder->append("0"); }
-    unsigned widthInBits() override { return 1; }
-    unsigned implementationWidthInBits() override { return 8; }
+    unsigned widthInBits() const override { return 1; }
+    unsigned implementationWidthInBits() const override { return 8; }
+
+    DECLARE_TYPEINFO(EBPFBoolType, EBPFType, IHasWidth);
 };
 
 class EBPFStackType : public EBPFType, public IHasWidth {
@@ -91,14 +90,17 @@ class EBPFStackType : public EBPFType, public IHasWidth {
         : EBPFType(type), elementType(elementType), size(type->getSize()) {
         CHECK_NULL(type);
         CHECK_NULL(elementType);
-        BUG_CHECK(elementType->is<IHasWidth>(), "Unexpected element type %1%", elementType);
+        BUG_CHECK(elementType->is<IHasWidth>(), "Unexpected element type %1%",
+                  typeid(*elementType).name());
     }
     void emit(CodeBuilder *) override {}
     void declare(CodeBuilder *builder, cstring id, bool asPointer) override;
     void declareInit(CodeBuilder *builder, cstring id, bool asPointer) override;
     void emitInitializer(CodeBuilder *builder) override;
-    unsigned widthInBits() override;
-    unsigned implementationWidthInBits() override;
+    unsigned widthInBits() const override;
+    unsigned implementationWidthInBits() const override;
+
+    DECLARE_TYPEINFO(EBPFStackType, EBPFType, IHasWidth);
 };
 
 class EBPFScalarType : public EBPFType, public IHasWidth {
@@ -107,19 +109,23 @@ class EBPFScalarType : public EBPFType, public IHasWidth {
     const bool isSigned;
     explicit EBPFScalarType(const IR::Type_Bits *bits)
         : EBPFType(bits), width(bits->size), isSigned(bits->isSigned) {}
+    explicit EBPFScalarType(const IR::Type_Varbits *bits)
+        : EBPFType(bits), width(bits->size), isSigned(false) {}
     unsigned bytesRequired() const { return ROUNDUP(width, 8); }
     unsigned alignment() const;
     void emit(CodeBuilder *builder) override;
     void declare(CodeBuilder *builder, cstring id, bool asPointer) override;
     void declareInit(CodeBuilder *builder, cstring id, bool asPointer) override;
     void emitInitializer(CodeBuilder *builder) override;
-    unsigned widthInBits() override { return width; }
-    unsigned implementationWidthInBits() override { return bytesRequired() * 8; }
+    unsigned widthInBits() const override { return width; }
+    unsigned implementationWidthInBits() const override { return bytesRequired() * 8; }
     // True if this width is small enough to store in a machine scalar
     static bool generatesScalar(unsigned width) { return width <= 64; }
+
+    DECLARE_TYPEINFO(EBPFScalarType, EBPFType, IHasWidth);
 };
 
-// This should not always implement IHasWidth, but it may...
+/// This should not always implement IHasWidth, but it may...
 class EBPFTypeName : public EBPFType, public IHasWidth {
     const IR::Type_Name *type;
     EBPFType *canonical;
@@ -131,17 +137,19 @@ class EBPFTypeName : public EBPFType, public IHasWidth {
     void declare(CodeBuilder *builder, cstring id, bool asPointer) override;
     void declareInit(CodeBuilder *builder, cstring id, bool asPointer) override;
     void emitInitializer(CodeBuilder *builder) override;
-    unsigned widthInBits() override;
-    unsigned implementationWidthInBits() override;
+    unsigned widthInBits() const override;
+    unsigned implementationWidthInBits() const override;
     void declareArray(CodeBuilder *builder, cstring id, unsigned size) override;
 
     template <typename T>
     bool canonicalTypeIs() const {
-        return dynamic_cast<const T *>(this->canonical) != nullptr;
+        return this->canonical->is<T>();
     }
+
+    DECLARE_TYPEINFO(EBPFTypeName, EBPFType, IHasWidth);
 };
 
-// Also represents headers and unions
+/// Also represents headers and unions
 class EBPFStructType : public EBPFType, public IHasWidth {
     class EBPFField {
      public:
@@ -164,10 +172,12 @@ class EBPFStructType : public EBPFType, public IHasWidth {
     void declare(CodeBuilder *builder, cstring id, bool asPointer) override;
     void declareInit(CodeBuilder *builder, cstring id, bool asPointer) override;
     void emitInitializer(CodeBuilder *builder) override;
-    unsigned widthInBits() override { return width; }
-    unsigned implementationWidthInBits() override { return implWidth; }
+    unsigned widthInBits() const override { return width; }
+    unsigned implementationWidthInBits() const override { return implWidth; }
     void emit(CodeBuilder *builder) override;
     void declareArray(CodeBuilder *builder, cstring id, unsigned size) override;
+
+    DECLARE_TYPEINFO(EBPFStructType, EBPFType, IHasWidth);
 };
 
 class EBPFEnumType : public EBPFType, public EBPF::IHasWidth {
@@ -177,9 +187,40 @@ class EBPFEnumType : public EBPFType, public EBPF::IHasWidth {
     void declare(CodeBuilder *builder, cstring id, bool asPointer) override;
     void declareInit(CodeBuilder *builder, cstring id, bool asPointer) override;
     void emitInitializer(CodeBuilder *builder) override { builder->append("0"); }
-    unsigned widthInBits() override { return 32; }
-    unsigned implementationWidthInBits() override { return 32; }
+    unsigned widthInBits() const override { return 32; }
+    unsigned implementationWidthInBits() const override { return 32; }
     const IR::Type_Enum *getType() const { return type->to<IR::Type_Enum>(); }
+
+    DECLARE_TYPEINFO(EBPFEnumType, EBPFType, IHasWidth);
+};
+
+class EBPFErrorType : public EBPFType, public EBPF::IHasWidth {
+ public:
+    explicit EBPFErrorType(const IR::Type_Error *type) : EBPFType(type) {}
+    void emit(CodeBuilder *builder) override;
+    void declare(CodeBuilder *builder, cstring id, bool asPointer) override;
+    void declareInit(CodeBuilder *builder, cstring id, bool asPointer) override;
+    void emitInitializer(CodeBuilder *builder) override { builder->append("0"); }
+    unsigned widthInBits() const override { return 32; }
+    unsigned implementationWidthInBits() const override { return 32; }
+    const IR::Type_Error *getType() const { return type->to<IR::Type_Error>(); }
+
+    DECLARE_TYPEINFO(EBPFErrorType, EBPFType, IHasWidth);
+};
+
+/// Methods are function signatures.
+class EBPFMethodDeclaration : public EBPFObject {
+ private:
+    /// The underlying P4 method of this declaration.
+    const IR::Method *method_;
+
+ public:
+    explicit EBPFMethodDeclaration(const IR::Method *method);
+
+    /// Emit the signature declaration of this method in C-style form.
+    void emit(CodeBuilder *builder);
+
+    DECLARE_TYPEINFO(EBPFMethodDeclaration, EBPFObject);
 };
 
 }  // namespace EBPF

@@ -49,6 +49,7 @@ class TCActionParam {
     cstring paramName;
     unsigned dataType;
     unsigned bitSize;
+    unsigned direction;
     void setParamName(cstring pN) {
         paramName = pN;
     }
@@ -57,6 +58,9 @@ class TCActionParam {
     }
     void setDataType(unsigned d) {
         dataType = d;
+    }
+    void setDirection(unsigned d){
+        direction = d;
     }
     TCActionParam() {
         paramName = nullptr;
@@ -67,6 +71,39 @@ class TCActionParam {
     }
     cstring getName() const {
         return "param." + paramName;
+    }
+    unsigned getDirection() const {
+        return direction;
+    }
+    cstring getParamType() const {
+        std::string paramType = "";
+        switch(dataType) {
+            case TC::BIT_TYPE :
+                paramType += "__u" + Util::toString(bitSize);
+                break;
+            case TC::DEV_TYPE :
+                paramType += "dev";
+                break;
+            case TC::MACADDR_TYPE :
+                paramType += "macaddr";
+                break;
+            case TC::IPV4_TYPE :
+                paramType += "ipv4";
+                break;
+            case TC::IPV6_TYPE :
+                paramType += "ipv6";
+                break;
+            case TC::BE16_TYPE :
+                paramType += "__be16";
+                break;
+            case TC::BE32_TYPE :
+                paramType += "__be32";
+                break;
+            case TC::BE64_TYPE :
+                paramType += "__be64";
+                break;
+        } 
+        return paramType;
     }
     toString {
         std::string tcActionParam = "";
@@ -104,15 +141,44 @@ class TCActionParam {
     dbprint { out << toString(); }
 }
 
+class TCDefaultActionParam {
+    TCActionParam paramDetail;
+    cstring defaultValue;
+    void setParamDetail(TCActionParam pN) {
+        paramDetail = pN;
+    }
+    void setDefaultValue(cstring dV) {
+        defaultValue = dV;
+    }
+    TCDefaultActionParam() {
+        paramDetail = nullptr;
+        defaultValue = nullptr;
+    }
+    toString {
+        std::string tcActionParam = "";
+        tcActionParam += " " + paramDetail->paramName;
+        if (defaultValue != nullptr)
+            tcActionParam += " " + defaultValue;
+        return tcActionParam;
+    }
+    dbprint { out << toString(); }
+}
+
 class TCAction {
     cstring actionName;
     cstring pipelineName;
     unsigned actId;
     optional safe_vector<TCActionParam> actionParams;
     cstring getName() const {
-        cstring tcAction = pipelineName;
+        if (actionName == "NoAction") {
+            return actionName;
+        }
+        std::string tcAction = pipelineName.string();
         tcAction += "/" + actionName;
         return tcAction;
+    }
+    cstring getActionName() const {
+        return actionName;
     }
     void setPipelineName(cstring pN) {
         pipelineName = pN;
@@ -151,22 +217,56 @@ class TCAction {
     dbprint { out << toString(); }
 }
 
+class TCEntry {
+    cstring action;
+    ordered_map<cstring,cstring> keys;
+    cstring getActionName() const {
+        return action;
+    }
+    toString {
+        std::string tcEntry = "";
+        for(auto k : keys) {
+            tcEntry += " " + k.first + " " + k.second;
+        }
+        return tcEntry;
+    }
+    dbprint { out << toString(); }
+}
+
 class TCTable {
     unsigned tableID;
     cstring tableName;
     cstring controlName;
     cstring pipelineName;
+    cstring permissions;
+    cstring directCounterInstance;
     unsigned keySize;
     unsigned tableEntriesCount;
     unsigned numMask;
     unsigned matchType;
-    TCAction preaction;
-    TCAction postaction;
+    unsigned timerProfiles;
+    unsigned defaultTimerProfiles = 4;
     TCAction defaultHitAction;
     bool isDefaultHitConst;
+    bool isTcMayOverrideHit;
+    optional safe_vector<TCDefaultActionParam> defaultHitActionParams;
     TCAction defaultMissAction;
     bool isDefaultMissConst;
+    bool isTcMayOverrideMiss;
+    optional safe_vector<TCDefaultActionParam> defaultMissActionParams;
+    bool isTableAddOnMiss;
+    bool isTcMayOverride;
+    bool isDirectCounter;
     ordered_map<TCAction, unsigned> actionList;
+    safe_vector<TCEntry> const_entries;
+
+    void setTablePermission(cstring p) {
+        permissions = p;
+    }
+    void setDirectCounter(cstring counter) {
+        isDirectCounter = true;
+        directCounterInstance = counter;
+    }
     void setKeySize(unsigned k) {
         keySize = k;
     }
@@ -178,12 +278,6 @@ class TCTable {
     }
     void setMatchType(unsigned m) {
         matchType = m;
-    }
-    void setPreaction(TCAction p) {
-        preaction = p;
-    }
-    void setPostaction(TCAction p) {
-        postaction = p;
     }
     void setDefaultHitAction(TCAction d) {
         defaultHitAction = d;
@@ -197,20 +291,38 @@ class TCTable {
     void setDefaultMissConst(bool i) {
         isDefaultMissConst = i;
     }
+    void setTcMayOverrideHit() {
+        isTcMayOverrideHit = true;
+    }
+    void setTcMayOverrideMiss() {
+        isTcMayOverrideMiss = true;
+    }
+    void setTableAddOnMiss() {
+        isTableAddOnMiss = true;
+    }
     void addAction(TCAction action, unsigned flag) {
         actionList.emplace(action, flag);
     }
+    void addConstEntries(TCEntry entry) {
+        const_entries.push_back(entry);
+    }
+    void addTimerProfiles(unsigned tp) {
+        timerProfiles = tp;
+    }
+    cstring getTableName() const {
+        return tableName;
+    }
     cstring printMatchType(unsigned matchType) const {
-        cstring matchTypeString = "";
+        cstring matchTypeString = cstring::empty;
         switch(matchType) {
                 case TC::EXACT_TYPE :
-                    matchTypeString = "exact";
+                    matchTypeString = "exact"_cs;
                     break;
                 case TC::LPM_TYPE :
-                    matchTypeString = "lpm";
+                    matchTypeString = "lpm"_cs;
                     break;
                 case TC::TERNARY_TYPE :
-                    matchTypeString = "ternary";
+                    matchTypeString = "ternary"_cs;
                     break;
         }
         return matchTypeString;
@@ -221,15 +333,19 @@ class TCTable {
         controlName = cN;
         pipelineName = pN;
         keySize = 0;
+        timerProfiles = 0;
         tableEntriesCount = TC::DEFAULT_TABLE_ENTRIES;
         numMask = TC::DEFAULT_KEY_MASK;
         matchType = TC::EXACT_TYPE;
-        preaction = nullptr;
-        postaction = nullptr;
         defaultHitAction = nullptr;
         defaultMissAction = nullptr;
         isDefaultHitConst = false;
         isDefaultMissConst = false;
+        isTcMayOverrideHit = false;
+        isTcMayOverrideMiss = false;
+        isTableAddOnMiss = false;
+        isTcMayOverride = false;
+        isDirectCounter = false;
     }
     toString {
         std::string tcTable = "";
@@ -239,7 +355,14 @@ class TCTable {
         tcTable += "\n\ttype " + printMatchType(matchType) + " \\";
         tcTable += "\n\tkeysz " + Util::toString(keySize);
         tcTable += " nummasks " + Util::toString(numMask);
+        tcTable += " permissions " + Util::toString(permissions);
         tcTable += " tentries " + Util::toString(tableEntriesCount);
+        if (isTableAddOnMiss && timerProfiles > defaultTimerProfiles) {
+            tcTable += " num_timer_profiles " + Util::toString(timerProfiles);
+        }
+        if (isDirectCounter) {
+            tcTable += " \\\n\tpna_direct_counter DirectCounter/" + directCounterInstance;
+        }
 
         if (!actionList.empty()) {
             tcTable += " \\";
@@ -257,58 +380,216 @@ class TCTable {
                 }
             }
         }
-
-        if (preaction != nullptr) {
-            tcTable += "\n" + preaction->toString();
-            tcTable += "\n$TC p4template update table/" + pipelineName
-                      + "/" + controlName + "/" + tableName
-                      + " preactions action " + preaction->getName();
-        }
-        if (postaction != nullptr) {
-            tcTable += "\n" + postaction->toString();
-            tcTable += "\n$TC p4template update table/" + pipelineName
-                      + "/" + controlName + "/" + tableName
-                      + " postactions action " + postaction->getName();
-        }
         if (defaultHitAction != nullptr) {
             tcTable += "\n$TC p4template update table/" + pipelineName
                       + "/" + controlName + "/" + tableName
                       + " default_hit_action";
             if (isDefaultHitConst) {
-                tcTable += " permissions 0x109";
+                tcTable += " permissions 0x1024";
             }
             tcTable += " action " + defaultHitAction->getName();
+            if (!defaultHitActionParams.empty())
+                tcTable += " param";
+            for (auto param : defaultHitActionParams)
+                tcTable += param->toString();
+            if (isTcMayOverrideHit)
+                tcTable += " flags runtime";
         }
         if (defaultMissAction != nullptr) {
             tcTable += "\n$TC p4template update table/" + pipelineName
                       + "/" + controlName + "/" + tableName
                       + " default_miss_action";
             if (isDefaultMissConst) {
-                tcTable += " permissions 0x109";
+                tcTable += " permissions 0x1024";
             }
             tcTable += " action " + defaultMissAction->getName();
+            if (!defaultMissActionParams.empty())
+                tcTable += " param";
+            for (auto param : defaultMissActionParams)
+                tcTable += param->toString();
+            if (isTcMayOverrideMiss)
+                tcTable += " flags runtime";
+        }
+        if (const_entries.size() != 0) {
+            for (auto entry : const_entries) {
+                tcTable += "\n$TC p4template create table/" + pipelineName
+                            + "/" + controlName + "/" + tableName
+                            + " entry" + entry->toString();
+                tcTable += " permissions 0x1024";
+                tcTable += " action " + pipelineName
+                            + "/" + controlName + "/" + entry->getActionName();
+            }
         }
         return tcTable;
     }
     dbprint { out << toString(); }
 }
 
+class TCKey {
+    unsigned keyID;
+    unsigned bitwidth;
+    cstring keyName;
+    cstring keyAttribute;
+    bool emitID;
+    bool emitValue;
+    unsigned value;
+    TCKey(unsigned id, unsigned width, cstring name, cstring attr, bool isID) {
+        keyID = id;
+        bitwidth = width;
+        keyName = name;
+        keyAttribute = attr;
+        emitID = isID;
+        emitValue = false;
+    }
+    void setValue(unsigned v) {
+        value = v;
+        emitValue = true;
+    }
+    toString {
+        std::string tckeyInstance = " " + keyAttribute + " " + keyName + " ptype bit" + Util::toString(bitwidth);
+        if (emitID) {
+            tckeyInstance += " id " + Util::toString(keyID);
+        }
+        if (emitValue) {
+            tckeyInstance += " " + Util::toString(value);
+        }
+        return tckeyInstance;
+    }
+    dbprint { out << toString(); }
+
+}
+
+class TCExternInstance {
+    unsigned instanceID;
+    cstring instanceName;
+    bool isNumelemns;
+    unsigned numelemns;
+    bool isControlPath;
+    bool isTablBindable;
+    bool isConstructorKeys;
+    safe_vector<TCKey> controlKeys;
+    safe_vector<TCKey> constructorKeys;
+    TCExternInstance(unsigned id, cstring name, bool isNe, unsigned ne) {
+        instanceID = id;
+        instanceName = name;
+        isNumelemns = isNe;
+        numelemns = ne;
+        isControlPath = false;
+        isTablBindable = false;
+        isConstructorKeys = false;
+    }
+    void addControlPathKeys(safe_vector<TCKey> k) {
+        if (k.size() > 0) {
+            isControlPath = true;
+            controlKeys = k;
+        }
+    }
+    void addConstructorKeys(safe_vector<TCKey> k) {
+        if (k.size() > 0) {
+            isConstructorKeys = true;
+            constructorKeys = k;
+        }
+    }
+    void setExternTableBindable(bool flag) {
+        isTablBindable = flag;
+    }
+    void setNumElements(unsigned ne) {
+        isNumelemns = true;
+        numelemns = ne;
+    } 
+    toString {
+        std::string tcExternInstance = "";
+        tcExternInstance += instanceName + " instid " + Util::toString(instanceID) + " \\";
+        
+        if (isNumelemns) {
+            tcExternInstance += "\ntc_numel " + Util::toString(numelemns);
+        }
+        if (isTablBindable) {
+            tcExternInstance += " tbl_bindable";
+        }
+        if (isConstructorKeys) {
+            tcExternInstance += " constructor";
+            for (auto field : constructorKeys) {
+                tcExternInstance += field->toString();
+            }
+            tcExternInstance += " \\";
+        }
+        if (isControlPath) {
+            tcExternInstance += "\ncontrol_path";
+            for (auto field : controlKeys) {
+                tcExternInstance += field->toString();
+            }
+        }
+        return tcExternInstance;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCExtern {
+    cstring externName;
+    cstring pipelineName;
+    cstring acl_permisson;
+    cstring externID;
+    unsigned numinstances;
+    safe_vector<TCExternInstance> externInstances;
+    bool has_exec_method;
+    TCExtern(cstring eId, cstring eN, cstring pN, unsigned inst, cstring p, bool exec_method) {
+        externID = eId;
+        externName = eN;
+        pipelineName = pN;
+        numinstances = inst;
+        acl_permisson = p;
+        has_exec_method = exec_method;
+    }
+    void addExternInstance(TCExternInstance tei) {
+        externInstances.push_back(tei);
+    }
+    TCExternInstance getExternInstance(cstring inst_name) const {
+        for (auto extnInstDef : externInstances) {
+            if(extnInstDef->instanceName == inst_name) {
+                return extnInstDef;
+            }
+        }
+        return nullptr;
+    }
+    toString {
+        std::string tcExtern = "";
+        tcExtern += "\n$TC p4template create extern/";
+        tcExtern += "root/" + externName;
+        tcExtern += " extid " + externID;
+        tcExtern += " numinstances " + Util::toString(numinstances);
+        tcExtern += " tc_acl " + acl_permisson;
+        if (has_exec_method) {
+             tcExtern += " has_exec_method ";
+        }
+        for (unsigned iter = 0; iter < numinstances; iter++) {
+            tcExtern += "\n\n$TC p4template create extern_inst/" + pipelineName
+                      + "/" + externName + "/";
+            if (externInstances.size() > iter)
+                tcExtern += externInstances[iter]->toString();
+        }
+        return tcExtern;
+    }
+    dbprint { out << toString(); }
+}
+
 class TCPipeline {
     cstring pipelineName;
-    unsigned pipelineId;
     unsigned numTables;
+    TCAction NoAction;
     safe_vector<TCAction> actionDefs;
     safe_vector<TCTable> tableDefs;
+    safe_vector<TCExtern> externDefs;
     TCAction preaction;
     TCAction postaction;
     void setPipelineName(cstring pName) {
         pipelineName = pName;
     }
-    void setPipelineId(unsigned p) {
-        pipelineId = p;
-    }
     void setNumTables(unsigned n) {
         numTables = n;
+    }
+    void addNoActionDefinition(TCAction actionDef) {
+        NoAction = actionDef;
     }
     void addActionDefinition(TCAction actionDef) {
         actionDefs.push_back(actionDef);
@@ -322,25 +603,37 @@ class TCPipeline {
     void setPipelinePostAction(TCAction action) {
         postaction = action;
     }
+    void addExternDefinition(TCExtern externDef) {
+        externDefs.push_back(externDef);
+    }
+    TCExtern getExternDefinition(cstring eName) const {
+        for (auto externDef : externDefs) {
+            if(externDef->externName == eName) {
+                return externDef;
+            }
+        }
+        return nullptr;
+    }
     TCPipeline() {
         Util::SourceInfo* srcinfo = new Util::SourceInfo();
         Node::srcInfo = *srcinfo;
         pipelineName = nullptr;
-        numTables = 0;
-        preaction = nullptr;
-        postaction = nullptr;
     }
     toString {
         std::string tcCode = "#!/bin/bash -x\n";
         tcCode += "\nset -e\n";
         tcCode += "\nTC=\"tc\"";
-        tcCode += "\n$TC p4template create pipeline/" + pipelineName + " pipeid ";
-        tcCode += Util::toString(pipelineId);
+        tcCode += "\n$TC p4template create pipeline/" + pipelineName;
         tcCode += " numtables ";
         tcCode += Util::toString(numTables);
         if (!actionDefs.empty()) {
             for (auto a : actionDefs) {
                 tcCode += "\n" + a->toString();
+            }
+        }
+        if (!externDefs.empty()) {
+            for (auto e : externDefs) {
+                tcCode += "\n" + e->toString();
             }
         }
         if (!tableDefs.empty()) {

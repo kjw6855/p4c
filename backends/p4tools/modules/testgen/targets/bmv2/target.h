@@ -1,13 +1,8 @@
 #ifndef BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TARGET_H_
 #define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_TARGET_H_
 
-#include <cstdint>
-#include <filesystem>
-#include <optional>
-
-#include "backends/p4tools/common/core/solver.h"
-#include "backends/p4tools/common/lib/arch_spec.h"
 #include "ir/ir.h"
+#include "ir/solver.h"
 
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
@@ -28,11 +23,13 @@ class Bmv2V1ModelTestgenTarget : public TestgenTarget {
     static void make();
 
  protected:
-    const Bmv2V1ModelProgramInfo *initProgramImpl(
-        const IR::P4Program *program, const IR::Declaration_Instance *mainDecl) const override;
+    const Bmv2V1ModelProgramInfo *produceProgramInfoImpl(
+        const CompilerResult &compilerResult,
+        const IR::Declaration_Instance *mainDecl) const override;
 
-    Bmv2TestBackend *getTestBackendImpl(const ProgramInfo &programInfo, SymbolicExecutor &symbex,
-                                        const std::filesystem::path &testPath) const override;
+    Bmv2TestBackend *getTestBackendImpl(const ProgramInfo &programInfo,
+                                        const TestBackendConfiguration &testBackendConfiguration,
+                                        SymbolicExecutor &symbex) const override;
 
     Bmv2V1ModelCmdStepper *getCmdStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                              const ProgramInfo &programInfo) const override;
@@ -46,12 +43,12 @@ class Bmv2V1ModelTestgenTarget : public TestgenTarget {
     Bmv2V1ModelExprVisitor *getExprVisitorImpl(ExecutionState &state,
                                                const ProgramInfo &programInfo, TestCase &testCase) const override;
 
-    [[nodiscard]] const ArchSpec *getArchSpecImpl() const override;
-
  private:
     Bmv2V1ModelTestgenTarget();
 
-    static const ArchSpec ARCH_SPEC;
+    [[nodiscard]] MidEnd mkMidEnd(const CompilerOptions &options) const override;
+
+    CompilerResultOrError runCompilerImpl(const IR::P4Program *program) const override;
 };
 
 }  // namespace P4Tools::P4Testgen::Bmv2

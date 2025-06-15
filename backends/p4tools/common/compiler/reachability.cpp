@@ -17,6 +17,8 @@
 
 namespace P4Tools {
 
+using namespace P4::literals;
+
 P4ProgramDCGCreator::P4ProgramDCGCreator(NodesCallGraph *dcg) : dcg(dcg), p4program(nullptr) {
     CHECK_NULL(dcg);
     setName("P4ProgramDCGCreator");
@@ -125,7 +127,7 @@ bool P4ProgramDCGCreator::preorder(const IR::P4Action *action) {
 
 bool P4ProgramDCGCreator::preorder(const IR::P4Parser *parser) {
     addEdge(parser, parser->name);
-    visit(parser->states.getDeclaration<IR::ParserState>("start"));
+    visit(parser->states.getDeclaration<IR::ParserState>("start"_cs));
     return false;
 }
 
@@ -216,23 +218,17 @@ bool P4ProgramDCGCreator::preorder(const IR::P4Program *program) {
         if (const auto *pathExpr = expr->template to<IR::PathExpression>()) {
             // Look up the path expression in the declaration map, and expect to find a
             // declaration instance.
-            std::function<bool(const IR::IDeclaration *)> filter =
-                [pathExpr](const IR::IDeclaration *d) {
-                    CHECK_NULL(d);
-                    const auto *decl = d->to<IR::Declaration_Instance>();
-                    if (decl == nullptr) {
-                        return false;
-                    }
+            auto filter = [pathExpr](const IR::IDeclaration *d) {
+                CHECK_NULL(d);
+                if (const auto *decl = d->to<IR::Declaration_Instance>())
                     return pathExpr->path->name == decl->name;
-                };
-            const auto *declVector = program->getDeclarations()->where(filter)->toVector();
-            BUG_CHECK(!declVector->empty(), "Not a declaration instance: %1%", pathExpr);
-
+                return false;
+            };
             // Convert the declaration instance into a constructor-call expression.
-            const auto *decl = declVector->at(0)->to<IR::Declaration_Instance>();
-            auto *ctorCall =
-                new IR::ConstructorCallExpression(decl->srcInfo, decl->type, decl->arguments);
-            v.push_back(ctorCall);
+            const auto *decl =
+                program->getDeclarations()->where(filter)->single()->to<IR::Declaration_Instance>();
+            v.push_back(
+                new IR::ConstructorCallExpression(decl->srcInfo, decl->type, decl->arguments));
             continue;
         }
     }

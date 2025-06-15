@@ -25,8 +25,8 @@ header ipv4_t {
     bit<8>  ttl;
     bit<8>  protocol;
     bit<16> hdrChecksum;
-    bit<32> srcAddr;
-    bit<32> dstAddr;
+    @tc_type ("ipv4") bit<32> srcAddr;
+    @tc_type ("ipv4") bit<32> dstAddr;
 }
 
 struct my_ingress_headers_t {
@@ -126,7 +126,7 @@ control ingress(
 
 control Ingress_Deparser(
     packet_out pkt,
-    in    my_ingress_headers_t hdr,
+    inout    my_ingress_headers_t hdr,
     in    my_ingress_metadata_t meta,
     in    pna_main_output_metadata_t ostd)
 {

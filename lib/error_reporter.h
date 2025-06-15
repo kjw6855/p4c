@@ -17,6 +17,16 @@ limitations under the License.
 #ifndef LIB_ERROR_REPORTER_H_
 #define LIB_ERROR_REPORTER_H_
 
+#include <iostream>
+#include <ostream>
+#include <set>
+#include <type_traits>
+#include <unordered_map>
+
+#include <boost/format.hpp>
+
+#include "absl/strings/str_format.h"
+#include "bug_helper.h"
 #include "error_catalog.h"
 #include "error_helper.h"
 #include "exceptions.h"
@@ -24,6 +34,7 @@ limitations under the License.
 /// An action to take when a diagnostic message is triggered.
 enum class DiagnosticAction {
     Ignore,  /// Take no action and continue compilation.
+    Info,    /// Print an info message and continue compilation.
     Warn,    /// Print a warning and continue compilation.
     Error    /// Print an error and signal that compilation should be aborted.
 };
@@ -35,8 +46,9 @@ enum class DiagnosticAction {
 // Some compatibility for printf-style arguments is also supported.
 class ErrorReporter {
  protected:
-    unsigned int errorCount;
+    unsigned int infoCount;
     unsigned int warningCount;
+    unsigned int errorCount;
     unsigned int maxErrorCount;  /// the maximum number of errors that we print before fail
 
     std::ostream *outputstream;
@@ -66,79 +78,80 @@ class ErrorReporter {
     }
 
     /// retrieve the format from the error catalog
-    const char *get_error_name(int errorCode) {
-        return ErrorCatalog::getCatalog().getName(errorCode);
-    }
+    cstring get_error_name(int errorCode) { return ErrorCatalog::getCatalog().getName(errorCode); }
 
  public:
     ErrorReporter()
-        : errorCount(0),
+        : infoCount(0),
           warningCount(0),
+          errorCount(0),
           maxErrorCount(20),
+          defaultInfoDiagnosticAction(DiagnosticAction::Info),
           defaultWarningDiagnosticAction(DiagnosticAction::Warn) {
         outputstream = &std::cerr;
     }
 
     // error message for a bug
-    template <typename... T>
-    std::string bug_message(const char *format, T... args) {
+    template <typename... Args>
+    std::string bug_message(const char *format, Args &&...args) {
         boost::format fmt(format);
-        std::string message = ::bug_helper(fmt, "", "", "", args...);
-        return message;
+        // FIXME: This will implicitly take location of the first argument having
+        // SourceInfo. Not sure if this always desireable or not.
+        return ::bug_helper(fmt, "", "", std::forward<Args>(args)...);
     }
 
-    template <typename... T>
-    std::string format_message(const char *format, T... args) {
+    template <typename... Args>
+    std::string format_message(const char *format, Args &&...args) {
         boost::format fmt(format);
-        std::string message = ::error_helper(fmt, args...).toString();
-        return message;
+        return ::error_helper(fmt, std::forward<Args>(args)...).toString();
     }
 
-    template <
-        class T,
-        typename = typename std::enable_if<std::is_base_of<Util::IHasSourceInfo, T>::value>::type,
-        typename... Args>
+    template <class T, typename = std::enable_if_t<Util::has_SourceInfo_v<T>>, typename... Args>
     void diagnose(DiagnosticAction action, const int errorCode, const char *format,
-                  const char *suffix, const T *node, Args... args) {
-        if (!error_reported(errorCode, node->getSourceInfo())) {
-            const char *name = get_error_name(errorCode);
+                  const char *suffix, const T *node, Args &&...args) {
+        if (node && !error_reported(errorCode, node->getSourceInfo())) {
+            cstring name = get_error_name(errorCode);
             auto da = getDiagnosticAction(name, action);
             if (name)
-                diagnose(da, name, format, suffix, node, args...);
+                diagnose(da, name, format, suffix, node, std::forward<Args>(args)...);
             else
                 diagnose(action, nullptr, format, suffix, node, std::forward<Args>(args)...);
         }
     }
 
-    template <
-        class T,
-        typename = typename std::enable_if<std::is_base_of<Util::IHasSourceInfo, T>::value>::type,
-        typename... Args>
+    template <class T, typename = std::enable_if_t<Util::has_SourceInfo_v<T>>, typename... Args>
     void diagnose(DiagnosticAction action, const int errorCode, const char *format,
-                  const char *suffix, const T &node, Args... args) {
+                  const char *suffix, const T &node, Args &&...args) {
         diagnose(action, errorCode, format, suffix, &node, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     void diagnose(DiagnosticAction action, const int errorCode, const char *format,
-                  const char *suffix, Args... args) {
-        const char *name = get_error_name(errorCode);
+                  const char *suffix, Args &&...args) {
+        cstring name = get_error_name(errorCode);
         auto da = getDiagnosticAction(name, action);
         if (name)
-            diagnose(da, name, format, suffix, args...);
+            diagnose(da, name, format, suffix, std::forward<Args>(args)...);
         else
             diagnose(action, nullptr, format, suffix, std::forward<Args>(args)...);
     }
 
     /// The sink of all the diagnostic functions. Here the error gets printed
     /// or an exception thrown if the error count exceeds maxErrorCount.
-    template <typename... T>
+    template <typename... Args>
     void diagnose(DiagnosticAction action, const char *diagnosticName, const char *format,
-                  const char *suffix, T... args) {
+                  const char *suffix, Args &&...args) {
         if (action == DiagnosticAction::Ignore) return;
 
         ErrorMessage::MessageType msgType = ErrorMessage::MessageType::None;
-        if (action == DiagnosticAction::Warn) {
+        if (action == DiagnosticAction::Info) {
+            // Avoid burying errors in a pile of info messages:
+            // don't emit any more info messages if we've emitted errors.
+            if (errorCount > 0) return;
+
+            infoCount++;
+            msgType = ErrorMessage::MessageType::Info;
+        } else if (action == DiagnosticAction::Warn) {
             // Avoid burying errors in a pile of warnings: don't emit any more warnings if we've
             // emitted errors.
             if (errorCount > 0) return;
@@ -152,7 +165,7 @@ class ErrorReporter {
 
         boost::format fmt(format);
         ErrorMessage msg(msgType, diagnosticName ? diagnosticName : "", suffix);
-        msg = ::error_helper(fmt, msg, args...);
+        msg = ::error_helper(fmt, msg, std::forward<Args>(args)...);
         emit_message(msg);
 
         if (errorCount > maxErrorCount)
@@ -171,9 +184,11 @@ class ErrorReporter {
 
     unsigned getWarningCount() const { return warningCount; }
 
+    unsigned getInfoCount() const { return infoCount; }
+
     /// @return the number of diagnostics (warnings and errors) encountered
     /// in the current CompileContext.
-    unsigned getDiagnosticCount() const { return errorCount + warningCount; }
+    unsigned getDiagnosticCount() const { return errorCount + warningCount + infoCount; }
 
     void setOutputStream(std::ostream *stream) { outputstream = stream; }
 
@@ -187,8 +202,7 @@ class ErrorReporter {
         std::stringstream ss;
         ss << message;
 
-        ParserErrorMessage msg(location, ss.str());
-        emit_message(msg);
+        emit_message(ParserErrorMessage(location, ss.str()));
     }
 
     /**
@@ -197,31 +211,33 @@ class ErrorReporter {
      * generator's C-based Bison parser, which doesn't have location information
      * available.
      */
-    void parser_error(const Util::InputSources *sources, const char *fmt, va_list args) {
+    template <typename... Args>
+    void parser_error(const Util::InputSources *sources, const char *fmt, Args &&...args) {
         errorCount++;
 
         Util::SourcePosition position = sources->getCurrentPosition();
         position--;
-        cstring message = Util::vprintf_format(fmt, args);
 
-        Util::SourceInfo info(sources, position);
-        ParserErrorMessage msg(info, message);
-        emit_message(msg);
-    }
-    void parser_error(const Util::InputSources *sources, const char *fmt, ...) {
-        va_list args;
-        va_start(args, fmt);
-        parser_error(sources, fmt, args);
-        va_end(args);
+        // Unfortunately, we cannot go with statically checked format string
+        // here as it would require some changes to yyerror
+        std::string message;
+        if (!absl::FormatUntyped(&message, absl::UntypedFormatSpec(fmt),
+                                 {absl::FormatArg(args)...})) {
+            BUG("Failed to format string");
+        }
+
+        emit_message(ParserErrorMessage(Util::SourceInfo(sources, position), std::move(message)));
     }
 
     /// @return the action to take for the given diagnostic, falling back to the
     /// default action if it wasn't overridden via the command line or a pragma.
     DiagnosticAction getDiagnosticAction(cstring diagnostic, DiagnosticAction defaultAction) {
+        // Actions for errors can never be overridden.
+        if (defaultAction == DiagnosticAction::Error) return defaultAction;
         auto it = diagnosticActions.find(diagnostic);
         if (it != diagnosticActions.end()) return it->second;
         // if we're dealing with warnings and they have been globally modified
-        // (ingnored or turned into errors), then return the global default
+        // (ignored or turned into errors), then return the global default
         if (defaultAction == DiagnosticAction::Warn &&
             defaultWarningDiagnosticAction != DiagnosticAction::Warn)
             return defaultWarningDiagnosticAction;
@@ -229,8 +245,8 @@ class ErrorReporter {
     }
 
     /// Set the action to take for the given diagnostic.
-    void setDiagnosticAction(cstring diagnostic, DiagnosticAction action) {
-        diagnosticActions[diagnostic] = action;
+    void setDiagnosticAction(std::string_view diagnostic, DiagnosticAction action) {
+        diagnosticActions[cstring(diagnostic)] = action;
     }
 
     /// @return the default diagnostic action for calls to `::warning()`.
@@ -241,7 +257,18 @@ class ErrorReporter {
         defaultWarningDiagnosticAction = action;
     }
 
+    /// @return the default diagnostic action for calls to `::info()`.
+    DiagnosticAction getDefaultInfoDiagnosticAction() { return defaultInfoDiagnosticAction; }
+
+    /// set the default diagnostic action for calls to `::info()`.
+    void setDefaultInfoDiagnosticAction(DiagnosticAction action) {
+        defaultInfoDiagnosticAction = action;
+    }
+
  private:
+    /// The default diagnostic action for calls to `::info()`.
+    DiagnosticAction defaultInfoDiagnosticAction;
+
     /// The default diagnostic action for calls to `::warning()`.
     DiagnosticAction defaultWarningDiagnosticAction;
 

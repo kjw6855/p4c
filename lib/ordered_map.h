@@ -48,7 +48,7 @@ class ordered_map {
     typedef std::reverse_iterator<iterator> reverse_iterator;
     typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
 
-    class value_compare : std::binary_function<value_type, value_type, bool> {
+    class value_compare {
         friend class ordered_map;
 
      protected:
@@ -62,12 +62,12 @@ class ordered_map {
     };
 
  private:
-    struct mapcmp : std::binary_function<const K *, const K *, bool> {
+    struct mapcmp {
         COMP comp;
         bool operator()(const K *a, const K *b) const { return comp(*a, *b); }
     };
-    using map_alloc =
-        typename ALLOC::template rebind<std::pair<const K *const, list_iterator>>::other;
+    using map_alloc = typename std::allocator_traits<ALLOC>::template rebind_alloc<
+        std::pair<const K *const, list_iterator>>;
     using map_type = std::map<const K *, list_iterator, mapcmp, map_alloc>;
     map_type data_map;
     void init_data_map() {
@@ -86,7 +86,6 @@ class ordered_map {
  public:
     typedef typename map_type::size_type size_type;
 
- public:
     ordered_map() {}
     ordered_map(const ordered_map &a) : data(a.data) { init_data_map(); }
     template <typename InputIt>
@@ -254,51 +253,5 @@ class ordered_map {
         data.sort(comp);
     }
 };
-
-// XXX(seth): We use this namespace to hide our get() overloads from ADL. GCC
-// 4.8 has a bug which causes these overloads to be considered when get() is
-// called on a type in the global namespace, even if the number of arguments
-// doesn't match up, which can trigger template instantiations that cause
-// errors.
-namespace GetImpl {
-
-template <class K, class T, class V, class Comp, class Alloc>
-inline V get(const ordered_map<K, V, Comp, Alloc> &m, T key, V def = V()) {
-    auto it = m.find(key);
-    if (it != m.end()) return it->second;
-    return def;
-}
-
-template <class K, class T, class V, class Comp, class Alloc>
-inline V *getref(ordered_map<K, V, Comp, Alloc> &m, T key) {
-    auto it = m.find(key);
-    if (it != m.end()) return &it->second;
-    return 0;
-}
-
-template <class K, class T, class V, class Comp, class Alloc>
-inline const V *getref(const ordered_map<K, V, Comp, Alloc> &m, T key) {
-    auto it = m.find(key);
-    if (it != m.end()) return &it->second;
-    return 0;
-}
-
-template <class K, class T, class V, class Comp, class Alloc>
-inline V get(const ordered_map<K, V, Comp, Alloc> *m, T key, V def = V()) {
-    return m ? get(*m, key, def) : def;
-}
-
-template <class K, class T, class V, class Comp, class Alloc>
-inline V *getref(ordered_map<K, V, Comp, Alloc> *m, T key) {
-    return m ? getref(*m, key) : 0;
-}
-
-template <class K, class T, class V, class Comp, class Alloc>
-inline const V *getref(const ordered_map<K, V, Comp, Alloc> *m, T key) {
-    return m ? getref(*m, key) : 0;
-}
-
-}  // namespace GetImpl
-using namespace GetImpl;  // NOLINT(build/namespaces)
 
 #endif /* LIB_ORDERED_MAP_H_ */

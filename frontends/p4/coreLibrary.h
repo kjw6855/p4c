@@ -27,7 +27,6 @@ enum class StandardExceptions {
     PacketTooShort,
     NoMatch,
     StackOutOfBounds,
-    OverwritingHeader,
     HeaderTooShort,
     ParserTimeout,
 };
@@ -47,9 +46,6 @@ inline std::ostream &operator<<(std::ostream &out, P4::StandardExceptions e) {
         case P4::StandardExceptions::StackOutOfBounds:
             out << "StackOutOfBounds";
             break;
-        case P4::StandardExceptions::OverwritingHeader:
-            out << "OverwritingHeader";
-            break;
         case P4::StandardExceptions::HeaderTooShort:
             out << "HeaderTooShort";
             break;
@@ -64,14 +60,16 @@ inline std::ostream &operator<<(std::ostream &out, P4::StandardExceptions e) {
 
 namespace P4 {
 
+using namespace literals;
+
 class PacketIn : public Model::Extern_Model {
  public:
     PacketIn()
-        : Extern_Model("packet_in"),
-          extract("extract"),
-          lookahead("lookahead"),
-          advance("advance"),
-          length("length") {}
+        : Extern_Model("packet_in"_cs),
+          extract("extract"_cs),
+          lookahead("lookahead"_cs),
+          advance("advance"_cs),
+          length("length"_cs) {}
     Model::Elem extract;
     Model::Elem lookahead;
     Model::Elem advance;
@@ -81,14 +79,14 @@ class PacketIn : public Model::Extern_Model {
 
 class PacketOut : public Model::Extern_Model {
  public:
-    PacketOut() : Extern_Model("packet_out"), emit("emit") {}
+    PacketOut() : Extern_Model("packet_out"_cs), emit("emit"_cs) {}
     Model::Elem emit;
 };
 
 class P4Exception_Model : public ::Model::Elem {
  public:
     const StandardExceptions exc;
-    explicit P4Exception_Model(StandardExceptions exc) : ::Model::Elem(""), exc(exc) {
+    explicit P4Exception_Model(StandardExceptions exc) : ::Model::Elem(cstring::empty), exc(exc) {
         std::stringstream str;
         str << exc;
         name = str.str();
@@ -99,19 +97,18 @@ class P4Exception_Model : public ::Model::Elem {
 // To be kept in sync with core.p4
 class P4CoreLibrary : public ::Model::Model {
  protected:
+    // NOLINTBEGIN(bugprone-throw-keyword-missing)
     P4CoreLibrary()
-        : noAction("NoAction"),
-          exactMatch("exact"),
-          ternaryMatch("ternary"),
-          lpmMatch("lpm"),
-          packetIn(PacketIn()),
-          packetOut(PacketOut()),
+        : noAction("NoAction"_cs),
+          exactMatch("exact"_cs),
+          ternaryMatch("ternary"_cs),
+          lpmMatch("lpm"_cs),
           noError(StandardExceptions::NoError),
           packetTooShort(StandardExceptions::PacketTooShort),
           noMatch(StandardExceptions::NoMatch),
           stackOutOfBounds(StandardExceptions::StackOutOfBounds),
-          overwritingHeader(StandardExceptions::OverwritingHeader),
           headerTooShort(StandardExceptions::HeaderTooShort) {}
+    // NOLINTEND(bugprone-throw-keyword-missing)
 
  public:
     static P4CoreLibrary &instance() {
@@ -131,7 +128,6 @@ class P4CoreLibrary : public ::Model::Model {
     P4Exception_Model packetTooShort;
     P4Exception_Model noMatch;
     P4Exception_Model stackOutOfBounds;
-    P4Exception_Model overwritingHeader;
     P4Exception_Model headerTooShort;
 };
 

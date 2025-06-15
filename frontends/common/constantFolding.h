@@ -17,11 +17,26 @@ limitations under the License.
 #ifndef COMMON_CONSTANTFOLDING_H_
 #define COMMON_CONSTANTFOLDING_H_
 
+#include "frontends/common/resolveReferences/referenceMap.h"
+#include "frontends/common/resolveReferences/resolveReferences.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "ir/ir.h"
-#include "lib/big_int_util.h"
 
 namespace P4 {
+
+using namespace literals;
+
+/// A policy for constant folding that allows customization of the folding.
+/// Currently we only have hook for customizing IR::PathExpression, but more can be added.
+/// Each hook takes a visitor and a node and is called from the visitor's preorder function on that
+/// node. If the hook returns a non-null value, so will the preorder. Otherwise the preorder
+/// continues with its normal processing. The hooks can be stateful, they are non-const member
+/// functions.
+class ConstantFoldingPolicy {
+ public:
+    /// The default hook does not modify anything.
+    virtual const IR::Node *hook(Visitor &, IR::PathExpression *) { return nullptr; }
+};
 
 /** @brief statically evaluates many constant expressions.
  *
@@ -43,11 +58,13 @@ namespace P4 {
  *      `IR::Declaration_Constant` nodes are initialized with
  *      compile-time known constants.
  */
-class DoConstantFolding : public Transform {
+class DoConstantFolding : public Transform, public ResolutionContext {
  protected:
+    ConstantFoldingPolicy *policy;
+
     /// Used to resolve IR nodes to declarations.
     /// If `nullptr`, then `const` values cannot be resolved.
-    const ReferenceMap *refMap;
+    const DeclarationLookup *refMap;
 
     /// Used to resolve nodes to their types.
     /// If `nullptr`, then type information is not available.
@@ -65,7 +82,6 @@ class DoConstantFolding : public Transform {
     // we substituting constants there.
     bool assignmentTarget;
 
- protected:
     /// @returns a constant equivalent to @p expr or `nullptr`
     const IR::Expression *getConstant(const IR::Expression *expr) const;
 
@@ -98,12 +114,23 @@ class DoConstantFolding : public Transform {
     Result setContains(const IR::Expression *keySet, const IR::Expression *constant) const;
 
  public:
-    DoConstantFolding(const ReferenceMap *refMap, TypeMap *typeMap, bool warnings = true)
+    DoConstantFolding(const DeclarationLookup *refMap, const TypeMap *typeMap, bool warnings = true,
+                      ConstantFoldingPolicy *policy = nullptr)
         : refMap(refMap), typeMap(typeMap), typesKnown(typeMap != nullptr), warnings(warnings) {
+        if (policy) {
+            this->policy = policy;
+        } else {
+            this->policy = new ConstantFoldingPolicy();
+        }
         visitDagOnce = true;
         setName("DoConstantFolding");
         assignmentTarget = false;
     }
+
+    // If DeclarationLookup is not passed, then resolve by our own.
+    explicit DoConstantFolding(const TypeMap *typeMap, bool warnings = true,
+                               ConstantFoldingPolicy *policy = nullptr)
+        : DoConstantFolding(this, typeMap, warnings, policy) {}
 
     const IR::Node *postorder(IR::Declaration_Constant *d) override;
     const IR::Node *postorder(IR::PathExpression *e) override;
@@ -142,24 +169,47 @@ class DoConstantFolding : public Transform {
     const IR::Node *postorder(IR::IfStatement *statement) override;
     const IR::Node *preorder(IR::AssignmentStatement *statement) override;
     const IR::Node *preorder(IR::ArrayIndex *e) override;
+    const IR::Node *preorder(IR::SwitchCase *c) override;
     const IR::BlockStatement *preorder(IR::BlockStatement *bs) override {
-        if (bs->annotations->getSingle("disable_optimization")) prune();
+        if (bs->annotations->getSingle("disable_optimization"_cs)) prune();
         return bs;
     }
 };
 
 /** Optionally runs @ref TypeChecking if @p typeMap is not
  *  `nullptr`, and then runs @ref DoConstantFolding.
+ * If policy is provided, it can modify behaviour of the constant folder.
  */
 class ConstantFolding : public PassManager {
  public:
+    ConstantFolding(ReferenceMap *refMap, TypeMap *typeMap, ConstantFoldingPolicy *policy)
+        : ConstantFolding(refMap, typeMap, true, nullptr, policy) {}
+
     ConstantFolding(ReferenceMap *refMap, TypeMap *typeMap, bool warnings = true,
-                    TypeChecking *typeChecking = nullptr) {
+                    TypeChecking *typeChecking = nullptr, ConstantFoldingPolicy *policy = nullptr) {
         if (typeMap != nullptr) {
             if (!typeChecking) typeChecking = new TypeChecking(refMap, typeMap);
             passes.push_back(typeChecking);
         }
-        passes.push_back(new DoConstantFolding(refMap, typeMap, warnings));
+        passes.push_back(new DoConstantFolding(refMap, typeMap, warnings, policy));
+        if (typeMap != nullptr) passes.push_back(new ClearTypeMap(typeMap));
+        setName("ConstantFolding");
+    }
+
+    ConstantFolding(TypeMap *typeMap, ConstantFoldingPolicy *policy)
+        : ConstantFolding(typeMap, true, nullptr, policy) {}
+
+    explicit ConstantFolding(ConstantFoldingPolicy *policy)
+        : ConstantFolding(nullptr, true, nullptr, policy) {}
+
+    explicit ConstantFolding(TypeMap *typeMap, bool warnings = true,
+                             TypeChecking *typeChecking = nullptr,
+                             ConstantFoldingPolicy *policy = nullptr) {
+        if (typeMap != nullptr) {
+            if (!typeChecking) typeChecking = new TypeChecking(nullptr, typeMap);
+            passes.push_back(typeChecking);
+        }
+        passes.push_back(new DoConstantFolding(typeMap, warnings, policy));
         if (typeMap != nullptr) passes.push_back(new ClearTypeMap(typeMap));
         setName("ConstantFolding");
     }

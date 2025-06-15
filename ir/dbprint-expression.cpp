@@ -14,24 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <list>
 #include <ostream>
-#include <utility>
-#include <vector>
-
-#include <boost/multiprecision/number.hpp>
 
 #include "dbprint.h"
-#include "ir/id.h"
-#include "ir/indexed_vector.h"
 #include "ir/ir.h"
 #include "ir/namemap.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"
-#include "lib/hex.h"
 #include "lib/indent.h"
 #include "lib/log.h"
-#include "lib/safe_vector.h"
 
 #define ALL_UNARY_OPS(M, ...)  \
     M(UPlus, +, ##__VA_ARGS__) \
@@ -143,8 +134,8 @@ void IR::Apply::dbprint(std::ostream &out) const {
     int prec = getprec(out);
     if (!actions.empty()) {
         out << " {" << indent << setprec(0);
-        for (auto act : actions)
-            out << Log::endl << act.first << " {" << indent << act.second << unindent << " }";
+        for (const auto &[actName, actExprs] : actions)
+            out << Log::endl << actName << " {" << indent << actExprs << unindent << " }";
         out << setprec(prec) << " }" << unindent;
     } else if (prec == 0) {
         out << ';';
@@ -152,7 +143,7 @@ void IR::Apply::dbprint(std::ostream &out) const {
 }
 
 void IR::BoolLiteral::dbprint(std::ostream &out) const {
-    out << value;
+    out << (value ? "true" : "false");
     if (getprec(out) == 0) out << ';';
 }
 

@@ -24,31 +24,33 @@ limitations under the License.
 namespace EBPF {
 
 void StateTranslationVisitor::compileLookahead(const IR::Expression *destination) {
-    cstring msgStr = Util::printf_format("Parser: lookahead for %s %s",
-                                         state->parser->typeMap->getType(destination)->toString(),
-                                         destination->toString());
+    cstring msgStr = absl::StrFormat("Parser: lookahead for %s %s",
+                                     state->parser->typeMap->getType(destination)->toString(),
+                                     destination->toString());
     builder->target->emitTraceMessage(builder, msgStr.c_str());
 
     builder->emitIndent();
     builder->blockStart();
     builder->emitIndent();
-    builder->appendFormat("%s_save = %s", state->parser->program->offsetVar.c_str(),
-                          state->parser->program->offsetVar.c_str());
+    builder->appendFormat("u8* %s_save = %s", state->parser->program->headerStartVar.c_str(),
+                          state->parser->program->headerStartVar.c_str());
     builder->endOfStatement(true);
     compileExtract(destination);
     builder->emitIndent();
-    builder->appendFormat("%s = %s_save", state->parser->program->offsetVar.c_str(),
-                          state->parser->program->offsetVar.c_str());
+    builder->appendFormat("%s = %s_save", state->parser->program->headerStartVar.c_str(),
+                          state->parser->program->headerStartVar.c_str());
     builder->endOfStatement(true);
     builder->blockEnd(true);
 }
 
 void StateTranslationVisitor::compileAdvance(const P4::ExternMethod *extMethod) {
     auto argExpr = extMethod->expr->arguments->at(0)->expression;
-    if (auto cnst = argExpr->to<IR::Constant>()) {
+    auto cnst = argExpr->to<IR::Constant>();
+    if (cnst) {
         cstring argStr = cstring::to_cstring(cnst->asUnsigned());
         cstring offsetStr =
-            Util::printf_format("BYTES(%s + %s)", state->parser->program->offsetVar, argStr);
+            absl::StrFormat("%s - (u8*)%s + BYTES(%s)", state->parser->program->headerStartVar,
+                            state->parser->program->packetStartVar, argStr);
         builder->target->emitTraceMessage(builder,
                                           "Parser (advance): check pkt_len=%%d < "
                                           "last_read_byte=%%d",
@@ -60,15 +62,22 @@ void StateTranslationVisitor::compileAdvance(const P4::ExternMethod *extMethod) 
         return;
     }
 
+    int advanceVal = cnst->asInt();
+    if (advanceVal % 8 != 0) {
+        ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
+                "packet_in.advance(%1%) must be byte-aligned in eBPF backend", advanceVal);
+        return;
+    }
+
     builder->emitIndent();
-    builder->appendFormat("%s += ", state->parser->program->offsetVar.c_str());
+    builder->appendFormat("%s += BYTES(", state->parser->program->headerStartVar.c_str());
     visit(argExpr);
+    builder->append(")");
     builder->endOfStatement(true);
 
     builder->emitIndent();
-    builder->appendFormat("if (%s < %s + BYTES(%s)) ", state->parser->program->packetEndVar.c_str(),
-                          state->parser->program->packetStartVar.c_str(),
-                          state->parser->program->offsetVar.c_str());
+    builder->appendFormat("if ((u8*)%s < %s) ", state->parser->program->packetEndVar.c_str(),
+                          state->parser->program->headerStartVar.c_str());
     builder->blockStart();
 
     builder->target->emitTraceMessage(builder, "Parser: invalid packet (packet too short)");
@@ -106,8 +115,8 @@ void StateTranslationVisitor::compileVerify(const IR::MethodCallExpression *expr
                           errorMember->member.name);
     builder->endOfStatement(true);
 
-    cstring msg = Util::printf_format("Verify: condition failed, parser_error=%%u (%s)",
-                                      errorMember->member.name);
+    cstring msg = absl::StrFormat("Verify: condition failed, parser_error=%%u (%s)",
+                                  errorMember->member.name);
     builder->target->emitTraceMessage(builder, msg.c_str(), 1,
                                       state->parser->program->errorVar.c_str());
 
@@ -147,10 +156,10 @@ bool StateTranslationVisitor::preorder(const IR::ParserState *parserState) {
     builder->spc();
     builder->blockStart();
 
-    cstring msgStr =
-        Util::printf_format("Parser: state %s (curr_offset=%%u)", parserState->name.name);
-    builder->target->emitTraceMessage(builder, msgStr.c_str(), 1,
-                                      state->parser->program->offsetVar);
+    cstring msgStr = absl::StrFormat("Parser: state %s (curr_offset=%%d)", parserState->name.name);
+    cstring offsetStr = absl::StrFormat("%s - (u8*)%s", state->parser->program->headerStartVar,
+                                        state->parser->program->packetStartVar);
+    builder->target->emitTraceMessage(builder, msgStr.c_str(), 1, offsetStr.c_str());
 
     visit(parserState->components, "components");
     if (parserState->selectExpression == nullptr) {
@@ -188,7 +197,7 @@ bool StateTranslationVisitor::preorder(const IR::SelectExpression *expression) {
     etype->declare(builder, selectValue, false);
     builder->endOfStatement(true);
 
-    emitAssignStatement(type, nullptr, selectValue, expression->select);
+    emitAssignStatement(type, nullptr, selectValue, expression->select->components.at(0));
     builder->newline();
 
     // Init value_sets
@@ -265,14 +274,15 @@ bool StateTranslationVisitor::preorder(const IR::SelectCase *selectCase) {
 }
 
 void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
-                                                  const IR::StructField *field, unsigned alignment,
-                                                  EBPFType *type) {
-    unsigned widthToExtract = dynamic_cast<IHasWidth *>(type)->widthInBits();
+                                                  const IR::StructField *field,
+                                                  unsigned hdrOffsetBits, EBPFType *type) {
+    unsigned alignment = hdrOffsetBits % 8;
+    unsigned widthToExtract = type->as<IHasWidth>().widthInBits();
     auto program = state->parser->program;
     cstring msgStr;
     cstring fieldName = field->name.name;
 
-    msgStr = Util::printf_format("Parser: extracting field %s", fieldName);
+    msgStr = absl::StrFormat("Parser: extracting field %s", fieldName);
     builder->target->emitTraceMessage(builder, msgStr.c_str());
 
     if (widthToExtract <= 64) {
@@ -303,8 +313,8 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
         visit(expr);
         builder->appendFormat(".%s = (", fieldName.c_str());
         type->emit(builder);
-        builder->appendFormat(")((%s(%s, BYTES(%s))", helper, program->packetStartVar.c_str(),
-                              program->offsetVar.c_str());
+        builder->appendFormat(")((%s(%s, BYTES(%u))", helper, program->headerStartVar.c_str(),
+                              hdrOffsetBits);
         if (shift != 0) builder->appendFormat(" >> %d", shift);
         builder->append(")");
 
@@ -326,7 +336,7 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
             //   0x112233445566778809
             //   0x112233445566778890
             // To correctly insert that padding, the length of field must be known, but tools like
-            // nikss-ctl (and the nikss library) don't consume P4info.txt to have such knowledge.
+            // nikss-ctl (and the nikss library) don't consume P4info.txtpb to have such knowledge.
             // There is also a bug in (de)parser causing such fields to be deparsed incorrectly.
             ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                     "%1%: fields wider than 64 bits must have a size multiple of 8 bits (1 byte) "
@@ -353,9 +363,8 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
             visit(expr);
             builder->appendFormat(".%s[%d] = (", fieldName.c_str(), i);
             bt->emit(builder);
-            builder->appendFormat(")((%s(%s, BYTES(%s) + %d) >> %d)", helper,
-                                  program->packetStartVar.c_str(), program->offsetVar.c_str(), i,
-                                  shift);
+            builder->appendFormat(")((%s(%s, BYTES(%u) + %d) >> %d)", helper,
+                                  program->headerStartVar.c_str(), hdrOffsetBits, i, shift);
 
             if ((i == bytes - 1) && (widthToExtract % 8 != 0)) {
                 builder->append(" & EBPF_MASK(");
@@ -367,10 +376,6 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
             builder->endOfStatement(true);
         }
     }
-
-    builder->emitIndent();
-    builder->appendFormat("%s += %d", program->offsetVar.c_str(), widthToExtract);
-    builder->endOfStatement(true);
 
     // eBPF can pass 64 bits of data as one argument passed in 64 bit register,
     // so value of the field is printed only when it fits into that register
@@ -384,17 +389,15 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
                 expr->to<IR::Member>()->expr->to<IR::PathExpression>()->path->name.name)) {
             exprStr = exprStr.replace(".", "->");
         }
-        cstring tmp = Util::printf_format("(unsigned long long) %s.%s", exprStr, fieldName);
+        cstring tmp = absl::StrFormat("(unsigned long long) %s.%s", exprStr, fieldName);
 
-        msgStr = Util::printf_format("Parser: extracted %s=0x%%llx (%u bits)", fieldName,
-                                     widthToExtract);
+        msgStr =
+            absl::StrFormat("Parser: extracted %s=0x%%llx (%u bits)", fieldName, widthToExtract);
         builder->target->emitTraceMessage(builder, msgStr.c_str(), 1, tmp.c_str());
     } else {
-        msgStr = Util::printf_format("Parser: extracted %s (%u bits)", fieldName, widthToExtract);
+        msgStr = absl::StrFormat("Parser: extracted %s (%u bits)", fieldName, widthToExtract);
         builder->target->emitTraceMessage(builder, msgStr.c_str());
     }
-
-    builder->newline();
 }
 
 void StateTranslationVisitor::compileExtract(const IR::Expression *destination) {
@@ -407,11 +410,18 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination) 
         return;
     }
 
+    // We expect all headers to start on a byte boundary.
     unsigned width = ht->width_bits();
+    if ((width % 8) != 0) {
+        ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
+                "Header %1% size %2% is not a multiple of 8 bits.", destination, width);
+        return;
+    }
+
     auto program = state->parser->program;
 
-    cstring offsetStr =
-        Util::printf_format("BYTES(%s + %s)", program->offsetVar, cstring::to_cstring(width));
+    cstring offsetStr = absl::StrFormat("(%s - (u8*)%s) + BYTES(%s)", program->headerStartVar,
+                                        program->packetStartVar, cstring::to_cstring(width));
 
     builder->target->emitTraceMessage(builder, "Parser: check pkt_len=%d >= last_read_byte=%d", 2,
                                       program->lengthVar.c_str(), offsetStr.c_str());
@@ -439,9 +449,8 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination) 
     }
 
     builder->emitIndent();
-    builder->appendFormat("if (%s < %s + BYTES(%s + %d + %u)) ", program->packetEndVar.c_str(),
-                          program->packetStartVar.c_str(), program->offsetVar.c_str(), width,
-                          curr_padding);
+    builder->appendFormat("if ((u8*)%s < %s + BYTES(%d + %u)) ", program->packetEndVar.c_str(),
+                          program->headerStartVar.c_str(), width, curr_padding);
     builder->blockStart();
 
     builder->target->emitTraceMessage(builder, "Parser: invalid packet (packet too short)");
@@ -455,24 +464,24 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination) 
     builder->newline();
     builder->blockEnd(true);
 
-    msgStr = Util::printf_format("Parser: extracting header %s", destination->toString());
+    msgStr = absl::StrFormat("Parser: extracting header %s", destination->toString());
     builder->target->emitTraceMessage(builder, msgStr.c_str());
     builder->newline();
 
-    unsigned alignment = 0;
+    unsigned hdrOffsetBits = 0;
     for (auto f : ht->fields) {
         auto ftype = state->parser->typeMap->getType(f);
         auto etype = EBPFTypeFactory::instance->create(ftype);
-        auto et = dynamic_cast<IHasWidth *>(etype);
+        auto et = etype->to<IHasWidth>();
         if (et == nullptr) {
             ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                     "Only headers with fixed widths supported %1%", f);
             return;
         }
-        compileExtractField(destination, f, alignment, etype);
-        alignment += et->widthInBits();
-        alignment %= 8;
+        compileExtractField(destination, f, hdrOffsetBits, etype);
+        hdrOffsetBits += et->widthInBits();
     }
+    builder->newline();
 
     if (ht->is<IR::Type_Header>()) {
         builder->emitIndent();
@@ -480,7 +489,12 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination) 
         builder->appendLine(".ebpf_valid = 1;");
     }
 
-    msgStr = Util::printf_format("Parser: extracted %s", destination->toString());
+    // Increment header pointer
+    builder->emitIndent();
+    builder->appendFormat("%s += BYTES(%u);", program->headerStartVar.c_str(), width);
+    builder->newline();
+
+    msgStr = absl::StrFormat("Parser: extracted %s", destination->toString());
     builder->target->emitTraceMessage(builder, msgStr.c_str());
 
     builder->newline();

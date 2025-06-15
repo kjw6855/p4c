@@ -24,16 +24,18 @@
 #include "backends/p4tools/modules/testgen/lib/test_object.h"
 #include "backends/p4tools/modules/testgen/options.h"
 #include "backends/p4tools/modules/testgen/targets/pna/backend/metadata/metadata.h"
+#include "backends/p4tools/modules/testgen/targets/pna/backend/ptf/ptf.h"
 #include "backends/p4tools/modules/testgen/targets/pna/dpdk/program_info.h"
 #include "backends/p4tools/modules/testgen/targets/pna/test_spec.h"
 
 namespace P4Tools::P4Testgen::Pna {
 
-const std::set<std::string> PnaTestBackend::SUPPORTED_BACKENDS = {"METADATA"};
+const std::set<std::string> PnaTestBackend::SUPPORTED_BACKENDS = {"METADATA", "PTF"};
 
-PnaTestBackend::PnaTestBackend(const ProgramInfo &programInfo, SymbolicExecutor &symbex,
-                               const std::filesystem::path &testPath)
-    : TestBackEnd(programInfo, symbex) {
+PnaTestBackend::PnaTestBackend(const ProgramInfo &programInfo,
+                               const TestBackendConfiguration &testBackendConfiguration,
+                               SymbolicExecutor &symbex)
+    : TestBackEnd(programInfo, testBackendConfiguration, symbex) {
     cstring testBackendString = TestgenOptions::get().testBackend;
     if (testBackendString.isNullOrEmpty()) {
         ::error(
@@ -42,9 +44,10 @@ PnaTestBackend::PnaTestBackend(const ProgramInfo &programInfo, SymbolicExecutor 
             Utils::containerToString(SUPPORTED_BACKENDS));
         exit(EXIT_FAILURE);
     }
-
     if (testBackendString == "METADATA") {
-        testWriter = new Metadata(testPath.c_str(), TestgenOptions::get().seed);
+        testWriter = new Metadata(testBackendConfiguration);
+    } else if (testBackendString == "PTF") {
+        testWriter = new PTF(testBackendConfiguration);
     } else {
         P4C_UNIMPLEMENTED(
             "Test back end %1% not implemented for this target. Supported back ends are %2%.",
@@ -67,7 +70,7 @@ const TestSpec *PnaTestBackend::createTestSpec(const ExecutionState *executionSt
     TestSpec *testSpec = nullptr;
 
     const auto *ingressPayload = testInfo.inputPacket;
-    const auto *ingressPayloadMask = IR::getConstant(IR::getBitType(1), 1);
+    const auto *ingressPayloadMask = IR::Constant::get(IR::Type_Bits::get(1), 1);
     const auto ingressPacket = Packet(testInfo.inputPort, ingressPayload, ingressPayloadMask);
 
     std::optional<Packet> egressPacket = std::nullopt;
@@ -76,15 +79,13 @@ const TestSpec *PnaTestBackend::createTestSpec(const ExecutionState *executionSt
     }
     testSpec = new TestSpec(ingressPacket, egressPacket, testInfo.programTraces);
 
-    // If metadata mode is enabled, gather the user metadata variable form the parser.
+    // If metadata mode is enabled, gather the user metadata variable from the parser.
     // Save the values of all the fields in it and return.
     if (TestgenOptions::get().testBackend == "METADATA") {
         auto *metadataCollection = new MetadataCollection();
-        const auto *pnaProgInfo = programInfo.checkedTo<PnaDpdkProgramInfo>();
-        const auto *localMetadataVar = pnaProgInfo->getBlockParam("MainParserT", 2);
-        const auto *localMetadataType = executionState->resolveType(localMetadataVar->type);
-        const auto &flatFields = executionState->getFlatFields(
-            localMetadataVar, localMetadataType->checkedTo<IR::Type_Struct>(), {});
+        const auto *pnaProgInfo = getProgramInfo().checkedTo<PnaDpdkProgramInfo>();
+        const auto *localMetadataVar = pnaProgInfo->getBlockParam("MainParserT"_cs, 2);
+        const auto &flatFields = executionState->getFlatFields(localMetadataVar, {});
         for (const auto &fieldRef : flatFields) {
             const auto *fieldVal = finalModel->evaluate(executionState->get(fieldRef), true);
             // Try to remove the leading internal name for the metadata field.
@@ -93,35 +94,36 @@ const TestSpec *PnaTestBackend::createTestSpec(const ExecutionState *executionSt
             fieldString = fieldString.substr(fieldString.find('.') - fieldString.begin() + 1);
             metadataCollection->addMetaDataField(fieldString, fieldVal);
         }
-        testSpec->addTestObject("metadata_collection", "metadata_collection", metadataCollection);
+        testSpec->addTestObject("metadata_collection"_cs, "metadata_collection"_cs,
+                                metadataCollection);
         return testSpec;
     }
 
     // We retrieve the individual table configurations from the execution state.
-    const auto uninterpretedTableConfigs = executionState->getTestObjectCategory("tableconfigs");
+    const auto uninterpretedTableConfigs = executionState->getTestObjectCategory("tableconfigs"_cs);
     // Since these configurations are uninterpreted we need to convert them. We launch a
     // helper function to solve the variables involved in each table configuration.
     for (const auto &tablePair : uninterpretedTableConfigs) {
         const auto tableName = tablePair.first;
         const auto *uninterpretedTableConfig = tablePair.second->checkedTo<TableConfig>();
         const auto *const tableConfig = uninterpretedTableConfig->evaluate(*finalModel, true);
-        testSpec->addTestObject("tables", tableName, tableConfig);
+        testSpec->addTestObject("tables"_cs, tableName, tableConfig);
     }
 
-    const auto actionProfiles = executionState->getTestObjectCategory("action_profile");
+    const auto actionProfiles = executionState->getTestObjectCategory("action_profile"_cs);
     for (const auto &testObject : actionProfiles) {
         const auto profileName = testObject.first;
         const auto *actionProfile = testObject.second->checkedTo<PnaDpdkActionProfile>();
         const auto *evaluatedProfile = actionProfile->evaluate(*finalModel, true);
-        testSpec->addTestObject("action_profiles", profileName, evaluatedProfile);
+        testSpec->addTestObject("action_profiles"_cs, profileName, evaluatedProfile);
     }
 
-    const auto actionSelectors = executionState->getTestObjectCategory("action_selector");
+    const auto actionSelectors = executionState->getTestObjectCategory("action_selector"_cs);
     for (const auto &testObject : actionSelectors) {
         const auto selectorName = testObject.first;
         const auto *actionSelector = testObject.second->checkedTo<PnaDpdkActionSelector>();
         const auto *evaluatedSelector = actionSelector->evaluate(*finalModel, true);
-        testSpec->addTestObject("action_selectors", selectorName, evaluatedSelector);
+        testSpec->addTestObject("action_selectors"_cs, selectorName, evaluatedSelector);
     }
 
     return testSpec;

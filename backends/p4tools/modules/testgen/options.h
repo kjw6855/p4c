@@ -2,6 +2,8 @@
 #define BACKENDS_P4TOOLS_MODULES_TESTGEN_OPTIONS_H_
 
 #include <cstdint>
+#include <filesystem>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -31,17 +33,11 @@ class TestgenOptions : public AbstractP4cToolOptions {
     // listed in @var SUPPORTED_STOP_METRICS.
     cstring stopMetric;
 
-    /// To be used with randomAccessMaxCoverage. It specifies after how many
-    /// tests (saddle point) we should randomly explore the program and pick
-    /// a random branch ranked by how many unique non-visited statements it
-    /// has.
-    uint64_t saddlePoint = 5;
-
     /// @returns the singleton instance of this class.
     static TestgenOptions &get();
 
     /// Directory for generated tests. Defaults to PWD.
-    cstring outputDir = nullptr;
+    std::optional<std::filesystem::path> outputDir = std::nullopt;
 
     /// Fail on unimplemented features instead of trying the next branch
     bool strict = false;
@@ -64,8 +60,8 @@ class TestgenOptions : public AbstractP4cToolOptions {
     bool dcg = false;
 
     /// The maximum permitted packet size, in bits.
-    // The default is the jumbo frame packet size, 9000 bytes.
-    int maxPktSize = 72000;
+    // The default is the standard MTU, 1500 bytes.
+    int maxPktSize = 12000;
 
     /// The minimum permitted packet size, in bits.
     int minPktSize = 0;
@@ -74,8 +70,14 @@ class TestgenOptions : public AbstractP4cToolOptions {
     /// TestGen will consider these when choosing input and output ports.
     std::vector<std::pair<int, int>> permittedPortRanges;
 
+    /// Skip generating a control plane entry for the entities in this list.
+    std::set<cstring> skippedControlPlaneEntities;
+
     /// Enforces the test generation of tests with mandatory output packet.
-    bool withOutputPacket = false;
+    bool outputPacketOnly = false;
+
+    /// Enforces the test generation of tests with mandatory dropped packet.
+    bool droppedPacketOnly = false;
 
     bool interactive = true;
 
@@ -87,7 +89,7 @@ class TestgenOptions : public AbstractP4cToolOptions {
     /// This will either produce no tests or only tests that contain counter examples.
     bool assertionModeEnabled = false;
 
-    /// Specifies, which IR nodes to track for coverage in the targeted P4 program.
+    /// Specifies general options which IR nodes to track for coverage in the targeted P4 program.
     /// Multiple options are possible. Currently supported: STATEMENTS, TABLE_ENTRIES.
     P4::Coverage::CoverageOptions coverageOptions;
 
@@ -99,7 +101,21 @@ class TestgenOptions : public AbstractP4cToolOptions {
 
     std::vector<int> allowPorts;
 
+    /// Indicates that coverage tracking is enabled for some coverage criteria. This is used for
+    /// sanity checking and it also affects information printed to output.
+    bool hasCoverageTracking = false;
+
+    /// Specifies minimum coverage that needs to be achieved for P4Testgen to exit successfully.
+    float minCoverage = 0;
+
+    /// The base name of the tests which are generated.
+    /// Defaults to the name of the input program, if provided.
+    std::optional<cstring> testBaseName;
+
     const char *getIncludePath() override;
+
+ protected:
+    bool validateOptions() const override;
 
  private:
     TestgenOptions();

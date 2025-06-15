@@ -26,6 +26,7 @@ limitations under the License.
 #include "frontends/p4/toP4/toP4.h"
 #include "ir/ir.h"
 #include "ir/json_loader.h"
+#include "ir/pass_utils.h"
 #include "lib/crash.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
@@ -107,7 +108,7 @@ int main(int argc, char *const argv[]) {
     AutoCompileContext autoP4TestContext(new P4TestContext);
     auto &options = P4TestContext::get().options();
     options.langVersion = CompilerOptions::FrontendVersion::P4_16;
-    options.compilerVersion = P4TEST_VERSION_STRING;
+    options.compilerVersion = cstring(P4TEST_VERSION_STRING);
 
     if (options.process(argc, argv) != nullptr) {
         if (options.loadIRFromJson == false) options.setInputFile();
@@ -127,16 +128,22 @@ int main(int argc, char *const argv[]) {
             error(ErrorType::ERR_IO, "Can't open %s", options.file);
         }
     } else {
+        P4::DiagnosticCountInfo info;
         program = P4::parseP4File(options);
+        info.emitInfo("PARSER");
 
         if (program != nullptr && ::errorCount() == 0) {
             P4::P4COptionPragmaParser optionsPragmaParser;
             program->apply(P4::ApplyOptionsPragmas(optionsPragmaParser));
+            info.emitInfo("PASS P4COptionPragmaParser");
 
             if (!options.parseOnly) {
                 try {
                     P4::FrontEnd fe;
                     fe.addDebugHook(hook);
+                    // use -TdiagnosticCountInPass:1 / -TdiagnosticCountInPass:4 to get output of
+                    // this hook
+                    fe.addDebugHook(info.getPassManagerHook());
                     program = fe.run(options, program);
                 } catch (const std::exception &bug) {
                     std::cerr << bug.what() << std::endl;
@@ -175,7 +182,7 @@ int main(int argc, char *const argv[]) {
             }
         }
         if (program) {
-            if (options.dumpJsonFile)
+            if (!options.dumpJsonFile.empty())
                 JSONGenerator(*openFile(options.dumpJsonFile, true), true) << program << std::endl;
             if (options.debugJson) {
                 std::stringstream ss1, ss2;

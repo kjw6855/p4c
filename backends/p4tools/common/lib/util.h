@@ -70,9 +70,18 @@ class Utils {
     /// @returns a random integer in the range [0, @param max]. Always return 0 if no seed is set.
     static uint64_t getRandInt(uint64_t max);
 
+    /// @returns a random integer between min and max.
+    static int64_t getRandInt(int64_t min, int64_t max);
+
+    /// @returns a random integer based on the percent vector.
+    static int64_t getRandInt(const std::vector<int64_t> &percent);
+
     /// @returns a random big integer in the range [0, @param max]. Always return 0 if no seed is
     /// set.
-    static big_int getRandBigInt(big_int max);
+    static big_int getRandBigInt(const big_int &max);
+
+    /// This is a big_int version of getRndInt.
+    static big_int getRandBigInt(const big_int &min, const big_int &max);
 
     /// @returns a IR::Constant with a random big integer that fits the specified bit width.
     /// The type will be an unsigned Type_Bits with @param bitWidth.
@@ -100,8 +109,9 @@ class Utils {
     /// @returns a method call to an internal extern consumed by the interpreter. The return type
     /// is typically Type_Void.
     static const IR::MethodCallExpression *generateInternalMethodCall(
-        cstring methodName, const std::vector<const IR::Expression *> &argVector,
-        const IR::Type *returnType = IR::Type_Void::get());
+        std::string_view methodName, const std::vector<const IR::Expression *> &argVector,
+        const IR::Type *returnType = IR::Type_Void::get(),
+        const IR::ParameterList *paramList = new IR::ParameterList());
 
     /// Shuffles the given iterable @param inp
     template <typename T>
@@ -135,6 +145,23 @@ class Utils {
         return stringStream.str();
     }
 };
+
+/// Converts the list of arguments @inputArgs to a list of type declarations. Any names appearing in
+/// the arguments are resolved with @ns.
+/// This is mainly useful for inspecting package instances.
+std::vector<const IR::Type_Declaration *> argumentsToTypeDeclarations(
+    const IR::IGeneralNamespace *ns, const IR::Vector<IR::Argument> *inputArgs);
+
+/// Looks up a declaration from a path. A BUG occurs if no declaration is found.
+const IR::IDeclaration *findProgramDecl(const IR::IGeneralNamespace *ns, const IR::Path *path);
+
+/// Looks up a declaration from a path expression. A BUG occurs if no declaration is found.
+const IR::IDeclaration *findProgramDecl(const IR::IGeneralNamespace *ns,
+                                        const IR::PathExpression *pathExpr);
+
+/// Resolves a Type_Name in the top-level namespace.
+const IR::Type_Declaration *resolveProgramType(const IR::IGeneralNamespace *ns,
+                                               const IR::Type_Name *type);
 
 }  // namespace P4Tools
 

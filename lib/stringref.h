@@ -38,7 +38,7 @@ static inline void *memrchr(const char *s, int c, size_t n) {
  * to be used with care.  StringRefs should in general have short lifetimes, and not be
  * stored in other long-lived objects. */
 
-struct StringRef {
+struct [[deprecated("Use std::string_view instead")]] StringRef {
     const char *p;
     size_t len;
     StringRef() : p(0), len(0) {}
@@ -51,11 +51,14 @@ struct StringRef {
         len = 0;
     }
     StringRef(const StringRef &a) : p(a.p), len(a.len) {}
+    // avoid clang-tidy complaining about assignment that is actually safe
+    // NOLINTBEGIN(bugprone-unhandled-self-assignment)
     StringRef &operator=(const StringRef &a) {
         p = a.p;
         len = a.len;
         return *this;
     }
+    // NOLINTEND(bugprone-unhandled-self-assignment)
     explicit operator bool() const { return p != 0; }
 
     bool operator==(const StringRef &a) const {

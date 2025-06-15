@@ -35,7 +35,7 @@ class EBPFHashAlgorithmPSA : public EBPFObject {
     ArgumentsList unpackArguments(const IR::MethodCallExpression *expr, int dataPos);
 
  public:
-    // keep this enum in sync with psa.p4 file
+    /// Keep this enum in sync with psa.p4 file.
     enum HashAlgorithm {
         IDENTITY,
         CRC32,
@@ -53,7 +53,7 @@ class EBPFHashAlgorithmPSA : public EBPFObject {
 
     virtual unsigned getOutputWidth() const { return 0; }
 
-    // decl might be a null pointer
+    /// decl might be a null pointer
     virtual void emitVariables(CodeBuilder *builder, const IR::Declaration_Instance *decl) = 0;
 
     virtual void emitClear(CodeBuilder *builder) = 0;
@@ -100,48 +100,44 @@ class CRCChecksumAlgorithm : public EBPFHashAlgorithmPSA {
     void emitSetInternalState(CodeBuilder *builder, const IR::MethodCallExpression *expr) override;
 };
 
-/**
- * For CRC16 calculation we use a polynomial 0x8005.
- * - updateMethod adds a data to the checksum
- * and performs a CRC16 calculation
- * - finalizeMethod returns the CRC16 result
- *
- * Above C functions are emitted via emitGlobals.
- */
+/// For CRC16 calculation we use a polynomial 0x8005.
+/// - updateMethod adds a data to the checksum
+/// and performs a CRC16 calculation
+/// - finalizeMethod returns the CRC16 result
+///
+/// Above C functions are emitted via emitGlobals.
 class CRC16ChecksumAlgorithm : public CRCChecksumAlgorithm {
  public:
     CRC16ChecksumAlgorithm(const EBPFProgram *program, cstring name)
         : CRCChecksumAlgorithm(program, name, 16) {
-        initialValue = "0";
+        initialValue = "0"_cs;
         // We use a 0x8005 polynomial.
         // 0xA001 comes from 0x8005 value bits reflection.
-        polynomial = "0xA001";
-        updateMethod = "crc16_update";
-        finalizeMethod = "crc16_finalize";
+        polynomial = "0xA001"_cs;
+        updateMethod = "crc16_update"_cs;
+        finalizeMethod = "crc16_finalize"_cs;
     }
 
     static void emitGlobals(CodeBuilder *builder);
 };
 
-/**
- * For CRC32 calculation we use a polynomial 0x04C11DB7.
- * - updateMethod adds a data to the checksum
- * and performs a CRC32 calculation
- * - finalizeMethod finalizes a CRC32 calculation
- * and returns the CRC32 result
- *
- * Above C functions are emitted via emitGlobals.
- */
+/// For CRC32 calculation we use a polynomial 0x04C11DB7.
+/// - updateMethod adds a data to the checksum
+/// and performs a CRC32 calculation
+/// - finalizeMethod finalizes a CRC32 calculation
+/// and returns the CRC32 result
+///
+/// Above C functions are emitted via emitGlobals.
 class CRC32ChecksumAlgorithm : public CRCChecksumAlgorithm {
  public:
     CRC32ChecksumAlgorithm(const EBPFProgram *program, cstring name)
         : CRCChecksumAlgorithm(program, name, 32) {
-        initialValue = "0xffffffff";
+        initialValue = "0xffffffff"_cs;
         // We use a 0x04C11DB7 polynomial.
         // 0xEDB88320 comes from 0x04C11DB7 value bits reflection.
-        polynomial = "0xEDB88320";
-        updateMethod = "crc32_update";
-        finalizeMethod = "crc32_finalize";
+        polynomial = "0xEDB88320"_cs;
+        updateMethod = "crc32_update"_cs;
+        finalizeMethod = "crc32_finalize"_cs;
     }
 
     static void emitGlobals(CodeBuilder *builder);

@@ -7,6 +7,9 @@
 /* Define to 1 if you have the execinfo.h header */
 #cmakedefine HAVE_EXECINFO_H 1
 
+/* Define to 1 if you have libbacktrace */
+#cmakedefine HAVE_LIBBACKTRACE 1
+
 /* Define to 1 if you have the LIBGC library. */
 #cmakedefine HAVE_LIBGC 1
 
@@ -30,3 +33,6 @@
 
 /* Define to 1 if you have the cxxabi.h header */
 #cmakedefine HAVE_CXXABI_H 1
+
+/* Define to 1 if you have the mm_malloc.h header */
+#cmakedefine HAVE_MM_MALLOC_H 1

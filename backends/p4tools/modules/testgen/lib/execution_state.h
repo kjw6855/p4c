@@ -14,13 +14,13 @@
 
 #include "backends/p4tools/common/compiler/reachability.h"
 #include "backends/p4tools/common/core/abstract_execution_state.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/namespace_context.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "ir/declaration.h"
 #include "ir/ir.h"
 #include "ir/node.h"
+#include "ir/solver.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 #include "midend/coverage.h"
@@ -145,7 +145,7 @@ class ExecutionState : public AbstractExecutionState {
     /// List of branch decisions leading into this state.
     std::vector<uint64_t> selectedBranches;
 
-    /// State that is needed to track reachability of statements given a query.
+    /// State that is needed to track reachability of nodes given a query.
     ReachabilityEngineState *reachabilityEngineState = nullptr;
 
     const IR::Constant *zeroCksum = nullptr;
@@ -206,7 +206,7 @@ class ExecutionState : public AbstractExecutionState {
     void markAction(const IR::Node *node);
     void markParserState(const cstring stateName);
 
-    /// @returns list of all statements visited before reaching this state.
+    /// @returns list of all nodes visited before reaching this state.
     [[nodiscard]] const P4::Coverage::CoverageSet &getVisited() const;
     [[nodiscard]] const P4::Coverage::CoverageSet &getVisitedActions() const;
 

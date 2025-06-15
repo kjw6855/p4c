@@ -21,27 +21,25 @@ limitations under the License.
 #ifndef LIB_SOURCE_FILE_H_
 #define LIB_SOURCE_FILE_H_
 
+#include <map>
+#include <string_view>
 #include <vector>
 
 #include "cstring.h"
-#include "map.h"
-#include "stringref.h"
+#include "stringify.h"
 
 // GTest
+#ifdef P4C_GTEST_ENABLED
 #include "gtest/gtest_prod.h"
+#endif
 
 namespace Test {
 class UtilSourceFile;
 }
 
-class IHasDbPrint {
- public:
-    virtual void dbprint(std::ostream &out) const = 0;
-    void print() const;  // useful in the debugger
-    virtual ~IHasDbPrint() {}
-};
-
 namespace Util {
+using namespace P4::literals;
+
 struct SourceFileLine;
 /**
 A character position within some InputSources: a pair of
@@ -55,13 +53,12 @@ position are the "smallest", which is a reasonable choice.
 class SourcePosition final {
  public:
     /// Creates an invalid source position
-    SourcePosition() : lineNumber(0), columnNumber(0) {}
+    SourcePosition() = default;
 
     SourcePosition(unsigned lineNumber, unsigned columnNumber);
-    SourcePosition &operator=(const SourcePosition &) = default;
 
-    SourcePosition(const SourcePosition &other)
-        : lineNumber(other.lineNumber), columnNumber(other.columnNumber) {}
+    SourcePosition(const SourcePosition &other) = default;
+    SourcePosition &operator=(const SourcePosition &) = default;
 
     inline bool operator==(const SourcePosition &rhs) const {
         return columnNumber == rhs.columnNumber && lineNumber == rhs.lineNumber;
@@ -107,8 +104,8 @@ class SourcePosition final {
 
  private:
     // Input sources where this character position is interpreted.
-    unsigned lineNumber;
-    unsigned columnNumber;
+    unsigned lineNumber = 0;
+    unsigned columnNumber = 0;
 };
 
 class InputSources;
@@ -125,10 +122,10 @@ SourceInfo can also be "invalid"
 */
 class SourceInfo final {
  public:
-    cstring filename = "";
+    cstring filename = ""_cs;
     int line = -1;
     int column = -1;
-    cstring srcBrief = "";
+    cstring srcBrief = ""_cs;
     bool isLoaded = false;
     SourceInfo(cstring filename, int line, int column, cstring srcBrief) {
         this->filename = filename;
@@ -138,7 +135,7 @@ class SourceInfo final {
         this->isLoaded = filename.size() > 0;
     }
     /// Creates an "invalid" SourceInfo
-    SourceInfo() : sources(nullptr), start(SourcePosition()), end(SourcePosition()) {}
+    SourceInfo() = default;
 
     /// Creates a SourceInfo for a 'point' in the source, or invalid
     SourceInfo(const InputSources *sources, SourcePosition point)
@@ -147,13 +144,13 @@ class SourceInfo final {
     SourceInfo(const InputSources *sources, SourcePosition start, SourcePosition end);
 
     SourceInfo(const SourceInfo &other) = default;
-    ~SourceInfo() = default;
     SourceInfo &operator=(const SourceInfo &other) = default;
+    ~SourceInfo() = default;
 
     /**
         A SourceInfo that spans both this and rhs.
         However, if this or rhs is invalid, it is not taken into account */
-    const SourceInfo operator+(const SourceInfo &rhs) const {
+    SourceInfo operator+(const SourceInfo &rhs) const {
         if (!this->isValid()) return rhs;
         if (!rhs.isValid()) return *this;
         SourcePosition s = start.min(rhs.start);
@@ -172,11 +169,11 @@ class SourceInfo final {
 
     bool operator==(const SourceInfo &rhs) const { return start == rhs.start && end == rhs.end; }
 
-    cstring toDebugString() const;
+    cstring toString() const;
 
-    void dbprint(std::ostream &out) const { out << this->toDebugString(); }
+    void dbprint(std::ostream &out) const { out << this->toString(); }
 
-    cstring toSourceFragment() const;
+    cstring toSourceFragment(bool useMarker = true) const;
     cstring toBriefSourceFragment() const;
     cstring toPositionString() const;
     cstring toSourcePositionData(unsigned *outLineNumber, unsigned *outColumnNumber) const;
@@ -219,13 +216,16 @@ class IHasSourceInfo {
     virtual ~IHasSourceInfo() {}
 };
 
+template <class T>
+inline constexpr bool has_SourceInfo_v = std::is_base_of_v<Util::IHasSourceInfo, T>;
+
 /** A line in a source file */
 struct SourceFileLine {
     /// an empty filename indicates stdin
     cstring fileName;
     unsigned sourceLine;
 
-    SourceFileLine(cstring file, unsigned line) : fileName(file), sourceLine(line) {}
+    SourceFileLine(std::string_view file, unsigned line) : fileName(file), sourceLine(line) {}
 
     cstring toString() const;
 };
@@ -263,12 +263,14 @@ class Comment final : IHasDbPrint {
   This class implements a singleton pattern: there is a single instance of this class.
 */
 class InputSources final {
+#ifdef P4C_GTEST_ENABLED
     FRIEND_TEST(UtilSourceFile, InputSources);
+#endif
 
  public:
     InputSources();
 
-    cstring getLine(unsigned lineNumber) const;
+    std::string_view getLine(unsigned lineNumber) const;
     /// Original source line that produced the line with the specified number
     SourceFileLine getSourceLine(unsigned line) const;
 
@@ -285,15 +287,15 @@ class InputSources final {
     /**
         Map the next line in the file to the line with number 'originalSourceLine'
         from file 'file'. */
-    void mapLine(cstring file, unsigned originalSourceLineNo);
+    void mapLine(std::string_view file, unsigned originalSourceLineNo);
 
     /**
        The following return a nice (multi-line, newline-terminated)
        string describing a position in the sources, e.g.:
        int<32> variable;
                ^^^^^^^^ */
-    cstring getSourceFragment(const SourcePosition &position) const;
-    cstring getSourceFragment(const SourceInfo &position) const;
+    cstring getSourceFragment(const SourcePosition &position, bool useMarker) const;
+    cstring getSourceFragment(const SourceInfo &position, bool useMarker) const;
     cstring getBriefSourceFragment(const SourceInfo &position) const;
 
     cstring toDebugString() const;
@@ -301,9 +303,9 @@ class InputSources final {
 
  private:
     /// Append this text to the last line; must not contain newlines
-    void appendToLastLine(StringRef text);
+    void appendToLastLine(std::string_view text);
     /// Append a newline and start a new line
-    void appendNewline(StringRef newline);
+    void appendNewline(std::string_view newline);
 
     /// Input program that is being currently compiled; there can be only one.
     bool sealed;
@@ -318,6 +320,6 @@ class InputSources final {
 
 }  // namespace Util
 
-inline void dbprint(const IHasDbPrint *o) { o->dbprint(std::cout); }
+void dbprint(const IHasDbPrint *o);
 
 #endif /* LIB_SOURCE_FILE_H_ */

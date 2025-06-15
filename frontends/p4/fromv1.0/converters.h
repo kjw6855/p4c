@@ -143,7 +143,7 @@ class PrimitiveConverter {
     int priority;
 
  protected:
-    PrimitiveConverter(cstring name, int prio);
+    PrimitiveConverter(std::string_view name, int prio);
     virtual ~PrimitiveConverter();
 
     // helper functions
@@ -178,8 +178,9 @@ class DiscoverStructure : public Inspector {
     ProgramStructure *structure;
 
     // These names can only be used for very specific purposes
-    std::map<cstring, cstring> reserved_names = {
-        {"standard_metadata_t", "type"}, {"standard_metadata", "metadata"}, {"egress", "control"}};
+    std::map<cstring, cstring> reserved_names = {{"standard_metadata_t"_cs, "type"_cs},
+                                                 {"standard_metadata"_cs, "metadata"_cs},
+                                                 {"egress"_cs, "control"_cs}};
 
     void checkReserved(const IR::Node *node, cstring nodeName, cstring kind) const {
         auto it = reserved_names.find(nodeName);
@@ -203,7 +204,7 @@ class DiscoverStructure : public Inspector {
     }
     void postorder(const IR::Metadata *md) override {
         structure->metadata.emplace(md);
-        checkReserved(md, md->name, "metadata");
+        checkReserved(md, md->name, "metadata"_cs);
     }
     void postorder(const IR::Header *hd) override {
         structure->headers.emplace(hd);
@@ -211,11 +212,11 @@ class DiscoverStructure : public Inspector {
     }
     void postorder(const IR::Type_StructLike *t) override {
         structure->types.emplace(t);
-        checkReserved(t, t->name, "type");
+        checkReserved(t, t->name, "type"_cs);
     }
     void postorder(const IR::V1Control *control) override {
         structure->controls.emplace(control);
-        checkReserved(control, control->name, "control");
+        checkReserved(control, control->name, "control"_cs);
     }
     void postorder(const IR::V1Parser *parser) override {
         structure->parserStates.emplace(parser);
@@ -311,7 +312,7 @@ class ComputeCallGraph : public Inspector {
         auto name = primitive->name;
         const IR::GlobalRef *glob = nullptr;
         const IR::Declaration_Instance *extrn = nullptr;
-        if (primitive->operands.size() >= 1) glob = primitive->operands[0]->to<IR::GlobalRef>();
+        if (!primitive->operands.empty()) glob = primitive->operands[0]->to<IR::GlobalRef>();
         if (glob) extrn = glob->obj->to<IR::Declaration_Instance>();
 
         if (extrn) {
@@ -327,8 +328,10 @@ class ComputeCallGraph : public Inspector {
                 ctr = gr->obj->to<IR::Counter>();
             else if (auto nr = ctrref->to<IR::PathExpression>())
                 ctr = structure->counters.get(nr->path->name);
-            if (ctr == nullptr)
+            if (ctr == nullptr) {
                 ::error(ErrorType::ERR_NOT_FOUND, "%1%: Cannot find counter", ctrref);
+                return;
+            }
             auto parent = findContext<IR::ActionFunction>();
             BUG_CHECK(parent != nullptr, "%1%: Counter call not within action", primitive);
             structure->calledCounters.calls(parent->name, ctr->name.name);
@@ -340,7 +343,10 @@ class ComputeCallGraph : public Inspector {
                 mtr = gr->obj->to<IR::Meter>();
             else if (auto nr = mtrref->to<IR::PathExpression>())
                 mtr = structure->meters.get(nr->path->name);
-            if (mtr == nullptr) ::error(ErrorType::ERR_NOT_FOUND, "%1%: Cannot find meter", mtrref);
+            if (mtr == nullptr) {
+                ::error(ErrorType::ERR_NOT_FOUND, "%1%: Cannot find meter", mtrref);
+                return;
+            }
             auto parent = findContext<IR::ActionFunction>();
             BUG_CHECK(parent != nullptr, "%1%: not within action", primitive);
             structure->calledMeters.calls(parent->name, mtr->name.name);
@@ -356,8 +362,10 @@ class ComputeCallGraph : public Inspector {
                 reg = gr->obj->to<IR::Register>();
             else if (auto nr = regref->to<IR::PathExpression>())
                 reg = structure->registers.get(nr->path->name);
-            if (reg == nullptr)
+            if (reg == nullptr) {
                 ::error(ErrorType::ERR_NOT_FOUND, "%1%: Cannot find register", regref);
+                return;
+            }
             auto parent = findContext<IR::ActionFunction>();
             BUG_CHECK(parent != nullptr, "%1%: not within action", primitive);
             structure->calledRegisters.calls(parent->name, reg->name.name);
@@ -407,11 +415,15 @@ class ComputeTableCallGraph : public Inspector {
     void postorder(const IR::Apply *apply) override {
         LOG3("Scanning " << apply->name);
         auto tbl = structure->tables.get(apply->name.name);
-        if (tbl == nullptr)
+        if (tbl == nullptr) {
             ::error(ErrorType::ERR_NOT_FOUND, "%1%: Could not find table", apply->name);
+            return;
+        }
         auto parent = findContext<IR::V1Control>();
-        if (!parent)
+        if (!parent) {
             ::error(ErrorType::ERR_UNEXPECTED, "%1%: Apply not within a control block?", apply);
+            return;
+        }
 
         auto ctrl = get(structure->tableMapping, tbl);
 
@@ -526,7 +538,7 @@ class FixExtracts final : public Transform {
 
         for (auto f : type->fields) {
             if (f->type->is<IR::Type_Varbits>()) {
-                cstring hname = structure->makeUniqueName(type->name);
+                cstring hname = structure->makeUniqueName(type->name.name);
                 if (fixedHeaderType != nullptr) {
                     ::error(ErrorType::ERR_INVALID,
                             "%1%: header types with multiple varbit fields are not supported",
@@ -626,7 +638,7 @@ class FixExtracts final : public Transform {
         CHECK_NULL(fixed->fixedHeaderType);
 
         auto result = new IR::IndexedVector<IR::StatOrDecl>();
-        cstring varName = structure->makeUniqueName("tmp_hdr");
+        cstring varName = structure->makeUniqueName("tmp_hdr"_cs);
         auto var =
             new IR::Declaration_Variable(IR::ID(varName), fixed->fixedHeaderType->to<IR::Type>());
         varDecls.push_back(var);
@@ -785,9 +797,9 @@ class InsertCompilerGeneratedStartState : public Transform {
     explicit InsertCompilerGeneratedStartState(ProgramStructure *structure) : structure(structure) {
         setName("InsertCompilerGeneratedStartState");
         structure->allNames.insert({IR::ParserState::start, 0});
-        structure->allNames.insert({"InstanceType", 0});
+        structure->allNames.insert({"InstanceType"_cs, 0});
         newStartState = structure->makeUniqueName(IR::ParserState::start);
-        newInstanceType = structure->makeUniqueName("InstanceType");
+        newInstanceType = structure->makeUniqueName("InstanceType"_cs);
     }
 
     const IR::Node *postorder(IR::P4Program *program) override {
@@ -798,7 +810,7 @@ class InsertCompilerGeneratedStartState : public Transform {
 
     // rename original start state
     const IR::Node *postorder(IR::ParserState *state) override {
-        if (!structure->parserEntryPoints.size()) return state;
+        if (structure->parserEntryPoints.empty()) return state;
         if (state->name == IR::ParserState::start) {
             state->name = newStartState;
         }
@@ -807,7 +819,7 @@ class InsertCompilerGeneratedStartState : public Transform {
 
     // Rename any path refering to original start state
     const IR::Node *postorder(IR::Path *path) override {
-        if (!structure->parserEntryPoints.size()) return path;
+        if (structure->parserEntryPoints.empty()) return path;
         // At this point any identifier called start should have been renamed
         // to unique name (e.g. start_1) => we can safely assume that any
         // "start" refers to the parser state
@@ -825,12 +837,13 @@ class InsertCompilerGeneratedStartState : public Transform {
     }
 
     const IR::Node *postorder(IR::P4Parser *parser) override {
-        if (!structure->parserEntryPoints.size()) return parser;
+        if (structure->parserEntryPoints.empty()) return parser;
         IR::IndexedVector<IR::SerEnumMember> members;
         // transition to original start state
         members.push_back(new IR::SerEnumMember("START", new IR::Constant(0)));
         selCases.push_back(new IR::SelectCase(
-            new IR::Member(new IR::TypeNameExpression(new IR::Type_Name(newInstanceType)), "START"),
+            new IR::Member(new IR::TypeNameExpression(new IR::Type_Name(newInstanceType)),
+                           "START"_cs),
             new IR::PathExpression(new IR::Path(newStartState))));
 
         // transition to addtional entry points
@@ -843,19 +856,19 @@ class InsertCompilerGeneratedStartState : public Transform {
                 new IR::PathExpression(new IR::Path(p.second->name))));
         }
         auto instAnnos = new IR::Annotations();
-        instAnnos->add(new IR::Annotation(IR::Annotation::nameAnnotation, ".$InstanceType"));
+        instAnnos->add(new IR::Annotation(IR::Annotation::nameAnnotation, ".$InstanceType"_cs));
         auto instEnum =
             new IR::Type_SerEnum(newInstanceType, instAnnos, IR::Type_Bits::get(32), members);
         allTypeDecls.push_back(instEnum);
 
         IR::Vector<IR::Expression> selExpr;
-        selExpr.push_back(
-            new IR::Cast(new IR::Type_Name(newInstanceType),
-                         new IR::Member(new IR::PathExpression(new IR::Path("standard_metadata")),
-                                        "instance_type")));
+        selExpr.push_back(new IR::Cast(
+            new IR::Type_Name(newInstanceType),
+            new IR::Member(new IR::PathExpression(new IR::Path("standard_metadata"_cs)),
+                           "instance_type"_cs)));
         auto selects = new IR::SelectExpression(new IR::ListExpression(selExpr), selCases);
         auto annos = new IR::Annotations();
-        annos->add(new IR::Annotation(IR::Annotation::nameAnnotation, ".$start"));
+        annos->add(new IR::Annotation(IR::Annotation::nameAnnotation, ".$start"_cs));
         auto startState = new IR::ParserState(IR::ParserState::start, annos, selects);
         parserStates.push_back(startState);
 
@@ -1023,9 +1036,7 @@ class FindRecirculated : public Inspector {
     }
 
     void postorder(const IR::Primitive *primitive) override {
-        if (primitive->name == "recirculate") {
-            add(primitive, 0);
-        } else if (primitive->name == "resubmit") {
+        if (primitive->name == "recirculate" || primitive->name == "resubmit") {
             add(primitive, 0);
         } else if (primitive->name.startsWith("clone") && primitive->operands.size() == 2) {
             add(primitive, 1);

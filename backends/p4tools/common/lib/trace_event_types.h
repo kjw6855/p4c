@@ -19,11 +19,12 @@ namespace P4Tools::TraceEvents {
  *   Generic
  * ============================================================================================= */
 
-/// A generic event that only takes in a string.
+/// A generic event that only takes in a string as label.
 class Generic : public TraceEvent {
  protected:
     // A label that specifies the type of this generic trace event.
     cstring label;
+
     void print(std::ostream &os) const override;
 
  public:
@@ -33,6 +34,26 @@ class Generic : public TraceEvent {
     Generic(Generic &&) = default;
     Generic &operator=(const Generic &) = default;
     Generic &operator=(Generic &&) = default;
+
+    DECLARE_TYPEINFO(Generic, TraceEvent);
+};
+
+/* =============================================================================================
+ *   GenericDescription
+ * ============================================================================================= */
+
+/// A generic event that takes in two strings, the first is the label, the second a description of
+/// the label.
+class GenericDescription : public Generic {
+ protected:
+    cstring description;
+
+    void print(std::ostream &os) const override;
+
+ public:
+    explicit GenericDescription(cstring label, cstring description);
+
+    DECLARE_TYPEINFO(GenericDescription, Generic);
 };
 
 /* =============================================================================================
@@ -58,6 +79,31 @@ class Expression : public Generic {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(Expression, Generic);
+};
+
+/* =============================================================================================
+ *   MethodCallExpression
+ * ============================================================================================= */
+
+/// Label dedicated to method call expression.
+class MethodCall : public TraceEvent {
+ private:
+    const IR::MethodCallExpression *call;
+
+ public:
+    explicit MethodCall(const IR::MethodCallExpression *call);
+    ~MethodCall() override = default;
+    MethodCall(const MethodCall &) = default;
+    MethodCall(MethodCall &&) = default;
+    MethodCall &operator=(const MethodCall &) = default;
+    MethodCall &operator=(MethodCall &&) = default;
+
+ protected:
+    void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(MethodCall, TraceEvent);
 };
 
 /* =============================================================================================
@@ -82,6 +128,31 @@ class IfStatementCondition : public TraceEvent {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(IfStatementCondition, TraceEvent);
+};
+
+/* =============================================================================================
+ *   AssignmentStatement
+ * ============================================================================================= */
+
+/// Represents an assignment statement.
+class AssignmentStatement : public TraceEvent {
+ private:
+    const IR::AssignmentStatement &stmt;
+
+ public:
+    [[nodiscard]] const AssignmentStatement *subst(const SymbolicEnv &env) const override;
+    const AssignmentStatement *apply(Transform &visitor) const override;
+    [[nodiscard]] const AssignmentStatement *evaluate(const Model &model,
+                                                      bool doComplete) const override;
+
+    explicit AssignmentStatement(const IR::AssignmentStatement &stmt);
+
+ protected:
+    void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(AssignmentStatement, TraceEvent);
 };
 
 /* =============================================================================================
@@ -128,6 +199,8 @@ class ExtractSuccess : public TraceEvent {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(ExtractSuccess, TraceEvent);
 };
 
 /* =============================================================================================
@@ -160,6 +233,8 @@ class ExtractFailure : public TraceEvent {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(ExtractFailure, TraceEvent);
 };
 
 /* =============================================================================================
@@ -169,19 +244,15 @@ class ExtractFailure : public TraceEvent {
 /// A field being emitted by a deparser.
 class Emit : public TraceEvent {
  private:
-    /// The label of the emitted header. Either a PathExpression or a member.
-    const IR::Expression *emitHeader;
-
-    /// The list of fields and their values of the emitted header.
-    std::vector<std::pair<IR::StateVariable, const IR::Expression *>> fields;
+    /// The emitted header structure.
+    const IR::HeaderExpression *emitHeader;
 
  public:
     [[nodiscard]] const Emit *subst(const SymbolicEnv &env) const override;
     const Emit *apply(Transform &visitor) const override;
     [[nodiscard]] const Emit *evaluate(const Model &model, bool doComplete) const override;
 
-    Emit(const IR::Expression *emitHeader,
-         std::vector<std::pair<IR::StateVariable, const IR::Expression *>> fields);
+    explicit Emit(const IR::HeaderExpression *emitHeader);
     ~Emit() override = default;
     Emit(const Emit &) = default;
     Emit(Emit &&) = default;
@@ -190,6 +261,8 @@ class Emit : public TraceEvent {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(Emit, TraceEvent);
 };
 
 /* =============================================================================================
@@ -226,6 +299,8 @@ class Packet : public TraceEvent {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(Packet, TraceEvent);
 };
 
 std::ostream &operator<<(std::ostream &os, const Packet::Direction &direction);
@@ -249,6 +324,8 @@ class ParserStart : public TraceEvent {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(ParserStart, TraceEvent);
 };
 
 /* =============================================================================================
@@ -273,6 +350,8 @@ class ParserState : public TraceEvent {
 
  protected:
     void print(std::ostream &os) const override;
+
+    DECLARE_TYPEINFO(ParserState, TraceEvent);
 };
 
 }  // namespace P4Tools::TraceEvents

@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <ctime>
 #include <iomanip>
+#include <numeric>
 #include <optional>
-#include <ratio>
 
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/cpp_int/add.hpp>
@@ -65,7 +65,30 @@ uint64_t Utils::getRandInt(uint64_t max) {
     return dist(rng);
 }
 
-big_int Utils::getRandBigInt(big_int max) {
+int64_t Utils::getRandInt(int64_t min, int64_t max) {
+    boost::random::uniform_int_distribution<int64_t> distribution(min, max);
+    return distribution(rng);
+}
+
+int64_t Utils::getRandInt(const std::vector<int64_t> &percent) {
+    int sum = std::accumulate(percent.begin(), percent.end(), 0);
+
+    // Do not pick zero since that conflicts with zero percentage values.
+    auto randNum = getRandInt(1, sum);
+    int ret = 0;
+
+    int64_t retSum = 0;
+    for (auto i : percent) {
+        retSum += i;
+        if (retSum >= randNum) {
+            break;
+        }
+        ret = ret + 1;
+    }
+    return ret;
+}
+
+big_int Utils::getRandBigInt(const big_int &max) {
     if (!currentSeed) {
         return 0;
     }
@@ -73,17 +96,25 @@ big_int Utils::getRandBigInt(big_int max) {
     return dist(rng);
 }
 
+big_int Utils::getRandBigInt(const big_int &min, const big_int &max) {
+    if (!currentSeed) {
+        return 0;
+    }
+    boost::random::uniform_int_distribution<big_int> dist(min, max);
+    return dist(rng);
+}
+
 const IR::Constant *Utils::getRandConstantForWidth(int bitWidth) {
     auto maxVal = IR::getMaxBvVal(bitWidth);
     auto randInt = Utils::getRandBigInt(maxVal);
-    const auto *constType = IR::getBitType(bitWidth);
-    return IR::getConstant(constType, randInt);
+    const auto *constType = IR::Type_Bits::get(bitWidth);
+    return IR::Constant::get(constType, randInt);
 }
 
 const IR::Constant *Utils::getRandConstantForType(const IR::Type_Bits *type) {
     auto maxVal = IR::getMaxBvVal(type->width_bits());
     auto randInt = Utils::getRandBigInt(maxVal);
-    return IR::getConstant(type, randInt);
+    return IR::Constant::get(type, randInt);
 }
 
 /* =========================================================================================
@@ -136,17 +167,17 @@ std::optional<bool> Utils::evalCondWithTaint(const IR::Expression *cond) {
 }
 
 const IR::MethodCallExpression *Utils::generateInternalMethodCall(
-    cstring methodName, const std::vector<const IR::Expression *> &argVector,
-    const IR::Type *returnType) {
+    std::string_view methodName, const std::vector<const IR::Expression *> &argVector,
+    const IR::Type *returnType, const IR::ParameterList *paramList) {
     auto *args = new IR::Vector<IR::Argument>();
     for (const auto *expr : argVector) {
         args->push_back(new IR::Argument(expr));
     }
+    cstring name(methodName);
     return new IR::MethodCallExpression(
         returnType,
-        new IR::Member(new IR::Type_Method(new IR::ParameterList(), methodName),
-                       new IR::PathExpression(new IR::Type_Extern("*"), new IR::Path("*")),
-                       methodName),
+        new IR::Member(new IR::Type_Method(paramList, name),
+                       new IR::PathExpression(new IR::Type_Extern("*"), new IR::Path("*")), name),
         args);
 }
 
@@ -275,6 +306,74 @@ const IR::Constant *Utils::getZeroCksum(const IR::Expression *expr, int zeroLen,
     }
 
     return nullptr;
+}
+
+std::vector<const IR::Type_Declaration *> argumentsToTypeDeclarations(
+    const IR::IGeneralNamespace *ns, const IR::Vector<IR::Argument> *inputArgs) {
+    std::vector<const IR::Type_Declaration *> resultDecls;
+    for (const auto *arg : *inputArgs) {
+        const auto *expr = arg->expression;
+
+        const IR::Type_Declaration *declType = nullptr;
+
+        if (const auto *ctorCall = expr->to<IR::ConstructorCallExpression>()) {
+            const auto *constructedTypeName = ctorCall->constructedType->checkedTo<IR::Type_Name>();
+
+            // Find the corresponding type declaration in the top-level namespace.
+            declType =
+                findProgramDecl(ns, constructedTypeName->path)->checkedTo<IR::Type_Declaration>();
+        } else if (const auto *pathExpr = expr->to<IR::PathExpression>()) {
+            // Look up the path expression in the top-level namespace and expect to find a
+            // declaration instance.
+            const auto *declInstance =
+                findProgramDecl(ns, pathExpr->path)->checkedTo<IR::Declaration_Instance>();
+            if (const auto *pipe = declInstance->type->to<IR::Type_Specialized>()) {
+                const auto *pipeDecl = declInstance->to<IR::Declaration_Instance>();
+                argumentsToTypeDeclarations(ns, pipeDecl->arguments, resultDecls);
+                return;
+
+            } else {
+                declType = declInstance->type->checkedTo<IR::Type_Declaration>();
+            }
+        } else {
+            BUG("Unexpected main-declaration argument node type: %1%", expr->node_type_name());
+        }
+
+        // The constructor's parameter list should be empty, since the compiler should have
+        // substituted the constructor arguments for us.
+        if (const auto *iApply = declType->to<IR::IContainer>()) {
+            const IR::ParameterList *ctorParams = iApply->getConstructorParameters();
+            BUG_CHECK(ctorParams->empty(), "Compiler did not eliminate constructor parameters: %1%",
+                      ctorParams);
+        } else {
+            BUG("Does not instantiate an IContainer: %1%", expr);
+        }
+
+        resultDecls.emplace_back(declType);
+    }
+    return resultDecls;
+}
+
+const IR::IDeclaration *findProgramDecl(const IR::IGeneralNamespace *ns, const IR::Path *path) {
+    auto name = path->name.name;
+    const auto *decl = ns->getDeclsByName(name)->singleOrDefault();
+    if (decl != nullptr) {
+        return decl;
+    }
+    BUG("Variable %1% not found in the available namespaces.", path);
+}
+
+const IR::IDeclaration *findProgramDecl(const IR::IGeneralNamespace *ns,
+                                        const IR::PathExpression *pathExpr) {
+    return findProgramDecl(ns, pathExpr->path);
+}
+
+const IR::Type_Declaration *resolveProgramType(const IR::IGeneralNamespace *ns,
+                                               const IR::Type_Name *type) {
+    const auto *path = type->path;
+    const auto *decl = findProgramDecl(ns, path)->to<IR::Type_Declaration>();
+    BUG_CHECK(decl, "Not a type: %1%", path);
+    return decl;
 }
 
 }  // namespace P4Tools

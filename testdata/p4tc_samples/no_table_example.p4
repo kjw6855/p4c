@@ -20,8 +20,8 @@ header ipv4_t {
     bit<8>  ttl;
     bit<8>  protocol;
     bit<16> hdrChecksum;
-    bit<32> srcAddr;
-    bit<32> dstAddr;
+    @tc_type ("ipv4") bit<32> srcAddr;
+    @tc_type ("ipv4") bit<32> dstAddr;
 }
 
 header udp_t {
@@ -92,7 +92,7 @@ control MainControlImpl(
 
 control MainDeparserImpl(
     packet_out pkt,
-    in headers_t hdr,                    // from main control
+    inout headers_t hdr,                    // from main control
     in main_metadata_t user_meta,        // from main control
     in pna_main_output_metadata_t ostd)
 {

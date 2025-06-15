@@ -41,7 +41,7 @@ class PSAErrorCodesGen : public Inspector {
             ++id;
             if (decl->srcInfo.isValid()) {
                 auto sourceFile = decl->srcInfo.getSourceFile();
-                // all the error codes are located in core.p4 file, they are defined in psa.h
+                // All the error codes are located in core.p4 file, they are defined in psa.h
                 if (sourceFile.endsWith("p4include/core.p4")) continue;
             }
 
@@ -49,7 +49,7 @@ class PSAErrorCodesGen : public Inspector {
             builder->appendFormat("static const ParserError_t %s = %d", decl->name.name, id);
             builder->endOfStatement(true);
 
-            // type ParserError_t is u8, which can have values from 0 to 255
+            // Type ParserError_t is u8, which can have values from 0 to 255.
             if (id > 255) {
                 ::error(ErrorType::ERR_OVERLIMIT, "%1%: Reached maximum number of possible errors",
                         decl);
@@ -87,16 +87,7 @@ void PSAEbpfGenerator::emitPreamble(CodeBuilder *builder) const {
 }
 
 void PSAEbpfGenerator::emitCommonPreamble(CodeBuilder *builder) const {
-    builder->newline();
-    builder->appendLine("#define EBPF_MASK(t, w) ((((t)(1)) << (w)) - (t)1)");
-    builder->appendLine("#define BYTES(w) ((w) / 8)");
-    builder->appendLine(
-        "#define write_partial(a, w, s, v) do { *((u8*)a) = ((*((u8*)a)) "
-        "& ~(EBPF_MASK(u8, w) << s)) | (v << s) ; } while (0)");
-    builder->appendLine(
-        "#define write_byte(base, offset, v) do { "
-        "*(u8*)((base) + (offset)) = (v); "
-        "} while (0)");
+    ingress->emitCommonPreamble(builder);  // from ebpfProgram
     builder->target->emitPreamble(builder);
 }
 
@@ -122,7 +113,7 @@ void PSAEbpfGenerator::emitInternalStructures(CodeBuilder *builder) const {
     builder->newline();
 }
 
-/* Generate headers and structs in p4 prog */
+/// Generate headers and structs in p4 prog.
 void PSAEbpfGenerator::emitTypes(CodeBuilder *builder) const {
     PSAErrorCodesGen errorGen(builder);
     ingress->program->apply(errorGen);
@@ -149,16 +140,16 @@ void PSAEbpfGenerator::emitGlobalHeadersMetadata(CodeBuilder *builder) const {
     builder->blockStart();
     builder->emitIndent();
 
-    ingress->parser->headerType->declare(builder, "cpumap_hdr", false);
+    ingress->parser->headerType->declare(builder, "cpumap_hdr"_cs, false);
     builder->endOfStatement(true);
     builder->emitIndent();
     auto user_md_type = ingress->typeMap->getType(ingress->control->user_metadata);
     BUG_CHECK(user_md_type != nullptr, "cannot declare user metadata");
     auto userMetadataType = EBPFTypeFactory::instance->create(user_md_type);
-    userMetadataType->declare(builder, "cpumap_usermeta", false);
+    userMetadataType->declare(builder, "cpumap_usermeta"_cs, false);
     builder->endOfStatement(true);
 
-    // additional field to avoid compiler errors when both headers and user_metadata are empty.
+    // Additional field to avoid compiler errors when both headers and user_metadata are empty.
     builder->emitIndent();
     builder->append("__u8 __hook");
     builder->endOfStatement(true);
@@ -169,12 +160,12 @@ void PSAEbpfGenerator::emitGlobalHeadersMetadata(CodeBuilder *builder) const {
 }
 
 void PSAEbpfGenerator::emitPacketReplicationTables(CodeBuilder *builder) const {
-    builder->target->emitMapInMapDecl(builder, "clone_session_tbl_inner", TableHash, "elem_t",
-                                      "struct element", MaxClones, "clone_session_tbl", TableArray,
-                                      "__u32", MaxCloneSessions);
-    builder->target->emitMapInMapDecl(builder, "multicast_grp_tbl_inner", TableHash, "elem_t",
-                                      "struct element", MaxClones, "multicast_grp_tbl", TableArray,
-                                      "__u32", MaxCloneSessions);
+    builder->target->emitMapInMapDecl(builder, "clone_session_tbl_inner"_cs, TableHash, "elem_t"_cs,
+                                      "struct element"_cs, MaxClones, "clone_session_tbl"_cs,
+                                      TableArray, "__u32"_cs, MaxCloneSessions);
+    builder->target->emitMapInMapDecl(builder, "multicast_grp_tbl_inner"_cs, TableHash, "elem_t"_cs,
+                                      "struct element"_cs, MaxClones, "multicast_grp_tbl"_cs,
+                                      TableArray, "__u32"_cs, MaxCloneSessions);
 }
 
 void PSAEbpfGenerator::emitPipelineInstances(CodeBuilder *builder) const {
@@ -185,8 +176,8 @@ void PSAEbpfGenerator::emitPipelineInstances(CodeBuilder *builder) const {
     egress->parser->emitValueSetInstances(builder);
     egress->control->emitTableInstances(builder);
 
-    builder->target->emitTableDecl(builder, "hdr_md_cpumap", TablePerCPUArray, "u32",
-                                   "struct hdr_md", 2);
+    builder->target->emitTableDecl(builder, "hdr_md_cpumap"_cs, TablePerCPUArray, "u32"_cs,
+                                   "struct hdr_md"_cs, 2);
 }
 
 void PSAEbpfGenerator::emitInitializer(CodeBuilder *builder) const {
@@ -237,7 +228,7 @@ void PSAEbpfGenerator::emitHelperFunctions(CodeBuilder *builder) const {
         "        next_id = elem->next_id;\n"
         "    }\n"
         "    return 0;\n"
-        "}";
+        "}"_cs;
     if (options.emitTraceMessages) {
         forEachFunc = forEachFunc.replace(
             "%trace_msg_no_elements%",
@@ -248,7 +239,7 @@ void PSAEbpfGenerator::emitHelperFunctions(CodeBuilder *builder) const {
     builder->appendLine(forEachFunc);
     builder->newline();
 
-    // Function to perform cloning, common for ingress and egress
+    // Function to perform cloning, common for ingress and egress.
     cstring cloneFunction =
         "static __always_inline\n"
         "void do_clone(SK_BUFF *skb, void *data)\n"
@@ -256,14 +247,14 @@ void PSAEbpfGenerator::emitHelperFunctions(CodeBuilder *builder) const {
         "    struct clone_session_entry *entry = (struct clone_session_entry *) data;\n"
         "%trace_msg_redirect%"
         "    bpf_clone_redirect(skb, entry->egress_port, 0);\n"
-        "}";
+        "}"_cs;
     if (options.emitTraceMessages) {
         cloneFunction = cloneFunction.replace(
-            cstring("%trace_msg_redirect%"),
+            "%trace_msg_redirect%",
             "    bpf_trace_message(\"do_clone: cloning pkt, egress_port=%d, cos=%d\\n\", "
             "entry->egress_port, entry->class_of_service);\n");
     } else {
-        cloneFunction = cloneFunction.replace(cstring("%trace_msg_redirect%"), "");
+        cloneFunction = cloneFunction.replace("%trace_msg_redirect%", "");
     }
     builder->appendLine(cloneFunction);
     builder->newline();
@@ -290,27 +281,27 @@ void PSAEbpfGenerator::emitHelperFunctions(CodeBuilder *builder) const {
         "    }\n"
         "%trace_msg_cloning_done%"
         "    return 0;\n"
-        " }";
+        " }"_cs;
     if (options.emitTraceMessages) {
         pktClonesFunc = pktClonesFunc.replace(
-            cstring("%trace_msg_clone_requested%"),
+            "%trace_msg_clone_requested%",
             "    bpf_trace_message(\"Clone#%d: pkt clone requested, session=%d\\n\", "
             "caller_id, session_id);\n");
         pktClonesFunc = pktClonesFunc.replace(
-            cstring("%trace_msg_clone_failed%"),
+            "%trace_msg_clone_failed%",
             "            bpf_trace_message(\"Clone#%d: failed to clone packet\", caller_id);\n");
         pktClonesFunc =
-            pktClonesFunc.replace(cstring("%trace_msg_no_session%"),
+            pktClonesFunc.replace("%trace_msg_no_session%",
                                   "        bpf_trace_message(\"Clone#%d: session_id not found, "
                                   "no clones created\\n\", caller_id);\n");
         pktClonesFunc = pktClonesFunc.replace(
-            cstring("%trace_msg_cloning_done%"),
+            "%trace_msg_cloning_done%",
             "    bpf_trace_message(\"Clone#%d: packet cloning finished\\n\", caller_id);\n");
     } else {
-        pktClonesFunc = pktClonesFunc.replace(cstring("%trace_msg_clone_requested%"), "");
-        pktClonesFunc = pktClonesFunc.replace(cstring("%trace_msg_clone_failed%"), "");
-        pktClonesFunc = pktClonesFunc.replace(cstring("%trace_msg_no_session%"), "");
-        pktClonesFunc = pktClonesFunc.replace(cstring("%trace_msg_cloning_done%"), "");
+        pktClonesFunc = pktClonesFunc.replace("%trace_msg_clone_requested%", "");
+        pktClonesFunc = pktClonesFunc.replace("%trace_msg_clone_failed%", "");
+        pktClonesFunc = pktClonesFunc.replace("%trace_msg_no_session%", "");
+        pktClonesFunc = pktClonesFunc.replace("%trace_msg_cloning_done%", "");
     }
 
     builder->appendLine(pktClonesFunc);
@@ -339,14 +330,14 @@ void PSAEbpfGenerator::emitCRC32LookupTableTypes(CodeBuilder *builder) const {
 }
 
 void PSAEbpfGenerator::emitCRC32LookupTableInstance(CodeBuilder *builder) const {
-    builder->target->emitTableDecl(builder, cstring("crc_lookup_tbl"), TableArray, "u32",
+    builder->target->emitTableDecl(builder, cstring("crc_lookup_tbl"), TableArray, "u32"_cs,
                                    cstring("struct lookup_tbl_val"), 1);
 }
 
 void PSAEbpfGenerator::emitCRC32LookupTableInitializer(CodeBuilder *builder) const {
-    cstring keyName = "lookup_tbl_key";
-    cstring valueName = "lookup_tbl_value";
-    cstring instanceName = "crc_lookup_tbl";
+    cstring keyName = "lookup_tbl_key"_cs;
+    cstring valueName = "lookup_tbl_value"_cs;
+    cstring instanceName = "crc_lookup_tbl"_cs;
 
     builder->emitIndent();
     builder->appendFormat("u32 %s = 0", keyName.c_str());
@@ -426,19 +417,17 @@ void PSAEbpfGenerator::emitCRC32LookupTableInitializer(CodeBuilder *builder) con
 
 // =====================PSAArchTC=============================
 void PSAArchTC::emit(CodeBuilder *builder) const {
-    /**
-     * How the structure of a single C program for PSA should look like?
-     * 1. Automatically generated comment
-     * 2. Includes
-     * 3. Macro definitions (it's called "preamble")
-     * 4. Headers, structs, types, PSA-specific data types.
-     * 5. BPF map definitions.
-     * 6. BPF map initialization
-     * 7. XDP helper program.
-     * 8. Helper functions
-     * 9. TC Ingress program.
-     * 10. TC Egress program.
-     */
+    // How the structure of a single C program for PSA should look like?
+    // 1. Automatically generated comment
+    // 2. Includes
+    // 3. Macro definitions (it's called "preamble")
+    // 4. Headers, structs, types, PSA-specific data types.
+    // 5. BPF map definitions.
+    // 6. BPF map initialization
+    // 7. XDP helper program.
+    // 8. Helper functions
+    // 9. TC Ingress program.
+    // 10. TC Egress program.
 
     // 1. Automatically generated comment.
     // Note we use inherited function from EBPFProgram.
@@ -450,47 +439,31 @@ void PSAArchTC::emit(CodeBuilder *builder) const {
     builder->target->emitIncludes(builder);
     emitPSAIncludes(builder);
 
-    /*
-     * 3. Macro definitions (it's called "preamble")
-     */
+    // 3. Macro definitions (it's called "preamble")
     emitPreamble(builder);
 
-    /*
-     * 4. Headers, structs, types, PSA-specific data types.
-     */
+    // 4. Headers, structs, types, PSA-specific data types.
     emitInternalStructures(builder);
     emitTypes(builder);
     emitGlobalHeadersMetadata(builder);
 
-    /*
-     * 5. BPF map definitions.
-     */
+    // 5. BPF map definitions.
     emitInstances(builder);
 
-    /*
-     * 6. Helper functions for ingress and egress program.
-     */
+    // 6. Helper functions for ingress and egress program.
     emitHelperFunctions(builder);
 
-    /*
-     * 7. BPF map initialization.
-     */
+    // 7. BPF map initialization.
     emitInitializer(builder);
     builder->newline();
 
-    /*
-     * 8. XDP helper program.
-     */
+    // 8. XDP helper program.
     xdp->emit(builder);
 
-    /*
-     * 9. TC Ingress program.
-     */
+    // 9. TC Ingress program.
     ingress->emit(builder);
 
-    /*
-     * 10. TC Egress program.
-     */
+    // 10. TC Egress program.
     if (!egress->isEmpty()) {
         // Do not generate TC Egress program if PSA egress pipeline is not used (empty).
         egress->emit(builder);
@@ -503,7 +476,8 @@ void PSAArchTC::emitInstances(CodeBuilder *builder) const {
     builder->appendLine("REGISTER_START()");
 
     if (options.xdp2tcMode == XDP2TC_CPUMAP) {
-        builder->target->emitTableDecl(builder, "xdp2tc_cpumap", TablePerCPUArray, "u32", "u16", 1);
+        builder->target->emitTableDecl(builder, "xdp2tc_cpumap"_cs, TablePerCPUArray, "u32"_cs,
+                                       "u16"_cs, 1);
     }
 
     emitPacketReplicationTables(builder);
@@ -574,11 +548,11 @@ void PSAArchXDP::emitInstances(CodeBuilder *builder) const {
     tcEgressForXDP->control->tables.insert(egress->control->tables.begin(),
                                            egress->control->tables.end());
 
-    builder->target->emitTableDecl(builder, "xdp2tc_shared_map", TablePerCPUArray, "u32",
-                                   "struct xdp2tc_metadata", 1);
+    builder->target->emitTableDecl(builder, "xdp2tc_shared_map"_cs, TablePerCPUArray, "u32"_cs,
+                                   "struct xdp2tc_metadata"_cs, 1);
 
-    builder->target->emitTableDecl(builder, "tx_port", TableDevmap, "u32", "struct bpf_devmap_val",
-                                   egressDevmapSize);
+    builder->target->emitTableDecl(builder, "tx_port"_cs, TableDevmap, "u32"_cs,
+                                   "struct bpf_devmap_val"_cs, egressDevmapSize);
 
     emitCRC32LookupTableInstance(builder);
 
@@ -644,30 +618,30 @@ const PSAEbpfGenerator *ConvertToEbpfPSA::build(const IR::ToplevelBlock *tlb) {
     /*
      * INGRESS
      */
-    auto ingress = tlb->getMain()->getParameterValue("ingress")->to<IR::PackageBlock>();
-    auto ingressParser = ingress->getParameterValue("ip");
+    auto ingress = tlb->getMain()->getParameterValue("ingress"_cs)->to<IR::PackageBlock>();
+    auto ingressParser = ingress->getParameterValue("ip"_cs);
     BUG_CHECK(ingressParser != nullptr, "No ingress parser block found");
-    auto ingressControl = ingress->getParameterValue("ig");
+    auto ingressControl = ingress->getParameterValue("ig"_cs);
     BUG_CHECK(ingressControl != nullptr, "No ingress control block found");
-    auto ingressDeparser = ingress->getParameterValue("id");
+    auto ingressDeparser = ingress->getParameterValue("id"_cs);
     BUG_CHECK(ingressDeparser != nullptr, "No ingress deparser block found");
 
     /*
      * EGRESS
      */
-    auto egress = tlb->getMain()->getParameterValue("egress")->to<IR::PackageBlock>();
-    auto egressParser = egress->getParameterValue("ep");
+    auto egress = tlb->getMain()->getParameterValue("egress"_cs)->to<IR::PackageBlock>();
+    auto egressParser = egress->getParameterValue("ep"_cs);
     BUG_CHECK(egressParser != nullptr, "No egress parser block found");
-    auto egressControl = egress->getParameterValue("eg");
+    auto egressControl = egress->getParameterValue("eg"_cs);
     BUG_CHECK(egressControl != nullptr, "No egress control block found");
-    auto egressDeparser = egress->getParameterValue("ed");
+    auto egressDeparser = egress->getParameterValue("ed"_cs);
     BUG_CHECK(egressDeparser != nullptr, "No egress deparser block found");
 
     if (!options.generateToXDP) {
         auto xdp = new XDPHelpProgram(options);
 
         auto ingress_pipeline_converter = new ConvertToEbpfPipeline(
-            "tc-ingress", TC_INGRESS, options, ingressParser->to<IR::ParserBlock>(),
+            "tc-ingress"_cs, TC_INGRESS, options, ingressParser->to<IR::ParserBlock>(),
             ingressControl->to<IR::ControlBlock>(), ingressDeparser->to<IR::ControlBlock>(), refmap,
             typemap);
         ingress->apply(*ingress_pipeline_converter);
@@ -675,7 +649,7 @@ const PSAEbpfGenerator *ConvertToEbpfPSA::build(const IR::ToplevelBlock *tlb) {
         auto tcIngress = ingress_pipeline_converter->getEbpfPipeline();
 
         auto egress_pipeline_converter = new ConvertToEbpfPipeline(
-            "tc-egress", TC_EGRESS, options, egressParser->to<IR::ParserBlock>(),
+            "tc-egress"_cs, TC_EGRESS, options, egressParser->to<IR::ParserBlock>(),
             egressControl->to<IR::ControlBlock>(), egressDeparser->to<IR::ControlBlock>(), refmap,
             typemap);
         egress->apply(*egress_pipeline_converter);
@@ -685,7 +659,7 @@ const PSAEbpfGenerator *ConvertToEbpfPSA::build(const IR::ToplevelBlock *tlb) {
         return new PSAArchTC(options, ebpfTypes, xdp, tcIngress, tcEgress);
     } else {
         auto ingress_pipeline_converter = new ConvertToEbpfPipeline(
-            "xdp-ingress", XDP_INGRESS, options, ingressParser->to<IR::ParserBlock>(),
+            "xdp-ingress"_cs, XDP_INGRESS, options, ingressParser->to<IR::ParserBlock>(),
             ingressControl->to<IR::ControlBlock>(), ingressDeparser->to<IR::ControlBlock>(), refmap,
             typemap);
         ingress->apply(*ingress_pipeline_converter);
@@ -694,7 +668,7 @@ const PSAEbpfGenerator *ConvertToEbpfPSA::build(const IR::ToplevelBlock *tlb) {
         BUG_CHECK(xdpIngress != nullptr, "Cannot create xdpIngress block.");
 
         auto egress_pipeline_converter = new ConvertToEbpfPipeline(
-            "xdp-egress", XDP_EGRESS, options, egressParser->to<IR::ParserBlock>(),
+            "xdp-egress"_cs, XDP_EGRESS, options, egressParser->to<IR::ParserBlock>(),
             egressControl->to<IR::ControlBlock>(), egressDeparser->to<IR::ControlBlock>(), refmap,
             typemap);
         egress->apply(*egress_pipeline_converter);
@@ -703,7 +677,7 @@ const PSAEbpfGenerator *ConvertToEbpfPSA::build(const IR::ToplevelBlock *tlb) {
         BUG_CHECK(xdpEgress != nullptr, "Cannot create xdpEgress block.");
 
         auto tc_trafficmanager_converter = new ConvertToEbpfPipeline(
-            "tc-ingress", TC_TRAFFIC_MANAGER, options, ingressParser->to<IR::ParserBlock>(),
+            "tc-ingress"_cs, TC_TRAFFIC_MANAGER, options, ingressParser->to<IR::ParserBlock>(),
             ingressControl->to<IR::ControlBlock>(), ingressDeparser->to<IR::ControlBlock>(), refmap,
             typemap);
         ingress->apply(*tc_trafficmanager_converter);
@@ -711,7 +685,7 @@ const PSAEbpfGenerator *ConvertToEbpfPSA::build(const IR::ToplevelBlock *tlb) {
         BUG_CHECK(tcTrafficManager != nullptr, "Cannot create tcTrafficManager block.");
 
         auto tc_egress_pipeline_converter = new ConvertToEbpfPipeline(
-            "tc-egress", TC_EGRESS, options, egressParser->to<IR::ParserBlock>(),
+            "tc-egress"_cs, TC_EGRESS, options, egressParser->to<IR::ParserBlock>(),
             egressControl->to<IR::ControlBlock>(), egressDeparser->to<IR::ControlBlock>(), refmap,
             typemap);
         egress->apply(*tc_egress_pipeline_converter);

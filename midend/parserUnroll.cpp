@@ -33,19 +33,19 @@ bool StackVariable::operator==(const StackVariable &other) const {
 size_t StackVariableHash::operator()(const StackVariable &var) const {
     // hash for path expression.
     if (const auto *path = var.variable->to<IR::PathExpression>()) {
-        return Util::Hash::fnv1a<const cstring>(path->path->name.name);
+        return Util::Hash{}(path->path->name.name);
     }
     const IR::Member *curMember = var.variable->to<IR::Member>();
-    std::vector<size_t> h;
+    uint64_t hash = UINT64_C(0xDEADBEEF);
     while (curMember) {
-        h.push_back(Util::Hash::fnv1a<const cstring>(curMember->member.name));
+        hash = Util::hash_combine(hash, curMember->member.name);
         if (auto *path = curMember->expr->to<IR::PathExpression>()) {
-            h.push_back(Util::Hash::fnv1a<const cstring>(path->path->name));
+            hash = Util::hash_combine(hash, path->path->name.name);
             break;
         }
         curMember = curMember->expr->checkedTo<IR::Member>();
     }
-    return Util::Hash::fnv1a(h.data(), sizeof(size_t) * h.size());
+    return hash;
 }
 
 /// The main class for parsers' states key for visited checking.
@@ -149,7 +149,8 @@ class ParserStateRewriter : public Transform {
           typeMap(typeMap),
           afterExec(afterExec),
           visitedStates(visitedStates),
-          wasOutOfBound(false) {
+          wasOutOfBound(false),
+          wasError(false) {
         CHECK_NULL(parserStructure);
         CHECK_NULL(state);
         CHECK_NULL(refMap);
@@ -172,6 +173,12 @@ class ParserStateRewriter : public Transform {
         ExpressionEvaluator ev(refMap, typeMap, valueMap);
         auto *value = ev.evaluate(expression->right, false);
         if (!value->is<SymbolicInteger>()) return expression;
+        if (!value->to<SymbolicInteger>()->isKnown()) {
+            ::warning(ErrorType::ERR_INVALID, "Uninitialized value prevents loop unrolling:\n%1%",
+                      expression->right);
+            wasError = true;
+            return expression;
+        }
         auto *res = value->to<SymbolicInteger>()->constant->clone();
         newExpression->right = res;
         if (!res->fitsInt64()) {
@@ -230,6 +237,7 @@ class ParserStateRewriter : public Transform {
     }
     inline size_t getIndex() { return currentIndex; }
     bool isOutOfBound() { return wasOutOfBound; }
+    bool checkError() { return wasError; }
 
  protected:
     const IR::Type *getTypeArray(const IR::Node *element) {
@@ -338,6 +346,7 @@ class ParserStateRewriter : public Transform {
     StatesVisitedMap &visitedStates;
     size_t currentIndex;
     bool wasOutOfBound;
+    bool wasError;
 };
 
 class ParserSymbolicInterpreter {
@@ -382,7 +391,7 @@ class ParserSymbolicInterpreter {
             }
 
             if (value == nullptr) value = factory->create(type, true);
-            if (value->is<SymbolicError>()) {
+            if (value && value->is<SymbolicError>()) {
                 ::warning(ErrorType::ERR_EXPRESSION, "%1%: %2%", d,
                           value->to<SymbolicError>()->message());
                 return nullptr;
@@ -496,12 +505,16 @@ class ParserSymbolicInterpreter {
             }
             std::stringstream errorStr;
             errorStr << errorValue;
-            ::warning(ErrorType::WARN_IGNORE_PROPERTY, "Result of %1% is not defined: %2%", sord,
+            ::warning(ErrorType::WARN_IGNORE_PROPERTY, "Result of '%1%' is not defined: %2%", sord,
                       errorStr.str());
         }
         ParserStateRewriter rewriter(structure, state, valueMap, refMap, typeMap, &ev,
                                      visitedStates);
         const IR::Node *node = sord->apply(rewriter);
+        if (rewriter.checkError()) {
+            wasError = true;
+            return nullptr;
+        }
         if (rewriter.isOutOfBound()) {
             return nullptr;
         }
@@ -778,8 +791,8 @@ class ParserSymbolicInterpreter {
         }
         hasOutOfboundState = true;
         newStates.insert(newName);
-        auto *pathExpr =
-            new IR::PathExpression(new IR::Type_State(), new IR::Path(outOfBoundsStateName, false));
+        auto *pathExpr = new IR::PathExpression(IR::Type_State::get(),
+                                                new IR::Path(outOfBoundsStateName, false));
         stateInfo->newState = new IR::ParserState(newName, components, pathExpr);
     }
 

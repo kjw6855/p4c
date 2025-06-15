@@ -1,4 +1,4 @@
-# Common Utilities
+# Common P4C utility functions
 
 This directory contains miscellaneous utilities that are generally useful
 and not specific to any part of the compiler.  Most are not even compiler
@@ -71,10 +71,6 @@ A simple ostream that does nothing.
 
 Represents compiler command-line options.
 
-##### path.h, path.cpp
-
-Simple system-independent pathname abstraction.
-
 ##### range.h
 
 Iterators over numeric ranges.
@@ -91,10 +87,3 @@ Conversion of various types to strings.
 ##### sourceCodeBuilder.h
 
 Support for emitting programs in source (works for P4 and C).
-
-##### stringref.h
-
-A stringref is really a substring of another string, with a specified
-length, but sharing the same storage.  Since it is just a reference, care needs
-to be taken to ensure that it does not outlive the storage it refers to -- if
-the object owning the memory releases it.

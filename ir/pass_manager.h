@@ -29,6 +29,8 @@ limitations under the License.
 #include "lib/exceptions.h"
 #include "lib/safe_vector.h"
 
+/// A hook called by pass manager after a pass finishes.
+/// @param node a result of the last pass, which can be the (transformed) node, or a nullptr.
 typedef std::function<void(const char *manager, unsigned seqNo, const char *pass,
                            const IR::Node *node)>
     DebugHook;
@@ -142,8 +144,10 @@ class PassRepeated : virtual public PassManager {
     unsigned repeats;  // 0 = until convergence
  public:
     PassRepeated() : repeats(0) {}
-    PassRepeated(const std::initializer_list<VisitorRef> &init, unsigned repeats = 0)
+    explicit PassRepeated(const std::initializer_list<VisitorRef> &init, unsigned repeats = 0)
         : PassManager(init), repeats(repeats) {}
+    explicit PassRepeated(const PassManager &other, unsigned repeats = 0)
+        : PassManager(other), repeats(repeats) {}
     const IR::Node *apply_visitor(const IR::Node *, const char * = 0) override;
     PassRepeated *setRepeats(unsigned repeats) {
         this->repeats = repeats;

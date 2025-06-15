@@ -35,6 +35,8 @@ limitations under the License.
 
 namespace DPDK {
 
+using namespace P4::literals;
+
 class ConvertToDpdkProgram : public Transform {
     P4::TypeMap *typemap;
     P4::ReferenceMap *refmap;
@@ -135,7 +137,7 @@ class CollectActionUses : public Inspector {
         if (auto mce = ale->expression->to<IR::MethodCallExpression>()) {
             if (auto path = mce->method->to<IR::PathExpression>()) {
                 if (path->path->name.originalName == "NoAction")
-                    actions.insert("NoAction");
+                    actions.insert("NoAction"_cs);
                 else
                     actions.insert(path->path->name.name);
             }
@@ -160,9 +162,9 @@ class ElimUnusedActions : public Transform {
     }
 };
 
-// frontend generates multiple copies of the same action in the localizeActions pass,
-// they are not useful for dpdk datapath. Removed the duplicated actions in
-// this pass.
+/// frontend generates multiple copies of the same action in the localizeActions pass,
+/// they are not useful for dpdk datapath. Removed the duplicated actions in
+/// this pass.
 class EliminateUnusedAction : public PassManager {
     ordered_set<cstring> actions;
 

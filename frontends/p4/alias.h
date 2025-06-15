@@ -26,12 +26,12 @@ limitations under the License.
  * part of the *same statement*.
  */
 
-#include "frontends/common/resolveReferences/referenceMap.h"
-#include "frontends/p4/methodInstance.h"
-#include "frontends/p4/typeChecking/typeChecker.h"
+#include "frontends/common/resolveReferences/resolveReferences.h"
 #include "ir/ir.h"
 
 namespace P4 {
+
+using namespace literals;
 
 /// This class represents the path to a location.
 /// Given a struct S { bit a; bit b; } and a variable S x;
@@ -113,21 +113,22 @@ class SetOfLocations : public IHasDbPrint {
 };
 
 /// Computes the SetOfLocations read and written by an expression.
-class ReadsWrites : public Inspector {
-    const ReferenceMap *refMap;
+class ReadsWrites : public Inspector, public ResolutionContext {
     std::map<const IR::Expression *, const SetOfLocations *> rw;
 
  public:
-    explicit ReadsWrites(const ReferenceMap *refMap) : refMap(refMap) { setName("ReadsWrites"); }
+    ReadsWrites() { setName("ReadsWrites"); }
 
     void postorder(const IR::Operation_Binary *expression) override {
         auto left = ::get(rw, expression->left);
         auto right = ::get(rw, expression->right);
+        CHECK_NULL(left);
+        CHECK_NULL(right);
         rw.emplace(expression, left->join(right));
     }
 
     void postorder(const IR::PathExpression *expression) override {
-        auto decl = refMap->getDeclaration(expression->path);
+        auto decl = getDeclaration(expression->path);
         auto path = new LocationPath(decl);
         auto locs = new SetOfLocations(path);
         rw.emplace(expression, locs);
@@ -135,11 +136,13 @@ class ReadsWrites : public Inspector {
 
     void postorder(const IR::Operation_Unary *expression) override {
         auto e = ::get(rw, expression->expr);
+        CHECK_NULL(e);
         rw.emplace(expression, e);
     }
 
     void postorder(const IR::Member *expression) override {
         auto e = ::get(rw, expression->expr);
+        CHECK_NULL(e);
         auto result = e->append(expression->member);
         rw.emplace(expression, result);
     }
@@ -153,7 +156,7 @@ class ReadsWrites : public Inspector {
             result = e->append(Util::toString(index));
         } else {
             auto index = ::get(rw, expression->right);
-            result = e->append("*")->join(index);
+            result = e->append("*"_cs)->join(index);
         }
         rw.emplace(expression, result);
     }
@@ -182,11 +185,15 @@ class ReadsWrites : public Inspector {
         auto e0 = ::get(rw, expression->e0);
         auto e1 = ::get(rw, expression->e1);
         auto e2 = ::get(rw, expression->e2);
+        CHECK_NULL(e0);
+        CHECK_NULL(e1);
+        CHECK_NULL(e2);
         rw.emplace(expression, e0->join(e1)->join(e2));
     }
 
     void postorder(const IR::Slice *expression) override {
         auto e = ::get(rw, expression->e0);
+        CHECK_NULL(e);
         rw.emplace(expression, e);
     }
 
@@ -194,6 +201,7 @@ class ReadsWrites : public Inspector {
         auto e = ::get(rw, expression->method);
         for (auto a : *expression->arguments) {
             auto s = ::get(rw, a->expression);
+            CHECK_NULL(s);
             e = e->join(s);
         }
         rw.emplace(expression, e);
@@ -203,6 +211,7 @@ class ReadsWrites : public Inspector {
         const SetOfLocations *result = new SetOfLocations();
         for (auto e : *expression->arguments) {
             auto s = ::get(rw, e->expression);
+            CHECK_NULL(s);
             result = result->join(s);
         }
         rw.emplace(expression, result);
@@ -212,6 +221,7 @@ class ReadsWrites : public Inspector {
         const SetOfLocations *result = new SetOfLocations();
         for (auto e : expression->components) {
             auto s = ::get(rw, e->expression);
+            CHECK_NULL(s);
             result = result->join(s);
         }
         rw.emplace(expression, result);
@@ -221,22 +231,30 @@ class ReadsWrites : public Inspector {
         const SetOfLocations *result = new SetOfLocations();
         for (auto e : expression->components) {
             auto s = ::get(rw, e);
+            CHECK_NULL(s);
             result = result->join(s);
         }
         rw.emplace(expression, result);
     }
 
-    const SetOfLocations *get(const IR::Expression *expression) {
-        expression->apply(*this);
+    void postorder(const IR::DefaultExpression *expression) override {
+        rw.emplace(expression, new SetOfLocations());
+    }
+
+    const SetOfLocations *get(const IR::Expression *expression, const Visitor::Context *ctxt) {
+        expression->apply(*this, ctxt);
         auto result = ::get(rw, expression);
         CHECK_NULL(result);
         LOG3("SetOfLocations(" << expression << ")=" << result);
         return result;
     }
 
-    bool mayAlias(const IR::Expression *left, const IR::Expression *right) {
-        auto llocs = get(left);
-        auto rlocs = get(right);
+    bool mayAlias(const IR::Expression *left, const IR::Expression *right,
+                  const Visitor::Context *ctxt) {
+        auto llocs = get(left, ctxt);
+        auto rlocs = get(right, ctxt);
+        CHECK_NULL(llocs);
+        CHECK_NULL(rlocs);
         LOG3("Checking overlap between " << llocs << " and " << rlocs);
         return llocs->overlaps(rlocs);
     }

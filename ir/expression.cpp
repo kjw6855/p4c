@@ -15,15 +15,8 @@ limitations under the License.
 */
 
 #include <ostream>
-#include <vector>
 
-#include <boost/core/enable_if.hpp>
-#include <boost/format.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
-#include <boost/multiprecision/detail/et_ops.hpp>
-#include <boost/multiprecision/number.hpp>
-#include <boost/multiprecision/traits/explicit_conversion.hpp>
-
+#include "absl/container/flat_hash_map.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
 #include "ir/ir.h"
@@ -60,7 +53,7 @@ int IR::Member::offset_bits() const {
 
 int IR::Member::lsb() const {
     int rv = 0;
-    auto header_type = dynamic_cast<const IR::Type_StructLike *>(expr->type);
+    auto header_type = expr->type->checkedTo<IR::Type_StructLike>();
     auto field_iter = header_type->fields.rbegin();
     // This assumes little-endian number for bits.
     while ((*field_iter)->name != member) {
@@ -144,4 +137,51 @@ IR::Constant IR::Constant::operator-() const { return IR::Constant(-value); }
 
 IR::Constant IR::Constant::GetMask(unsigned width) {
     return (IR::Constant(1) << width) - IR::Constant(1);
+}
+
+const IR::Constant *IR::Constant::get(const IR::Type *t, big_int v, Util::SourceInfo si) {
+    // Only cache bits with width lower than 16 bit to restrict the size of the cache.
+    // Do not cache values with a non-empty source info (yet).
+    const auto *tb = t->to<Type_Bits>();
+    if (t->width_bits() > 16 || tb == nullptr || si.isValid()) {
+        return new IR::Constant(si, t, v);
+    }
+    // Constants are interned. Keys in the intern map are pairs of types and values.
+    using key_t = std::tuple<int, RTTI::TypeId, bool, big_int>;
+    static absl::flat_hash_map<key_t, const Constant *, Util::Hash> CONSTANTS;
+
+    auto *&result = CONSTANTS[{tb->width_bits(), t->typeId(), tb->isSigned, v}];
+    if (result == nullptr) {
+        result = new Constant(si, tb, v);
+    }
+
+    return result;
+}
+
+const IR::BoolLiteral *IR::BoolLiteral::get(bool value, const Util::SourceInfo &si) {
+    // Do not cache values with a non-empty source info (yet).
+    if (si.isValid()) {
+        return new IR::BoolLiteral(si, IR::Type_Boolean::get(), value);
+    }
+    // Boolean literals are interned.
+    static IR::BoolLiteral TRUE_BOOLLITERAL(si, IR::Type_Boolean::get(), true);
+    static IR::BoolLiteral FALSE_BOOLLITERAL(si, IR::Type_Boolean::get(), false);
+    return value ? &TRUE_BOOLLITERAL : &FALSE_BOOLLITERAL;
+}
+
+const IR::StringLiteral *IR::StringLiteral::get(cstring value, const IR::Type *t,
+                                                const Util::SourceInfo &si) {
+    // Do not cache values with a non-empty source info (yet).
+    if (si.isValid()) {
+        return new IR::StringLiteral(si, t, value);
+    }
+    // String literals are interned.
+    using key_t = std::pair<cstring, const IR::Type *>;
+    static absl::flat_hash_map<key_t, const IR::StringLiteral *, Util::Hash> STRINGS;
+
+    auto *&result = STRINGS[{value, t}];
+    if (result == nullptr) {
+        result = new IR::StringLiteral(si, t, value);
+    }
+    return result;
 }

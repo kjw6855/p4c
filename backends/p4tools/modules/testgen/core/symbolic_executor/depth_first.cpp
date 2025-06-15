@@ -4,7 +4,7 @@
 #include <iterator>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
+#include "ir/solver.h"
 #include "lib/error.h"
 #include "lib/timer.h"
 

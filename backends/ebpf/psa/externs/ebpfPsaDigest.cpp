@@ -35,21 +35,21 @@ class EBPFDigestPSAValueVisitor : public CodeGenInspector {
           codegen(codegen),
           valueType(valueType) {}
 
-    // handle expression like: "digest.pack(msg)", where "msg" is an existing variable
+    /// Handle expression like: "digest.pack(msg)", where "msg" is an existing variable.
     bool preorder(const IR::PathExpression *pe) override {
         digest->emitPushElement(builder, pe, codegen);
         return false;
     }
 
-    // handle expression like: "digest.pack(metadata.msg)", where "metadata.msg" is a member from an
-    // instance of struct or header
+    /// Handle expression like: "digest.pack(metadata.msg)", where "metadata.msg" is a member from
+    /// an instance of struct or header.
     bool preorder(const IR::Member *member) override {
         digest->emitPushElement(builder, member, codegen);
         return false;
     }
 
-    // handle expression like: "digest.pack(value)", where "value" is compile time known constant
-    // value
+    /// handle expression like: "digest.pack(value)", where "value" is compile time known constant
+    /// value.
     bool preorder(const IR::Constant *c) override {
         cstring tmpVar = refMap->newName("digest_entry");
 
@@ -68,8 +68,8 @@ class EBPFDigestPSAValueVisitor : public CodeGenInspector {
         return false;
     }
 
-    // handle expression like: "digest.pack({ expr1, expr2, ... })", where "exprN" is an any valid
-    // expression at this context
+    /// Handle expression like: "digest.pack({ expr1, expr2, ... })", where "exprN" is an any valid
+    /// expression at this context.
     bool preorder(const IR::StructExpression *se) override {
         cstring tmpVar = refMap->newName("digest_entry");
 
@@ -82,7 +82,7 @@ class EBPFDigestPSAValueVisitor : public CodeGenInspector {
 
         for (const auto *f : se->components) {
             auto type = typeMap->getType(f->expression);
-            cstring path = Util::printf_format("%s.%s", tmpVar, f->name.name);
+            cstring path = absl::StrFormat("%s.%s", tmpVar, f->name.name);
             codegen->emitAssignStatement(type, nullptr, path, f->expression);
             builder->newline();
         }
@@ -126,7 +126,7 @@ void EBPFDigestPSA::emitInstance(CodeBuilder *builder) const {
     builder->appendFormat("REGISTER_TABLE_NO_KEY_TYPE(%s, BPF_MAP_TYPE_QUEUE, 0, ", instanceName);
 
     if (valueTypeName.isNullOrEmpty()) {
-        valueType->declare(builder, "", false);
+        valueType->declare(builder, cstring::empty, false);
     } else {
         builder->append(valueTypeName);
     }

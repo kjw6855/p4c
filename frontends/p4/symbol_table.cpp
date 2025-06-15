@@ -18,13 +18,16 @@ limitations under the License.
 
 #include <sstream>
 
+#include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
 
 namespace Util {
 
-class NamedSymbol {
+using namespace P4::literals;
+
+class NamedSymbol : public ICastable {
  protected:
     Util::SourceInfo sourceInfo;
     Namespace *parent;
@@ -53,6 +56,8 @@ class NamedSymbol {
     virtual const Namespace *symNamespace() const;
 
     bool template_args = false;  // does the symbol expect template args
+
+    DECLARE_TYPEINFO(NamedSymbol);
 };
 
 class Namespace : public NamedSymbol {
@@ -91,7 +96,7 @@ class Namespace : public NamedSymbol {
         if (it == contents.end()) return nullptr;
         return it->second;
     }
-    cstring toString() const override { return cstring("Namespace ") + getName(); }
+    cstring toString() const override { return "Namespace "_cs + getName(); }
     void dump(std::stringstream &into, unsigned indent) const override {
         std::string s(indent, ' ');
         into << s;
@@ -102,9 +107,11 @@ class Namespace : public NamedSymbol {
     }
     void clear() { contents.clear(); }
     static const Namespace empty;
+
+    DECLARE_TYPEINFO(Namespace, NamedSymbol);
 };
 
-const Namespace Namespace::empty("<empty>", Util::SourceInfo(), false);
+const Namespace Namespace::empty("<empty>"_cs, Util::SourceInfo(), false);
 const Namespace *NamedSymbol::symNamespace() const { return &Namespace::empty; }
 
 class Object : public NamedSymbol {
@@ -112,15 +119,19 @@ class Object : public NamedSymbol {
 
  public:
     Object(cstring name, Util::SourceInfo si) : NamedSymbol(name, si) {}
-    cstring toString() const override { return cstring("Object ") + getName(); }
+    cstring toString() const override { return "Object "_cs + getName(); }
     const Namespace *symNamespace() const override { return typeNamespace; }
     void setNamespace(const Namespace *ns) { typeNamespace = ns; }
+
+    DECLARE_TYPEINFO(Object, NamedSymbol);
 };
 
 class SimpleType : public NamedSymbol {
  public:
     SimpleType(cstring name, Util::SourceInfo si) : NamedSymbol(name, si) {}
-    cstring toString() const { return cstring("SimpleType ") + getName(); }
+    cstring toString() const override { return "SimpleType "_cs + getName(); }
+
+    DECLARE_TYPEINFO(SimpleType, NamedSymbol);
 };
 
 // A Type that is also a namespace (e.g., a parser)
@@ -128,14 +139,16 @@ class ContainerType : public Namespace {
  public:
     ContainerType(cstring name, Util::SourceInfo si, bool allowDuplicates)
         : Namespace(name, si, allowDuplicates) {}
-    cstring toString() const { return cstring("ContainerType ") + getName(); }
+    cstring toString() const override { return "ContainerType "_cs + getName(); }
+
+    DECLARE_TYPEINFO(ContainerType, Namespace);
 };
 
 /////////////////////////////////////////////////
 
 ProgramStructure::ProgramStructure()
     : debug(false), debugStream(nullptr), rootNamespace(nullptr), currentNamespace(nullptr) {
-    rootNamespace = new Namespace("", Util::SourceInfo(), true);
+    rootNamespace = new Namespace(cstring::empty, Util::SourceInfo(), true);
     currentNamespace = rootNamespace;
     // We use stderr because we want debugging output
     // to be the same as the bison debugging output.
@@ -154,7 +167,7 @@ void ProgramStructure::push(Namespace *ns) {
 
 void ProgramStructure::pushNamespace(SourceInfo si, bool allowDuplicates) {
     // Today we don't have named namespaces
-    auto ns = new Util::Namespace("", si, allowDuplicates);
+    auto ns = new Util::Namespace(cstring::empty, si, allowDuplicates);
     push(ns);
 }
 
@@ -187,7 +200,8 @@ void ProgramStructure::declareObject(IR::ID id, cstring type) {
     LOG3("ProgramStructure: adding object " << id << " with type " << type);
     auto type_sym = lookup(type);
     auto o = new Object(id.name, id.srcInfo);
-    if (auto tns = dynamic_cast<const Namespace *>(type_sym)) o->setNamespace(tns);
+    if (type_sym)
+        if (auto tns = type_sym->to<Namespace>()) o->setNamespace(tns);
     currentNamespace->declare(o);
 }
 
@@ -235,12 +249,12 @@ NamedSymbol *ProgramStructure::lookup(cstring identifier) {
 
 ProgramStructure::SymbolKind ProgramStructure::lookupIdentifier(cstring identifier) {
     NamedSymbol *ns = lookup(identifier);
-    if (ns == nullptr || dynamic_cast<Object *>(ns) != nullptr) {
+    if (ns == nullptr || ns->is<Object>()) {
         LOG2("Identifier " << identifier);
         if (ns && ns->template_args) return ProgramStructure::SymbolKind::TemplateIdentifier;
         return ProgramStructure::SymbolKind::Identifier;
     }
-    if (dynamic_cast<SimpleType *>(ns) != nullptr || dynamic_cast<ContainerType *>(ns) != nullptr) {
+    if (ns->is<SimpleType>() || ns->is<ContainerType>()) {
         if (ns && ns->template_args) return ProgramStructure::SymbolKind::TemplateType;
         return ProgramStructure::SymbolKind::Type;
         LOG2("Type " << identifier);

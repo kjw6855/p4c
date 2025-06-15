@@ -18,16 +18,12 @@ limitations under the License.
 #define TYPECHECKING_TYPECHECKER_H_
 
 #include "frontends/common/resolveReferences/referenceMap.h"
-#include "frontends/p4/methodInstance.h"
+#include "frontends/common/resolveReferences/resolveReferences.h"
 #include "frontends/p4/typeChecking/typeSubstitution.h"
-#include "frontends/p4/typeChecking/typeSubstitutionVisitor.h"
 #include "frontends/p4/typeMap.h"
 #include "ir/ir.h"
 #include "ir/pass_manager.h"
 #include "ir/visitor.h"
-#include "lib/cstring.h"
-#include "lib/exceptions.h"
-#include "typeUnification.h"
 
 namespace P4 {
 
@@ -63,9 +59,9 @@ class TypeChecking : public PassManager {
                  bool updateExpressions = false);
 };
 
-template <typename... T>
-void typeError(const char *format, T... args) {
-    ::error(ErrorType::ERR_TYPE_ERROR, format, args...);
+template <typename... Args>
+void typeError(const char *format, Args &&...args) {
+    ::error(ErrorType::ERR_TYPE_ERROR, format, std::forward<Args>(args)...);
 }
 /// True if the type contains any varbit or header_union subtypes
 bool hasVarbitsOrUnions(const TypeMap *typeMap, const IR::Type *type);
@@ -80,23 +76,25 @@ bool hasVarbitsOrUnions(const TypeMap *typeMap, const IR::Type *type);
 // In fact, several passes do modify the program such that types are invalidated.
 // For example, enum elimination converts enum values into integers.  After such
 // changes the typemap has to be cleared and types must be recomputed from scratch.
-class TypeInference : public Transform {
-    // Input: reference map
-    ReferenceMap *refMap;
+class TypeInference : public Transform, public ResolutionContext {
     // Output: type map
     TypeMap *typeMap;
     const IR::Node *initialNode;
+    std::shared_ptr<MinimalNameGenerator> nameGen;
+
+    TypeInference(TypeMap *typeMap, std::shared_ptr<MinimalNameGenerator> nameGen);
 
  public:
     // @param readOnly If true it will assert that it behaves like
     //        an Inspector.
-    TypeInference(ReferenceMap *refMap, TypeMap *typeMap, bool readOnly = false,
-                  bool checkArrays = true);
+    explicit TypeInference(TypeMap *typeMap, bool readOnly = false, bool checkArrays = true,
+                           bool errorOnNullDecls = false);
 
  protected:
     // If true we expect to leave the program unchanged
-    bool readOnly;
+    bool readOnly = false;
     bool checkArrays = true;
+    bool errorOnNullDecls = false;
     const IR::Type *getType(const IR::Node *element) const;
     const IR::Type *getTypeType(const IR::Node *element) const;
     void setType(const IR::Node *element, const IR::Type *type);
@@ -117,20 +115,20 @@ class TypeInference : public Transform {
 
     TypeVariableSubstitution *unifyBase(bool allowCasts, const IR::Node *errorPosition,
                                         const IR::Type *destType, const IR::Type *srcType,
-                                        cstring errorFormat,
+                                        std::string_view errorFormat,
                                         std::initializer_list<const IR::Node *> errorArgs);
 
     /// Unifies two types.  Returns nullptr if unification fails.
     /// Populates the typeMap with values for the type variables.
     /// This allows an implicit cast from the right type to the left type.
     TypeVariableSubstitution *unifyCast(const IR::Node *errorPosition, const IR::Type *destType,
-                                        const IR::Type *srcType, cstring errorFormat = nullptr,
+                                        const IR::Type *srcType, std::string_view errorFormat = {},
                                         std::initializer_list<const IR::Node *> errorArgs = {}) {
         return unifyBase(true, errorPosition, destType, srcType, errorFormat, errorArgs);
     }
     /// Same as above, not allowing casts
     TypeVariableSubstitution *unify(const IR::Node *errorPosition, const IR::Type *destType,
-                                    const IR::Type *srcType, cstring errorFormat = nullptr,
+                                    const IR::Type *srcType, std::string_view errorFormat = {},
                                     std::initializer_list<const IR::Node *> errorArgs = {}) {
         return unifyBase(false, errorPosition, destType, srcType, errorFormat, errorArgs);
     }
@@ -194,6 +192,10 @@ class TypeInference : public Transform {
     const IR::ActionListElement *validateActionInitializer(const IR::Expression *actionCall);
     bool containsActionEnum(const IR::Type *type) const;
 
+    /// Check if the underlying type for enum is bit<> or int<> and emit error if it is not.
+    /// @returns the resolved type, or nullptr if the type is invalid
+    const IR::Type_Bits *checkUnderlyingEnumType(const IR::Type *enumType);
+
     //////////////////////////////////////////////////////////////
 
  public:
@@ -201,7 +203,8 @@ class TypeInference : public Transform {
     using Transform::preorder;
 
     static const IR::Type *specialize(const IR::IMayBeGenericType *type,
-                                      const IR::Vector<IR::Type> *arguments);
+                                      const IR::Vector<IR::Type> *arguments,
+                                      const Visitor::Context *ctxt);
     const IR::Node *pruneIfDone(const IR::Node *node) {
         if (done()) {
             prune();
@@ -314,6 +317,7 @@ class TypeInference : public Transform {
     const IR::Node *postorder(IR::P4ListExpression *expression) override;
     const IR::Node *postorder(IR::StructExpression *expression) override;
     const IR::Node *postorder(IR::HeaderStackExpression *expression) override;
+    const IR::Node *postorder(IR::MethodCallStatement *mcs) override;
     const IR::Node *postorder(IR::MethodCallExpression *expression) override;
     const IR::Node *postorder(IR::ConstructorCallExpression *expression) override;
     const IR::Node *postorder(IR::SelectExpression *expression) override;
@@ -326,6 +330,7 @@ class TypeInference : public Transform {
     const IR::Node *postorder(IR::IfStatement *stat) override;
     const IR::Node *postorder(IR::SwitchStatement *stat) override;
     const IR::Node *postorder(IR::AssignmentStatement *stat) override;
+    const IR::Node *postorder(IR::ForInStatement *stat) override;
     const IR::Node *postorder(IR::ActionListElement *elem) override;
     const IR::Node *postorder(IR::KeyElement *elem) override;
     const IR::Node *postorder(IR::Property *elem) override;
@@ -334,12 +339,13 @@ class TypeInference : public Transform {
 
     Visitor::profile_t init_apply(const IR::Node *node) override;
     void end_apply(const IR::Node *Node) override;
+    const IR::Node *apply_visitor(const IR::Node *, const char *name = 0) override;
 
     TypeInference *clone() const override;
     // Apply recursively the typechecker to the newly created node
     // to add all component subtypes in the typemap.
     // Return 'true' if errors were discovered in the learning process.
-    bool learn(const IR::Node *node, Visitor *caller);
+    bool learn(const IR::Node *node, Visitor *caller, const Visitor::Context *ctxt);
 };
 
 // Copy types from the typeMap to expressions.  Updates the typeMap with newly created nodes

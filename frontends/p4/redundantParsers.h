@@ -18,6 +18,7 @@ limitations under the License.
 #define FRONTENDS_P4_REDUNDANTPARSERS_H_
 
 #include "frontends/p4/typeChecking/typeChecker.h"
+#include "frontends/p4/unusedDeclarations.h"
 #include "ir/ir.h"
 
 namespace P4 {
@@ -53,10 +54,11 @@ class RemoveRedundantParsers : public PassManager {
     std::set<const IR::P4Parser *> redundantParsers;
 
  public:
-    RemoveRedundantParsers(ReferenceMap *refMap, TypeMap *typeMap)
+    RemoveRedundantParsers(ReferenceMap *refMap, TypeMap *typeMap, const RemoveUnusedPolicy &policy)
         : PassManager{new TypeChecking(refMap, typeMap, true),
                       new FindRedundantParsers(redundantParsers),
-                      new EliminateSubparserCalls(redundantParsers, refMap, typeMap)} {
+                      new EliminateSubparserCalls(redundantParsers, refMap, typeMap),
+                      new RemoveAllUnusedDeclarations(refMap, policy)} {
         setName("RemoveRedundantParsers");
     }
 };

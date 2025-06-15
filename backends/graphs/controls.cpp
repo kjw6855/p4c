@@ -23,6 +23,7 @@ limitations under the License.
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/tableApply.h"
 #include "graphs.h"
+#include "lib/cstring.h"
 #include "lib/log.h"
 #include "lib/nullstream.h"
 
@@ -34,11 +35,11 @@ Graph *ControlGraphs::ControlStack::pushBack(Graph &currentSubgraph, const cstri
     auto &newSubgraph = currentSubgraph.create_subgraph();
     auto fullName = getName(name);
     boost::get_property(newSubgraph, boost::graph_name) = "cluster" + fullName;
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["label"] =
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["label"_cs] =
         boost::get_property(currentSubgraph, boost::graph_name) +
         (fullName != "" ? "." + fullName : fullName);
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["fontsize"] = "22pt";
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["style"] = "bold";
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["fontsize"_cs] = "22pt"_cs;
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["style"_cs] = "bold"_cs;
     names.push_back(name);
     subgraphs.push_back(&newSubgraph);
     return getSubgraph();
@@ -68,8 +69,8 @@ bool ControlGraphs::ControlStack::isEmpty() const { return subgraphs.empty(); }
 using vertex_t = ControlGraphs::vertex_t;
 
 ControlGraphs::ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-                             const cstring &graphsDir)
-    : refMap(refMap), typeMap(typeMap), graphsDir(graphsDir) {
+                             std::filesystem::path graphsDir)
+    : refMap(refMap), typeMap(typeMap), graphsDir(std::move(graphsDir)) {
     visitDagOnce = false;
 }
 
@@ -83,11 +84,11 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             Graph *g_ = new Graph();
             g = g_;
             instanceName = std::nullopt;
-            boost::get_property(*g_, boost::graph_name) = name;
+            boost::get_property(*g_, boost::graph_name) = name.string();
             BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
-            g = controlStack.pushBack(*g_, "");
-            start_v = add_vertex("__START__", VertexType::OTHER);
-            exit_v = add_vertex("__EXIT__", VertexType::OTHER);
+            g = controlStack.pushBack(*g_, cstring::empty);
+            start_v = add_vertex("__START__"_cs, VertexType::OTHER);
+            exit_v = add_vertex("__EXIT__"_cs, VertexType::OTHER);
             parents = {{start_v, new EdgeUnconditional()}};
             visit(it.second->getNode());
 
@@ -157,7 +158,7 @@ bool ControlGraphs::preorder(const IR::IfStatement *statement) {
 bool ControlGraphs::preorder(const IR::SwitchStatement *statement) {
     auto tbl = P4::TableApplySolver::isActionRun(statement->expression, refMap, typeMap);
     vertex_t v;
-    // special case for action_run
+    // Special case for action_run.
     std::stringstream sstream;
     if (tbl == nullptr) {
         statement->expression->dbprint(sstream);
@@ -184,7 +185,7 @@ bool ControlGraphs::preorder(const IR::SwitchStatement *statement) {
         }
     }
     // TODO(antonin): do not add default statement for action_run if all actions
-    // are present
+    // are present.
     if (!hasDefault)
         new_parents.emplace_back(v, new EdgeSwitch(new IR::DefaultExpression()));
     else

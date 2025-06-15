@@ -1,3 +1,5 @@
+# proto-file: p4/v1/p4runtime.proto
+# proto-message: p4.v1.WriteRequest
 updates {
   type: INSERT
   entity {
@@ -24,6 +26,7 @@ updates {
         }
       }
       priority: 3
+      is_const: true
     }
   }
 }
@@ -48,6 +51,7 @@ updates {
         }
       }
       priority: 2
+      is_const: true
     }
   }
 }
@@ -72,6 +76,7 @@ updates {
         }
       }
       priority: 1
+      is_const: true
     }
   }
 }

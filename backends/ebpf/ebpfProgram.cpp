@@ -20,6 +20,7 @@ limitations under the License.
 #include <ctime>
 
 #include "ebpfControl.h"
+#include "ebpfDeparser.h"
 #include "ebpfParser.h"
 #include "ebpfTable.h"
 #include "ebpfType.h"
@@ -30,44 +31,62 @@ namespace EBPF {
 
 bool EBPFProgram::build() {
     auto pack = toplevel->getMain();
-    if (pack->type->name != "ebpfFilter")
-        ::warning(ErrorType::WARN_INVALID,
-                  "%1%: the main ebpf package should be called ebpfFilter"
-                  "; are you using the wrong architecture?",
-                  pack->type->name);
+    if (pack->type->name == "xdp") {
+        if (pack->getConstructorParameters()->size() != 3) {
+            ::error(ErrorType::ERR_EXPECTED,
+                    "Expected toplevel xdp package %1% to have 3 parameters", pack->type);
+            return false;
+        }
+        model.arch = ModelArchitecture::XdpSwitch;
+        progTarget = new XdpTarget(options.emitTraceMessages);
+    } else {
+        if (pack->type->name != "ebpfFilter")
+            ::warning(ErrorType::WARN_INVALID,
+                      "%1%: the main ebpf package should be called ebpfFilter or xdp"
+                      "; are you using the wrong architecture?",
+                      pack->type->name);
 
-    if (pack->getConstructorParameters()->size() != 2) {
-        ::error(ErrorType::ERR_EXPECTED, "Expected toplevel package %1% to have 2 parameters",
-                pack->type);
-        return false;
+        if (pack->getConstructorParameters()->size() != 2) {
+            ::error(ErrorType::ERR_EXPECTED,
+                    "Expected toplevel ebpfFilter package %1% to have 2 parameters", pack->type);
+            return false;
+        }
+        model.arch = ModelArchitecture::EbpfFilter;
     }
 
-    auto pb = pack->getParameterValue(model.filter.parser.name)->to<IR::ParserBlock>();
+    auto prsName = (model.arch == ModelArchitecture::XdpSwitch) ? model.xdp.parser.name
+                                                                : model.filter.parser.name;
+    auto ctlName = (model.arch == ModelArchitecture::XdpSwitch) ? model.xdp.switch_.name
+                                                                : model.filter.filter.name;
+
+    auto pb = pack->getParameterValue(prsName)->to<IR::ParserBlock>();
     BUG_CHECK(pb != nullptr, "No parser block found");
     parser = new EBPFParser(this, pb, typeMap);
     bool success = parser->build();
     if (!success) return success;
 
-    auto cb = pack->getParameterValue(model.filter.filter.name)->to<IR::ControlBlock>();
+    auto cb = pack->getParameterValue(ctlName)->to<IR::ControlBlock>();
     BUG_CHECK(cb != nullptr, "No control block found");
     control = new EBPFControl(this, cb, parser->headers);
     success = control->build();
     if (!success) return success;
 
+    if (model.arch == ModelArchitecture::XdpSwitch) {
+        auto db = pack->getParameterValue(model.xdp.deparser.name)->to<IR::ControlBlock>();
+        BUG_CHECK(db != nullptr, "No deparser block found");
+        deparser = new EBPFDeparser(this, db, parser->headers);
+        bool success = deparser->build();
+        if (!success) return success;
+    }
+
     return true;
 }
 
-void EBPFProgram::emitC(CodeBuilder *builder, cstring header) {
+void EBPFProgram::emitC(CodeBuilder *builder, const std::filesystem::path &header) {
     emitGeneratedComment(builder);
 
-    // Find the last occurrence of a folder slash (Linux only)
-    const char *header_stripped = header.findlast('/');
-    if (header_stripped)
-        // Remove the path from the header
-        builder->appendFormat("#include \"%s\"", header_stripped + 1);
-    else
-        // There is no prepended path, just include the header
-        builder->appendFormat("#include \"%s\"", header.c_str());
+    // Remove the path from the header
+    builder->appendFormat("#include \"%s\"", header.filename());
     builder->newline();
 
     builder->target->emitIncludes(builder);
@@ -78,9 +97,13 @@ void EBPFProgram::emitC(CodeBuilder *builder, cstring header) {
     builder->append("REGISTER_END()\n");
     builder->newline();
     builder->emitIndent();
-    builder->target->emitCodeSection(builder, "prog");
+    // Use different section name for XDP - this is used by the runtime test framework.
+    if (model.arch == ModelArchitecture::XdpSwitch)
+        builder->target->emitCodeSection(builder, "xdp"_cs);
+    else
+        builder->target->emitCodeSection(builder, "prog"_cs);
     builder->emitIndent();
-    builder->target->emitMain(builder, functionName, model.CPacketName.str());
+    builder->target->emitMain(builder, functionName, model.CPacketName.toString());
     builder->blockStart();
 
     emitHeaderInstances(builder);
@@ -90,9 +113,6 @@ void EBPFProgram::emitC(CodeBuilder *builder, cstring header) {
 
     emitLocalVariables(builder);
     builder->newline();
-    builder->emitIndent();
-    builder->appendFormat("goto %s;", IR::ParserState::start.c_str());
-    builder->newline();
 
     parser->emit(builder);
     emitPipeline(builder);
@@ -100,17 +120,24 @@ void EBPFProgram::emitC(CodeBuilder *builder, cstring header) {
     builder->emitIndent();
     builder->appendFormat("%s:\n", endLabel.c_str());
     builder->emitIndent();
-    builder->appendFormat("if (%s)\n", control->accept->name.name.c_str());
-    builder->increaseIndent();
-    builder->emitIndent();
-    builder->appendFormat("return %s;\n", builder->target->forwardReturnCode().c_str());
-    builder->decreaseIndent();
-    builder->emitIndent();
-    builder->appendLine("else");
-    builder->increaseIndent();
-    builder->emitIndent();
-    builder->appendFormat("return %s;\n", builder->target->dropReturnCode().c_str());
-    builder->decreaseIndent();
+    if (model.arch == ModelArchitecture::EbpfFilter) {
+        builder->appendFormat("if (%s)\n", control->accept->name.name.c_str());
+        builder->increaseIndent();
+        builder->emitIndent();
+        builder->appendFormat("return %s;\n", builder->target->forwardReturnCode().c_str());
+        builder->decreaseIndent();
+        builder->emitIndent();
+        builder->appendLine("else");
+        builder->increaseIndent();
+        builder->emitIndent();
+        builder->appendFormat("return %s;\n", builder->target->dropReturnCode().c_str());
+        builder->decreaseIndent();
+    } else if (model.arch == ModelArchitecture::XdpSwitch) {
+        builder->append("return omd.output_action;");
+        builder->newline();
+    } else {
+        BUG("Invalid value for model.arch !");
+    }
     builder->blockEnd(true);  // end of function
 
     builder->target->emitLicense(builder, license);
@@ -129,7 +156,7 @@ void EBPFProgram::emitGeneratedComment(CodeBuilder *builder) {
     builder->newline();
 }
 
-void EBPFProgram::emitH(CodeBuilder *builder, cstring) {
+void EBPFProgram::emitH(CodeBuilder *builder, const std::filesystem::path &) {
     emitGeneratedComment(builder);
     builder->appendLine("#ifndef _P4_GEN_HEADER_");
     builder->appendLine("#define _P4_GEN_HEADER_");
@@ -158,9 +185,29 @@ void EBPFProgram::emitTypes(CodeBuilder *builder) {
             !d->is<IR::Type_Error>()) {
             auto type = EBPFTypeFactory::instance->create(d->to<IR::Type>());
             if (type == nullptr) continue;
+            if (d->is<IR::Type_Enum>() && d->to<IR::Type_Enum>()->name == "xdp_action")
+                continue;  // already in linux/bpf.h
             type->emit(builder);
             builder->newline();
         }
+        // TODO: This code is disabled until we fix stability issues in Ubuntu 20.04.
+        // For an unclear reason we can not use definitions and declarations for eBPF externs there.
+        // All externs need to be defined as static inline, which clashes with these definitions.
+        // Context: https://github.com/p4lang/p4c/pull/4644
+        // if (const auto *method = d->to<IR::Method>()) {
+        //     if (!method->srcInfo.isValid()) {
+        //         continue;
+        //     }
+        //     // Ignore methods originating from core.p4 and ubpf_model.p4 because they are already
+        //     // defined.
+        //     // TODO: Maybe we should still generate declarations for these methods?
+        //     if (isLibraryMethod(method->controlPlaneName())) {
+        //         continue;
+        //     }
+        //     EBPFMethodDeclaration methodInstance(method);
+        //     methodInstance.emit(builder);
+        //     builder->newline();
+        // }
     }
 }
 
@@ -180,6 +227,25 @@ class ErrorCodesVisitor : public Inspector {
 };
 }  // namespace
 
+void EBPFProgram::emitCommonPreamble(CodeBuilder *builder) {
+    builder->newline();
+    builder->appendLine("#define EBPF_MASK(t, w) ((((t)(1)) << (w)) - (t)1)");
+    builder->appendLine("#define BYTES(w) ((w) / 8)");
+    builder->appendLine(
+        "#define write_partial(a, s, v) do "
+        "{ u8 mask = EBPF_MASK(u8, s); "
+        "*((u8*)a) = ((*((u8*)a)) & ~mask) | (((v) >> (8 - (s))) & mask); "
+        "} while (0)");
+    builder->appendLine(
+        "#define write_partial_ex(a, w, s, v) do { *((u8*)a) = ((*((u8*)a)) "
+        "& ~(EBPF_MASK(u8, w) << s)) | (v << s) ; } while (0)");
+    builder->appendLine(
+        "#define write_byte(base, offset, v) do { "
+        "*(u8*)((base) + (offset)) = (v); "
+        "} while (0)");
+    builder->appendLine("#define PTR_DIFF_BYTES(b, o) (ssize_t)((u8*)(b) - (u8*)(o))");
+}
+
 void EBPFProgram::emitPreamble(CodeBuilder *builder) {
     builder->emitIndent();
     builder->appendFormat("enum %s ", errorEnum.c_str());
@@ -190,18 +256,9 @@ void EBPFProgram::emitPreamble(CodeBuilder *builder) {
 
     builder->blockEnd(false);
     builder->endOfStatement(true);
-    builder->newline();
-    builder->appendLine("#define EBPF_MASK(t, w) ((((t)(1)) << (w)) - (t)1)");
-    builder->appendLine("#define BYTES(w) ((w) / 8)");
-    builder->appendLine(
-        "#define write_partial(a, s, v) do "
-        "{ u8 mask = EBPF_MASK(u8, s); "
-        "*((u8*)a) = ((*((u8*)a)) & ~mask) | (((v) >> (8 - (s))) & mask); "
-        "} while (0)");
-    builder->appendLine(
-        "#define write_byte(base, offset, v) do { "
-        "*(u8*)((base) + (offset)) = (v); "
-        "} while (0)");
+
+    emitCommonPreamble(builder);
+
     builder->newline();
     builder->appendLine("void* memcpy(void* dest, const void* src, size_t num);");
     builder->newline();
@@ -211,27 +268,36 @@ void EBPFProgram::emitPreamble(CodeBuilder *builder) {
 
 void EBPFProgram::emitLocalVariables(CodeBuilder *builder) {
     builder->emitIndent();
-    builder->appendFormat("unsigned %s = 0;", offsetVar.c_str());
-    builder->appendFormat("unsigned %s_save = 0;", offsetVar.c_str());
-    builder->newline();
-
-    builder->emitIndent();
     builder->appendFormat("enum %s %s = %s;", errorEnum.c_str(), errorVar.c_str(),
                           P4::P4CoreLibrary::instance().noError.str());
     builder->newline();
 
     builder->emitIndent();
     builder->appendFormat("void* %s = %s;", packetStartVar.c_str(),
-                          builder->target->dataOffset(model.CPacketName.str()).c_str());
+                          builder->target->dataOffset(model.CPacketName.toString()).c_str());
+    builder->newline();
+    builder->emitIndent();
+    builder->appendFormat("u8* %s = %s;", headerStartVar.c_str(), packetStartVar.c_str());
     builder->newline();
     builder->emitIndent();
     builder->appendFormat("void* %s = %s;", packetEndVar.c_str(),
-                          builder->target->dataEnd(model.CPacketName.str()).c_str());
+                          builder->target->dataEnd(model.CPacketName.toString()).c_str());
     builder->newline();
 
-    builder->emitIndent();
-    builder->appendFormat("u8 %s = 0;", control->accept->name.name.c_str());
-    builder->newline();
+    if (model.arch == ModelArchitecture::EbpfFilter) {
+        builder->emitIndent();
+        builder->appendFormat("u8 %s = 0;", control->accept->name.name.c_str());
+        builder->newline();
+    } else if (model.arch == ModelArchitecture::XdpSwitch) {
+        builder->emitIndent();
+        builder->append("struct xdp_input imd = { .input_port = skb->ingress_ifindex };");
+        builder->newline();
+        builder->emitIndent();
+        builder->append("struct xdp_output omd = { };");
+        builder->newline();
+    } else {
+        BUG("Invalid value for model.arch !");
+    }
 
     builder->emitIndent();
     builder->appendFormat("u32 %s = 0;", zeroKey.c_str());
@@ -242,8 +308,8 @@ void EBPFProgram::emitLocalVariables(CodeBuilder *builder) {
     builder->newline();
 
     builder->emitIndent();
-    builder->appendFormat("u32 %s = %s - %s", lengthVar.c_str(), packetEndVar.c_str(),
-                          packetStartVar.c_str());
+    builder->appendFormat("u32 %s = %s", lengthVar.c_str(),
+                          builder->target->dataLength(model.CPacketName.toString()).c_str());
     builder->endOfStatement(true);
 }
 
@@ -262,8 +328,33 @@ void EBPFProgram::emitPipeline(CodeBuilder *builder) {
     builder->target->emitTraceMessage(builder, "Control: packet processing started");
     control->emit(builder);
     builder->blockEnd(true);
-    builder->target->emitTraceMessage(builder, "Control: packet processing finished, pass=%d", 1,
-                                      control->accept->name.name.c_str());
+
+    if (model.arch == ModelArchitecture::XdpSwitch) {
+        BUG_CHECK(deparser != nullptr, "XDP program can't be missing deparser");
+        builder->emitIndent();
+        builder->append("/* deparser */");
+        builder->newline();
+        builder->emitIndent();
+        builder->blockStart();
+        deparser->emit(builder);
+        builder->blockEnd(true);
+    } else {
+        builder->target->emitTraceMessage(builder, "Control: packet processing finished, pass=%d",
+                                          1, control->accept->name.name.c_str());
+    }
+}
+
+bool EBPFProgram::isLibraryMethod(cstring methodName) {
+    static std::set<cstring> DEFAULT_METHODS = {"static_assert"_cs, "verify"_cs};
+    if (DEFAULT_METHODS.find(methodName) != DEFAULT_METHODS.end() && options.target != "xdp") {
+        return true;
+    }
+
+    static std::set<cstring> XDP_METHODS = {
+        "ebpf_ipv4_checksum"_cs,    "csum_replace2"_cs,    "csum_replace4"_cs,
+        "BPF_PERF_EVENT_OUTPUT"_cs, "BPF_KTIME_GET_NS"_cs,
+    };
+    return XDP_METHODS.find(methodName) != XDP_METHODS.end();
 }
 
 }  // namespace EBPF

@@ -5,12 +5,12 @@
 #include "frontends/p4/typeMap.h"
 #include "ir/ir.h"
 
-// DPDK target implementation treats tables with keys lying non-contiguous in underlying
-// structure as wildcard even if all keys are exact match keys.
-// Learner tables are special table with contiguous and exact match keys.
+/// DPDK target implementation treats tables with keys lying non-contiguous in underlying
+/// structure as wildcard even if all keys are exact match keys.
+/// Learner tables are special table with contiguous and exact match keys.
 enum InternalTableType { REGULAR_EXACT, LEARNER, WILDCARD };
 
-/* Collect information related to P4 programs targeting dpdk */
+/// Collect information related to P4 programs targeting dpdk.
 struct DpdkProgramStructure {
     cstring p4arch;  // 'pna' or 'psa'
     ordered_map<cstring, const IR::Declaration_Variable *> scalars;
@@ -26,10 +26,10 @@ struct DpdkProgramStructure {
     ordered_map<cstring, const IR::Declaration_Variable *> header_unions;
     ordered_map<cstring, const IR::P4Action *> actions;
 
-    // table and action info for learner tables
+    /// Table and action info for learner tables.
     ordered_set<cstring> learner_tables;
     ordered_set<cstring> learner_actions;
-    ordered_map<cstring, cstring> learner_action_map;
+    ordered_map<std::pair<cstring, cstring>, cstring> learner_action_map;
     ordered_map<cstring, std::vector<cstring>> learner_action_params;
     ordered_map<cstring, const IR::P4Table *> learner_action_table;
     ordered_map<cstring, enum InternalTableType> table_type_map;
@@ -57,8 +57,8 @@ struct DpdkProgramStructure {
 
     IR::Type_Struct *metadataStruct;
     IR::Expression *ipsec_header;
-    cstring local_metadata_type = "";
-    cstring header_type = "";
+    cstring local_metadata_type = cstring::empty;
+    cstring header_type = cstring::empty;
     IR::IndexedVector<IR::StructField> compiler_added_fields;
     IR::IndexedVector<IR::StructField> key_fields;
     IR::Vector<IR::Type> used_metadata;
@@ -78,24 +78,20 @@ struct DpdkProgramStructure {
         return false;
     }
 
-    /**
-     * @brief Predicate that states whether architecture is PSA or not.
-     *
-     * Architecture is known after pass ParseDpdkArchitecture
-     *
-     * @return true If architecture is PSA.
-     * @return false If architecture is not PSA.
-     */
+    /// @brief Predicate that states whether architecture is PSA or not.
+    ///
+    /// Architecture is known after pass ParseDpdkArchitecture
+    ///
+    /// @return true If architecture is PSA.
+    /// @return false If architecture is not PSA.
     bool isPSA(void) { return (p4arch == "psa") ? true : false; }
 
-    /**
-     * @brief Predicate that states whether architecture is PNA or not.
-     *
-     * Architecture is known after pass ParseDpdkArchitecture
-     *
-     * @return true If architecture is PNA.
-     * @return false If architecture is not PNA.
-     */
+    /// @brief Predicate that states whether architecture is PNA or not.
+    ///
+    /// Architecture is known after pass ParseDpdkArchitecture
+    ///
+    /// @return true If architecture is PNA.
+    /// @return false If architecture is not PNA.
     bool isPNA(void) { return (p4arch == "pna") ? true : false; }
 };
 
@@ -108,8 +104,8 @@ struct hdrFieldInfo {
     unsigned msb;
     unsigned fieldWidth;
     hdrFieldInfo() {
-        modifiedName = "";
-        headerStr = "";
+        modifiedName = cstring::empty;
+        headerStr = cstring::empty;
         modifiedWidth = 0;
         offset = 0;
         lsb = 0;

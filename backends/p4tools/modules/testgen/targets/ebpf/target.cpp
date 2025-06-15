@@ -1,16 +1,17 @@
 #include "backends/p4tools/modules/testgen/targets/ebpf/target.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
+#include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
+#include "ir/solver.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/ordered_map.h"
 
+#include "backends/p4tools/modules/testgen/core/compiler_result.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/testgen/core/target.h"
@@ -36,13 +37,13 @@ void EBPFTestgenTarget::make() {
     }
 }
 
-const EBPFProgramInfo *EBPFTestgenTarget::initProgramImpl(
-    const IR::P4Program *program, const IR::Declaration_Instance *mainDecl) const {
+const EBPFProgramInfo *EBPFTestgenTarget::produceProgramInfoImpl(
+    const CompilerResult &compilerResult, const IR::Declaration_Instance *mainDecl) const {
     // The blocks in the main declaration are just the arguments in the constructor call.
     // Convert mainDecl->arguments into a vector of blocks, represented as constructor-call
     // expressions.
-    std::vector<const IR::Type_Declaration *> blocks;
-    argumentsToTypeDeclarations(program, mainDecl->arguments, blocks);
+    const auto blocks =
+        argumentsToTypeDeclarations(&compilerResult.getProgram(), mainDecl->arguments);
 
     // We should have six arguments.
     BUG_CHECK(blocks.size() == 2, "%1%: The EBPF architecture requires 2 blocks. Received %2%.",
@@ -51,7 +52,7 @@ const EBPFProgramInfo *EBPFTestgenTarget::initProgramImpl(
     ordered_map<cstring, const IR::Type_Declaration *> programmableBlocks;
     for (size_t idx = 0; idx < blocks.size(); ++idx) {
         const auto *declType = blocks.at(idx);
-        auto canonicalName = archSpec.getArchMember(idx)->blockName;
+        auto canonicalName = EBPFProgramInfo::ARCH_SPEC.getArchMember(idx)->blockName;
         programmableBlocks.emplace(canonicalName, declType);
     }
 
@@ -64,13 +65,14 @@ const EBPFProgramInfo *EBPFTestgenTarget::initProgramImpl(
         testgenOptions.maxPktSize = 12000;
     }
 
-    return new EBPFProgramInfo(program, programmableBlocks);
+    return new EBPFProgramInfo(*compilerResult.checkedTo<TestgenCompilerResult>(),
+                               programmableBlocks);
 }
 
 EBPFTestBackend *EBPFTestgenTarget::getTestBackendImpl(
-    const ProgramInfo &programInfo, SymbolicExecutor &symbex,
-    const std::filesystem::path &testPath) const {
-    return new EBPFTestBackend(programInfo, symbex, testPath);
+    const ProgramInfo &programInfo, const TestBackendConfiguration &testBackendConfiguration,
+    SymbolicExecutor &symbex) const {
+    return new EBPFTestBackend(programInfo, testBackendConfiguration, symbex);
 }
 
 EBPFCmdStepper *EBPFTestgenTarget::getCmdStepperImpl(ExecutionState &state, AbstractSolver &solver,
@@ -97,12 +99,11 @@ ExprVisitor *EBPFTestgenTarget::getExprVisitorImpl(ExecutionState &state,
     return nullptr;
 }
 
-const ArchSpec EBPFTestgenTarget::archSpec =
-    ArchSpec("ebpfFilter", {// parser parse<H>(packet_in packet, out H headers);
-                            {"parse", {nullptr, "*hdr"}},
-                            // control filter<H>(inout H headers, out bool accept);
-                            {"filter", {"*hdr", "*accept"}}});
+MidEnd EBPFTestgenTarget::mkMidEnd(const CompilerOptions &options) const {
+    MidEnd midEnd(options);
+    midEnd.addDefaultPasses();
 
-const ArchSpec *EBPFTestgenTarget::getArchSpecImpl() const { return &archSpec; }
+    return midEnd;
+}
 
 }  // namespace P4Tools::P4Testgen::EBPF

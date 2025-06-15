@@ -1,6 +1,5 @@
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
 
-#include <iostream>
 #include <optional>
 
 #include "backends/p4tools/common/core/z3_solver.h"
@@ -24,33 +23,54 @@
 #include "backends/p4tools/modules/testgen/lib/final_state.h"
 #include "backends/p4tools/modules/testgen/lib/logging.h"
 #include "backends/p4tools/modules/testgen/lib/packet_vars.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
+#include "backends/p4tools/modules/testgen/lib/test_framework.h"
 #include "backends/p4tools/modules/testgen/options.h"
 
 namespace P4Tools::P4Testgen {
+
+TestBackEnd::TestBackEnd(const ProgramInfo &programInfo,
+                         const TestBackendConfiguration &testBackendConfiguration,
+                         SymbolicExecutor &symbex)
+    : programInfo(programInfo),
+      testBackendConfiguration(testBackendConfiguration),
+      symbex(symbex),
+      maxTests(TestgenOptions::get().maxTests) {
+    // If we select a specific branch, the number of tests should be 1.
+    if (!TestgenOptions::get().selectedBranches.empty()) {
+        maxTests = 1;
+    }
+}
 
 bool TestBackEnd::run(const FinalState &state) {
     {
         // Evaluate the model and extract the input and output packets.
         const auto *executionState = state.getExecutionState();
         const auto *outputPacketExpr = executionState->getPacketBuffer();
-        const auto *outputPortExpr = executionState->get(programInfo.getTargetOutputPortVar());
-        const auto &coverableNodes = programInfo.getCoverableNodes();
+        const auto *outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
+        const auto &coverableNodes = getProgramInfo().getCoverableNodes();
         const auto *programTraces = state.getTraces();
+        const auto &testgenOptions = TestgenOptions::get();
 
-        // Don't increase the test count if --with-output-packet is enabled and we don't
+        // Don't increase the test count if --output-packet-only is enabled and we don't
         // produce a test with an output packet.
-        if (TestgenOptions::get().withOutputPacket) {
-            auto outputPacketSize = executionState->getPacketBufferSize();
-            bool packetIsDropped = executionState->getProperty<bool>("drop");
-            if (outputPacketSize <= 0 || packetIsDropped) {
+        if (testgenOptions.outputPacketOnly) {
+            if (executionState->getPacketBufferSize() <= 0 ||
+                executionState->getProperty<bool>("drop"_cs)) {
+                return needsToTerminate(testCount);
+            }
+        }
+
+        // Don't increase the test count if --dropped-packet-only is enabled and we produce a test
+        // with an output packet.
+        if (testgenOptions.droppedPacketOnly) {
+            if (!executionState->getProperty<bool>("drop"_cs)) {
                 return needsToTerminate(testCount);
             }
         }
 
         // If assertion mode is active, ignore any test that does not trigger an assertion.
-        if (TestgenOptions::get().assertionModeEnabled) {
-            if (!executionState->getProperty<bool>("assertionTriggered")) {
+        if (testgenOptions.assertionModeEnabled) {
+            if (!executionState->getProperty<bool>("assertionTriggered"_cs)) {
                 return needsToTerminate(testCount);
             }
             printFeature("test_info", 4,
@@ -70,7 +90,7 @@ bool TestBackEnd::run(const FinalState &state) {
         // Execute concolic functions that may occur in the output packet, the output port,
         // or any path conditions.
         auto concolicResolver = ConcolicResolver(state.getFinalModel(), *executionState,
-                                                 *programInfo.getConcolicMethodImpls());
+                                                 *getProgramInfo().getConcolicMethodImpls());
 
         outputPacketExpr->apply(concolicResolver);
         outputPortExpr->apply(concolicResolver);
@@ -85,42 +105,53 @@ bool TestBackEnd::run(const FinalState &state) {
         auto concolicOptState = state.computeConcolicState(*resolvedConcolicVariables);
         if (!concolicOptState.has_value()) {
             testCount++;
-            printPerformanceReport(false);
             return needsToTerminate(testCount);
         }
         auto replacedState = concolicOptState.value().get();
         executionState = replacedState.getExecutionState();
         outputPacketExpr = executionState->getPacketBuffer();
         const auto &finalModel = replacedState.getFinalModel();
-        outputPortExpr = executionState->get(programInfo.getTargetOutputPortVar());
+        outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
 
         auto testInfo = produceTestInfo(executionState, &finalModel, outputPacketExpr,
                                         outputPortExpr, programTraces);
 
         // Add a list of tracked branches to the test output, too.
         std::stringstream selectedBranches;
-        if (TestgenOptions::get().trackBranches) {
+        if (testgenOptions.trackBranches) {
             symbex.printCurrentTraceAndBranches(selectedBranches, *executionState);
         }
 
         abort = printTestInfo(executionState, testInfo, outputPortExpr);
         if (abort) {
             testCount++;
-            printPerformanceReport(false);
             return needsToTerminate(testCount);
         }
         const auto *testSpec = createTestSpec(executionState, &finalModel, testInfo);
 
-        // Commit an update to the visited statements.
+        // Commit an update to the visited nodes.
         // Only do this once we are sure we are generating a test.
-        symbex.updateVisitedNodes(replacedState.getVisited());
+        auto hasUpdated = symbex.updateVisitedNodes(replacedState.getVisited());
+
+        // Skip test case generation if the --only-covering-tests is enabled and we do not increase
+        // coverage.
+        if (!coverableNodes.empty() && testgenOptions.coverageOptions.onlyCoveringTests &&
+            !hasUpdated) {
+            return needsToTerminate(testCount);
+        }
+
+        testCount++;
         const P4::Coverage::CoverageSet &visitedNodes = symbex.getVisitedNodes();
-        float coverage = NAN;
         int testCoverage = 0;
         int bitmapSize = 0;
         unsigned char *testCoverageMap = nullptr;
-        if (coverableNodes.empty()) {
+        if (!testgenOptions.hasCoverageTracking) {
             printFeature("test_info", 4, "============ Test %1% ============", testCount);
+        } else if (coverableNodes.empty()) {
+            printFeature("test_info", 4,
+                         "============ Test %1%: No coverable nodes ============", testCount);
+            // All 0 nodes covered.
+            coverage = 1.0;
         } else {
             bitmapSize = coverableNodes.size();
             int allocLen = (bitmapSize / 8) + 1;
@@ -150,22 +181,32 @@ bool TestBackEnd::run(const FinalState &state) {
         }
 
         // Output the test.
-        Util::withTimer("backend", [this, &testSpec, &selectedBranches, &coverage, testCoverageMap, bitmapSize] {
-            testWriter->outputTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap, bitmapSize);
+        Util::withTimer("backend", [this, &testSpec, &selectedBranches, testCoverageMap, bitmapSize] {
+            if (testWriter->isInFileMode()) {
+                testWriter->writeTestToFile(testSpec, selectedBranches, testCount, coverage, testCoverageMap, bitmapSize);
+            } else {
+                auto testOpt =
+                    testWriter->produceTest(testSpec, selectedBranches, testCount, coverage, testCoverageMap, bitmapSize);
+                if (!testOpt.has_value()) {
+                    BUG("Failed to produce test.");
+                }
+                tests.push_back(testOpt.value());
+            }
         });
 
         if (testCoverageMap)
             free(testCoverageMap);
 
         printTraces("============ End Test %1% ============\n", testCount);
-        testCount++;
         P4::Coverage::printCoverageReport(coverableNodes, visitedNodes);
-        printPerformanceReport(false);
 
-        // If MAX_STATEMENT_COVERAGE is enabled, terminate early if we hit max coverage already.
-        if (TestgenOptions::get().stopMetric == "MAX_STATEMENT_COVERAGE" && coverage == 1.0) {
+        // If MAX_NODE_COVERAGE is enabled, terminate early if we hit max node coverage already.
+        if (testgenOptions.stopMetric == "MAX_NODE_COVERAGE" && coverage == 1.0) {
             return true;
         }
+#ifdef P4TESTGEN_PRINT_PERFORMANCE_PER_TEST
+        printPerformanceReport(std::nullopt);
+#endif
         return needsToTerminate(testCount);
     }
 }
@@ -184,15 +225,15 @@ TestBackEnd::TestInfo TestBackEnd::produceTestInfo(
     const auto *payloadExpr = finalModel->get(&PacketVars::PAYLOAD_SYMBOL, false);
     if (payloadExpr != nullptr) {
         inputPacketExpr =
-            new IR::Concat(IR::getBitType(calculatedPacketSize), inputPacketExpr, payloadExpr);
-        outputPacketExpr = new IR::Concat(
-            IR::getBitType(outputPacketExpr->type->width_bits() + payloadExpr->type->width_bits()),
-            outputPacketExpr, payloadExpr);
+            new IR::Concat(IR::Type_Bits::get(calculatedPacketSize), inputPacketExpr, payloadExpr);
+        outputPacketExpr = new IR::Concat(IR::Type_Bits::get(outputPacketExpr->type->width_bits() +
+                                                             payloadExpr->type->width_bits()),
+                                          outputPacketExpr, payloadExpr);
     }
     const auto *inputPacket = finalModel->evaluate(inputPacketExpr, true);
     const auto *outputPacket = finalModel->evaluate(outputPacketExpr, true);
     const auto *inputPort =
-        finalModel->evaluate(executionState->get(programInfo.getTargetInputPortVar()), true);
+        finalModel->evaluate(executionState->get(getProgramInfo().getTargetInputPortVar()), true);
 
     const auto *outputPortVar = finalModel->evaluate(outputPortExpr, true);
     // Build the taint mask by dissecting the program packet variable
@@ -202,10 +243,10 @@ TestBackEnd::TestInfo TestBackEnd::produceTestInfo(
     auto inputPortInt = IR::getIntFromLiteral(inputPort);
     auto outputPortInt = IR::getIntFromLiteral(outputPortVar);
 
-    return {inputPacket->checkedTo<IR::Constant>(),   inputPortInt,
-            outputPacket->checkedTo<IR::Constant>(),  outputPortInt,
-            evalMask->checkedTo<IR::Constant>(),      *programTraces,
-            executionState->getProperty<bool>("drop")};
+    return {inputPacket->checkedTo<IR::Constant>(),      inputPortInt,
+            outputPacket->checkedTo<IR::Constant>(),     outputPortInt,
+            evalMask->checkedTo<IR::Constant>(),         *programTraces,
+            executionState->getProperty<bool>("drop"_cs)};
 }
 
 bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const TestInfo &testInfo,
@@ -221,7 +262,7 @@ bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const
 
     printTraces("=======================================");
     printTraces("============ Input packet for Test %1% ============", testCount);
-    printTraces(formatHexExpr(testInfo.inputPacket, false, true, false));
+    printTraces(formatHexExpr(testInfo.inputPacket, {false, true, false}));
     printTraces("=======================================");
     // We have no control over the test, if the output port is tainted. So we abort.
     if (Taint::hasTaint(outputPortExpr)) {
@@ -243,12 +284,12 @@ bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const
     BUG_CHECK(outputPacketSize >= 0, "Invalid out packet size (%1% bits) calculated!",
               outputPacketSize);
     printTraces("============ Output packet for Test %1% ============", testCount);
-    printTraces(formatHexExpr(testInfo.outputPacket, false, true, false));
+    printTraces(formatHexExpr(testInfo.outputPacket, {false, true, false}));
     printTraces("=======================================");
     printTraces("Output packet size: %1% ", outputPacketSize);
     printTraces("=======================================");
     printTraces("============ Output mask Test %1% ============", testCount);
-    printTraces(formatHexExpr(testInfo.packetTaintMask, false, true, false));
+    printTraces(formatHexExpr(testInfo.packetTaintMask, {false, true, false}));
     printTraces("=======================================");
     printTraces("Output port: %1%\n", testInfo.outputPort);
     printTraces("=======================================");
@@ -256,10 +297,19 @@ bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const
     return false;
 }
 
-void TestBackEnd::printPerformanceReport(bool write) const {
-    testWriter->printPerformanceReport(write);
-}
-
 int64_t TestBackEnd::getTestCount() const { return testCount; }
 
+float TestBackEnd::getCoverage() const { return coverage; }
+
+const ProgramInfo &TestBackEnd::getProgramInfo() const { return programInfo; }
+
+const TestBackendConfiguration &TestBackEnd::getTestBackendConfiguration() const {
+    return testBackendConfiguration;
+}
+
+bool TestBackEnd::needsToTerminate(int64_t testCount) const {
+    // If maxTests is 0, we never "need" to terminate because we want to produce as many tests as
+    // possible.
+    return maxTests != 0 && testCount >= maxTests;
+}
 }  // namespace P4Tools::P4Testgen

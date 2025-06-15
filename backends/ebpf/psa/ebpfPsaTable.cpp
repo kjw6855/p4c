@@ -24,29 +24,6 @@ limitations under the License.
 
 namespace EBPF {
 
-class EBPFTablePsaPropertyVisitor : public Inspector {
- protected:
-    EBPFTablePSA *table;
-
- public:
-    explicit EBPFTablePsaPropertyVisitor(EBPFTablePSA *table) : table(table) {}
-
-    // Use these two preorders to print error when property contains something other than name of
-    // extern instance. ListExpression is required because without it Expression will take
-    // precedence over it and throw error for whole list.
-    bool preorder(const IR::ListExpression *) override { return true; }
-    bool preorder(const IR::Expression *expr) override {
-        ::error(ErrorType::ERR_UNSUPPORTED,
-                "%1%: unsupported expression, expected a named instance", expr);
-        return false;
-    }
-
-    void visitTableProperty(cstring propertyName) {
-        auto property = table->table->container->properties->getProperty(propertyName);
-        if (property != nullptr) property->apply(*this);
-    }
-};
-
 class EBPFTablePSADirectCounterPropertyVisitor : public EBPFTablePsaPropertyVisitor {
  public:
     explicit EBPFTablePSADirectCounterPropertyVisitor(EBPFTablePSA *table)
@@ -70,7 +47,7 @@ class EBPFTablePSADirectCounterPropertyVisitor : public EBPFTablePsaPropertyVisi
     }
 
     void visitTableProperty() {
-        EBPFTablePsaPropertyVisitor::visitTableProperty("psa_direct_counter");
+        EBPFTablePsaPropertyVisitor::visitTableProperty("psa_direct_counter"_cs);
     }
 };
 
@@ -96,7 +73,7 @@ class EBPFTablePSADirectMeterPropertyVisitor : public EBPFTablePsaPropertyVisito
     }
 
     void visitTableProperty() {
-        EBPFTablePsaPropertyVisitor::visitTableProperty("psa_direct_meter");
+        EBPFTablePsaPropertyVisitor::visitTableProperty("psa_direct_meter"_cs);
     }
 };
 
@@ -105,8 +82,8 @@ class EBPFTablePSAImplementationPropertyVisitor : public EBPFTablePsaPropertyVis
     explicit EBPFTablePSAImplementationPropertyVisitor(EBPFTablePSA *table)
         : EBPFTablePsaPropertyVisitor(table) {}
 
-    // PSA table is allowed to have up to one table implementation. This visitor
-    // will iterate over all entries in property, so lets use this and print errors.
+    /// PSA table is allowed to have up to one table implementation. This visitor
+    /// will iterate over all entries in property, so lets use this and print errors.
     bool preorder(const IR::PathExpression *pe) override {
         auto decl = table->program->refMap->getDeclaration(pe->path, true);
         auto di = decl->to<IR::Declaration_Instance>();
@@ -133,12 +110,12 @@ class EBPFTablePSAImplementationPropertyVisitor : public EBPFTablePsaPropertyVis
     }
 
     void visitTableProperty() {
-        EBPFTablePsaPropertyVisitor::visitTableProperty("psa_implementation");
+        EBPFTablePsaPropertyVisitor::visitTableProperty("psa_implementation"_cs);
     }
 };
 
-// Generator for table key/value initializer value (const entries). Can't be used during table
-// lookup because this inspector expects only constant values as initializer.
+/// Generator for table key/value initializer value (const entries). Can't be used during table
+/// lookup because this inspector expects only constant values as initializer.
 class EBPFTablePSAInitializerCodeGen : public CodeGenInspector {
  protected:
     unsigned currentKeyEntryIndex = 0;
@@ -189,7 +166,7 @@ class EBPFTablePSAInitializerCodeGen : public CodeGenInspector {
         return false;
     }
 
-    // {pre,post}orders for table key initializer
+    /// {pre,post}orders for table key initializer
     bool preorder(const IR::Key *) override {
         BUG_CHECK(table->keyGenerator->keyElements.size() == currentEntry->keys->size(),
                   "Entry key size does not match table key size");
@@ -252,7 +229,7 @@ class EBPFTablePSAInitializerCodeGen : public CodeGenInspector {
     }
     void postorder(const IR::Key *) override { builder->blockEnd(false); }
 
-    // preorder for value table value initializer
+    /// preorder for value table value initializer
     bool preorder(const IR::MethodCallExpression *mce) override {
         auto mi = P4::MethodInstance::resolve(mce, refMap, typeMap);
         auto ac = mi->to<P4::ActionCall>();
@@ -280,13 +257,13 @@ class EBPFTablePSAInitializerCodeGen : public CodeGenInspector {
     bool preorder(const IR::PathExpression *p) override { return notSupported(p); }
 };
 
-// Generate mask for whole table key
+/// Generate mask for whole table key
 class EBPFTablePSATernaryTableMaskGenerator : public Inspector {
  protected:
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
-    // Mask generation is done using string concatenation,
-    // so use std::string as it behave better in this case than cstring.
+    /// Mask generation is done using string concatenation,
+    /// so use std::string as it behave better in this case than cstring.
     std::string mask;
 
  public:
@@ -315,7 +292,7 @@ class EBPFTablePSATernaryTableMaskGenerator : public Inspector {
     }
 };
 
-// Build mask initializer for a single table key entry
+/// Build mask initializer for a single table key entry.
 class EBPFTablePSATernaryKeyMaskGenerator : public EBPFTablePSAInitializerCodeGen {
  public:
     EBPFTablePSATernaryKeyMaskGenerator(P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
@@ -418,7 +395,7 @@ cstring ActionTranslationVisitorPSA::getParamName(const IR::PathExpression *expr
 EBPFTablePSA::EBPFTablePSA(const EBPFProgram *program, const IR::TableBlock *table,
                            CodeGenInspector *codeGen)
     : EBPFTable(program, table, codeGen), implementation(nullptr) {
-    auto sizeProperty = table->container->properties->getProperty("size");
+    auto sizeProperty = table->container->properties->getProperty("size"_cs);
     if (keyGenerator == nullptr && sizeProperty != nullptr) {
         ::warning(ErrorType::WARN_IGNORE_PROPERTY,
                   "%1%: property ignored because table does not have a key", sizeProperty);
@@ -482,7 +459,7 @@ void EBPFTablePSA::initImplementation() {
                 "%1%: implementation not found, ActionSelector is required",
                 selectorKey->matchType);
     }
-    auto emptyGroupAction = table->container->properties->getProperty("psa_empty_group_action");
+    auto emptyGroupAction = table->container->properties->getProperty("psa_empty_group_action"_cs);
     if (!hasActionSelector && emptyGroupAction != nullptr) {
         ::warning(ErrorType::WARN_UNUSED, "%1%: unused property (ActionSelector not provided)",
                   emptyGroupAction);
@@ -542,10 +519,8 @@ void EBPFTablePSA::emitTypes(CodeBuilder *builder) {
     emitCacheTypes(builder);
 }
 
-/**
- * Order of emitting counters and meters affects generated layout of BPF map value.
- * Do not change this order!
- */
+/// Order of emitting counters and meters affects generated layout of BPF map value.
+/// Do not change this order!
 void EBPFTablePSA::emitDirectValueTypes(CodeBuilder *builder) {
     for (auto ctr : counters) {
         ctr.second->emitValueType(builder);
@@ -603,7 +578,7 @@ void EBPFTablePSA::emitConstEntriesInitializer(CodeBuilder *builder) {
         auto ret = program->refMap->newName("ret");
         builder->emitIndent();
         builder->appendFormat("int %s = ", ret.c_str());
-        builder->target->emitTableUpdate(builder, instanceName, keyName.c_str(), valueName.c_str());
+        builder->target->emitTableUpdate(builder, instanceName, keyName, valueName);
         builder->newline();
 
         emitMapUpdateTraceMsg(builder, instanceName, ret);
@@ -621,8 +596,7 @@ void EBPFTablePSA::emitDefaultActionInitializer(CodeBuilder *builder) {
         auto ret = program->refMap->newName("ret");
         builder->emitIndent();
         builder->appendFormat("int %s = ", ret.c_str());
-        builder->target->emitTableUpdate(builder, defaultActionMapName, program->zeroKey.c_str(),
-                                         value.c_str());
+        builder->target->emitTableUpdate(builder, defaultActionMapName, program->zeroKey, value);
         builder->newline();
 
         emitMapUpdateTraceMsg(builder, defaultActionMapName, ret);
@@ -637,16 +611,15 @@ void EBPFTablePSA::emitMapUpdateTraceMsg(CodeBuilder *builder, cstring mapName,
     builder->emitIndent();
     builder->appendFormat("if (%s) ", returnCode.c_str());
     builder->blockStart();
-    cstring msgStr = Util::printf_format("Map initializer: Error while map (%s) update, code: %s",
-                                         mapName, "%d");
+    cstring msgStr =
+        absl::StrFormat("Map initializer: Error while map (%s) update, code: %s", mapName, "%d");
     builder->target->emitTraceMessage(builder, msgStr, 1, returnCode.c_str());
 
     builder->blockEnd(false);
     builder->append(" else ");
 
     builder->blockStart();
-    msgStr = Util::printf_format("Map initializer: Map (%s) update succeed", mapName,
-                                 returnCode.c_str());
+    msgStr = absl::StrFormat("Map initializer: Map (%s) update succeed", mapName);
     builder->target->emitTraceMessage(builder, msgStr);
     builder->blockEnd(true);
 }
@@ -861,12 +834,10 @@ void EBPFTablePSA::emitValueMask(CodeBuilder *builder, const cstring valueMask,
     }
 }
 
-/**
- * This method groups entries with the same prefix into separate lists.
- * For example four entries which have two different masks
- * will give as a result a list of two list (each with two entries).
- * @return a vector of vectors with const entries that have the same prefix
- */
+/// This method groups entries with the same prefix into separate lists.
+/// For example four entries which have two different masks
+/// will give as a result a list of two list (each with two entries).
+/// @return a vector of vectors with const entries that have the same prefix.
 EBPFTablePSA::EntriesGroupedByMask_t EBPFTablePSA::getConstEntriesGroupedByMask() {
     EntriesGroupedByMask_t result;
     const IR::EntriesList *entries = table->container->getEntries();
@@ -935,7 +906,7 @@ cstring EBPFTablePSA::addPrefixFunc(bool trace) {
         "%trace_msg_tuple_not_found%"
         "        return;\n"
         "    }\n"
-        "}";
+        "}"_cs;
 
     if (trace) {
         addPrefixFunc = addPrefixFunc.replace(
@@ -1016,7 +987,7 @@ void EBPFTablePSA::emitCacheInstance(CodeBuilder *builder) {
 }
 
 void EBPFTablePSA::emitCacheLookup(CodeBuilder *builder, cstring key, cstring value) {
-    cstring cacheVal = "cached_value";
+    cstring cacheVal = "cached_value"_cs;
 
     builder->appendFormat("struct %s* %s = NULL", cacheValueTypeName.c_str(), cacheVal.c_str());
     builder->endOfStatement(true);
@@ -1052,7 +1023,7 @@ void EBPFTablePSA::emitCacheLookup(CodeBuilder *builder, cstring key, cstring va
 }
 
 void EBPFTablePSA::emitCacheUpdate(CodeBuilder *builder, cstring key, cstring value) {
-    cstring cacheUpdateVarName = "cache_update";
+    cstring cacheUpdateVarName = "cache_update"_cs;
 
     builder->emitIndent();
     builder->appendFormat("if (%s != NULL) ", value.c_str());

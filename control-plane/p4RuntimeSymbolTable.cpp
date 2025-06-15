@@ -15,13 +15,9 @@ limitations under the License.
 */
 #include "p4RuntimeSymbolTable.h"
 
-#include <iosfwd>
-#include <unordered_map>
-
-#include <boost/algorithm/string/split.hpp>
-#include <boost/range/adaptor/reversed.hpp>
-
+#include "absl/strings/str_split.h"
 #include "lib/cstring.h"
+#include "lib/iterator_range.h"
 #include "p4RuntimeArchHandler.h"
 #include "typeSpecConverter.h"
 
@@ -30,13 +26,13 @@ namespace P4 {
 namespace ControlPlaneAPI {
 
 bool isControllerHeader(const IR::Type_Header *type) {
-    return type->getAnnotation("controller_header") != nullptr;
+    return type->getAnnotation("controller_header"_cs) != nullptr;
 }
 
-bool isHidden(const IR::Node *node) { return node->getAnnotation("hidden") != nullptr; }
+bool isHidden(const IR::Node *node) { return node->getAnnotation("hidden"_cs) != nullptr; }
 
 std::optional<p4rt_id_t> getIdAnnotation(const IR::IAnnotated *node) {
-    const auto *idAnnotation = node->getAnnotation("id");
+    const auto *idAnnotation = node->getAnnotation("id"_cs);
     if (idAnnotation == nullptr) {
         return std::nullopt;
     }
@@ -104,12 +100,20 @@ void collectControlSymbols(P4RuntimeSymbolTable &symbols, P4RuntimeArchHandlerIf
             });
     });
 
+    // Collect any use of something in an assignment statement
+    forAllMatching<IR::AssignmentStatement>(
+        control->body, [&](const IR::AssignmentStatement *assign) {
+            archHandler->collectAssignmentStatement(&symbols, assign);
+        });
+
     // Collect any extern function invoked directly from the control.
     forAllMatching<IR::MethodCallExpression>(
         control->body, [&](const IR::MethodCallExpression *call) {
             auto *instance = P4::MethodInstance::resolve(call, refMap, typeMap);
             if (instance->is<P4::ExternFunction>()) {
                 archHandler->collectExternFunction(&symbols, instance->to<P4::ExternFunction>());
+            } else if (instance->is<P4::ExternMethod>()) {
+                archHandler->collectExternMethod(&symbols, instance->to<P4::ExternMethod>());
             }
         });
 }
@@ -287,9 +291,8 @@ uint32_t P4::ControlPlaneAPI::P4RuntimeSymbolTable::jenkinsOneAtATimeHash(const 
 
 cstring P4::ControlPlaneAPI::P4SymbolSuffixSet::shortestUniqueSuffix(const cstring &symbol) const {
     BUG_CHECK(!symbol.isNullOrEmpty(), "Null or empty symbol name?");
-    std::vector<cstring> components;
     const char *cSymbol = symbol.c_str();
-    boost::split(components, cSymbol, [](char c) { return c == '.'; });
+    std::vector<cstring> components = absl::StrSplit(cSymbol, '.');
 
     // Determine how many suffix components we need to uniquely identify
     // this symbol. For example, if we have the symbols "d.a.c" and "e.b.c",
@@ -297,12 +300,11 @@ cstring P4::ControlPlaneAPI::P4SymbolSuffixSet::shortestUniqueSuffix(const cstri
     // uniquely, so in both cases we only need two components.
     unsigned neededComponents = 0;
     auto *node = suffixesRoot;
-    for (auto &component : boost::adaptors::reverse(components)) {
-        if (node->edges.find(component) == node->edges.end()) {
-            BUG("Symbol is not in suffix set: %1%", symbol);
-        }
+    for (auto &component : Util::iterator_range(components).reverse()) {
+        auto it = node->edges.find(component);
+        BUG_CHECK(it != node->edges.end(), "Symbol is not in suffix set: %1%", symbol);
 
-        node = node->edges[component];
+        node = it->second;
         neededComponents++;
 
         // If there's only one suffix that passes through this node, we have
@@ -318,7 +320,7 @@ cstring P4::ControlPlaneAPI::P4SymbolSuffixSet::shortestUniqueSuffix(const cstri
     BUG_CHECK(neededComponents <= components.size(), "Too many components?");
     std::string uniqueSuffix;
     std::for_each(components.end() - neededComponents, components.end(),
-                  [&](const cstring &component) {
+                  [&](const auto &component) {
                       if (!uniqueSuffix.empty()) {
                           uniqueSuffix.append(".");
                       }
@@ -341,16 +343,15 @@ void P4::ControlPlaneAPI::P4SymbolSuffixSet::addSymbol(const cstring &symbol) {
     // strictly and have tests for them, it's safest to ensure this
     // precondition here.
     {
-        auto result = symbols.insert(symbol);
-        if (!result.second) {
+        auto [_, inserted] = symbols.insert(symbol);
+        if (!inserted) {
             return;  // It was already present.
         }
     }
 
     // Split the symbol name into dot-separated components.
-    std::vector<cstring> components;
     const char *cSymbol = symbol.c_str();
-    boost::split(components, cSymbol, [](char c) { return c == '.'; });
+    std::vector<cstring> components = absl::StrSplit(cSymbol, '.');
 
     // Insert the components into our tree of suffixes. We work
     // right-to-left through the symbol name, since we're concerned with
@@ -361,11 +362,10 @@ void P4::ControlPlaneAPI::P4SymbolSuffixSet::addSymbol(const cstring &symbol) {
     //                       \-> "d" -> (1) -> "a" -> (1)
     // (Nodes are in parentheses, and edge labels are in quotes.)
     auto *node = suffixesRoot;
-    for (auto &component : boost::adaptors::reverse(components)) {
-        if (node->edges.find(component) == node->edges.end()) {
-            node->edges[component] = new SuffixNode;
-        }
-        node = node->edges[component];
+    for (auto &component : Util::iterator_range(components).reverse()) {
+        auto [it, inserted] = node->edges.emplace(component, nullptr);
+        if (inserted) it->second = new SuffixNode;
+        node = it->second;
         node->instances++;
     }
 }

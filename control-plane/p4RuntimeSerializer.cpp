@@ -15,28 +15,28 @@ limitations under the License.
 */
 #include "p4RuntimeSerializer.h"
 
-#include <google/protobuf/text_format.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wpedantic"
+#include <google/protobuf/text_format.h>
 #include <google/protobuf/util/json_util.h>
+#pragma GCC diagnostic pop
 
-#include <algorithm>
 #include <iostream>
 #include <iterator>
 #include <optional>
 #include <set>
-#include <typeinfo>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "p4/config/v1/p4info.pb.h"
-#include "p4/config/v1/p4types.pb.h"
+#include "lib/error.h"
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include "p4/v1/p4runtime.pb.h"
 #pragma GCC diagnostic pop
-
-#include <boost/algorithm/string.hpp>
-#include <boost/range/adaptor/reversed.hpp>
 
 // TODO(antonin): this include should go away when we cleanup getMatchFields
 // and tableNeedsPriority implementations.
@@ -50,14 +50,11 @@ limitations under the License.
 #include "frontends/p4/externInstance.h"
 #include "frontends/p4/fromv1.0/v1model.h"
 #include "frontends/p4/methodInstance.h"
-#include "frontends/p4/parseAnnotations.h"
-#include "frontends/p4/simplify.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "frontends/p4/typeMap.h"
 #include "ir/ir.h"
 #include "lib/log.h"
 #include "lib/nullstream.h"
-#include "lib/ordered_set.h"
 #include "p4RuntimeAnnotations.h"
 #include "p4RuntimeArchHandler.h"
 #include "p4RuntimeArchStandard.h"
@@ -101,6 +98,7 @@ static std::optional<cstring> explicitNameAnnotation(const IR::IAnnotated *item)
 namespace writers {
 
 using google::protobuf::Message;
+using google::protobuf::util::JsonPrintOptions;
 
 /// Serialize the protobuf @message to @destination in the binary protocol
 /// buffers format.
@@ -113,13 +111,10 @@ static bool writeTo(const Message &message, std::ostream *destination) {
 
 /// Serialize the protobuf @message to @destination in the JSON protocol buffers
 /// format. This is intended for debugging and testing.
-static bool writeJsonTo(const Message &message, std::ostream *destination) {
+static bool writeJsonTo(const Message &message, std::ostream *destination,
+                        const JsonPrintOptions &options) {
     using namespace google::protobuf::util;
     CHECK_NULL(destination);
-
-    // Serialize the JSON in a human-readable format.
-    JsonPrintOptions options;
-    options.add_whitespace = true;
 
     std::string output;
     if (!MessageToJsonString(message, &output, options).ok()) {
@@ -149,7 +144,9 @@ static bool writeTextTo(const Message &message, std::ostream *destination) {
     google::protobuf::TextFormat::Printer textPrinter;
     // set to expand google.protobuf.Any payloads
     textPrinter.SetExpandAny(true);
-    if (textPrinter.PrintToString(message, &output) == false) {
+    *destination << "# proto-file: " << message.GetDescriptor()->file()->name() << "\n";
+    *destination << "# proto-message: " << message.GetTypeName() << "\n\n";
+    if (!textPrinter.PrintToString(message, &output)) {
         ::error(ErrorType::ERR_IO, "Failed to serialize protobuf message to text");
         return false;
     }
@@ -292,6 +289,15 @@ static bool getConstTable(const IR::P4Table *table) {
     if (ep == nullptr) return false;
     BUG_CHECK(ep->value->is<IR::EntriesList>(), "Invalid 'entries' property");
     return ep->isConstant;
+}
+
+/// @return true if @table has an 'entries' or 'const entries'
+/// property, and there is at least one entry.
+static bool getHasInitialEntries(const IR::P4Table *table) {
+    BUG_CHECK(table != nullptr, "Failed precondition for getHasInitialEntries");
+    auto entriesList = table->getEntries();
+    if (entriesList == nullptr) return false;
+    return (entriesList->entries.size() >= 1);
 }
 
 static std::vector<ActionRef> getActionRefs(const IR::P4Table *table, ReferenceMap *refMap) {
@@ -473,18 +479,20 @@ class P4RuntimeAnalyzer {
 
         // I considered using Protobuf reflection, but it didn't really make the
         // code less verbose, and it certainly didn't make it easier to read.
-        dupCnt += checkForDuplicatesOfSameType(p4Info->tables(), "table", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->actions(), "action", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->action_profiles(), "action profile", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->counters(), "counter", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->direct_counters(), "direct counter", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->meters(), "meter", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->direct_meters(), "direct meter", &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->tables(), "table"_cs, &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->actions(), "action"_cs, &ids);
+        dupCnt +=
+            checkForDuplicatesOfSameType(p4Info->action_profiles(), "action profile"_cs, &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->counters(), "counter"_cs, &ids);
+        dupCnt +=
+            checkForDuplicatesOfSameType(p4Info->direct_counters(), "direct counter"_cs, &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->meters(), "meter"_cs, &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->direct_meters(), "direct meter"_cs, &ids);
         dupCnt += checkForDuplicatesOfSameType(p4Info->controller_packet_metadata(),
-                                               "controller packet metadata", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->value_sets(), "value set", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->registers(), "register", &ids);
-        dupCnt += checkForDuplicatesOfSameType(p4Info->digests(), "digest", &ids);
+                                               "controller packet metadata"_cs, &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->value_sets(), "value set"_cs, &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->registers(), "register"_cs, &ids);
+        dupCnt += checkForDuplicatesOfSameType(p4Info->digests(), "digest"_cs, &ids);
 
         for (const auto &externType : p4Info->externs()) {
             dupCnt += checkForDuplicatesOfSameType(externType.instances(),
@@ -539,7 +547,8 @@ class P4RuntimeAnalyzer {
         serializedActions.insert(id);
 
         auto action = p4Info->add_actions();
-        setPreamble(action->mutable_preamble(), id, name, symbols.getAlias(name), annotations);
+        setPreamble(action->mutable_preamble(), id, name, symbols.getAlias(name), annotations,
+                    [this](cstring anno) { return archHandler->filterAnnotations(anno); });
 
         // Allocate ids for all action parameters.
         std::vector<const IR::Parameter *> actionParams;
@@ -594,7 +603,7 @@ class P4RuntimeAnalyzer {
         auto id = symbols.getId(P4RuntimeSymbolType::P4RT_CONTROLLER_HEADER(), name);
         auto annotations = type->to<IR::IAnnotated>();
 
-        auto controllerAnnotation = type->getAnnotation("controller_header");
+        auto controllerAnnotation = type->getAnnotation("controller_header"_cs);
         CHECK_NULL(controllerAnnotation);
 
         auto nameConstant = controllerAnnotation->expr[0]->to<IR::StringLiteral>();
@@ -606,7 +615,8 @@ class P4RuntimeAnalyzer {
         // the annotation for the p4info preamble, not the P4 fully-qualified
         // name.
         setPreamble(header->mutable_preamble(), id, controllerName /* name */,
-                    controllerName /* alias */, annotations);
+                    controllerName /* alias */, annotations,
+                    [this](cstring anno) { return archHandler->filterAnnotations(anno); });
 
         FieldIdAllocator<decltype(flattenedHeaderType->fields)::value_type> idAllocator(
             flattenedHeaderType->fields.begin(), flattenedHeaderType->fields.end());
@@ -652,6 +662,7 @@ class P4RuntimeAnalyzer {
         auto actions = getActionRefs(tableDeclaration, refMap);
 
         bool isConstTable = getConstTable(tableDeclaration);
+        bool hasInitialEntries = getHasInitialEntries(tableDeclaration);
 
         auto name = archHandler->getControlPlaneName(tableBlock);
         auto annotations = tableDeclaration->to<IR::IAnnotated>();
@@ -659,7 +670,8 @@ class P4RuntimeAnalyzer {
         auto table = p4Info->add_tables();
         setPreamble(table->mutable_preamble(),
                     symbols.getId(P4RuntimeSymbolType::P4RT_TABLE(), name), name,
-                    symbols.getAlias(name), annotations);
+                    symbols.getAlias(name), annotations,
+                    [this](cstring anno) { return archHandler->filterAnnotations(anno); });
         table->set_size(tableSize);
 
         if (defaultAction && defaultAction->isConst) {
@@ -673,8 +685,8 @@ class P4RuntimeAnalyzer {
             action_ref->set_id(id);
             addAnnotations(action_ref, action.annotations);
             // set action ref scope
-            auto isTableOnly = (action.annotations->getAnnotation("tableonly") != nullptr);
-            auto isDefaultOnly = (action.annotations->getAnnotation("defaultonly") != nullptr);
+            auto isTableOnly = (action.annotations->getAnnotation("tableonly"_cs) != nullptr);
+            auto isDefaultOnly = (action.annotations->getAnnotation("defaultonly"_cs) != nullptr);
             if (isTableOnly && isDefaultOnly) {
                 ::error(ErrorType::ERR_INVALID,
                         "Table '%1%' has an action reference ('%2%') which is annotated "
@@ -708,6 +720,9 @@ class P4RuntimeAnalyzer {
 
         if (isConstTable) {
             table->set_is_const_table(true);
+        }
+        if (hasInitialEntries) {
+            table->set_has_initial_entries(true);
         }
 
         archHandler->addTableProperties(symbols, p4Info, table, tableBlock);
@@ -773,7 +788,8 @@ class P4RuntimeAnalyzer {
 
         auto id = symbols.getId(P4RuntimeSymbolType::P4RT_VALUE_SET(), name);
         setPreamble(vs->mutable_preamble(), id, name, symbols.getAlias(name),
-                    inst->to<IR::IAnnotated>());
+                    inst->to<IR::IAnnotated>(),
+                    [this](cstring anno) { return archHandler->filterAnnotations(anno); });
         vs->set_size(size);
 
         /// Look for a @match annotation on the struct field and set the match
@@ -937,9 +953,43 @@ class P4RuntimeAnalyzer {
             }
         }
 
+        // Parse `@platform_property` annotation into the PkgInfo.
+        for (auto *annotation : decl->getAnnotations()->annotations) {
+            if (annotation->name != "platform_property") continue;
+            auto *platform_properties = pkginfo->mutable_platform_properties();
+            for (auto *kv : annotation->kv) {
+                auto name = kv->name.name;
+                auto setInt32Field = [kv, &platform_properties](cstring fName) {
+                    auto *v = kv->expression->to<IR::Constant>();
+                    if (v == nullptr) {
+                        ::error(ErrorType::ERR_UNSUPPORTED,
+                                "Value for '%1%' key in @platform_property annotation is not an "
+                                "integer",
+                                kv);
+                        return;
+                    }
+                    // use Protobuf reflection library to minimize code duplication.
+                    auto *descriptor = platform_properties->GetDescriptor();
+                    auto *f = descriptor->FindFieldByName(static_cast<std::string>(fName));
+                    platform_properties->GetReflection()->SetInt32(platform_properties, f,
+                                                                   static_cast<int32_t>(v->value));
+                };
+                if (name == "multicast_group_table_size" ||
+                    name == "multicast_group_table_total_replicas" ||
+                    name == "multicast_group_table_max_replicas_per_entry") {
+                    setInt32Field(name);
+                } else {
+                    ::warning(ErrorType::WARN_UNKNOWN,
+                              "Unknown key name '%1%' in @platform_property annotation", name);
+                }
+            }
+        }
+
         // add other annotations on the P4 package to the message. @pkginfo is
         // ignored using the unary predicate argument to addAnnotations.
-        addAnnotations(pkginfo, decl, [](cstring name) { return name == "pkginfo"; });
+        addAnnotations(pkginfo, decl, [](cstring name) {
+            return name == "pkginfo" || name == "platform_property";
+        });
 
         addDocumentation(pkginfo, decl);
     }
@@ -970,9 +1020,9 @@ static void analyzeParser(P4RuntimeAnalyzer &analyzer, const IR::ParserBlock *pa
     }
 }
 
-/// A converter which translates the 'const entries' for P4 tables (if any)
-/// into a P4Runtime WriteRequest message which can be used by a target to
-/// initialize its tables.
+/// A converter which translates the 'entries' or 'const entries' for
+/// P4 tables (if any) into a P4Runtime WriteRequest message which can
+/// be used by a target to initialize its tables.
 class P4RuntimeEntriesConverter {
  private:
     friend class P4RuntimeAnalyzer;
@@ -1009,6 +1059,7 @@ class P4RuntimeEntriesConverter {
             protoEntry->set_table_id(tableId);
             addMatchKey(protoEntry, table, e->getKeys(), refMap, typeMap);
             addAction(protoEntry, e->getAction(), refMap, typeMap);
+            protoEntry->set_is_const(isConst || e->isConst);
             if (needsPriority) {
                 if (!isConst) {
                     // The entry has a priority, use it.
@@ -1031,7 +1082,7 @@ class P4RuntimeEntriesConverter {
                 }
             }
 
-            auto priorityAnnotation = e->getAnnotation("priority");
+            auto priorityAnnotation = e->getAnnotation("priority"_cs);
             if (priorityAnnotation != nullptr) {
                 ::warning(ErrorType::WARN_DEPRECATED,
                           "The @priority annotation on %1% is not part of the P4 specification, "
@@ -1384,11 +1435,16 @@ class P4RuntimeEntriesConverter {
         if (block->is<IR::TableBlock>())
             entriesConverter.addTableEntries(block->to<IR::TableBlock>(), refMap, typeMap,
                                              archHandler);
+        else if (block->is<IR::ExternBlock>()) {
+            // add entries for arch specific extern types
+            archHandler->addExternEntries(entriesConverter.getEntries(), *symbols,
+                                          block->to<IR::ExternBlock>());
+        }
     });
 
     auto *p4Info = analyzer.getP4Info();
     auto *p4Entries = entriesConverter.getEntries();
-    return P4RuntimeAPI{p4Info, p4Entries};
+    return P4RuntimeAPI{p4Info, p4Entries, archHandler->getJsonPrintOptions()};
 }
 
 }  // namespace ControlPlaneAPI
@@ -1439,8 +1495,9 @@ void P4RuntimeAPI::serializeP4InfoTo(std::ostream *destination, P4RuntimeFormat 
             success = writers::writeTo(*p4Info, destination);
             break;
         case P4RuntimeFormat::JSON:
-            success = writers::writeJsonTo(*p4Info, destination);
+            success = writers::writeJsonTo(*p4Info, destination, jsonPrintOptions);
             break;
+        case P4RuntimeFormat::TEXT_PROTOBUF:
         case P4RuntimeFormat::TEXT:
             success = writers::writeTextTo(*p4Info, destination);
             break;
@@ -1458,8 +1515,9 @@ void P4RuntimeAPI::serializeEntriesTo(std::ostream *destination, P4RuntimeFormat
             success = writers::writeTo(*entries, destination);
             break;
         case P4RuntimeFormat::JSON:
-            success = writers::writeJsonTo(*entries, destination);
+            success = writers::writeJsonTo(*entries, destination, jsonPrintOptions);
             break;
+        case P4RuntimeFormat::TEXT_PROTOBUF:
         case P4RuntimeFormat::TEXT:
             success = writers::writeTextTo(*entries, destination);
             break;
@@ -1471,33 +1529,32 @@ void P4RuntimeAPI::serializeEntriesTo(std::ostream *destination, P4RuntimeFormat
 
 static bool parseFileNames(cstring fileNameVector, std::vector<cstring> &files,
                            std::vector<P4::P4RuntimeFormat> &formats) {
-    for (auto current = fileNameVector; current;) {
+    // FIXME: Logic here shoule be refactored. Lots of cstring copies everywhere.
+    for (auto current = fileNameVector; !current.isNullOrEmpty();) {
         cstring name = current;
         const char *comma = current.find(',');
         if (comma != nullptr) {
             name = current.before(comma);
-            current = comma + 1;
+            current = cstring(comma + 1);
         } else {
-            current = cstring();
+            current = cstring::empty;
         }
         files.push_back(name);
 
-        if (cstring suffix = name.findlast('.')) {
-            if (suffix == ".json") {
-                formats.push_back(P4::P4RuntimeFormat::JSON);
-            } else if (suffix == ".bin") {
-                formats.push_back(P4::P4RuntimeFormat::BINARY);
-            } else if (suffix == ".txt") {
-                formats.push_back(P4::P4RuntimeFormat::TEXT);
-            } else {
-                ::error(ErrorType::ERR_UNKNOWN,
-                        "%1%: Could not detect p4runtime info file format from file suffix %2%",
-                        name, suffix);
-                return false;
-            }
+        if (name.endsWith(".json")) {
+            formats.push_back(P4::P4RuntimeFormat::JSON);
+        } else if (name.endsWith(".bin")) {
+            formats.push_back(P4::P4RuntimeFormat::BINARY);
+        } else if (name.endsWith(".txtpb")) {
+            formats.push_back(P4::P4RuntimeFormat::TEXT_PROTOBUF);
+        } else if (name.endsWith(".txt")) {
+            ::warning(ErrorType::WARN_DEPRECATED,
+                      ".txt format is being deprecated; use .txtpb instead");
+            formats.push_back(P4::P4RuntimeFormat::TEXT);
         } else {
             ::error(ErrorType::ERR_UNKNOWN,
-                    "%1%: unknown file kind; known suffixes are .bin, .txt, .json", name);
+                    "%1%: unknown file kind; known suffixes are .bin, .txt, .json, and .txtpb",
+                    name);
             return false;
         }
     }
@@ -1524,6 +1581,7 @@ void P4RuntimeSerializer::serializeP4RuntimeIfRequired(const IR::P4Program *prog
 
 void P4RuntimeSerializer::serializeP4RuntimeIfRequired(const P4RuntimeAPI &p4Runtime,
                                                        const CompilerOptions &options) {
+    // FIXME: get rid of cstring here
     std::vector<cstring> files;
     std::vector<P4::P4RuntimeFormat> formats;
 
@@ -1537,7 +1595,7 @@ void P4RuntimeSerializer::serializeP4RuntimeIfRequired(const P4RuntimeAPI &p4Run
         for (unsigned i = 0; i < files.size(); i++) {
             cstring file = files.at(i);
             P4::P4RuntimeFormat format = formats.at(i);
-            std::ostream *out = openFile(file, false);
+            std::ostream *out = openFile(file.string(), false);
             if (!out) {
                 ::error(ErrorType::ERR_IO, "Couldn't open P4Runtime API file: %1%", file);
                 continue;
@@ -1559,7 +1617,7 @@ void P4RuntimeSerializer::serializeP4RuntimeIfRequired(const P4RuntimeAPI &p4Run
         for (unsigned i = 0; i < files.size(); i++) {
             cstring file = files.at(i);
             P4::P4RuntimeFormat format = formats.at(i);
-            std::ostream *out = openFile(file, false);
+            std::ostream *out = openFile(file.string(), false);
             if (!out) {
                 ::error(ErrorType::ERR_IO, "Couldn't open P4Runtime static entries file: %1%",
                         options.p4RuntimeEntriesFile);
@@ -1571,10 +1629,10 @@ void P4RuntimeSerializer::serializeP4RuntimeIfRequired(const P4RuntimeAPI &p4Run
 }
 
 P4RuntimeSerializer::P4RuntimeSerializer() {
-    registerArch("v1model", new ControlPlaneAPI::Standard::V1ModelArchHandlerBuilder());
-    registerArch("psa", new ControlPlaneAPI::Standard::PSAArchHandlerBuilder());
-    registerArch("pna", new ControlPlaneAPI::Standard::PNAArchHandlerBuilder());
-    registerArch("ubpf", new ControlPlaneAPI::Standard::UBPFArchHandlerBuilder());
+    registerArch("v1model"_cs, new ControlPlaneAPI::Standard::V1ModelArchHandlerBuilder());
+    registerArch("psa"_cs, new ControlPlaneAPI::Standard::PSAArchHandlerBuilder());
+    registerArch("pna"_cs, new ControlPlaneAPI::Standard::PNAArchHandlerBuilder());
+    registerArch("ubpf"_cs, new ControlPlaneAPI::Standard::UBPFArchHandlerBuilder());
 }
 
 P4RuntimeSerializer *P4RuntimeSerializer::get() {
@@ -1588,7 +1646,7 @@ cstring P4RuntimeSerializer::resolveArch(const CompilerOptions &options) {
     } else if (options.arch != nullptr) {
         return options.arch;
     } else {
-        return "v1model";
+        return "v1model"_cs;
     }
 }
 

@@ -14,12 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <gtest/gtest.h>
+
 #include "frontends/common/parseInput.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "frontends/p4/typeMap.h"
-#include "gtest/gtest.h"
 #include "helpers.h"
 #include "ir/ir.h"
 #include "lib/log.h"
@@ -159,7 +160,7 @@ static void testReplaceSelectRange(std::vector<Bound> ranges, ExtraTests extraTe
     TypeMap typeMap;
 
     PassManager passes_ = {new P4::ResolveReferences(&refMap),
-                           new P4::TypeInference(&refMap, &typeMap, false),
+                           new P4::TypeInference(&typeMap, false),
                            // properly set types for compound expressions
                            new P4::TypeChecking(&refMap, &typeMap, true),
                            new P4::ReplaceSelectRange(&refMap, &typeMap)};

@@ -3,21 +3,19 @@
 #include <cstddef>
 #include <optional>
 #include <ostream>
-#include <string>
 #include <vector>
 
 #include <boost/multiprecision/cpp_int.hpp>
 
+#include "backends/p4tools/common/control_plane/symbolic_variables.h"
+#include "backends/p4tools/common/lib/constants.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
-#include "backends/p4tools/common/lib/variables.h"
 #include "ir/declaration.h"
 #include "ir/id.h"
 #include "ir/irutils.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
-#include "lib/log.h"
-#include "lib/null.h"
 #include "lib/source_file.h"
 #include "midend/coverage.h"
 
@@ -36,36 +34,48 @@
 
 namespace P4Tools::P4Testgen::Bmv2 {
 
+using namespace P4::literals;
+
 const IR::Expression *Bmv2V1ModelTableStepper::computeTargetMatchType(
     const TableUtils::KeyProperties &keyProperties, TableMatchMap *matches,
     const IR::Expression *hitCondition) {
     const IR::Expression *keyExpr = keyProperties.key->expression;
+    const auto &testgenOptions = TestgenOptions::get();
 
-    // TODO: We consider optional match types to be a no-op, but we could make them exact matches.
-    if (keyProperties.matchType == BMv2Constants::MATCH_KIND_OPT) {
-        cstring keyName = properties.tableName + "_key_" + keyProperties.name;
-        const auto *ctrlPlaneKey = ToolsVariables::getSymbolicVariable(keyExpr->type, keyName);
+    if (keyProperties.matchType == BMv2Constants::MATCH_KIND_OPT ||
+        keyProperties.matchType == P4Constants::MATCH_KIND_TERNARY) {
+        const auto *ctrlPlaneKey =
+            ControlPlaneState::getTableKey(properties.tableName, keyProperties.name, keyExpr->type);
         // We can recover from taint by simply not adding the optional match.
         // Create a new symbolic variable that corresponds to the key expression.
-        const IR::Expression *ternaryMask = nullptr;
         // We can recover from taint by inserting a ternary match that is 0.
-        const auto *wildCard = IR::getConstant(keyExpr->type, 0);
+        const auto *wildCard = IR::Constant::get(keyExpr->type, 0);
         if (keyProperties.isTainted) {
             matches->emplace(keyProperties.name,
                              new Ternary(keyProperties.key, ctrlPlaneKey, wildCard));
             return hitCondition;
         }
-        cstring maskName = properties.tableName + "_mask_" + keyProperties.name;
-        const auto *fullMatch = IR::getMaxValueConstant(keyExpr->type);
-        ternaryMask = ToolsVariables::getSymbolicVariable(keyExpr->type, maskName);
-        auto *maskCond =
-            new IR::LOr(new IR::Equ(ternaryMask, wildCard), new IR::Equ(ternaryMask, fullMatch));
         matches->emplace(keyProperties.name,
                          new Ternary(keyProperties.key, ctrlPlaneKey, wildCard));
-        return new IR::LAnd(
-            hitCondition,
-            new IR::LAnd(maskCond, new IR::Equ(new IR::BAnd(keyExpr, ternaryMask),
-                                               new IR::BAnd(ctrlPlaneKey, ternaryMask))));
+        // Calculate the conditions for the ternary or optional match.
+        const auto *ternaryMask = ControlPlaneState::getTableTernaryMask(
+            properties.tableName, keyProperties.name, keyExpr->type);
+        // Encode P4Runtime constraints for PTF and Protobuf tests.
+        // (https://p4.org/p4-spec/docs/p4runtime-spec-working-draft-html-version.html#sec-match-format)
+        if (testgenOptions.testBackend == "PTF" || testgenOptions.testBackend == "PROTOBUF" ||
+            testgenOptions.testBackend == "PROTOBUF_IR") {
+            hitCondition = new IR::LAnd(
+                hitCondition, new IR::Equ(new IR::BAnd(ctrlPlaneKey, ternaryMask), ctrlPlaneKey));
+        }
+        // Optional matches are either a ternary exact match or are fully wildcarded.
+        if (keyProperties.matchType == BMv2Constants::MATCH_KIND_OPT) {
+            const auto *fullMatch = IR::getMaxValueConstant(keyExpr->type);
+            hitCondition =
+                new IR::LAnd(hitCondition, new IR::LOr(new IR::Equ(ternaryMask, wildCard),
+                                                       new IR::Equ(ternaryMask, fullMatch)));
+        }
+        return new IR::LAnd(hitCondition, new IR::Equ(new IR::BAnd(keyExpr, ternaryMask),
+                                                      new IR::BAnd(ctrlPlaneKey, ternaryMask)));
     }
     // Action selector entries are not part of the match.
     if (keyProperties.matchType == BMv2Constants::MATCH_KIND_SELECTOR) {
@@ -74,19 +84,17 @@ const IR::Expression *Bmv2V1ModelTableStepper::computeTargetMatchType(
     }
     // Ranges are not yet implemented for BMv2 STF tests.
     if (keyProperties.matchType == BMv2Constants::MATCH_KIND_RANGE &&
-        TestgenOptions::get().testBackend != "STF") {
-        cstring minName = properties.tableName + "_range_min_" + keyProperties.name;
-        cstring maxName = properties.tableName + "_range_max_" + keyProperties.name;
+        testgenOptions.testBackend != "STF") {
         // We can recover from taint by matching on the entire possible range.
         const IR::Expression *minKey = nullptr;
         const IR::Expression *maxKey = nullptr;
         if (keyProperties.isTainted) {
-            minKey = IR::getConstant(keyExpr->type, 0);
-            maxKey = IR::getConstant(keyExpr->type, IR::getMaxBvVal(keyExpr->type));
+            minKey = IR::Constant::get(keyExpr->type, 0);
+            maxKey = IR::Constant::get(keyExpr->type, IR::getMaxBvVal(keyExpr->type));
             keyExpr = minKey;
         } else {
-            minKey = ToolsVariables::getSymbolicVariable(keyExpr->type, minName);
-            maxKey = ToolsVariables::getSymbolicVariable(keyExpr->type, maxName);
+            std::tie(minKey, maxKey) = Bmv2ControlPlaneState::getTableRange(
+                properties.tableName, keyProperties.name, keyExpr->type);
         }
         matches->emplace(keyProperties.name, new Range(keyProperties.key, minKey, maxKey));
         return new IR::LAnd(hitCondition, new IR::LAnd(new IR::LAnd(new IR::Lss(minKey, maxKey),
@@ -121,13 +129,10 @@ void Bmv2V1ModelTableStepper::evalTableActionProfile(
         const auto &parameters = actionType->parameters;
         auto *arguments = new IR::Vector<IR::Argument>();
         std::vector<ActionArg> ctrlPlaneArgs;
-        for (size_t argIdx = 0; argIdx < parameters->size(); ++argIdx) {
-            const auto *parameter = parameters->getParameter(argIdx);
+        for (const auto *parameter : parameters->parameters) {
             // Synthesize a symbolic variable here that corresponds to a control plane argument.
-            // We get the unique name of the table coupled with the unique name of the action.
-            // Getting the unique name is needed to avoid generating duplicate arguments.
-            cstring keyName = properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
-            const auto &actionArg = ToolsVariables::getSymbolicVariable(parameter->type, keyName);
+            const auto &actionArg = ControlPlaneState::getTableActionArgument(
+                properties.tableName, actionName, parameter->name, parameter->type);
             arguments->push_back(new IR::Argument(actionArg));
             // We also track the argument we synthesize for the control plane.
             // Note how we use the control plane name for the parameter here.
@@ -137,15 +142,11 @@ void Bmv2V1ModelTableStepper::evalTableActionProfile(
         // TODO: Should we check if we exceed the maximum number of possible profile entries?
         actionProfile->addToActionMap(actionName, ctrlPlaneArgs);
         // Update the action profile in the execution state.
-        nextState.addTestObject("action_profile", actionProfile->getObjectName(), actionProfile);
+        nextState.addTestObject("action_profile"_cs, actionProfile->getObjectName(), actionProfile);
 
         // We add the arguments to our action call, effectively creating a const entry call.
         auto *synthesizedAction = tableAction->clone();
         synthesizedAction->arguments = arguments;
-
-        // We need to set the table action in the state for eventual switch action_run hits.
-        // We also will need it for control plane table entries.
-        setTableAction(nextState, tableAction);
 
         // Finally, add all the new rules to the execution state.
         const ActionCall ctrlPlaneActionCall(actionName, actionType, ctrlPlaneArgs);
@@ -155,23 +156,23 @@ void Bmv2V1ModelTableStepper::evalTableActionProfile(
 
         // Add the action profile to the table.
         // This implies a slightly different implementation to usual control plane table behavior.
-        tableConfig->addTableProperty("action_profile", actionProfile);
-        nextState.addTestObject("tableconfigs", table->controlPlaneName(), tableConfig);
+        tableConfig->addTableProperty("action_profile"_cs, actionProfile);
+        nextState.addTestObject("tableconfigs"_cs, table->controlPlaneName(), tableConfig);
 
         // Update all the tracking variables for tables.
         std::vector<Continuation::Command> replacements;
         replacements.emplace_back(
             new IR::MethodCallStatement(Util::SourceInfo(), synthesizedAction));
         // Some path selection strategies depend on looking ahead and collecting potential
-        // statements. If that is the case, apply the CoverableNodesScanner visitor.
+        // nodes. If that is the case, apply the CoverableNodesScanner visitor.
         P4::Coverage::CoverageSet coveredNodes;
         if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
             auto collector = CoverableNodesScanner(*state);
             collector.updateNodeCoverage(actionType, coveredNodes);
         }
 
-        nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-        nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+        nextState.set(getTableHitVar(table), IR::BoolLiteral::get(true));
+        nextState.set(getTableActionVar(table), getTableActionString(tableAction));
         std::stringstream tableStream;
         tableStream << "Table Branch: " << properties.tableName;
         tableStream << " Chosen action: " << actionName;
@@ -199,7 +200,6 @@ void Bmv2V1ModelTableStepper::evalTableActionSelector(
         auto &nextState = state->clone();
         // We get the control plane name of the action we are calling.
         cstring actionName = actionType->controlPlaneName();
-
         // Copy the previous action profile.
         auto *actionProfile = new Bmv2V1ModelActionProfile(
             bmv2V1ModelProperties.actionSelector->getActionProfile()->getProfileDecl());
@@ -207,13 +207,10 @@ void Bmv2V1ModelTableStepper::evalTableActionSelector(
         const auto &parameters = actionType->parameters;
         auto *arguments = new IR::Vector<IR::Argument>();
         std::vector<ActionArg> ctrlPlaneArgs;
-        for (size_t argIdx = 0; argIdx < parameters->size(); ++argIdx) {
-            const auto *parameter = parameters->getParameter(argIdx);
+        for (const auto *parameter : parameters->parameters) {
             // Synthesize a symbolic variable here that corresponds to a control plane argument.
-            // We get the unique name of the table coupled with the unique name of the action.
-            // Getting the unique name is needed to avoid generating duplicate arguments.
-            cstring keyName = properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
-            const auto &actionArg = ToolsVariables::getSymbolicVariable(parameter->type, keyName);
+            const auto &actionArg = ControlPlaneState::getTableActionArgument(
+                properties.tableName, actionName, parameter->name, parameter->type);
             arguments->push_back(new IR::Argument(actionArg));
             // We also track the argument we synthesize for the control plane.
             // Note how we use the control plane name for the parameter here.
@@ -227,17 +224,14 @@ void Bmv2V1ModelTableStepper::evalTableActionSelector(
             bmv2V1ModelProperties.actionSelector->getSelectorDecl(), actionProfile);
 
         // Update the action profile in the execution state.
-        nextState.addTestObject("action_profile", actionProfile->getObjectName(), actionProfile);
+        nextState.addTestObject("action_profile"_cs, actionProfile->getObjectName(), actionProfile);
         // Update the action selector in the execution state.
-        nextState.addTestObject("action_selector", actionSelector->getObjectName(), actionSelector);
+        nextState.addTestObject("action_selector"_cs, actionSelector->getObjectName(),
+                                actionSelector);
 
         // We add the arguments to our action call, effectively creating a const entry call.
         auto *synthesizedAction = tableAction->clone();
         synthesizedAction->arguments = arguments;
-
-        // We need to set the table action in the state for eventual switch action_run hits.
-        // We also will need it for control plane table entries.
-        setTableAction(nextState, tableAction);
 
         // Finally, add all the new rules to the execution state.
         ActionCall ctrlPlaneActionCall(actionName, actionType, ctrlPlaneArgs);
@@ -246,26 +240,26 @@ void Bmv2V1ModelTableStepper::evalTableActionSelector(
         auto *tableConfig = new TableConfig(table, {tableRule});
 
         // Add the action profile to the table. This signifies a slightly different implementation.
-        tableConfig->addTableProperty("action_profile", actionProfile);
+        tableConfig->addTableProperty("action_profile"_cs, actionProfile);
         // Add the action selector to the table. This signifies a slightly different implementation.
-        tableConfig->addTableProperty("action_selector", actionSelector);
+        tableConfig->addTableProperty("action_selector"_cs, actionSelector);
 
-        nextState.addTestObject("tableconfigs", table->controlPlaneName(), tableConfig);
+        nextState.addTestObject("tableconfigs"_cs, table->controlPlaneName(), tableConfig);
 
         // Update all the tracking variables for tables.
         std::vector<Continuation::Command> replacements;
         replacements.emplace_back(
             new IR::MethodCallStatement(Util::SourceInfo(), synthesizedAction));
         // Some path selection strategies depend on looking ahead and collecting potential
-        // statements. If that is the case, apply the CoverableNodesScanner visitor.
+        // nodes. If that is the case, apply the CoverableNodesScanner visitor.
         P4::Coverage::CoverageSet coveredNodes;
         if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
             auto collector = CoverableNodesScanner(*state);
             collector.updateNodeCoverage(actionType, coveredNodes);
         }
 
-        nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-        nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+        nextState.set(getTableHitVar(table), IR::BoolLiteral::get(true));
+        nextState.set(getTableActionVar(table), getTableActionString(tableAction));
         std::stringstream tableStream;
         tableStream << "Table Branch: " << properties.tableName;
         tableStream << " Chosen action: " << actionName;
@@ -276,7 +270,7 @@ void Bmv2V1ModelTableStepper::evalTableActionSelector(
 }
 
 bool Bmv2V1ModelTableStepper::checkForActionProfile() {
-    const auto *impl = table->properties->getProperty("implementation");
+    const auto *impl = table->properties->getProperty("implementation"_cs);
     if (impl == nullptr) {
         return false;
     }
@@ -304,7 +298,7 @@ bool Bmv2V1ModelTableStepper::checkForActionProfile() {
     }
 
     const auto *testObject =
-        state->getTestObject("action_profile", implDecl->controlPlaneName(), false);
+        state->getTestObject("action_profile"_cs, implDecl->controlPlaneName(), false);
     if (testObject == nullptr) {
         // This means, for every possible control plane entry (and with that, new execution state)
         // add the generated action profile.
@@ -318,7 +312,7 @@ bool Bmv2V1ModelTableStepper::checkForActionProfile() {
 }
 
 bool Bmv2V1ModelTableStepper::checkForActionSelector() {
-    const auto *impl = table->properties->getProperty("implementation");
+    const auto *impl = table->properties->getProperty("implementation"_cs);
     if (impl == nullptr) {
         return false;
     }
@@ -347,7 +341,7 @@ bool Bmv2V1ModelTableStepper::checkForActionSelector() {
     // Treat action selectors like action profiles for now.
     // The behavioral model P4Runtime is unclear how to configure action selectors.
     const auto *testObject =
-        state->getTestObject("action_selector", selectorDecl->controlPlaneName(), false);
+        state->getTestObject("action_profile"_cs, selectorDecl->controlPlaneName(), false);
     if (testObject == nullptr) {
         // This means, for every possible control plane entry (and with that, new execution state)
         // add the generated action profile.
@@ -395,10 +389,12 @@ void Bmv2V1ModelTableStepper::checkTargetProperties(
 void Bmv2V1ModelTableStepper::evalTargetTable(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     const auto *keys = table->getKey();
+    const auto &testgenOptions = TestgenOptions::get();
+
     // If we have no keys, there is nothing to match.
     if (keys == nullptr) {
         // Either override the default action or fall back to executing it.
-        auto testBackend = TestgenOptions::get().testBackend;
+        auto testBackend = testgenOptions.testBackend;
         if (testBackend == "STF" && !properties.defaultIsImmutable) {
             setTableDefaultEntries(tableActionList);
             return;
@@ -426,7 +422,7 @@ void Bmv2V1ModelTableStepper::evalTargetTable(
         case TableImplementation::selector: {
             // If an action selector is attached to the table, do not assume normal control plane
             // behavior.
-            if (TestgenOptions::get().testBackend != "STF") {
+            if (testgenOptions.testBackend != "STF") {
                 evalTableActionSelector(tableActionList);
             } else {
                 // We can only generate profile entries for PTF and Protobuf tests.
@@ -439,7 +435,7 @@ void Bmv2V1ModelTableStepper::evalTargetTable(
         case TableImplementation::profile: {
             // If an action profile is attached to the table, do not assume normal control plane
             // behavior.
-            if (TestgenOptions::get().testBackend != "STF") {
+            if (testgenOptions.testBackend != "STF") {
                 evalTableActionProfile(tableActionList);
             } else {
                 // We can only generate profile entries for PTF and Protobuf tests.

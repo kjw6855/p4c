@@ -32,7 +32,7 @@ struct user_meta_data_t {
 	bit<8> psa_ingress_output_metadata_drop
 	bit<32> psa_ingress_output_metadata_egress_port
 	bit<48> local_metadata_addr
-	bit<80> Ingress_flg
+	bit<64> Ingress_flg
 }
 metadata instanceof user_meta_data_t
 

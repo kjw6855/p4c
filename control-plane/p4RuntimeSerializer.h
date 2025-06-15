@@ -17,10 +17,17 @@ limitations under the License.
 #ifndef CONTROL_PLANE_P4RUNTIMESERIALIZER_H_
 #define CONTROL_PLANE_P4RUNTIMESERIALIZER_H_
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wpedantic"
+#include <google/protobuf/util/json_util.h>
+#pragma GCC diagnostic pop
+
 #include <iosfwd>
 #include <unordered_map>
 
 #include "lib/cstring.h"
+#include "p4RuntimeTypes.h"
 
 namespace p4 {
 namespace config {
@@ -41,8 +48,7 @@ class CompilerOptions;
 
 namespace P4 {
 
-/// P4Runtime serialization formats.
-enum class P4RuntimeFormat { BINARY, JSON, TEXT };
+using namespace literals;
 
 /// A P4 program's control-plane API, represented in terms of P4Runtime's data
 /// structures. Can be inspected or serialized.
@@ -60,6 +66,18 @@ struct P4RuntimeAPI {
     /// All static table entries as one P4Runtime WriteRequest object. Never
     /// null.
     const ::p4::v1::WriteRequest *entries;
+
+    // Print options to use while outputting JSON.
+    google::protobuf::util::JsonPrintOptions jsonPrintOptions;
+
+    P4RuntimeAPI(const ::p4::config::v1::P4Info *p4Info, const ::p4::v1::WriteRequest *entries)
+        : p4Info(p4Info), entries(entries) {
+        jsonPrintOptions.add_whitespace = true;
+    }
+
+    P4RuntimeAPI(const ::p4::config::v1::P4Info *p4Info, const ::p4::v1::WriteRequest *entries,
+                 google::protobuf::util::JsonPrintOptions jsonPrintOptions)
+        : p4Info(p4Info), entries(entries), jsonPrintOptions(jsonPrintOptions) {}
 };
 
 namespace ControlPlaneAPI {
@@ -123,7 +141,7 @@ class P4RuntimeSerializer {
 
 /// Calls @ref P4RuntimeSerializer::generateP4Runtime on the @ref
 /// P4RuntimeSerializer singleton.
-P4RuntimeAPI generateP4Runtime(const IR::P4Program *program, cstring arch = "v1model");
+P4RuntimeAPI generateP4Runtime(const IR::P4Program *program, cstring arch = "v1model"_cs);
 
 /// Calls @ref P4RuntimeSerializer::serializeP4RuntimeIfRequired on the @ref
 /// P4RuntimeSerializer singleton.

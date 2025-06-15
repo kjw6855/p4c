@@ -110,7 +110,7 @@ UBPFDeparserTranslationVisitor::UBPFDeparserTranslationVisitor(const UBPFDeparse
 
 void UBPFDeparserTranslationVisitor::compileEmitField(const IR::Expression *expr, cstring field,
                                                       unsigned alignment, EBPF::EBPFType *type) {
-    auto et = dynamic_cast<EBPF::IHasWidth *>(type);
+    auto et = type->to<EBPF::IHasWidth>();
     if (et == nullptr) {
         ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                 "Only headers with fixed widths supported %1%", expr);
@@ -120,17 +120,17 @@ void UBPFDeparserTranslationVisitor::compileEmitField(const IR::Expression *expr
     unsigned widthToEmit = et->widthInBits();
 
     unsigned loadSize = 0;
-    cstring swap = "";
+    cstring swap = ""_cs;
     if (widthToEmit <= 8) {
         loadSize = 8;
     } else if (widthToEmit <= 16) {
-        swap = "bpf_htons";
+        swap = "bpf_htons"_cs;
         loadSize = 16;
     } else if (widthToEmit <= 32) {
-        swap = "htonl";
+        swap = "htonl"_cs;
         loadSize = 32;
     } else if (widthToEmit <= 64) {
-        swap = "htonll";
+        swap = "htonll"_cs;
         loadSize = 64;
     }
     unsigned bytes = ROUNDUP(widthToEmit, 8);
@@ -249,7 +249,7 @@ void UBPFDeparserTranslationVisitor::compileEmit(const IR::Vector<IR::Argument> 
     for (auto f : ht->fields) {
         auto ftype = typeMap->getType(f);
         auto etype = UBPFTypeFactory::instance->create(ftype);
-        auto et = dynamic_cast<EBPF::IHasWidth *>(etype);
+        auto et = etype->to<EBPF::IHasWidth>();
         if (et == nullptr) {
             ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                     "Only headers with fixed widths supported %1%", f);

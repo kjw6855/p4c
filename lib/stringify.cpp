@@ -18,7 +18,10 @@ limitations under the License.
 
 #include <deque>
 #include <sstream>
+#include <string>
 
+#include "big_int.h"
+#include "cstring.h"
 #include "exceptions.h"
 
 namespace Util {
@@ -26,7 +29,7 @@ cstring toString(bool value) {
     return value ? cstring::literal("true") : cstring::literal("false");
 }
 
-cstring toString(std::string value) { return value; }
+cstring toString(const std::string &value) { return value; }
 
 cstring toString(const char *value) {
     if (value == nullptr) return cstring::literal("<nullptr>");
@@ -80,9 +83,10 @@ char DigitToChar(int digit) {
     BUG("Unexpected digit: %1%", digit);
 }
 
-cstring toString(big_int value, unsigned width, bool sign, unsigned int base) {
+cstring toString(const big_int &v, unsigned width, bool sign, unsigned int base) {
     std::ostringstream oss;
     big_int zero = 0;
+    big_int value = v;
     if (value < zero) {
         oss << "-";
         value = -value;
@@ -122,33 +126,6 @@ cstring toString(cstring value) {
     return value;
 }
 
-cstring toString(StringRef value) { return value; }
-
-cstring printf_format(const char *fmt_str, ...) {
-    if (fmt_str == nullptr) throw std::runtime_error("Null format string");
-    va_list ap;
-    va_start(ap, fmt_str);
-    cstring formatted = vprintf_format(fmt_str, ap);
-    va_end(ap);
-    return formatted;
-}
-
-// printf into a string
-cstring vprintf_format(const char *fmt_str, va_list ap) {
-    static char buf[128];
-    va_list ap_copy;
-    va_copy(ap_copy, ap);
-    if (fmt_str == nullptr) throw std::runtime_error("Null format string");
-
-    int size = vsnprintf(buf, sizeof(buf), fmt_str, ap);
-    if (size < 0) throw std::runtime_error("Error in vsnprintf");
-    if (static_cast<size_t>(size) >= sizeof(buf)) {
-        char *formatted = new char[size + 1];
-        vsnprintf(formatted, size + 1, fmt_str, ap_copy);
-        return cstring::own(formatted, size);
-    }
-    va_end(ap_copy);
-    return cstring(buf);
-}
+cstring toString(std::string_view value) { return cstring(value); }
 
 }  // namespace Util

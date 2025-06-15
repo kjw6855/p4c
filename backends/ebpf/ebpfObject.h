@@ -27,7 +27,7 @@ limitations under the License.
 
 namespace EBPF {
 
-// Base class for EBPF objects
+/// Base class for EBPF objects.
 class EBPFObject : public ICastable {
  public:
     virtual ~EBPFObject() {}
@@ -54,6 +54,8 @@ class EBPFObject : public ICastable {
 
         return nullptr;
     }
+
+    DECLARE_TYPEINFO(EBPFObject);
 };
 
 }  // namespace EBPF

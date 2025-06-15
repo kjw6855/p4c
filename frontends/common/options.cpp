@@ -23,8 +23,9 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
         "--excludeFrontendPasses", "pass1[,pass2]",
         [this](const char *arg) {
             excludeFrontendPasses = true;
+            // FIXME: just split into string_view's
             auto copy = strdup(arg);
-            while (auto pass = strsep(&copy, ",")) passesToExcludeFrontend.push_back(pass);
+            while (auto pass = strsep(&copy, ",")) passesToExcludeFrontend.push_back(cstring(pass));
             return true;
         },
         "Exclude passes from frontend passes whose name is equal\n"
@@ -34,7 +35,7 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
         [this](const char *) {
             listFrontendPasses = true;
             P4::FrontEnd frontend;
-            frontend.run(*this, nullptr, false, outStream);
+            frontend.run(*this, nullptr, outStream);
             exit(0);
             return false;
         },
@@ -44,7 +45,7 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
         [this](const char *arg) {
             excludeMidendPasses = true;
             auto copy = strdup(arg);
-            while (auto pass = strsep(&copy, ",")) passesToExcludeMidend.push_back(pass);
+            while (auto pass = strsep(&copy, ",")) passesToExcludeMidend.push_back(cstring(pass));
             return true;
         },
         "Exclude passes from midend passes whose name is equal\n"
@@ -80,7 +81,7 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
     registerOption(
         "--p4runtime-file", "file",
         [this](const char *arg) {
-            p4RuntimeFile = arg;
+            p4RuntimeFile = cstring(arg);
             return true;
         },
         "Write a P4Runtime control plane API description to the specified "
@@ -89,7 +90,7 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
     registerOption(
         "--p4runtime-entries-file", "file",
         [this](const char *arg) {
-            p4RuntimeEntriesFile = arg;
+            p4RuntimeEntriesFile = cstring(arg);
             return true;
         },
         "Write static table entries as a P4Runtime WriteRequest message"
@@ -98,7 +99,7 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
     registerOption(
         "--p4runtime-files", "filelist",
         [this](const char *arg) {
-            p4RuntimeFiles = arg;
+            p4RuntimeFiles = cstring(arg);
             return true;
         },
         "Write the P4Runtime control plane API description to the specified\n"
@@ -107,7 +108,7 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
     registerOption(
         "--p4runtime-entries-files", "files",
         [this](const char *arg) {
-            p4RuntimeEntriesFiles = arg;
+            p4RuntimeEntriesFiles = cstring(arg);
             return true;
         },
         "Write static table entries as a P4Runtime WriteRequest message\n"
@@ -134,14 +135,14 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
     registerOption(
         "--target", "target",
         [this](const char *arg) {
-            target = arg;
+            target = cstring(arg);
             return true;
         },
         "Compile for the specified target device.");
     registerOption(
         "--arch", "arch",
         [this](const char *arg) {
-            arch = arg;
+            arch = cstring(arg);
             return true;
         },
         "Compile for the specified architecture.");
@@ -152,6 +153,25 @@ CompilerOptions::CompilerOptions() : ParserOptions() {
             return true;
         },
         "Unrolling all parser's loops");
+    registerOption(
+        "-O", nullptr,
+        [this](const char *level) {
+            if (!level) {
+                ++optimizationLevel;
+                return true;
+            }
+            if (isdigit(*level)) optimizationLevel = *level++ - '0';
+            if (*level == 'g') {
+                optimizeDebug = true;
+                ++level;
+            }
+            if (*level == 'z') {
+                optimizeSize = true;
+                ++level;
+            }
+            return *level == 0;
+        },
+        "Optimization level");
 }
 
 bool CompilerOptions::enable_intrinsic_metadata_fix() { return true; }

@@ -4,9 +4,9 @@
 #include <utility>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/id.h"
 #include "ir/ir.h"
+#include "ir/solver.h"
 #include "ir/vector.h"
 #include "lib/cstring.h"
 
@@ -67,6 +67,11 @@ class ExprStepper : public AbstractStepper {
     /// values for hit, miss and action_run after that.
     void handleHitMissActionRun(const IR::Member *member);
 
+    /// Resolve all arguments to the method call by stepping into each argument that is not yet
+    /// symbolic or a pure reference (represented as Out direction).
+    /// @returns false when an argument needs to be resolved, true otherwise.
+    bool resolveMethodCallArguments(const IR::MethodCallExpression *call);
+
     /// Evaluates a call to an extern method. Upon return, the given result will be augmented with
     /// the successor states resulting from evaluating the call.
     ///
@@ -98,7 +103,8 @@ class ExprStepper : public AbstractStepper {
                                               const IR::Vector<IR::Argument> *args,
                                               const ExecutionState &state);
 
-    /// Evaluates a call to an action. This usually only happens when a table is invoked.
+    /// Evaluates a call to an action. This usually only happens when a table is invoked or when
+    /// action is directly invoked from a control.
     /// In other cases, actions should be inlined. When the action call is evaluated, we use
     /// symbolic variables to pass arguments across execution boundaries. These variables persist
     /// until the end of program execution.
@@ -115,9 +121,10 @@ class ExprStepper : public AbstractStepper {
     void generateCopyIn(ExecutionState &nextState, const IR::StateVariable &targetPath,
                         const IR::StateVariable &srcPath, cstring dir, bool forceTaint) const;
 
-    /// Takes a step to reflect a "select" expression failing to match. The default implementation
+    /// Takes a step to reflect a "select" expression failing to match. If condition is given, this
+    /// will create a new state that is guarded by the given condition. The default implementation
     /// raises Continuation::Exception::NoMatch.
-    virtual void stepNoMatch();
+    virtual void stepNoMatch(std::string traceLog, const IR::Expression *condition = nullptr);
 
  public:
     ExprStepper(const ExprStepper &) = default;
@@ -145,7 +152,7 @@ class ExprStepper : public AbstractStepper {
     bool preorder(const IR::Operation_Binary *binary) override;
     bool preorder(const IR::Operation_Unary *unary) override;
     bool preorder(const IR::SelectExpression *selectExpression) override;
-    bool preorder(const IR::ListExpression *listExpression) override;
+    bool preorder(const IR::BaseListExpression *listExpression) override;
     bool preorder(const IR::StructExpression *structExpression) override;
     bool preorder(const IR::Slice *slice) override;
     bool preorder(const IR::P4Table *table) override;

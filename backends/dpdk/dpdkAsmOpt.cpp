@@ -19,7 +19,7 @@ limitations under the License.
 #include "dpdkUtils.h"
 
 namespace DPDK {
-// The assumption is compiler can only produce forward jumps.
+/// The assumption is compiler can only produce forward jumps.
 const IR::IndexedVector<IR::DpdkAsmStatement> *RemoveRedundantLabel::removeRedundantLabel(
     const IR::IndexedVector<IR::DpdkAsmStatement> &s) {
     IR::IndexedVector<IR::DpdkAsmStatement> used_labels;
@@ -299,15 +299,6 @@ IR::IndexedVector<IR::DpdkAsmStatement> CopyPropagationAndElimination::copyPropA
         } else if (auto c = stmt->to<IR::DpdkCounterCountStatement>()) {
             instr.push_back(new IR::DpdkCounterCountStatement(c->counter, replaceIfCopy(c->index),
                                                               replaceIfCopy(c->incr)));
-        } else if (auto neg = stmt->to<IR::DpdkNegStatement>()) {
-            instr.push_back(
-                new IR::DpdkNegStatement(replaceIfCopy(neg->dst, false), replaceIfCopy(neg->src)));
-        } else if (auto cmpl = stmt->to<IR::DpdkCmplStatement>()) {
-            instr.push_back(new IR::DpdkCmplStatement(replaceIfCopy(cmpl->dst, false),
-                                                      replaceIfCopy(cmpl->src)));
-        } else if (auto lnot = stmt->to<IR::DpdkLNotStatement>()) {
-            instr.push_back(new IR::DpdkLNotStatement(replaceIfCopy(lnot->dst, false),
-                                                      replaceIfCopy(lnot->src)));
         } else if (auto add = stmt->to<IR::DpdkAddStatement>()) {
             instr.push_back(new IR::DpdkAddStatement(replaceIfCopy(add->dst, false),
                                                      replaceIfCopy(add->src1, false),
@@ -332,46 +323,10 @@ IR::IndexedVector<IR::DpdkAsmStatement> CopyPropagationAndElimination::copyPropA
             instr.push_back(new IR::DpdkOrStatement(replaceIfCopy(or1->dst, false),
                                                     replaceIfCopy(or1->src1, false),
                                                     replaceIfCopy(or1->src2)));
-        } else if (auto eq = stmt->to<IR::DpdkEquStatement>()) {
-            instr.push_back(new IR::DpdkEquStatement(replaceIfCopy(eq->dst, false),
-                                                     replaceIfCopy(eq->src1, false),
-                                                     replaceIfCopy(eq->src2)));
         } else if (auto xor1 = stmt->to<IR::DpdkXorStatement>()) {
             instr.push_back(new IR::DpdkXorStatement(replaceIfCopy(xor1->dst, false),
                                                      replaceIfCopy(xor1->src1, false),
                                                      replaceIfCopy(xor1->src2)));
-        } else if (auto cmp = stmt->to<IR::DpdkCmpStatement>()) {
-            instr.push_back(new IR::DpdkCmpStatement(replaceIfCopy(cmp->dst, false),
-                                                     replaceIfCopy(cmp->src1, false),
-                                                     replaceIfCopy(cmp->src2)));
-        } else if (auto and1 = stmt->to<IR::DpdkLAndStatement>()) {
-            instr.push_back(new IR::DpdkLAndStatement(replaceIfCopy(and1->dst, false),
-                                                      replaceIfCopy(and1->src1, false),
-                                                      replaceIfCopy(and1->src2)));
-        } else if (auto lor = stmt->to<IR::DpdkLOrStatement>()) {
-            instr.push_back(new IR::DpdkLOrStatement(replaceIfCopy(lor->dst, false),
-                                                     replaceIfCopy(lor->src1, false),
-                                                     replaceIfCopy(lor->src2)));
-        } else if (auto leq = stmt->to<IR::DpdkLeqStatement>()) {
-            instr.push_back(new IR::DpdkLeqStatement(replaceIfCopy(leq->dst, false),
-                                                     replaceIfCopy(leq->src1, false),
-                                                     replaceIfCopy(leq->src2)));
-        } else if (auto lss = stmt->to<IR::DpdkLssStatement>()) {
-            instr.push_back(new IR::DpdkLssStatement(replaceIfCopy(lss->dst, false),
-                                                     replaceIfCopy(lss->src1, false),
-                                                     replaceIfCopy(lss->src2)));
-        } else if (auto grt = stmt->to<IR::DpdkGrtStatement>()) {
-            instr.push_back(new IR::DpdkGrtStatement(replaceIfCopy(grt->dst, false),
-                                                     replaceIfCopy(grt->src1, false),
-                                                     replaceIfCopy(grt->src2)));
-        } else if (auto geq = stmt->to<IR::DpdkGeqStatement>()) {
-            instr.push_back(new IR::DpdkGeqStatement(replaceIfCopy(geq->dst, false),
-                                                     replaceIfCopy(geq->src1, false),
-                                                     replaceIfCopy(geq->src2)));
-        } else if (auto neq = stmt->to<IR::DpdkNeqStatement>()) {
-            instr.push_back(new IR::DpdkNeqStatement(replaceIfCopy(neq->dst, false),
-                                                     replaceIfCopy(neq->src1, false),
-                                                     replaceIfCopy(neq->src2)));
         } else if (auto recd = stmt->to<IR::DpdkRecircidStatement>()) {
             instr.push_back(new IR::DpdkRecircidStatement(replaceIfCopy(recd->pass, false)));
         } else if (auto mdecl = stmt->to<IR::DpdkMeterDeclStatement>()) {
@@ -415,9 +370,11 @@ int EmitDpdkTableConfig::getTypeWidth(const IR::Type *type, P4::TypeMap *typeMap
     return typeMap->widthBits(type, type->getNode(), false);
 }
 
-void EmitDpdkTableConfig::print(cstring str, cstring sep) { dpdkTableConfigFile << str << sep; }
+void EmitDpdkTableConfig::print(std::string_view str, std::string_view sep) {
+    dpdkTableConfigFile << str << sep;
+}
 
-void EmitDpdkTableConfig::print(big_int str, cstring sep) {
+void EmitDpdkTableConfig::print(big_int str, std::string_view sep) {
     try {
         dpdkTableConfigFile << "0x" << std::hex << str << sep;
     } catch (const std::runtime_error &re) {
@@ -468,7 +425,7 @@ void EmitDpdkTableConfig::addAction(const IR::Expression *actionRef, P4::Referen
         actionName = newNameMap[actionDecl->name.name];
     else
         actionName = actionDecl->name.name;
-    print(actionName, " ");
+    print(actionName.string_view(), " ");
     if (actionDecl->parameters->parameters.size() == 1) {
         std::vector<cstring> paramNames;
         std::vector<big_int> argVals;
@@ -500,7 +457,7 @@ void EmitDpdkTableConfig::addAction(const IR::Expression *actionRef, P4::Referen
         }
 
         for (size_t i = 0; i < argVals.size(); i++) {
-            print(paramNames[i], " ");
+            print(paramNames[i].string_view(), " ");
             print(argVals[i], " ");
         }
     }
@@ -664,7 +621,7 @@ bool EmitDpdkTableConfig::isAllKeysDefaultExpression(const IR::ListExpression *k
 void EmitDpdkTableConfig::postorder(const IR::DpdkTable *table) {
     auto entriesList = table->getEntries();
     if (entriesList == nullptr) return;
-    dpdkTableConfigFile.open(table->name + ".txt");
+    dpdkTableConfigFile.open(table->name + ".txtpb");
     auto needsPriority = tableNeedsPriority(table, refMap);
     int entryPriority = entriesList->entries.size();
     for (auto e : entriesList->entries) {

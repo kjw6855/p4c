@@ -29,6 +29,7 @@ limitations under the License.
 #include <unordered_map>
 #include <utility>
 
+#include "absl/time/time.h"
 #include "ir/gen-tree-macro.h"
 #include "ir/ir-tree-macros.h"
 #include "ir/node.h"
@@ -48,14 +49,14 @@ struct Visitor_Context {
     // context via getContext/findContext
     const Visitor_Context *parent;
     const IR::Node *node, *original;
-    mutable int child_index;
     mutable const char *child_name;
+    mutable int child_index;
     int depth;
     template <class T>
     inline const T *findContext(const Visitor_Context *&c) const {
         c = this;
         while ((c = c->parent))
-            if (auto *rv = dynamic_cast<const T *>(c->node)) return rv;
+            if (auto *rv = c->node->to<T>()) return rv;
         return nullptr;
     }
     template <class T>
@@ -65,8 +66,8 @@ struct Visitor_Context {
     }
 };
 
+class ControlFlowVisitor;
 class SplitFlowVisit_base;
-
 class Inspector;
 
 class Visitor {
@@ -76,15 +77,16 @@ class Visitor {
         // for profiling -- a profile_t object is created when a pass
         // starts and destroyed when it ends.  Moveable but not copyable.
         Visitor &v;
-        uint64_t start;
+        absl::Time start;
         explicit profile_t(Visitor &);
+        friend class Visitor;
+
+     public:
         profile_t() = delete;
         profile_t(const profile_t &) = delete;
         profile_t &operator=(const profile_t &) = delete;
         profile_t &operator=(profile_t &&) = delete;
-        friend class Visitor;
 
-     public:
         ~profile_t();
         profile_t(profile_t &&);
     };
@@ -196,6 +198,7 @@ class Visitor {
     virtual bool check_clone(const Visitor *a) { return typeid(*this) == typeid(*a); }
 
     // Functions for IR visit_children to call for ControlFlowVisitors.
+    virtual ControlFlowVisitor *controlFlowVisitor() { return nullptr; }
     virtual Visitor &flow_clone() { return *this; }
     // all flow_clones share a split_link chain to allow stack walking
     SplitFlowVisit_base *split_link_mem = nullptr, *&split_link;
@@ -205,6 +208,7 @@ class Visitor {
      * control flow graph.  Should update @this and leave the other unchanged.
      */
     virtual void flow_merge(Visitor &) {}
+    virtual bool flow_merge_closure(Visitor &) { BUG("%s pass does not support loops", name()); }
     /** Support methods for non-local ControlFlow computations */
     virtual void flow_merge_global_to(cstring) {}
     virtual void flow_merge_global_from(cstring) {}
@@ -218,7 +222,7 @@ class Visitor {
         if (!internalName) internalName = demangle(typeid(*this).name());
         return internalName.c_str();
     }
-    void setName(const char *name) { internalName = name; }
+    void setName(const char *name) { internalName = cstring(name); }
     void print_context() const;  // for debugging; can be called from debugger
 
     // Context access/search functions.  getContext returns the context
@@ -245,8 +249,9 @@ class Visitor {
     template <class T>
     inline const T *findContext(const Context *&c) const {
         if (!c) c = ctxt;
+        if (!c) return nullptr;
         while ((c = c->parent))
-            if (auto *rv = dynamic_cast<const T *>(c->node)) return rv;
+            if (auto *rv = c->node->to<T>()) return rv;
         return nullptr;
     }
     template <class T>
@@ -257,8 +262,9 @@ class Visitor {
     template <class T>
     inline const T *findOrigCtxt(const Context *&c) const {
         if (!c) c = ctxt;
+        if (!c) return nullptr;
         while ((c = c->parent))
-            if (auto *rv = dynamic_cast<const T *>(c->original)) return rv;
+            if (auto *rv = c->original->to<T>()) return rv;
         return nullptr;
     }
     template <class T>
@@ -289,20 +295,14 @@ class Visitor {
     /// Static version of the above function, which can be called
     /// even if not directly in a visitor
     static bool warning_enabled(const Visitor *visitor, int warning_kind);
-    template <
-        class T,
-        typename = typename std::enable_if<std::is_base_of<Util::IHasSourceInfo, T>::value>::type,
-        class... Args>
-    void warn(const int kind, const char *format, const T *node, Args... args) {
+    template <class T, typename = std::enable_if_t<Util::has_SourceInfo_v<T>>, class... Args>
+    void warn(const int kind, const char *format, const T *node, Args &&...args) {
         if (warning_enabled(kind)) ::warning(kind, format, node, std::forward<Args>(args)...);
     }
 
     /// The const ref variant of the above
-    template <
-        class T,
-        typename = typename std::enable_if<std::is_base_of<Util::IHasSourceInfo, T>::value>::type,
-        class... Args>
-    void warn(const int kind, const char *format, const T &node, Args... args) {
+    template <class T, typename = std::enable_if_t<Util::has_SourceInfo_v<T>>, class... Args>
+    void warn(const int kind, const char *format, const T &node, Args &&...args) {
         if (warning_enabled(kind)) ::warning(kind, format, node, std::forward<Args>(args)...);
     }
 
@@ -348,16 +348,17 @@ class Visitor {
     virtual void post_join_flows(const IR::Node *, const IR::Node *) {}
 
     void visit_children(const IR::Node *, std::function<void()> fn) { fn(); }
+    class Tracker;        // used by Inspector -- private to it
     class ChangeTracker;  // used by Modifier and Transform -- private to them
     // This overrides visitDagOnce for a single node -- can only be called from
     // preorder and postorder functions
-    void visitOnce() const { *visitCurrentOnce = true; }
-    void visitAgain() const { *visitCurrentOnce = false; }
+    // FIXME: It would be better named visitCurrentOnce() / visitCurrenAgain()
+    virtual void visitOnce() const { BUG("do not know how to handle request"); }
+    virtual void visitAgain() const { BUG("do not know how to handle request"); }
 
  private:
     virtual void visitor_const_error();
     const Context *ctxt = nullptr;  // should be readonly to subclasses
-    bool *visitCurrentOnce = nullptr;
     friend class Inspector;
     friend class Modifier;
     friend class Transform;
@@ -385,14 +386,15 @@ class Modifier : public virtual Visitor {
 #undef DECLARE_VISIT_FUNCTIONS
     void revisit_visited();
     bool visit_in_progress(const IR::Node *) const;
+    void visitOnce() const override;
+    void visitAgain() const override;
+
+ protected:
+    bool forceClone = false;  // force clone whole tree even if unchanged
 };
 
 class Inspector : public virtual Visitor {
-    struct info_t {
-        bool done, visitOnce;
-    };
-    typedef std::unordered_map<const IR::Node *, info_t> visited_t;
-    std::shared_ptr<visited_t> visited;
+    std::shared_ptr<Tracker> visited;
     bool check_clone(const Visitor *) override;
 
  public:
@@ -410,10 +412,9 @@ class Inspector : public virtual Visitor {
     IRNODE_ALL_SUBCLASSES(DECLARE_VISIT_FUNCTIONS)
 #undef DECLARE_VISIT_FUNCTIONS
     void revisit_visited();
-    bool visit_in_progress(const IR::Node *n) const {
-        if (visited->count(n)) return !visited->at(n).done;
-        return false;
-    }
+    bool visit_in_progress(const IR::Node *n) const;
+    void visitOnce() const override;
+    void visitAgain() const override;
 };
 
 class Transform : public virtual Visitor {
@@ -438,6 +439,8 @@ class Transform : public virtual Visitor {
 #undef DECLARE_VISIT_FUNCTIONS
     void revisit_visited();
     bool visit_in_progress(const IR::Node *) const;
+    void visitOnce() const override;
+    void visitAgain() const override;
     // can only be called usefully from a 'preorder' function (directly or indirectly)
     void prune() { prune_flag = true; }
 
@@ -447,6 +450,7 @@ class Transform : public virtual Visitor {
         prune_flag = true;
         return rv;
     }
+    bool forceClone = false;  // force clone whole tree even if unchanged
 };
 
 // turn this on for extra info tracking control joinFlows for debugging
@@ -475,6 +479,11 @@ class ControlFlowVisitor : public virtual Visitor {
     friend void dump(const flow_join_info_t *);
     friend void dump(const flow_join_points_t &);
     friend void dump(const flow_join_points_t *);
+
+    // Flag set by visit_children of nodes that are unconditional branches, to denote that
+    // the control flow is currently unreachable.  Future flow_merges to this visitor should
+    // clear this if merging a reachable state.
+    bool unreachable = false;
 
     flow_join_points_t *flow_join_points = 0;
     class SetupJoinPoints : public Inspector {
@@ -515,12 +524,19 @@ class ControlFlowVisitor : public virtual Visitor {
      * edge are never join points.
      */
     virtual bool filter_join_point(const IR::Node *) { return false; }
-    ControlFlowVisitor &flow_clone() override;
-    void flow_merge(Visitor &) override = 0;
-    virtual void flow_copy(ControlFlowVisitor &) = 0;
     ControlFlowVisitor() : globals(*new std::map<cstring, ControlFlowVisitor &>) {}
 
  public:
+    ControlFlowVisitor *controlFlowVisitor() override { return this; }
+    ControlFlowVisitor &flow_clone() override;
+    void flow_merge(Visitor &) override = 0;
+    virtual void flow_copy(ControlFlowVisitor &) = 0;
+    virtual bool operator==(const ControlFlowVisitor &) const {
+        BUG("%s pass does not support loops", name());
+    }
+    bool operator!=(const ControlFlowVisitor &v) const { return !(*this == v); }
+    void setUnreachable() { unreachable = true; }
+    bool isUnreachable() { return unreachable; }
     void flow_merge_global_to(cstring key) override {
         if (globals.count(key))
             globals.at(key).flow_merge(*this);
@@ -533,6 +549,18 @@ class ControlFlowVisitor : public virtual Visitor {
     void erase_global(cstring key) override { globals.erase(key); }
     bool check_global(cstring key) override { return globals.count(key) != 0; }
     void clear_globals() override { globals.clear(); }
+    std::pair<cstring, ControlFlowVisitor *> save_global(cstring key) {
+        ControlFlowVisitor *cfv = nullptr;
+        if (auto i = globals.find(key); i != globals.end()) {
+            cfv = &i->second;
+            globals.erase(i);
+        }
+        return std::make_pair(key, cfv);
+    }
+    void restore_global(std::pair<cstring, ControlFlowVisitor *> saved) {
+        globals.erase(saved.first);
+        if (saved.second) globals.emplace(saved.first, *saved.second);
+    }
 
     /// RAII class to ensure global key is only used in one place
     class GuardGlobal {
@@ -544,6 +572,23 @@ class ControlFlowVisitor : public virtual Visitor {
             BUG_CHECK(!self.check_global(key), "ControlFlowVisitor global %s in use", key);
         }
         ~GuardGlobal() { self.erase_global(key); }
+    };
+    /// RAII class to save and restore one or more global keys
+    class SaveGlobal {
+        ControlFlowVisitor &self;
+        std::vector<std::pair<cstring, ControlFlowVisitor *>> saved;
+
+     public:
+        SaveGlobal(ControlFlowVisitor &self, cstring key) : self(self) {
+            saved.push_back(self.save_global(key));
+        }
+        SaveGlobal(ControlFlowVisitor &self, cstring k1, cstring k2) : self(self) {
+            saved.push_back(self.save_global(k1));
+            saved.push_back(self.save_global(k2));
+        }
+        ~SaveGlobal() {
+            for (auto it = saved.rbegin(); it != saved.rend(); ++it) self.restore_global(*it);
+        }
     };
 
     bool has_flow_joins() const override { return !!flow_join_points; }
@@ -681,25 +726,25 @@ class SplitFlowVisitVector : public SplitFlowVisit_base {
                     i = vec->erase(i);
                 } else if (result[idx] == *i) {
                     ++i;
-                } else if (auto l = dynamic_cast<const IR::Vector<N> *>(result[idx])) {
+                } else if (auto l = result[idx]->template to<IR::Vector<N>>()) {
                     i = vec->erase(i);
                     i = vec->insert(i, l->begin(), l->end());
                     i += l->size();
-                } else if (auto v = dynamic_cast<const IR::VectorBase *>(result[idx])) {
+                } else if (auto v = result[idx]->template to<IR::VectorBase>()) {
                     if (v->empty()) {
                         i = vec->erase(i);
                     } else {
                         i = vec->insert(i, v->size() - 1, nullptr);
                         for (auto el : *v) {
                             CHECK_NULL(el);
-                            if (auto e = dynamic_cast<const N *>(el))
+                            if (auto e = el->template to<N>())
                                 *i++ = e;
                             else
                                 BUG("visitor returned invalid type %s for Vector<%s>",
                                     el->node_type_name(), N::static_type_name());
                         }
                     }
-                } else if (auto e = dynamic_cast<const N *>(result[idx])) {
+                } else if (auto e = result[idx]->template to<N>()) {
                     *i++ = e;
                 } else {
                     CHECK_NULL(result[idx]);
@@ -726,6 +771,8 @@ class Backtrack : public virtual Visitor {
         // must call this from the constructor if a trigger subclass contains pointers
         // or references to GC objects
         void register_for_gc(size_t);
+
+        DECLARE_TYPEINFO(trigger);
     };
     virtual bool backtrack(trigger &trig) = 0;
     virtual bool never_backtracks() { return false; }  // generally not overridden

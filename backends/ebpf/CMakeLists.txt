@@ -13,9 +13,35 @@
 # limitations under the License.
 
 # CMakefile for the EBPF P4-16 back-end.
-# To be included in the main P4C compiler CMakefile
+message(STATUS "Start configuring the eBPF back end")
 
-message(STATUS "Start configuring eBPF back end")
+if(NOT APPLE)
+  # Fetch and declare the libbpf library. Print out download state while setting up libbpf.
+  set(FETCHCONTENT_QUIET_PREV ${FETCHCONTENT_QUIET})
+  set(FETCHCONTENT_QUIET OFF)
+  fetchcontent_declare(
+    bpfrepo
+    URL https://github.com/libbpf/libbpf/archive/refs/tags/v1.4.1.tar.gz
+    URL_HASH SHA256=cc01a3a05d25e5978c20be7656f14eb8b6fcb120bb1c7e8041e497814fc273cb
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/runtime/contrib/libbpf
+    USES_TERMINAL_DOWNLOAD TRUE
+    GIT_PROGRESS TRUE
+  )
+  fetchcontent_makeavailable(bpfrepo)
+  set(FETCHCONTENT_QUIET ${FETCHCONTENT_QUIET_PREV})
+  # Check if we have already built the libbpf library.
+  find_library(LIBBPF NAMES bpf HINTS "${CMAKE_CURRENT_SOURCE_DIR}/runtime/usr/lib64/")
+  if (NOT LIBBPF)
+    message("Building libbpf...")
+    execute_process(
+      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_libbpf
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+  endif()
+  message("Done with setting up libbpf for P4C.")
+endif()
+
+
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/version.h" @ONLY)
@@ -90,7 +116,10 @@ set (P4C_EBPF_HDRS
   psa/externs/ebpfPsaMeter.h
 )
 
-set (P4C_EBPF_DIST_HEADERS p4include/ebpf_model.p4)
+set (P4C_EBPF_DIST_HEADERS
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../p4include/ebpf_model.p4
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../p4include/xdp_model.p4
+)
 
 add_executable(p4c-ebpf ${P4C_EBPF_SRCS})
 target_link_libraries (p4c-ebpf ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
@@ -119,7 +148,7 @@ file(RELATIVE_PATH
 add_custom_target(linkp4cebpf
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CURRENT_BINARY_DIR_PATH_REL}/p4c-ebpf ${P4C_BINARY_DIR}/p4c-ebpf
   COMMAND ${CMAKE_COMMAND} -E make_directory ${P4C_BINARY_DIR}/p4include &&
-          ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/${P4C_EBPF_DIST_HEADERS} ${P4C_BINARY_DIR}/p4include
+          ${CMAKE_COMMAND} -E copy ${P4C_EBPF_DIST_HEADERS} ${P4C_BINARY_DIR}/p4include
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${P4C_BINARY_DIR_PATH_REL}/p4include ${CMAKE_CURRENT_BINARY_DIR}/p4include
   DEPENDS update_includes
   )
@@ -148,6 +177,13 @@ set (XFAIL_TESTS_TEST
 
 set (EBPF_TEST_SUITES
   "${P4C_SOURCE_DIR}/testdata/p4_16_samples/*_ebpf.p4"
+  )
+# Kernel tests for XDP won't work on other targets (e.g. missing bpf_xdp_* helpers).
+set (EBPF_KERNEL_TEST_SUITES
+  "${P4C_SOURCE_DIR}/testdata/p4_16_samples/*_ebpf-kernel.p4"
+  )
+set (EBPF_ERRORS_SUITES
+  "${P4C_SOURCE_DIR}/testdata/p4_16_ebpf_errors/*.p4"
   )
 
 # determine the kernel version
@@ -193,7 +229,7 @@ endif()
 # check for the libbpf library
 find_library(LIBBPF NAMES bpf HINTS "${CMAKE_CURRENT_SOURCE_DIR}/runtime/usr/lib64/")
 if (LIBBPF)
-  message(STATUS "Found libbpf library")
+  message(STATUS "Found libbpf library at ${LIBBPF}")
 else()
   message(WARNING "Missing the libbpf dependency, disabling kernel tests."
   " You can install libbpf by running './build_libbpf' in the "
@@ -204,6 +240,7 @@ endif()
 # Only add the kernel tests if the two requirements are met
 if (SUPPORTS_KERNEL)
   p4c_add_tests("ebpf-kernel" ${EBPF_DRIVER_KERNEL} ${EBPF_TEST_SUITES} "${XFAIL_TESTS_KERNEL}")
+  p4c_add_tests("ebpf-kernel" ${EBPF_DRIVER_KERNEL} ${EBPF_KERNEL_TEST_SUITES} "${XFAIL_TESTS_KERNEL}")
   # These are special tests with args that are not included
   # in the default ebpf tests
   p4c_add_test_with_args("ebpf-kernel" ${EBPF_DRIVER_KERNEL} FALSE "testdata/p4_16_samples/ebpf_conntrack_extern.p4" "testdata/p4_16_samples/ebpf_conntrack_extern.p4" "--extern-file ${P4C_SOURCE_DIR}/testdata/extern_modules/extern-conntrack-ebpf.c" "")
@@ -213,6 +250,7 @@ endif()
 # Ideally, this is done via check for the python package
 p4c_add_tests("ebpf-bcc" ${EBPF_DRIVER_BCC} ${EBPF_TEST_SUITES} "${XFAIL_TESTS_BCC}")
 p4c_add_tests("ebpf" ${EBPF_DRIVER_TEST} ${EBPF_TEST_SUITES} "${XFAIL_TESTS_TEST}")
+p4c_add_tests("ebpf-errors" ${EBPF_DRIVER_TEST} ${EBPF_ERRORS_SUITES} "${XFAIL_TESTS_TEST}")
 
 # These are special tests with args that are not included in the default ebpf tests
 p4c_add_test_with_args("ebpf" ${EBPF_DRIVER_TEST} FALSE "testdata/p4_16_samples/ebpf_checksum_extern.p4" "testdata/p4_16_samples/ebpf_checksum_extern.p4" "--extern-file ${P4C_SOURCE_DIR}/testdata/extern_modules/extern-checksum-ebpf.c" "")

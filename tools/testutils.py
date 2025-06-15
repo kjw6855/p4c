@@ -25,7 +25,9 @@ import socket
 import subprocess
 import threading
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import Any, List, NamedTuple, Optional, Union
+
+import scapy.packet
 
 # Set up logging.
 log = logging.getLogger(__name__)
@@ -46,10 +48,12 @@ class LogPipe(threading.Thread):
         and start the thread
         """
         threading.Thread.__init__(self)
-        self.daemon = False
-        self.level = level
+        self.daemon: bool = False
+        self.level: int = level
         self.fd_read, self.fd_write = os.pipe()
         self.pipe_reader = os.fdopen(self.fd_read)
+        # We capture what we log to this string.
+        self.out: str = ""
         self.start()
 
     def fileno(self) -> int:
@@ -57,10 +61,10 @@ class LogPipe(threading.Thread):
         return self.fd_write
 
     def run(self) -> None:
-        """Run the thread, logging everything."""
+        """Run the thread, logging and record everything."""
         for line in iter(self.pipe_reader.readline, ""):
             log.log(self.level, line.strip("\n"))
-
+            self.out += line
         self.pipe_reader.close()
 
     def close(self) -> None:
@@ -89,11 +93,26 @@ def hex_to_byte(hex_str: str) -> str:
     return "".join(byte_vals)
 
 
-def compare_pkt(expected: str, received: str) -> int:
+def compare_pkt(expected: str, received: scapy.packet.Packet) -> int:
     """Compare two given byte sequences and check if they are the same.
     Report errors if this is not the case."""
-    received = bytes(received).hex().upper()
+
+    # If the expected packet string ends with a '$' it means that the packets are only equal,
+    # if they are the exact same length.
+    strict_length_check = False
+    if expected[-1] == '$':
+        strict_length_check = True
+        expected = expected[:-1]
+
+    received = received.build().hex().upper()
     expected = "".join(expected.split()).upper()
+    if strict_length_check and len(received) > len(expected):
+        log.error(
+            "Received packet too long %s vs %s (in units of hex digits)",
+            len(received),
+            len(expected),
+        )
+        return FAILURE
     if len(received) < len(expected):
         log.error("Received packet too short %s vs %s", len(received), len(expected))
         return FAILURE
@@ -108,7 +127,7 @@ def compare_pkt(expected: str, received: str) -> int:
                 val,
                 received[idx],
             )
-            log.error("Expected packet %s", expected)
+            log.error("Expected packet\n %s", expected)
             return FAILURE
     return SUCCESS
 
@@ -128,12 +147,12 @@ def pick_tcp_port(addr: str, default_port: int) -> int:
     return default_port
 
 
-def open_process(args: str, **extra_args) -> Optional[subprocess.Popen]:
+def open_process(args: Union[List[str], str], **extra_args: Any) -> Optional[subprocess.Popen]:
     """Start the given argument string as a subprocess and return the handle to the process.
     @param extra_args is forwarded to the subprocess.communicate command"""
-    log.info("Writing %s", " ".join(args))
+    log.info("Writing %s", args)
     proc = None
-    output_args = {
+    output_args: Any = {
         "stdout": subprocess.PIPE,
         "stdin": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -144,6 +163,9 @@ def open_process(args: str, **extra_args) -> Optional[subprocess.Popen]:
 
     # Only split the arguments if the shell option is not present.
     if not ("shell" in extra_args and extra_args["shell"]):
+        if not isinstance(args, str):
+            log.error("Input must be a string. Received %s.", args)
+            return None
         args = args.split()
         # Sanitize all empty strings.
         args = list(filter(None, args))
@@ -158,7 +180,7 @@ def open_process(args: str, **extra_args) -> Optional[subprocess.Popen]:
     return proc
 
 
-def run_process(proc: subprocess.Popen, **extra_args) -> subprocess.Popen:
+def run_process(proc: subprocess.Popen, **extra_args: Any) -> subprocess.Popen:
     """Wait for the given process to finish. Report failures to stderr. @param extra_args is
     forwarded to the subprocess.communicate command."""
     try:
@@ -179,7 +201,7 @@ def run_process(proc: subprocess.Popen, **extra_args) -> subprocess.Popen:
     return proc
 
 
-def exec_process(args: str, **extra_args) -> ProcessResult:
+def exec_process(args: Union[List[str], str], **extra_args: Any) -> ProcessResult:
     """Run the given argument string as a subprocess. Time out after TIMEOUT
     seconds and report failures to stderr. @param extra_args is forwarded to the subprocess.run
     command."""
@@ -188,16 +210,21 @@ def exec_process(args: str, **extra_args) -> ProcessResult:
         return ProcessResult(f"Input must be a string. Received {args}.", FAILURE)
 
     log.info("Executing command: %s", args)
-    output_args = {"timeout": TIMEOUT, "universal_newlines": True}
+    output_args: Any = {"timeout": TIMEOUT, "universal_newlines": True}
     output_args = {**output_args, **extra_args}
 
     # Only split the arguments if the shell option is not present.
     if not ("shell" in extra_args and extra_args["shell"]):
+        if not isinstance(args, str):
+            log.error("Input must be a string. Received %s.", args)
+            return None
         args = args.split()
         # Sanitize all empty strings.
         args = list(filter(None, args))
 
     # Set up log pipes for both stdout and stderr.
+    outpipe: Optional[LogPipe] = None
+    errpipe: Optional[LogPipe] = None
     if "capture_output" not in extra_args:
         if "stdout" not in extra_args:
             outpipe = LogPipe(logging.INFO)
@@ -207,10 +234,14 @@ def exec_process(args: str, **extra_args) -> ProcessResult:
             output_args["stderr"] = errpipe
     try:
         result = subprocess.run(args, check=True, **output_args)
-        out = result.stdout
+        if outpipe:
+            out = outpipe.out
+        else:
+            out = result.stdout
         returncode = result.returncode
     except subprocess.CalledProcessError as exception:
-        out = exception.stderr
+        if errpipe:
+            out = errpipe.out
         returncode = exception.returncode
         cmd = exception.cmd
         # Rejoin the list for better readability.
@@ -218,7 +249,10 @@ def exec_process(args: str, **extra_args) -> ProcessResult:
             cmd = " ".join(cmd)
         log.error('Error %s when executing "%s".', returncode, cmd)
     except subprocess.TimeoutExpired as exception:
-        out = exception.stderr
+        if errpipe:
+            out = errpipe.out
+        else:
+            out = str(exception.stderr)
         returncode = FAILURE
         cmd = exception.cmd
         # Rejoin the list for better readability.
@@ -227,9 +261,9 @@ def exec_process(args: str, **extra_args) -> ProcessResult:
         log.error("Timed out when executing %s.", cmd)
     finally:
         if "capture_output" not in extra_args:
-            if "stdout" not in extra_args:
+            if outpipe:
                 outpipe.close()
-            if "stderr" not in extra_args:
+            if errpipe:
                 errpipe.close()
     return ProcessResult(out, returncode)
 
@@ -284,7 +318,7 @@ def check_and_create_dir(directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
-def del_dir(directory: str) -> None:
+def del_dir(directory: Path) -> None:
     """Delete a directory and all its children.
     TODO: Convert to Path input."""
     try:
@@ -297,7 +331,7 @@ def del_dir(directory: str) -> None:
         )
 
 
-def copy_file(src, dst):
+def copy_file(src: Union[List, Union[Path, str]], dst: Union[Path, str]) -> None:
     """Copy a file or a list of files to a destination."""
     try:
         if isinstance(src, list):

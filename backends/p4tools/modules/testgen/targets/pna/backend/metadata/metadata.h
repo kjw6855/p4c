@@ -14,32 +14,28 @@
 #include "ir/ir.h"
 #include "lib/cstring.h"
 
+#include "backends/p4tools/modules/testgen/lib/test_framework.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
 
 namespace P4Tools::P4Testgen::Pna {
 
 /// Extracts information from the @testSpec to emit a Metadata test case.
-class Metadata : public TF {
+class Metadata : public TestFramework {
     /// The output file.
     std::ofstream metadataFile;
 
  public:
-    virtual ~Metadata() = default;
-
+    ~Metadata() override = default;
     Metadata(const Metadata &) = delete;
-
     Metadata(Metadata &&) = delete;
-
     Metadata &operator=(const Metadata &) = delete;
-
     Metadata &operator=(Metadata &&) = delete;
 
-    Metadata(std::filesystem::path basePath, std::optional<unsigned int> seed);
+    explicit Metadata(const TestBackendConfiguration &testBackendConfiguration);
 
     /// Produce a Metadata test.
-    void outputTest(const TestSpec *spec, cstring selectedBranches, size_t testId,
-                    float currentCoverage, unsigned char* testCoverage, int mapSize) override;
+    void writeTestToFile(const TestSpec *spec, cstring selectedBranches, size_t testId,
+                         float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
  private:
     /// Emits the test preamble. This is only done once for all generated tests.

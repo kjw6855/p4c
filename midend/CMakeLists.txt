@@ -20,6 +20,7 @@ set (MIDEND_SRCS
   convertErrors.cpp
   copyStructures.cpp
   coverage.cpp
+  def_use.cpp
   eliminateInvalidHeaders.cpp
   eliminateNewtype.cpp
   eliminateSerEnums.cpp
@@ -57,6 +58,7 @@ set (MIDEND_SRCS
   simplifySelectList.cpp
   singleArgumentSelect.cpp
   tableHit.cpp
+  unrollLoops.cpp
   validateProperties.cpp
   )
 
@@ -71,6 +73,7 @@ set (MIDEND_HDRS
   convertErrors.h
   copyStructures.h
   coverage.h
+  def_use.h
   eliminateInvalidHeaders.h
   eliminateNewtype.h
   eliminateSerEnums.h
@@ -109,9 +112,14 @@ set (MIDEND_HDRS
   simplifySelectList.h
   singleArgumentSelect.h
   tableHit.h
+  unrollLoops.h
   validateProperties.h
   )
 
 
 add_library (midend STATIC ${MIDEND_SRCS})
+target_link_libraries(midend
+  # For TypeMap / RefMap
+  PRIVATE frontend
+)
 add_dependencies(midend genIR ir-generated)

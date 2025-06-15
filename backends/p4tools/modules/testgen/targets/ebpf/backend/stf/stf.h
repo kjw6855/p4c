@@ -2,8 +2,6 @@
 #define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_EBPF_BACKEND_STF_STF_H_
 
 #include <cstddef>
-#include <filesystem>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,29 +9,25 @@
 
 #include "lib/cstring.h"
 
+#include "backends/p4tools/modules/testgen/lib/test_framework.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
 
 namespace P4Tools::P4Testgen::EBPF {
 
 /// Extracts information from the @testSpec to emit a STF test case.
-class STF : public TF {
+class STF : public TestFramework {
  public:
-    virtual ~STF() = default;
-
+    ~STF() override = default;
     STF(const STF &) = delete;
-
     STF(STF &&) = delete;
-
     STF &operator=(const STF &) = delete;
-
     STF &operator=(STF &&) = delete;
 
-    STF(std::filesystem::path basePath, std::optional<unsigned int> seed);
+    explicit STF(const TestBackendConfiguration &testBackendConfiguration);
 
     /// Produce an STF test.
-    void outputTest(const TestSpec *spec, cstring selectedBranches, size_t testId,
-                    float currentCoverage, unsigned char* testCoverage, int mapSize) override;
+    void writeTestToFile(const TestSpec *spec, cstring selectedBranches, size_t testId,
+                         float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
  private:
     /// Emits a test case.

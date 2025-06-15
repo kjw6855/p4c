@@ -86,9 +86,9 @@ control ingress(
         drop_packet();
     }
 
-    table nh_table {
+    @tc_acl("RUS:RXP") table nh_table {
         key = {
-            hdr.ipv4.srcAddr : exact;
+            hdr.ipv4.srcAddr : exact @tc_type ("ipv4");
         }
         actions = {
             send_nh;
@@ -107,7 +107,7 @@ control ingress(
 
 control Ingress_Deparser(
     packet_out pkt,
-    in    my_ingress_headers_t hdr,
+    inout    my_ingress_headers_t hdr,
     in    my_ingress_metadata_t meta,
     in    pna_main_output_metadata_t ostd)
 {

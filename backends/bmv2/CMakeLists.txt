@@ -63,6 +63,7 @@ set (BMV2_BACKEND_COMMON_HDRS
   common/action.h
   common/annotations.h
   common/backend.h
+  common/check_unsupported.h
   common/control.h
   common/controlFlowGraph.h
   common/deparser.h
@@ -82,8 +83,8 @@ set (BMV2_BACKEND_COMMON_HDRS
 
 set (IR_DEF_FILES ${IR_DEF_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/bmv2.def PARENT_SCOPE)
 
-add_library(bmv2backend STATIC ${P4C_STATIC_BUILD} ${BMV2_BACKEND_COMMON_SRCS})
-add_dependencies(bmv2backend ir-generated frontend)
+add_library(bmv2backend STATIC ${BMV2_BACKEND_COMMON_SRCS})
+target_link_libraries(bmv2backend ir-generated frontend)
 
 add_executable(p4c-bm2-ss ${BMV2_SIMPLE_SWITCH_SRCS})
 target_link_libraries (p4c-bm2-ss bmv2backend ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
@@ -120,9 +121,8 @@ add_dependencies(p4c_driver linkbmv2)
 
 
 # Tests
-
 set(BMV2_DRIVER ${CMAKE_CURRENT_SOURCE_DIR}/run-bmv2-test.py)
-set(BMV2_PTF_DRIVER "sudo -E ${CMAKE_CURRENT_SOURCE_DIR}/run-bmv2-ptf-test.py")
+set(BMV2_PTF_DRIVER "$([[ $EUID = 0 ]] || echo 'sudo -E') ${CMAKE_CURRENT_SOURCE_DIR}/run-bmv2-ptf-test.py")
 
 set (V1_INCLUDE_PATTERNS "include.*v1model.p4")
 set (P4TESTS_FOR_V1MODEL "${P4C_SOURCE_DIR}/testdata/p4_16_samples/*-bmv2.p4")
@@ -130,7 +130,7 @@ p4c_find_tests("${P4TESTS_FOR_V1MODEL}" v1tests INCLUDE "${V1_INCLUDE_PATTERNS}"
 
 set (BMV2_V1MODEL_TEST_SUITES
   "${P4C_SOURCE_DIR}/testdata/p4_16_bmv_errors/*-bmv2.p4"
-  "${P4C_SOURCE_DIR}/testdata/p4_16_samples/dash/*.p4"
+  "${P4C_SOURCE_DIR}/testdata/p4_16_samples/dash/*-bmv2.p4"
   "${P4C_SOURCE_DIR}/testdata/p4_16_samples/fabric_*/fabric.p4"
   "${P4C_SOURCE_DIR}/testdata/p4_16_samples/omec/*.p4"
   "${P4C_SOURCE_DIR}/testdata/p4_16_samples/pins/*.p4"
@@ -200,7 +200,11 @@ if (HAVE_SIMPLE_SWITCH)
     # Does not work well with sanitizers, extern_func_module fails due to linking failures related to missing symbols.
     p4c_add_tests("bmv2" ${BMV2_DRIVER} "${BMV2_V1MODEL_TEST_SUITES}" "${XFAIL_TESTS}")
     add_library(extern_func_module MODULE EXCLUDE_FROM_ALL "${P4C_SOURCE_DIR}/testdata/extern_modules/extern-funcs-bmv2.cpp" )
-    p4c_add_test_with_args("bmv2" ${BMV2_DRIVER} FALSE "bmv2_emit_externs" "testdata/p4_16_samples/extern-funcs-bmv2.p4" "-a=--emit-externs --target-specific-switch-arg=\"--load-modules ${CMAKE_CURRENT_BINARY_DIR}/libextern_func_module.so\" --init=\"make extern_func_module\"" "")
+    p4c_add_test_with_args("bmv2" ${BMV2_DRIVER} FALSE "bmv2_emit_externs"
+      "testdata/p4_16_samples/extern-funcs-bmv2.p4"
+      "-a=--emit-externs --target-specific-switch-arg=\"--load-modules ${CMAKE_CURRENT_BINARY_DIR}/libextern_func_module.so\" --init=\"cmake --build . --target extern_func_module extern_func_module\""
+      ""
+    )
     p4c_add_tests("bmv2-parser-inline-opt-disabled" ${BMV2_DRIVER} "${BMV2_PARSER_INLINE_TESTS}" "")
     p4c_add_tests("bmv2-parser-inline-opt-enabled" ${BMV2_DRIVER} "${BMV2_PARSER_INLINE_TESTS}" "" "-a=--parser-inline-opt")
   endif()
@@ -221,7 +225,7 @@ else()
 endif()
 
 set (GTEST_BMV2_SOURCES
-  )
-
+  gtest/load_ir_from_json.cpp
+)
 set (GTEST_SOURCES ${GTEST_SOURCES} ${GTEST_BMV2_SOURCES} PARENT_SCOPE)
 set (GTEST_LDADD ${GTEST_LDADD} bmv2backend PARENT_SCOPE)

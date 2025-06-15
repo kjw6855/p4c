@@ -64,10 +64,10 @@ EBPFRegisterPSA::EBPFRegisterPSA(const EBPFProgram *program, cstring instanceNam
 
 bool EBPFRegisterPSA::shouldUseArrayMap() {
     CHECK_NULL(this->keyType);
-    if (auto wt = dynamic_cast<IHasWidth *>(this->keyType)) {
+    if (auto wt = this->keyType->to<IHasWidth>()) {
         unsigned keyWidth = wt->widthInBits();
         // For keys <= 32 bit register is based on array map,
-        // otherwise we use hash map
+        // otherwise we use hash map.
         return (keyWidth > 0 && keyWidth <= 32);
     }
 
@@ -97,13 +97,13 @@ void EBPFRegisterPSA::emitValueType(CodeBuilder *builder) {
 
 void EBPFRegisterPSA::emitInitializer(CodeBuilder *builder) {
     if (!shouldUseArrayMap()) {
-        // initialize array-based Registers only,
+        // Initialize array-based Registers only,
         // hash-based Registers are "lazy-initialized", upon a first lookup to the map.
         return;
     }
 
     if (this->initialValue == nullptr || this->initialValue->value.is_zero()) {
-        // for array maps, initialize only if an initial value is provided by a developer,
+        // For array maps, initialize only if an initial value is provided by a developer,
         // or if an initial value doesn't equal 0. Otherwise, array map is already zero-initialized.
         return;
     }
@@ -135,8 +135,8 @@ void EBPFRegisterPSA::emitInitializer(CodeBuilder *builder) {
     builder->emitIndent();
     builder->appendFormat("if (%s) ", ret.c_str());
     builder->blockStart();
-    cstring msgStr = Util::printf_format("Map initializer: Error while map (%s) update, code: %s",
-                                         instanceName, "%d");
+    cstring msgStr = absl::StrFormat("Map initializer: Error while map (%s) update, code: %s",
+                                     instanceName, "%d");
     builder->target->emitTraceMessage(builder, msgStr, 1, ret.c_str());
 
     builder->blockEnd(true);
@@ -160,7 +160,7 @@ void EBPFRegisterPSA::emitRegisterRead(CodeBuilder *builder, const P4::ExternMet
     this->valueType->declare(builder, valueName, true);
     builder->endOfStatement(true);
 
-    cstring msgStr = Util::printf_format("Register: reading %s", instanceName.c_str());
+    cstring msgStr = absl::StrFormat("Register: reading %s", instanceName.c_str());
     builder->target->emitTraceMessage(builder, msgStr.c_str());
 
     builder->emitIndent();
@@ -190,7 +190,7 @@ void EBPFRegisterPSA::emitRegisterRead(CodeBuilder *builder, const P4::ExternMet
 
     if (leftExpression != nullptr) {
         if (initialValue != nullptr || leftExpression->type->is<IR::Type_Bits>()) {
-            // let's create fake assigment statement and use it to generate valid code
+            // Let's create fake assigment statement and use it to generate valid code.
             const IR::Expression *right =
                 initialValue != nullptr ? initialValue : new IR::Constant(leftExpression->type, 0);
             const auto *assigment = new IR::AssignmentStatement(leftExpression, right);
@@ -215,7 +215,7 @@ void EBPFRegisterPSA::emitRegisterRead(CodeBuilder *builder, const P4::ExternMet
 
 void EBPFRegisterPSA::emitRegisterWrite(CodeBuilder *builder, const P4::ExternMethod *method,
                                         ControlBodyTranslatorPSA *translator) {
-    cstring msgStr = Util::printf_format("Register: writing %s", instanceName.c_str());
+    cstring msgStr = absl::StrFormat("Register: writing %s", instanceName.c_str());
     builder->target->emitTraceMessage(builder, msgStr.c_str());
 
     builder->emitIndent();
@@ -230,8 +230,7 @@ void EBPFRegisterPSA::emitRegisterWrite(CodeBuilder *builder, const P4::ExternMe
     builder->emitIndent();
     builder->appendFormat("if (%s) ", ret.c_str());
     builder->blockStart();
-    msgStr =
-        Util::printf_format("Register: Error while map (%s) update, code: %s", instanceName, "%d");
+    msgStr = absl::StrFormat("Register: Error while map (%s) update, code: %s", instanceName, "%d");
     builder->target->emitTraceMessage(builder, msgStr, 1, ret.c_str());
 
     builder->blockEnd(true);

@@ -1,66 +1,23 @@
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 
-#include "backends/p4tools/common/compiler/reachability.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
 #include "ir/id.h"
 #include "ir/irutils.h"
 #include "lib/cstring.h"
-#include "lib/enumerator.h"
 #include "lib/exceptions.h"
 #include "midend/coverage.h"
 
+#include "backends/p4tools/modules/testgen/core/compiler_result.h"
 #include "backends/p4tools/modules/testgen/lib/concolic.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
-#include "backends/p4tools/modules/testgen/options.h"
 
 namespace P4Tools::P4Testgen {
 
-ProgramInfo::ProgramInfo(const IR::P4Program *program) : concolicMethodImpls({}), program(program) {
+ProgramInfo::ProgramInfo(const TestgenCompilerResult &compilerResult)
+    : compilerResult(compilerResult), concolicMethodImpls({}) {
     concolicMethodImpls.add(*Concolic::getCoreConcolicMethodImpls());
-    if (TestgenOptions::get().dcg || !TestgenOptions::get().pattern.empty()) {
-        // Create DCG.
-        auto *currentDCG = new NodesCallGraph("NodesCallGraph");
-        P4ProgramDCGCreator dcgCreator(currentDCG);
-        program->apply(dcgCreator);
-        dcg = currentDCG;
-    }
-    /// Collect coverage information about the program.
-    auto coverage = P4::Coverage::CollectNodes(TestgenOptions::get().coverageOptions);
-    program->apply(coverage);
-    auto coveredNodes = coverage.getCoverableNodes();
-    coverableNodes.insert(coveredNodes.begin(), coveredNodes.end());
-}
-
-/* =============================================================================================
- *  Namespaces and declarations
- * ============================================================================================= */
-
-const IR::IDeclaration *ProgramInfo::findProgramDecl(const IR::IGeneralNamespace *ns,
-                                                     const IR::Path *path) {
-    auto name = path->name.name;
-    const auto *decls = ns->getDeclsByName(name)->toVector();
-    if (!decls->empty()) {
-        // TODO: Figure out what to do with multiple results. Maybe return all of them and
-        // let the caller sort it out?
-        BUG_CHECK(decls->size() == 1, "Handling of overloaded names not implemented");
-        return decls->at(0);
-    }
-    BUG("Variable %1% not found in the available namespaces.", path);
-}
-
-const IR::IDeclaration *ProgramInfo::findProgramDecl(const IR::IGeneralNamespace *ns,
-                                                     const IR::PathExpression *pathExpr) {
-    return findProgramDecl(ns, pathExpr->path);
-}
-
-const IR::Type_Declaration *ProgramInfo::resolveProgramType(const IR::IGeneralNamespace *ns,
-                                                            const IR::Type_Name *type) {
-    const auto *path = type->path;
-    const auto *decl = findProgramDecl(ns, path)->to<IR::Type_Declaration>();
-    BUG_CHECK(decl, "Not a type: %1%", path);
-    return decl;
 }
 
 const IR::Expression *ProgramInfo::createTargetUninitialized(const IR::Type *type,
@@ -75,7 +32,17 @@ const IR::Expression *ProgramInfo::createTargetUninitialized(const IR::Type *typ
  *  Getters
  * ============================================================================================= */
 
-const P4::Coverage::CoverageSet &ProgramInfo::getCoverableNodes() const { return coverableNodes; }
+const P4::Coverage::CoverageSet &ProgramInfo::getCoverableNodes() const {
+    return getCompilerResult().getCoverableNodes();
+}
+
+const TestgenCompilerResult &ProgramInfo::getCompilerResult() const { return compilerResult.get(); }
+
+const IR::P4Program &ProgramInfo::getP4Program() const { return getCompilerResult().getProgram(); }
+
+const NodesCallGraph &ProgramInfo::getCallGraph() const {
+    return getCompilerResult().getCallGraph();
+}
 
 const ConcolicMethodImpls *ProgramInfo::getConcolicMethodImpls() const {
     return &concolicMethodImpls;
@@ -104,7 +71,7 @@ void ProgramInfo::produceCopyInOutCall(const IR::Parameter *param, size_t paramI
     const auto *paramType = param->type;
     // We need to resolve type names.
     if (const auto *tn = paramType->to<IR::Type_Name>()) {
-        paramType = resolveProgramType(program, tn);
+        paramType = resolveProgramType(&getP4Program(), tn);
     }
     // Retrieve the identifier of the global architecture map using the parameter
     // index.
@@ -116,11 +83,11 @@ void ProgramInfo::produceCopyInOutCall(const IR::Parameter *param, size_t paramI
     }
     const auto *archPath = new IR::PathExpression(paramType, new IR::Path(archRef));
     const auto *paramRef = new IR::PathExpression(paramType, new IR::Path(param->name));
-    const auto *paramDir = new IR::StringLiteral(directionToString(param->direction));
+    const auto *paramDir = IR::StringLiteral::get(directionToString(param->direction));
     if (copyIns != nullptr) {
         // This mimicks the copy-in from the architecture environment.
         const auto *copyInCall = new IR::MethodCallStatement(Utils::generateInternalMethodCall(
-            "copy_in", {archPath, paramRef, paramDir, new IR::BoolLiteral(false)}));
+            "copy_in", {archPath, paramRef, paramDir, IR::BoolLiteral::get(false)}));
         copyIns->emplace_back(copyInCall);
     }
     if (copyOuts != nullptr) {

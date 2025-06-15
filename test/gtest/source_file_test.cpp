@@ -16,7 +16,8 @@ limitations under the License.
 
 #include "lib/source_file.h"
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
+
 #include "lib/compile_context.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
@@ -66,10 +67,10 @@ TEST(UtilSourceFile, InputSources) {
 
     EXPECT_EQ(3u, sources.lineCount());
 
-    cstring fl = sources.getLine(1);
+    auto fl = sources.getLine(1);
     EXPECT_EQ("First line\n", fl);
 
-    cstring sl = sources.getLine(2);
+    auto sl = sources.getLine(2);
     EXPECT_EQ("Second line\n", sl);
 
     SourceFileLine original = sources.getSourceLine(3);
@@ -91,7 +92,7 @@ TEST(UtilSourceFile, SourceInfo) {
     SourceInfo t2 = SourceInfo(&sources, t2_s, t2_e);
 
     SourceInfo span = t1 + t2;
-    cstring str = span.toDebugString();
+    cstring str = span.toString();
     EXPECT_EQ("(1:1)-(2:2)", str);
 
     SourceInfo invalid;

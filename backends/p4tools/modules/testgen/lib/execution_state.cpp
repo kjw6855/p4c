@@ -21,6 +21,7 @@
 #include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "backends/p4tools/common/lib/variables.h"
+#include "frontends/p4/optimizeExpressions.h"
 #include "ir/id.h"
 #include "ir/indexed_vector.h"
 #include "ir/irutils.h"
@@ -69,28 +70,28 @@ ExecutionState::ExecutionState(const IR::P4Program *program)
     : AbstractExecutionState(program),
       body({program}),
       stack(*(new std::stack<std::reference_wrapper<const StackFrame>>())) {
-    env.set(&PacketVars::INPUT_PACKET_LABEL, IR::getConstant(IR::getBitType(0), 0));
-    env.set(&PacketVars::PACKET_BUFFER_LABEL, IR::getConstant(IR::getBitType(0), 0));
+    env.set(&PacketVars::INPUT_PACKET_LABEL, IR::Constant::get(IR::Type_Bits::get(0), 0));
+    env.set(&PacketVars::PACKET_BUFFER_LABEL, IR::Constant::get(IR::Type_Bits::get(0), 0));
     // We also add the taint property and set it to false.
-    setProperty("inUndefinedState", false);
+    setProperty("inUndefinedState"_cs, false);
     // Drop is initialized to false, too.
-    setProperty("drop", false);
+    setProperty("drop"_cs, false);
     // If a user-pattern is provided, initialize the reachability engine state.
     if (!TestgenOptions::get().pattern.empty()) {
         reachabilityEngineState = ReachabilityEngineState::getInitial();
     }
     // If assertion mode is enabled, set the assertion property to false.
     if (TestgenOptions::get().assertionModeEnabled) {
-        setProperty("assertionTriggered", false);
+        setProperty("assertionTriggered"_cs, false);
     }
 }
 
 ExecutionState::ExecutionState(Continuation::Body body)
     : body(std::move(body)), stack(*(new std::stack<std::reference_wrapper<const StackFrame>>())) {
     // We also add the taint property and set it to false.
-    setProperty("inUndefinedState", false);
+    setProperty("inUndefinedState"_cs, false);
     // Drop is initialized to false, too.
-    setProperty("drop", false);
+    setProperty("drop"_cs, false);
     // If a user-pattern is provided, initialize the reachability engine state.
     if (!TestgenOptions::get().pattern.empty()) {
         reachabilityEngineState = ReachabilityEngineState::getInitial();
@@ -142,10 +143,18 @@ std::optional<const Continuation::Command> ExecutionState::getNextCmd() const {
 }
 
 const IR::Expression *ExecutionState::get(const IR::StateVariable &var) const {
+    auto varType = resolveType(var->type);
+
+    // In some cases, we may reference a complex expression. Convert it to a struct expression.
+    if (varType->is<IR::Type_StructLike>() || varType->to<IR::Type_Stack>()) {
+        return convertToComplexExpression(var);
+    }
+
     // TODO: This is a convoluted (and expensive?) check because struct members are not directly
     // associated with a header. We should be using runtime objects instead of flat assignments.
     if (const auto *member = var->to<IR::Member>()) {
-        if (member->expr->type->is<IR::Type_Header>() && member->member != ToolsVariables::VALID) {
+        auto memberType = resolveType(member->expr->type);
+        if (memberType->is<IR::Type_Header>() && member->member != ToolsVariables::VALID) {
             // If we are setting the member of a header, we need to check whether the
             // header is valid.
             // If the header is invalid, the get returns a tainted expression.
@@ -170,7 +179,7 @@ const IR::Expression *ExecutionState::get(const IR::StateVariable &var) const {
                 }
             }
             if (isTainted) {
-                return ToolsVariables::getTaintExpression(var->type);
+                return ToolsVariables::getTaintExpression(varType);
             }
         }
     }
@@ -192,6 +201,10 @@ void ExecutionState::markVisited(const IR::Node *node) {
     if (node->is<IR::Entry>() && !coverageOptions.coverTableEntries) {
         return;
     }
+    // Do not add actions, if coverActions is not toggled.
+    if (node->is<IR::P4Action>() && !coverageOptions.coverActions) {
+        return;
+    }
     visitedNodes.emplace(node);
 }
 
@@ -209,10 +222,37 @@ const P4::Coverage::CoverageSet &ExecutionState::getVisited() const { return vis
 const P4::Coverage::CoverageSet &ExecutionState::getVisitedActions() const { return visitedActions; }
 const std::list<cstring> &ExecutionState::getVisitedParserStates() const { return visitedParserStates; }
 
+/// Compare types, considering Extracted_Varbit and bits equal if the (real/extracted) sizes are
+/// equal. This is because the packet expression can be something like 0 ++
+/// (Extracted_Varbit<N>)pkt_var. This expression is typed as bit<N>, but the optimizer removes the
+/// 0 ++ and makes it into Extracted_Varbit type.
+/// TODO: Maybe there is a better way to handle varbit that could allow us to avoid this.
+static bool typeEquivSansVarbit(const IR::Type *a, const IR::Type *b) {
+    if (a->equiv(*b)) {
+        return true;
+    }
+    const auto *abit = a->to<IR::Type_Bits>();
+    const auto *avar = a->to<IR::Extracted_Varbits>();
+    const auto *bbit = b->to<IR::Type_Bits>();
+    const auto *bvar = b->to<IR::Extracted_Varbits>();
+    return (abit && bvar && abit->width_bits() == bvar->width_bits()) ||
+           (avar && bbit && avar->width_bits() == bbit->width_bits());
+}
+
 void ExecutionState::set(const IR::StateVariable &var, const IR::Expression *value) {
-    if (getProperty<bool>("inUndefinedState")) {
+    const auto *type = value->type;
+    BUG_CHECK(type && !type->is<IR::Type_Unknown>(), "Cannot set value with unspecified type: %1%",
+              value);
+    if (getProperty<bool>("inUndefinedState"_cs)) {
         // If we are in an undefined state, the variable we set is tainted.
-        value = ToolsVariables::getTaintExpression(value->type);
+        value = ToolsVariables::getTaintExpression(type);
+    } else {
+        value = P4::optimizeExpression(value);
+        BUG_CHECK(value->type && !value->type->is<IR::Type_Unknown>(),
+                  "The P4 expression optimizer stripped a type of %1% (was %2%)", value, type);
+        BUG_CHECK(typeEquivSansVarbit(type, value->type),
+                  "The P4 expression optimizer had changed type of %1% (%2% -> %3%)", value, type,
+                  value->type);
     }
     env.set(var, value);
 }
@@ -223,8 +263,8 @@ const std::vector<std::reference_wrapper<const TraceEvent>> &ExecutionState::get
 
 const Continuation::Body &ExecutionState::getBody() const { return body; }
 
-const std::stack<std::reference_wrapper<const ExecutionState::StackFrame>>
-    &ExecutionState::getStack() const {
+const std::stack<std::reference_wrapper<const ExecutionState::StackFrame>> &
+ExecutionState::getStack() const {
     return stack;
 }
 
@@ -266,9 +306,8 @@ TestObjectMap ExecutionState::getTestObjectCategory(cstring category) const {
 void ExecutionState::deleteTestObject(cstring category, cstring objectLabel) {
     auto it = testObjects.find(category);
     if (it != testObjects.end()) {
-        return;
+        it->second.erase(objectLabel);
     }
-    it->second.erase(objectLabel);
 }
 
 void ExecutionState::deleteTestObjectCategory(cstring category) { testObjects.erase(category); }
@@ -308,7 +347,7 @@ void ExecutionState::pushCurrentContinuation(std::optional<const IR::Type *> par
     std::optional<const Continuation::Parameter *> parameterOpt = std::nullopt;
     if (parameterType_opt) {
         const auto *parameter =
-            Continuation::genParameter(*parameterType_opt, "_", getNamespaceContext());
+            Continuation::genParameter(*parameterType_opt, "_"_cs, getNamespaceContext());
         parameterOpt = parameter;
     }
 
@@ -373,7 +412,7 @@ void ExecutionState::pushBranchDecision(uint64_t bIdx) { selectedBranches.push_b
 
 const IR::SymbolicVariable *ExecutionState::getInputPacketSizeVar() {
     return ToolsVariables::getSymbolicVariable(&PacketVars::PACKET_SIZE_VAR_TYPE,
-                                               "*packetLen_bits");
+                                               "*packetLen_bits"_cs);
 }
 
 int ExecutionState::getMaxPacketLength() { return TestgenOptions::get().maxPktSize; }
@@ -408,14 +447,14 @@ bool ExecutionState::getUnsupported() {
 
 void ExecutionState::appendToInputPacket(const IR::Expression *expr) {
     const auto *inputPkt = getInputPacket();
-    const auto *width = IR::getBitType(expr->type->width_bits() + inputPkt->type->width_bits());
+    const auto *width = IR::Type_Bits::get(expr->type->width_bits() + inputPkt->type->width_bits());
     const auto *concat = new IR::Concat(width, inputPkt, expr);
     env.set(&PacketVars::INPUT_PACKET_LABEL, concat);
 }
 
 void ExecutionState::prependToInputPacket(const IR::Expression *expr) {
     const auto *inputPkt = getInputPacket();
-    const auto *width = IR::getBitType(expr->type->width_bits() + inputPkt->type->width_bits());
+    const auto *width = IR::Type_Bits::get(expr->type->width_bits() + inputPkt->type->width_bits());
     const auto *concat = new IR::Concat(width, expr, inputPkt);
     env.set(&PacketVars::INPUT_PACKET_LABEL, concat);
 }
@@ -438,18 +477,18 @@ const IR::Expression *ExecutionState::peekPacketBuffer(int amount) {
     auto bufferSize = buffer->type->width_bits();
 
     auto diff = amount - bufferSize;
-    const auto *amountType = IR::getBitType(amount);
+    const auto *amountType = IR::Type_Bits::get(amount);
     // We are running off the available buffer, we need to generate new packet content.
     if (diff > 0) {
         // We need to enlarge the input packet by the amount we are exceeding the buffer.
         // TODO: How should we perform accounting here?
-        const IR::Expression *newVar = createPacketVariable(IR::getBitType(diff));
+        const IR::Expression *newVar = createPacketVariable(IR::Type_Bits::get(diff));
         appendToInputPacket(newVar);
         // If the buffer was not empty, append the data we have consumed to the newly generated
         // content and reset the buffer.
         if (bufferSize > 0) {
             auto *slice = new IR::Slice(buffer, bufferSize - 1, 0);
-            slice->type = IR::getBitType(amount);
+            slice->type = IR::Type_Bits::get(amount);
             newVar = new IR::Concat(amountType, slice, newVar);
             resetPacketBuffer();
         }
@@ -480,18 +519,18 @@ const IR::Expression *ExecutionState::slicePacketBuffer(int amount) {
 
     // Compute the difference between what we have in the buffer and what we want to slice.
     auto diff = amount - bufferSize;
-    const auto *amountType = IR::getBitType(amount);
+    const auto *amountType = IR::Type_Bits::get(amount);
     // We are running off the available buffer, we need to generate new packet content.
     if (diff > 0) {
         // We need to enlarge the input packet by the amount we are exceeding the buffer.
         // TODO: How should we perform accounting here?
-        const IR::Expression *newVar = createPacketVariable(IR::getBitType(diff));
+        const IR::Expression *newVar = createPacketVariable(IR::Type_Bits::get(diff));
         appendToInputPacket(newVar);
         // If the buffer was not empty, append the data we have consumed to the newly generated
         // content and reset the buffer.
         if (bufferSize > 0) {
             auto *slice = new IR::Slice(buffer, bufferSize - 1, 0);
-            slice->type = IR::getBitType(amount);
+            slice->type = IR::Type_Bits::get(amount);
             newVar = new IR::Concat(amountType, slice, newVar);
             resetPacketBuffer();
         }
@@ -505,7 +544,7 @@ const IR::Expression *ExecutionState::slicePacketBuffer(int amount) {
     // If the buffer is larger, update the buffer with its remainder.
     if (diff < 0) {
         auto *remainder = new IR::Slice(buffer, bufferSize - amount - 1, 0);
-        remainder->type = IR::getBitType(bufferSize - amount);
+        remainder->type = IR::Type_Bits::get(bufferSize - amount);
         env.set(&PacketVars::PACKET_BUFFER_LABEL, remainder);
     }
     // The amount we slice is equal to what is in the buffer. Just set the buffer to zero.
@@ -562,20 +601,20 @@ const IR::Expression *ExecutionState::slicePacket(int amount) {
 
 void ExecutionState::appendToPacketBuffer(const IR::Expression *expr) {
     const auto *buffer = getPacketBuffer();
-    const auto *width = IR::getBitType(expr->type->width_bits() + buffer->type->width_bits());
+    const auto *width = IR::Type_Bits::get(expr->type->width_bits() + buffer->type->width_bits());
     const auto *concat = new IR::Concat(width, buffer, expr);
     env.set(&PacketVars::PACKET_BUFFER_LABEL, concat);
 }
 
 void ExecutionState::prependToPacketBuffer(const IR::Expression *expr) {
     const auto *buffer = getPacketBuffer();
-    const auto *width = IR::getBitType(expr->type->width_bits() + buffer->type->width_bits());
+    const auto *width = IR::Type_Bits::get(expr->type->width_bits() + buffer->type->width_bits());
     const auto *concat = new IR::Concat(width, expr, buffer);
     env.set(&PacketVars::PACKET_BUFFER_LABEL, concat);
 }
 
 void ExecutionState::resetPacketBuffer() {
-    env.set(&PacketVars::PACKET_BUFFER_LABEL, IR::getConstant(IR::getBitType(0), 0));
+    env.set(&PacketVars::PACKET_BUFFER_LABEL, IR::Constant::get(IR::Type_Bits::get(0), 0));
 }
 
 const IR::Expression *ExecutionState::getEmitBuffer() const {
@@ -583,12 +622,12 @@ const IR::Expression *ExecutionState::getEmitBuffer() const {
 }
 
 void ExecutionState::resetEmitBuffer() {
-    env.set(&PacketVars::EMIT_BUFFER_LABEL, IR::getConstant(IR::getBitType(0), 0));
+    env.set(&PacketVars::EMIT_BUFFER_LABEL, IR::Constant::get(IR::Type_Bits::get(0), 0));
 }
 
 void ExecutionState::appendToEmitBuffer(const IR::Expression *expr) {
     const auto *buffer = getEmitBuffer();
-    const auto *width = IR::getBitType(expr->type->width_bits() + buffer->type->width_bits());
+    const auto *width = IR::Type_Bits::get(expr->type->width_bits() + buffer->type->width_bits());
     const auto *concat = new IR::Concat(width, buffer, expr);
     env.set(&PacketVars::EMIT_BUFFER_LABEL, concat);
 }

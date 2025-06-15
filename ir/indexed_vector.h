@@ -17,12 +17,11 @@ limitations under the License.
 #ifndef IR_INDEXED_VECTOR_H_
 #define IR_INDEXED_VECTOR_H_
 
-#include "ir/dbprint.h"
 #include "ir/declaration.h"
-#include "ir/id.h"
 #include "ir/vector.h"
 #include "lib/enumerator.h"
 #include "lib/error.h"
+#include "lib/map.h"
 #include "lib/null.h"
 #include "lib/ordered_map.h"
 #include "lib/safe_vector.h"
@@ -104,8 +103,7 @@ class IndexedVector : public Vector<T> {
         return it->second->template to<U>();
     }
     Util::Enumerator<const IDeclaration *> *getDeclarations() const {
-        return Util::Enumerator<const IDeclaration *>::createEnumerator(
-            Values(declarations).begin(), Values(declarations).end());
+        return Util::enumerate(Values(declarations));
     }
     iterator erase(iterator i) {
         removeFromMap(*i);
@@ -212,6 +210,9 @@ class IndexedVector : public Vector<T> {
                       "invalid element %1%", el);
         }
     }
+
+    DECLARE_TYPEINFO_WITH_DISCRIMINATOR(IndexedVector<T>, NodeDiscriminator::IndexedVectorT, T,
+                                        Vector<T>);
 };
 
 }  // namespace IR

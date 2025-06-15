@@ -5,9 +5,9 @@
 #include <optional>
 #include <string>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/ir.h"
 #include "ir/node.h"
+#include "ir/solver.h"
 #include "ir/vector.h"
 #include "ir/visitor.h"
 
@@ -106,12 +106,12 @@ class AbstractStepper : public Inspector {
     ///
     /// @returns false
     static bool stepToListSubexpr(
-        const IR::ListExpression *subexpr, SmallStepEvaluator::Result &result,
+        const IR::BaseListExpression *subexpr, SmallStepEvaluator::Result &result,
         const ExecutionState &state,
-        std::function<const Continuation::Command(const IR::ListExpression *)> rebuildCmd);
+        std::function<const Continuation::Command(const IR::BaseListExpression *)> rebuildCmd);
 
-    /// @see stepToListSubexpr.IR::StructExpression differs slightly from IR::ListExpression in that
-    /// the components are IR::NamedExpression instead of just IR::Expression.  To keep things
+    /// @see stepToListSubexpr.IR::StructExpression differs slightly from IR::BaseListExpression in
+    /// that the components are IR::NamedExpression instead of just IR::Expression.  To keep things
     /// simple, and to avoid excessive type casting, these two functions are kept separate.
     static bool stepToStructSubexpr(
         const IR::StructExpression *subexpr, SmallStepEvaluator::Result &result,
@@ -124,11 +124,12 @@ class AbstractStepper : public Inspector {
     ///     either Members or PathExpressions.
     ///
     /// @returns false
-    bool stepGetHeaderValidity(const IR::Expression *headerRef);
+    bool stepGetHeaderValidity(const IR::StateVariable &headerRef);
 
     /// Sets validity for a header if @a expr is a header. if @a expr is a part of a header union
     /// then it sets invalid for other headers in the union. Otherwise it generates an exception.
-    void setHeaderValidity(const IR::Expression *expr, bool validity, ExecutionState &state);
+    void setHeaderValidity(const IR::StateVariable &headerRef, bool validity,
+                           ExecutionState &state);
 
     /// Transition function for setValid and setInvalid calls.
     ///
@@ -137,7 +138,7 @@ class AbstractStepper : public Inspector {
     /// @param validity the validity state being assigned to the header instance.
     ///
     /// @returns false
-    bool stepSetHeaderValidity(const IR::Expression *headerRef, bool validity);
+    bool stepSetHeaderValidity(const IR::StateVariable &headerRef, bool validity);
 
     /// Transition function for push_front/pop_front calls.
     ///
@@ -167,8 +168,8 @@ class AbstractStepper : public Inspector {
     /// This is a helper function to declare structlike data structures.
     /// This also is used to declare the members of a stack. This function is primarily used by the
     /// Declaration_Variable preorder function.
-    void declareStructLike(ExecutionState &nextState, const IR::Expression *parentExpr,
-                           const IR::Type_StructLike *structType, bool forceTaint = false) const;
+    void declareStructLike(ExecutionState &nextState, const IR::StateVariable &parentExpr,
+                           bool forceTaint = false) const;
 
     /// This is a helper function to declare base type variables. Because all variables need to be a
     /// member in the execution state environment, this helper function suffixes a "*".

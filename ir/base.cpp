@@ -14,8 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <boost/format.hpp>
-
 #include "ir/declaration.h"
 #include "ir/id.h"
 #include "ir/ir.h"
@@ -39,12 +37,12 @@ cstring Annotation::getName() const {
 cstring Annotation::getSingleString() const {
     if (expr.size() != 1) {
         ::error(ErrorType::ERR_INVALID, "%1%: should contain a string", this);
-        return "";
+        return cstring::empty;
     }
     auto str = expr[0]->to<IR::StringLiteral>();
     if (str == nullptr) {
         ::error(ErrorType::ERR_INVALID, "%1%: should contain a string", this);
-        return "";
+        return cstring::empty;
     }
     return str->value;
 }

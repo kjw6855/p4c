@@ -16,6 +16,7 @@ limitations under the License.
 
 #include "midend.h"
 
+#include "backends/bmv2/common/check_unsupported.h"
 #include "backends/bmv2/simple_switch/options.h"
 #include "frontends/common/constantFolding.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
@@ -29,6 +30,7 @@ limitations under the License.
 #include "frontends/p4/typeMap.h"
 #include "frontends/p4/uniqueNames.h"
 #include "frontends/p4/unusedDeclarations.h"
+#include "lib/cstring.h"
 #include "midend/actionSynthesis.h"
 #include "midend/checkSize.h"
 #include "midend/compileTimeOps.h"
@@ -66,15 +68,18 @@ limitations under the License.
 
 namespace BMV2 {
 
+using namespace P4::literals;
+
 SimpleSwitchMidEnd::SimpleSwitchMidEnd(CompilerOptions &options, std::ostream *outStream)
     : MidEnd(options) {
     auto *evaluator = new P4::EvaluatorPass(&refMap, &typeMap);
-    if (BMV2::SimpleSwitchContext::get().options().loadIRFromJson == false) {
+    if (!BMV2::SimpleSwitchContext::get().options().loadIRFromJson) {
         auto *convertEnums =
-            new P4::ConvertEnums(&refMap, &typeMap, new EnumOn32Bits("v1model.p4"));
+            new P4::ConvertEnums(&refMap, &typeMap, new EnumOn32Bits("v1model.p4"_cs));
         addPasses(
             {options.ndebug ? new P4::RemoveAssertAssume(&refMap, &typeMap) : nullptr,
              new P4::CheckTableSize(),
+             new CheckUnsupported(),
              new P4::RemoveMiss(&refMap, &typeMap),
              new P4::EliminateNewtype(&refMap, &typeMap),
              new P4::EliminateInvalidHeaders(&refMap, &typeMap),
@@ -87,12 +92,12 @@ SimpleSwitchMidEnd::SimpleSwitchMidEnd(CompilerOptions &options, std::ostream *o
                  &refMap, &typeMap,
                  new P4::OrPolicy(new P4::IsValid(&refMap, &typeMap), new P4::IsMask())),
              new P4::ConstantFolding(&refMap, &typeMap),
-             new P4::StrengthReduction(&refMap, &typeMap),
+             new P4::StrengthReduction(&typeMap),
              new P4::SimplifySelectCases(&refMap, &typeMap, true),  // require constant keysets
              new P4::ExpandLookahead(&refMap, &typeMap),
              new P4::ExpandEmit(&refMap, &typeMap),
              new P4::SimplifyParsers(&refMap),
-             new P4::StrengthReduction(&refMap, &typeMap),
+             new P4::StrengthReduction(&typeMap),
              new P4::EliminateTuples(&refMap, &typeMap),
              new P4::SimplifyComparisons(&refMap, &typeMap),
              new P4::CopyStructures(&refMap, &typeMap),
@@ -106,15 +111,22 @@ SimpleSwitchMidEnd::SimpleSwitchMidEnd(CompilerOptions &options, std::ostream *o
              new P4::MoveDeclarations(),  // more may have been introduced
              new P4::ConstantFolding(&refMap, &typeMap),
              new P4::LocalCopyPropagation(&refMap, &typeMap),
-             new PassRepeated({new P4::ConstantFolding(&refMap, &typeMap),
-                               new P4::StrengthReduction(&refMap, &typeMap)}),
+             new PassRepeated({
+                 new P4::ConstantFolding(&refMap, &typeMap),
+                 new P4::StrengthReduction(&typeMap),
+             }),
              new P4::SimplifyKey(
                  &refMap, &typeMap,
                  new P4::OrPolicy(new P4::IsValid(&refMap, &typeMap), new P4::IsMask())),
              new P4::MoveDeclarations(),
-             new P4::ValidateTableProperties(
-                 {"implementation", "size", "counters", "meters", "support_timeout"}),
-             new P4::SimplifyControlFlow(&refMap, &typeMap),
+             new P4::ValidateTableProperties({
+                 "implementation"_cs,
+                 "size"_cs,
+                 "counters"_cs,
+                 "meters"_cs,
+                 "support_timeout"_cs,
+             }),
+             new P4::SimplifyControlFlow(&typeMap),
              new P4::EliminateTypedef(&refMap, &typeMap),
              new P4::CompileTimeOperations(),
              new P4::TableHit(&refMap, &typeMap),
@@ -129,7 +141,7 @@ SimpleSwitchMidEnd::SimpleSwitchMidEnd(CompilerOptions &options, std::ostream *o
              [this, evaluator]() { toplevel = evaluator->getToplevelBlock(); },
              new P4::MidEndLast()});
         if (options.listMidendPasses) {
-            listPasses(*outStream, "\n");
+            listPasses(*outStream, cstring::newline);
             *outStream << std::endl;
             return;
         }
@@ -137,7 +149,7 @@ SimpleSwitchMidEnd::SimpleSwitchMidEnd(CompilerOptions &options, std::ostream *o
             removePasses(options.passesToExcludeMidend);
         }
     } else {
-        auto *fillEnumMap = new P4::FillEnumMap(new EnumOn32Bits("v1model.p4"), &typeMap);
+        auto *fillEnumMap = new P4::FillEnumMap(new EnumOn32Bits("v1model.p4"_cs), &typeMap);
         addPasses({
             new P4::ResolveReferences(&refMap),
             new P4::TypeChecking(&refMap, &typeMap),

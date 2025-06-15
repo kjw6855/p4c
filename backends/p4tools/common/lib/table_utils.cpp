@@ -4,16 +4,18 @@
 
 namespace P4Tools::TableUtils {
 
+using namespace P4::literals;
+
 void checkTableImmutability(const IR::P4Table &table, TableProperties &properties) {
     bool isConstant = false;
-    const auto *entriesAnnotation = table.properties->getProperty("entries");
+    const auto *entriesAnnotation = table.properties->getProperty("entries"_cs);
     if (entriesAnnotation != nullptr) {
         isConstant = entriesAnnotation->isConstant;
     }
     // Also check if the table is invisible to the control plane.
     // This also implies that it cannot be modified.
-    properties.tableIsImmutable = isConstant || table.getAnnotation("hidden") != nullptr;
-    const auto *defaultAction = table.properties->getProperty("default_action");
+    properties.tableIsImmutable = isConstant || table.getAnnotation("hidden"_cs) != nullptr;
+    const auto *defaultAction = table.properties->getProperty("default_action"_cs);
     CHECK_NULL(defaultAction);
     properties.defaultIsImmutable = defaultAction->isConstant;
 }
@@ -26,7 +28,7 @@ std::vector<const IR::ActionListElement *> buildTableActionList(const IR::P4Tabl
     }
     for (size_t idx = 0; idx < actionList->size(); idx++) {
         const auto *action = actionList->actionList.at(idx);
-        if (action->getAnnotation("defaultonly") != nullptr) {
+        if (action->getAnnotation("defaultonly"_cs) != nullptr) {
             continue;
         }
         tableActionList.emplace_back(action);
@@ -89,11 +91,11 @@ const IR::Expression *computeEntryMatch(const IR::P4Table &table, const IR::Entr
     auto numKeys = key.keyElements.size();
     // If there are no entries or keys, there is nothing we can match against.
     if (numKeys == 0) {
-        return IR::getBoolLiteral(false);
+        return IR::BoolLiteral::get(false);
     }
     BUG_CHECK(key.keyElements.size() == entry.keys->size(),
               "The entry key list and key match list must be equal in size.");
-    const IR::Expression *entryMatchCondition = IR::getBoolLiteral(true);
+    const IR::Expression *entryMatchCondition = IR::BoolLiteral::get(true);
     for (size_t idx = 0; idx < numKeys; ++idx) {
         const auto *keyElement = key.keyElements.at(idx);
         const auto *keyExpr = keyElement->expression;

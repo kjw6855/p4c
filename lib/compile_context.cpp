@@ -56,16 +56,15 @@ AutoCompileContext::AutoCompileContext(ICompileContext *context) {
 
 AutoCompileContext::~AutoCompileContext() { CompileContextStack::pop(); }
 
-BaseCompileContext::BaseCompileContext() {}
-
-BaseCompileContext::BaseCompileContext(const BaseCompileContext &other)
-    : errorReporterInstance(other.errorReporterInstance) {}
-
 /* static */ BaseCompileContext &BaseCompileContext::get() {
     return CompileContextStack::top<BaseCompileContext>();
 }
 
 ErrorReporter &BaseCompileContext::errorReporter() { return errorReporterInstance; }
+
+DiagnosticAction BaseCompileContext::getDefaultInfoDiagnosticAction() {
+    return DiagnosticAction::Info;
+}
 
 DiagnosticAction BaseCompileContext::getDefaultWarningDiagnosticAction() {
     return DiagnosticAction::Warn;

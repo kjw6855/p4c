@@ -25,7 +25,7 @@
   #emit/#end      -> copy text literally to output header file
   #emit_impl/#end -> copy text literally to output C++ file
   #noXXX          -> do not emit the specified implementation for the XXX method
-                     e.g., #noconstructor, #nodbprint, #novisit_children
+                     e.g., #noconstructor, #nodbprint, #novisit_children, #nomethod_constructor
   #apply          -> generate apply overload for visitors
   method{ ... }   -> specifies an implementation for a default method
                      method can be 'operator=='
@@ -51,8 +51,7 @@
   Unless there is a '#noconstructor' tag in the class, a constructor
   will automatically be generated that takes as arguments values to
   initialize all fields of the IR class and its bases that do not have
-  explicit initializers.  Fields marked 'optional' will create multiple
-  constructors both with and without an argument for that field.
+  explicit initializers. There are some special method constructors which ignore #noconstructor, such as Class(JSONLoader &json). #nomethod_constructor will prevent these files from being generated. Fields marked 'optional' will create multiple constructors both with and without an argument for that field.
  */
 
 class ParserState : ISimpleNamespace, Declaration, IAnnotated {
@@ -113,7 +112,7 @@ class P4Parser : Type_Declaration, INestedNamespace, ISimpleNamespace, IApply, I
         for (auto d : parserLocals)
             BUG_CHECK(!d->is<ParserState>(), "%1%: state in locals", d);
     }
-    toString { return cstring("parser ") + externalName(); }
+    toString { return "parser "_cs + externalName(); }
 }
 
 class P4Control : Type_Declaration, INestedNamespace, ISimpleNamespace, IApply, IContainer, IAnnotated {
@@ -141,7 +140,7 @@ class P4Control : Type_Declaration, INestedNamespace, ISimpleNamespace, IApply, 
             BUG("Name mismatch for %1%: %2% != %3%", this, name, type->name);
         controlLocals.check_null();
     }
-    toString { return cstring("control ") + externalName(); }
+    toString { return "control "_cs + externalName(); }
 }
 
 /// A P4-16 action
@@ -284,7 +283,7 @@ class Property : Declaration, IAnnotated {
 
 class TableProperties : ISimpleNamespace {
     optional inline IndexedVector<Property> properties;
-    toString{ return "TableProperties(" + Util::toString(properties.size()) + ")"; }
+    toString{ return "TableProperties("_cs + Util::toString(properties.size()) + ")"_cs; }
     Util::Enumerator<IDeclaration>* getDeclarations() const override {
         return properties.getDeclarations(); }
     Property getProperty(cstring name) const {
@@ -404,12 +403,8 @@ class Declaration_Instance : Declaration, IAnnotated, IInstance {
 
     Annotations getAnnotations() const override { return annotations; }
     Type getType() const override { return type; }
-    cstring Name() const override { return name; }
-    validate{ BUG_CHECK(type->is<Type_Name>() ||
-                        type->is<Type_Specialized>() ||
-                        type->is<Type_Extern>(),        // P4_14 only?
-                        "%1%: unexpected type", type);
-        arguments->check_null(); }
+    ID Name() const override { return name; }
+    validate{ arguments->check_null(); }
 }
 
 /// Toplevel program representation
@@ -427,17 +422,19 @@ class P4Program : IGeneralNamespace {
 
 ///////////////////////////// Statements //////////////////////////
 
-abstract Statement : StatOrDecl {}
+abstract Statement : StatOrDecl {
+#apply
+}
 
 class ExitStatement : Statement {
-    toString{ return "exit"; }
+    toString{ return "exit"_cs; }
     dbprint { out << "exit"; }
 }
 
 class ReturnStatement : Statement {
     NullOK Expression expression;
-    toString{ return cstring("return ") +
-                (expression != nullptr ? expression->toString() : cstring("")); }
+    toString{ return "return "_cs +
+                (expression != nullptr ? expression->toString() : ""_cs); }
 }
 
 class EmptyStatement : Statement {
@@ -447,6 +444,7 @@ class EmptyStatement : Statement {
 class AssignmentStatement : Statement {
     Expression left;
     Expression right;
+    toString{ return left->toString() + " = "_cs + right->toString(); }
 }
 
 class IfStatement : Statement {
@@ -456,6 +454,18 @@ class IfStatement : Statement {
     visit_children {
         v.visit(condition, "condition");
         SplitFlowVisit<Statement>(v, ifTrue, ifFalse).run_visit(); }
+}
+
+class BreakStatement : Statement {
+    toString{ return "break"_cs; }
+    dbprint { out << "break"; }
+    visit_children;  // in loop-visitor.cpp
+}
+
+class ContinueStatement : Statement {
+    toString{ return "continue"_cs; }
+    dbprint { out << "continue"; }
+    visit_children;  // in loop-visitor.cpp
 }
 
 class BlockStatement : Statement, ISimpleNamespace, IAnnotated {
@@ -468,6 +478,8 @@ class BlockStatement : Statement, ISimpleNamespace, IAnnotated {
     void push_back(StatOrDecl st) { components.push_back(st); }
     Annotations getAnnotations() const override { return annotations; }
     bool empty() const { return components.empty(); }
+    void append(StatOrDecl stmt);
+    BlockStatement(std::initializer_list<StatOrDecl> il) { for (auto el : il) append(el); }
 }
 
 class MethodCallStatement : Statement {
@@ -504,7 +516,55 @@ class SwitchStatement : Statement {
         split.run_visit(); }
 }
 
-class Function : Declaration, IFunctional, ISimpleNamespace, INestedNamespace {
+/* abstract base class for all loops */
+abstract LoopStatement : Statement, ISimpleNamespace, IAnnotated {
+    optional Annotations                annotations = Annotations::empty;
+    Annotations getAnnotations() const override { return annotations; }
+}
+
+class ForStatement : LoopStatement {
+    inline IndexedVector<StatOrDecl>    init;
+    Expression                          condition;
+    inline IndexedVector<StatOrDecl>    updates;
+    Statement                           body;
+    IDeclaration getDeclByName(cstring name) const override {
+        return init.getDeclaration(name); }
+    Util::Enumerator<IDeclaration>* getDeclarations() const override {
+        return init.getDeclarations(); }
+    visit_children;
+#emit
+    // template single implementation of const vs non-const ForStatement
+    template<class THIS> static void visit_children(THIS *, Visitor &v);
+#end
+}
+
+// FIXME -- should we try to directly convert this to a ForStatement in the parser?
+class ForInStatement : LoopStatement {
+    NullOK Declaration_Variable         decl;
+    // the declaration will be moved to the enclosing block by MoveDeclarations, but
+    // we keep a ref (PathExpression) to it that will be set by the ctor
+    PathExpression                      ref = nullptr;
+    Expression                          collection;
+    Statement                           body;
+    ForInStatement { ref = new PathExpression(decl->name); }
+    ForInStatement(Util::SourceInfo si, Annotations a, PathExpression pe, Expression c, Statement b)
+        : LoopStatement(si, a), decl(nullptr), ref(pe), collection(c), body(b) {}
+    IDeclaration getDeclByName(cstring name) const override {
+        return decl && decl->name == name ? decl : nullptr; }
+    Util::Enumerator<IDeclaration>* getDeclarations() const override {
+        if (decl) return new Util::SingleEnumerator<const IDeclaration *>(decl);
+        return new Util::EmptyEnumerator<const IDeclaration *>(); }
+    visit_children;
+#emit
+    // template single implementation of const vs non-const ForInStatement
+    template<class THIS> static void visit_children(THIS *, Visitor &v);
+#end
+}
+
+/////////////////////////////////////////////////////////////
+
+class Function : Declaration, IFunctional, IAnnotated, ISimpleNamespace, INestedNamespace {
+    optional Annotations        annotations = Annotations::empty;
     Type_Method    type;
     BlockStatement body;
     ParameterList getParameters() const override {
@@ -516,6 +576,7 @@ class Function : Declaration, IFunctional, ISimpleNamespace, INestedNamespace {
         return type->parameters->getDeclByName(name); }
     std::vector<INamespace> getNestedNamespaces() const override {
         return { type->typeParameters }; }
+    Annotations getAnnotations() const override { return annotations; }
 }
 
 /////////////////////////////////////////////////////////////

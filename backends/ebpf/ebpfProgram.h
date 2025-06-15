@@ -32,6 +32,7 @@ namespace EBPF {
 class EBPFProgram;
 class EBPFParser;
 class EBPFControl;
+class EBPFDeparser;
 class EBPFTable;
 class EBPFType;
 
@@ -49,15 +50,17 @@ class EBPFProgram : public EBPFObject {
     EBPFParser *parser;
     EBPFControl *control;
     EBPFModel &model;
+    /// Deparser may be NULL if not supported (e.g. ebpfFilter package).
+    EBPFDeparser *deparser;
 
-    cstring endLabel, offsetVar, lengthVar;
+    cstring endLabel, offsetVar, lengthVar, headerStartVar;
     cstring zeroKey, functionName, errorVar;
     cstring packetStartVar, packetEndVar, byteVar;
     cstring errorEnum;
-    cstring license = "GPL";  // TODO: this should be a compiler option probably
-    cstring arrayIndexType = "u32";
+    cstring license = "GPL"_cs;  /// TODO: this should be a compiler option probably
+    cstring arrayIndexType = "u32"_cs;
 
-    virtual bool build();  // return 'true' on success
+    virtual bool build();  /// return 'true' on success
 
     EBPFProgram(const EbpfOptions &options, const IR::P4Program *program, P4::ReferenceMap *refMap,
                 P4::TypeMap *typeMap, const IR::ToplevelBlock *toplevel)
@@ -69,17 +72,20 @@ class EBPFProgram : public EBPFObject {
           typeMap(typeMap),
           parser(nullptr),
           control(nullptr),
-          model(EBPFModel::instance) {
-        offsetVar = EBPFModel::reserved("packetOffsetInBits");
-        zeroKey = EBPFModel::reserved("zero");
-        functionName = EBPFModel::reserved("filter");
-        errorVar = EBPFModel::reserved("errorCode");
-        packetStartVar = EBPFModel::reserved("packetStart");
-        packetEndVar = EBPFModel::reserved("packetEnd");
-        lengthVar = EBPFModel::reserved("pkt_len");
-        byteVar = EBPFModel::reserved("byte");
-        endLabel = EBPFModel::reserved("end");
-        errorEnum = EBPFModel::reserved("errorCodes");
+          model(EBPFModel::instance),
+          deparser(nullptr) {
+        // NB: offsetVar not used in eBPF backend - uBPF and TC only
+        offsetVar = EBPFModel::reserved("packetOffsetInBits"_cs);
+        zeroKey = EBPFModel::reserved("zero"_cs);
+        functionName = EBPFModel::reserved("filter"_cs);
+        errorVar = EBPFModel::reserved("errorCode"_cs);
+        packetStartVar = EBPFModel::reserved("packetStart"_cs);
+        packetEndVar = EBPFModel::reserved("packetEnd"_cs);
+        headerStartVar = EBPFModel::reserved("headerStart"_cs);
+        lengthVar = EBPFModel::reserved("pkt_len"_cs);
+        byteVar = EBPFModel::reserved("byte"_cs);
+        endLabel = EBPFModel::reserved("end"_cs);
+        errorEnum = EBPFModel::reserved("errorCodes"_cs);
     }
 
  protected:
@@ -89,10 +95,20 @@ class EBPFProgram : public EBPFObject {
     virtual void emitLocalVariables(CodeBuilder *builder);
     virtual void emitPipeline(CodeBuilder *builder);
 
+    /// Checks whether a method name is considered to be part of the standard library, e.g., defined
+    /// in core.p4 or ebpf_model.p4.
+    /// TODO: Should we also distinguish overloaded methods?
+    virtual bool isLibraryMethod(cstring methodName);
+
  public:
+    virtual void emitCommonPreamble(CodeBuilder *builder);
     virtual void emitGeneratedComment(CodeBuilder *builder);
-    virtual void emitH(CodeBuilder *builder, cstring headerFile);  // emits C headers
-    virtual void emitC(CodeBuilder *builder, cstring headerFile);  // emits C program
+    virtual void emitH(CodeBuilder *builder,
+                       const std::filesystem::path &headerFile);  // emits C headers
+    virtual void emitC(CodeBuilder *builder,
+                       const std::filesystem::path &headerFile);  // emits C program
+
+    DECLARE_TYPEINFO(EBPFProgram, EBPFObject);
 };
 
 }  // namespace EBPF

@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace P4 {
 
+using namespace literals;
+
 /**
    This pass performs some simple semantic checks on the program;
    since the grammar accepts many programs that are actually illegal,
@@ -47,6 +49,7 @@ namespace P4 {
    - names of all parameters are distinct
    - no duplicate declarations in toplevel program
    - Dots are the last field
+   - continue and break statements are only used in the context of a for statement
  */
 class ValidateParsedProgram final : public Inspector {
     void container(const IR::IContainer *type);
@@ -80,7 +83,7 @@ class ValidateParsedProgram final : public Inspector {
                            control->getConstructorParameters());
     }
     void postorder(const IR::P4Parser *parser) override {
-        auto start = parser->states.getDeclaration("start");
+        auto start = parser->states.getDeclaration(IR::ParserState::start);
         if (!start) {
             ::error(ErrorType::ERR_INVALID, "Parser %1% has no 'start' state", parser);
         }
@@ -89,6 +92,8 @@ class ValidateParsedProgram final : public Inspector {
                            parser->getConstructorParameters());
     }
     void postorder(const IR::Dots *dots) override;
+    void postorder(const IR::BreakStatement *s) override;
+    void postorder(const IR::ContinueStatement *s) override;
 };
 
 }  // namespace P4

@@ -4,11 +4,15 @@
 
 ```
 p4tools
- ├─ cmake       ── Common CMake modules
- ├─ common      ── C++ source: common code for the various components of p4check
- ├─ modules     ── P4Tools extensions.
- │  └─ testgen  ── C++ source: P4Testgen.
- └─ submodules  ── External dependencies.
+ ├─ cmake            ── common P4Tools CMake modules.
+ ├─ common           ── common code for the various P4Tools modules.
+ │  ├─ compiler      ── transformation passes for P4 code.
+ │  ├─ control_plane ── code concerning P4Tool's control plane semantics.
+ │  ├─ core          ── definitions for core parts of the P4Tools modules.
+ │  └─ lib           ── helper functions and utilities for P4Tools modules.  
+ └─  modules         ── P4Tools extensions.
+    ├─ smith       ── P4Smith: a random P4 program generator.
+    └─ testgen       ── P4Testgen: a test-case generator for P4 programs.
 ```
 
 ## P4Tools
@@ -16,9 +20,10 @@ P4Tools is a collection of tools that make testing P4 targets and programs a lit
 
 - [P4Testgen](https://github.com/p4lang/p4c/tree/main/backends/p4tools/modules/testgen): An input-output test case generator for P4.
 
-## Building
+- [P4Smith](https://github.com/p4lang/p4c/tree/main/backends/p4tools/modules/smith): A random P4 program generator in the spirit of Csmith.
 
-P4Tools can be built using the following CMAKE configuration in the P4C repository.
+## Building
+Please see the general installation instructions [here](https://github.com/p4lang/p4c#installing-p4c-from-source). P4Tools can be built using the following CMAKE configuration in the P4C repository.
 
 ```
 mkdir build
@@ -28,7 +33,6 @@ make
 ```
 
 ## Dependencies
-* [inja](https://github.com/pantor/inja) template engine for testcase generation.
 * [z3](https://github.com/Z3Prover/z3) SMT solver to compute path constraints.
     * Important: We currently only support Z3 versions 4.8.14 to 4.12.0.
 
@@ -50,8 +54,7 @@ for where to find/put what:
 
 P4Tools in general follows the [P4C coding style](https://github.com/p4lang/p4c/blob/main/docs/README.md#coding-conventions). Some deviations from the Style Guide are highlighted below.
 
-* Comments are important. The Style Guide's [section on
-  comments](https://google.github.io/styleguide/cppguide.html#Comments) is
+* Comments are important. The Style Guide's [section on comments](https://google.github.io/styleguide/cppguide.html#Comments) is
   required reading.
     * Classes, methods, and fields are documented with triple-slash
       Doxygen-style comments:

@@ -19,9 +19,11 @@ limitations under the License.
 #ifndef FRONTENDS_COMMON_OPTIONS_H_
 #define FRONTENDS_COMMON_OPTIONS_H_
 
+#include <filesystem>
+
 #include "parser_options.h"
 // for p4::P4RuntimeFormat definition
-#include "control-plane/p4RuntimeSerializer.h"
+#include "control-plane/p4RuntimeTypes.h"
 
 class CompilerOptions : public ParserOptions {
  protected:
@@ -52,7 +54,7 @@ class CompilerOptions : public ParserOptions {
     // passes.
     std::vector<cstring> passesToExcludeBackend;
     // Dump a JSON representation of the IR in the file.
-    cstring dumpJsonFile = nullptr;
+    std::filesystem::path dumpJsonFile;
     // Dump and undump the IR tree.
     bool debugJson = false;
     // if this flag is true, compile program in non-debug mode.
@@ -70,13 +72,18 @@ class CompilerOptions : public ParserOptions {
     // Choose format for P4Runtime API description.
     P4::P4RuntimeFormat p4RuntimeFormat = P4::P4RuntimeFormat::BINARY;
     // Pretty-print the program in the specified file.
-    cstring prettyPrintFile = nullptr;
+    std::filesystem::path prettyPrintFile;
     // Target.
     cstring target = nullptr;
     // Architecture.
     cstring arch = nullptr;
     // If true, unroll all parser loops inside the midend.
     bool loopsUnrolling = false;
+
+    // General optimization options -- can be interpreted by backends in various ways
+    int optimizationLevel = 1;
+    bool optimizeDebug = false;  // optimize favoring debuggability
+    bool optimizeSize = false;   // optimize favoring size
 
     virtual bool enable_intrinsic_metadata_fix();
 };

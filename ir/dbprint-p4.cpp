@@ -14,24 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <map>
 #include <ostream>
-#include <string>
 #include <utility>
-#include <vector>
 
 #include "dbprint.h"
-#include "ir/id.h"
-#include "ir/indexed_vector.h"
 #include "ir/ir.h"
 #include "ir/namemap.h"
-#include "ir/node.h"
-#include "ir/vector.h"
-#include "lib/cstring.h"
 #include "lib/indent.h"
 #include "lib/log.h"
 #include "lib/map.h"
-#include "lib/safe_vector.h"
 
 using namespace DBPrint;
 using namespace IndentCtl;
@@ -108,7 +99,9 @@ void IR::V1Parser::dbprint(std::ostream &out) const {
 }
 void IR::ParserException::dbprint(std::ostream &out) const { out << "IR::ParserException"; }
 void IR::ParserState::dbprint(std::ostream &out) const {
-    out << "state " << name << " " << annotations << "{" << indent;
+    out << "state " << name;
+    if (dbgetflags(out) & Brief) return;
+    out << " " << annotations << "{" << indent;
     for (auto s : components) out << Log::endl << s;
     if (selectExpression) out << Log::endl << selectExpression;
     out << " }" << unindent;
@@ -143,7 +136,7 @@ void IR::ActionFunction::dbprint(std::ostream &out) const {
 }
 
 void IR::P4Action::dbprint(std::ostream &out) const {
-    out << "action " << name << "(";
+    out << annotations << "action " << name << "(";
     const char *sep = "";
     for (auto arg : parameters->parameters) {
         out << sep << arg->direction << ' ' << arg->type << ' ' << arg->name;
@@ -230,7 +223,7 @@ void IR::P4Control::dbprint(std::ostream &out) const {
 }
 
 void IR::V1Program::dbprint(std::ostream &out) const {
-    for (auto &obj : Values(scope)) out << obj << Log::endl;
+    for (const auto &obj : Values(scope)) out << obj << Log::endl;
 }
 
 void IR::P4Program::dbprint(std::ostream &out) const {

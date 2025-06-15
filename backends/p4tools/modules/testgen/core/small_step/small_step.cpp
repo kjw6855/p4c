@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "backends/p4tools/common/compiler/reachability.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event.h"
@@ -16,6 +15,7 @@
 #include "ir/ir.h"
 #include "ir/irutils.h"
 #include "ir/node.h"
+#include "ir/solver.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/null.h"
@@ -31,11 +31,11 @@
 namespace P4Tools::P4Testgen {
 
 SmallStepEvaluator::Branch::Branch(ExecutionState &nextState)
-    : constraint(IR::getBoolLiteral(true)), nextState(nextState) {}
+    : constraint(IR::BoolLiteral::get(true)), nextState(nextState) {}
 
 SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
                                    const ExecutionState &prevState, ExecutionState &nextState)
-    : constraint(IR::getBoolLiteral(true)), nextState(nextState) {
+    : constraint(IR::BoolLiteral::get(true)), nextState(nextState) {
     if (c) {
         // Evaluate the branch constraint in the current state of symbolic environment.
         // Substitutes all variables to their symbolic value (expression on the program's initial
@@ -50,10 +50,10 @@ SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
 
 SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
                                    const ExecutionState &prevState, ExecutionState &nextState,
-                                   P4::Coverage::CoverageSet potentialStatements)
-    : constraint(IR::getBoolLiteral(true)),
+                                   P4::Coverage::CoverageSet potentialNodes)
+    : constraint(IR::BoolLiteral::get(true)),
       nextState(nextState),
-      potentialStatements(std::move(potentialStatements)) {
+      potentialNodes(std::move(potentialNodes)) {
     if (c) {
         // Evaluate the branch constraint in the current state of symbolic environment.
         // Substitutes all variables to their symbolic value (expression on the program's initial
@@ -70,7 +70,7 @@ SmallStepEvaluator::SmallStepEvaluator(AbstractSolver &solver, const ProgramInfo
     : programInfo(programInfo), solver(solver) {
     if (!TestgenOptions::get().pattern.empty()) {
         reachabilityEngine =
-            new ReachabilityEngine(*programInfo.dcg, TestgenOptions::get().pattern, true);
+            new ReachabilityEngine(programInfo.getCallGraph(), TestgenOptions::get().pattern, true);
     }
 }
 
@@ -223,7 +223,7 @@ class CommandStepper {
                 " Incrementing number of guard violations.",
                 condStream.str().c_str());
             self.get().violatedGuardConditions++;
-            return new std::vector<Branch>({{IR::getBoolLiteral(false), state, nextState}});
+            return new std::vector<Branch>({{IR::BoolLiteral::get(false), state, nextState}});
         }
         // Otherwise, we proceed as usual.
         return new std::vector<Branch>({{cond, state, nextState}});

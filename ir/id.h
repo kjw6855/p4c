@@ -18,7 +18,6 @@ limitations under the License.
 #define IR_ID_H_
 
 #include "lib/cstring.h"
-#include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/source_file.h"
 
@@ -38,8 +37,9 @@ struct ID : Util::IHasSourceInfo {
     ID(Util::SourceInfo si, cstring n) : srcInfo(si), name(n), originalName(n) {
         if (n.isNullOrEmpty()) BUG("Identifier with no name");
     }
-    ID(const char *n) : ID(Util::SourceInfo(), n) {}  // NOLINT(runtime/explicit)
-    ID(cstring n) : ID(Util::SourceInfo(), n) {}      // NOLINT(runtime/explicit)
+    ID(const char *n) : ID(Util::SourceInfo(), cstring(n)) {}  // NOLINT(runtime/explicit)
+    ID(cstring n) : ID(Util::SourceInfo(), n) {}               // NOLINT(runtime/explicit)
+    ID(std::string n) : ID(Util::SourceInfo(), n) {}           // NOLINT(runtime/explicit)
     ID(cstring n, cstring old) : ID(Util::SourceInfo(), n, old) {}
     void dbprint(std::ostream &out) const {
         out << name;
@@ -47,8 +47,14 @@ struct ID : Util::IHasSourceInfo {
     }
     bool operator==(const ID &a) const { return name == a.name; }
     bool operator!=(const ID &a) const { return name != a.name; }
+    bool operator==(cstring a) const { return name == a; }
+    bool operator!=(cstring a) const { return name != a; }
+    bool operator==(const char *a) const { return name == a; }
+    bool operator!=(const char *a) const { return name != a; }
     explicit operator bool() const { return name; }
     operator cstring() const { return name; }
+    std::string string() const { return name.string(); }
+    std::string_view string_view() const { return name.string_view(); }
     bool isDontCare() const { return name == "_"; }
     Util::SourceInfo getSourceInfo() const override { return srcInfo; }
     cstring toString() const override { return originalName.isNullOrEmpty() ? name : originalName; }

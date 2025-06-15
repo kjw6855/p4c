@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace P4 {
 
+using namespace literals;
+
 /// Unifies a call with a prototype.
 bool TypeUnification::unifyCall(const BinaryConstraint *constraint) {
     // These are canonical types.
@@ -205,7 +207,7 @@ bool TypeUnification::unifyBlocks(const BinaryConstraint *constraint) {
     CHECK_NULL(dest);
     CHECK_NULL(src);
     LOG3("Unifying blocks " << dest << " with " << src);
-    if (typeid(*dest) != typeid(*src))
+    if (dest->typeId() != src->typeId())
         return constraint->reportError(constraints->getCurrentSubstitution());
     for (auto tv : dest->typeParameters->parameters) constraints->addUnifiableTypeVariable(tv);
     for (auto tv : src->typeParameters->parameters) constraints->addUnifiableTypeVariable(tv);
@@ -408,7 +410,7 @@ bool TypeUnification::unify(const BinaryConstraint *constraint) {
             }
             if (stHasDots) {
                 auto dotsType = new IR::Type_UnknownStruct(st->name, *missingFields);
-                auto dotsField = st->getField("...");
+                auto dotsField = st->getField("..."_cs);
                 CHECK_NULL(dotsField);
                 auto partial = new IR::Type_Fragment(dotsType);
                 constraints->add(new EqualityConstraint(dotsField->type, partial, constraint));
@@ -450,9 +452,8 @@ bool TypeUnification::unify(const BinaryConstraint *constraint) {
         }
         return constraint->reportError(constraints->getCurrentSubstitution());
     } else if (dest->is<IR::Type_Declaration>() && src->is<IR::Type_Declaration>()) {
-        bool canUnify = typeid(dest) == typeid(src) && dest->to<IR::Type_Declaration>()->name ==
-                                                           src->to<IR::Type_Declaration>()->name;
-        if (!canUnify) return constraint->reportError(constraints->getCurrentSubstitution());
+        if (dest->to<IR::Type_Declaration>()->name != src->to<IR::Type_Declaration>()->name)
+            return constraint->reportError(constraints->getCurrentSubstitution());
         return true;
     } else if (auto dstack = dest->to<IR::Type_Stack>()) {
         if (auto sstack = src->to<IR::Type_Stack>()) {

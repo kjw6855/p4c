@@ -30,6 +30,8 @@ limitations under the License.
 
 namespace BMV2 {
 
+using namespace P4::literals;
+
 #ifndef UNUSED
 #define UNUSED __attribute__((__unused__))
 #endif
@@ -75,12 +77,12 @@ struct ActionProfileTraits;
 
 template <>
 struct ActionProfileTraits<Arch::V1MODEL> {
-    static const cstring name() { return "action profile"; }
+    static const cstring name() { return "action profile"_cs; }
     static const cstring propertyName() {
         return P4V1::V1Model::instance.tableAttributes.tableImplementation.name;
     }
     static const cstring typeName() { return P4V1::V1Model::instance.action_profile.name; }
-    static const cstring sizeParamName() { return "size"; }
+    static const cstring sizeParamName() { return "size"_cs; }
 };
 
 template <>
@@ -88,10 +90,10 @@ struct ActionProfileTraits<Arch::V1MODEL2020> : public ActionProfileTraits<Arch:
 
 template <>
 struct ActionProfileTraits<Arch::PSA> {
-    static const cstring name() { return "action profile"; }
-    static const cstring propertyName() { return "implementation"; }
-    static const cstring typeName() { return "ActionProfile"; }
-    static const cstring sizeParamName() { return "size"; }
+    static const cstring name() { return "action profile"_cs; }
+    static const cstring propertyName() { return "implementation"_cs; }
+    static const cstring typeName() { return "ActionProfile"_cs; }
+    static const cstring sizeParamName() { return "size"_cs; }
 };
 
 /// Traits for the action selector extern, must be specialized for v1model and
@@ -101,7 +103,7 @@ struct ActionSelectorTraits;
 
 template <>
 struct ActionSelectorTraits<Arch::V1MODEL> : public ActionProfileTraits<Arch::V1MODEL> {
-    static const cstring name() { return "action selector"; }
+    static const cstring name() { return "action selector"_cs; }
     static const cstring typeName() { return P4V1::V1Model::instance.action_selector.name; }
 };
 
@@ -110,8 +112,8 @@ struct ActionSelectorTraits<Arch::V1MODEL2020> : public ActionProfileTraits<Arch
 
 template <>
 struct ActionSelectorTraits<Arch::PSA> : public ActionProfileTraits<Arch::PSA> {
-    static const cstring name() { return "action selector"; }
-    static const cstring typeName() { return "ActionSelector"; }
+    static const cstring name() { return "action selector"_cs; }
+    static const cstring typeName() { return "ActionSelector"_cs; }
 };
 
 /// Traits for the register extern, must be specialized for v1model and PSA.
@@ -120,11 +122,11 @@ struct RegisterTraits;
 
 template <>
 struct RegisterTraits<Arch::V1MODEL> {
-    static const cstring name() { return "register"; }
+    static const cstring name() { return "register"_cs; }
     static const cstring typeName() { return P4V1::V1Model::instance.registers.name; }
-    static const cstring sizeParamName() { return "size"; }
-    // the index of the type parameter for the data stored in the register, in
-    // the type parameter list of the extern type declaration
+    static const cstring sizeParamName() { return "size"_cs; }
+    /// the index of the type parameter for the data stored in the register, in
+    /// the type parameter list of the extern type declaration.
     static size_t dataTypeParamIdx() { return 0; }
     static std::optional<size_t> indexTypeParamIdx() { return std::nullopt; }
 };
@@ -136,12 +138,12 @@ struct RegisterTraits<Arch::V1MODEL2020> : public RegisterTraits<Arch::V1MODEL> 
 
 template <>
 struct RegisterTraits<Arch::PSA> {
-    static const cstring name() { return "register"; }
-    static const cstring typeName() { return "Register"; }
-    static const cstring sizeParamName() { return "size"; }
+    static const cstring name() { return "register"_cs; }
+    static const cstring typeName() { return "Register"_cs; }
+    static const cstring sizeParamName() { return "size"_cs; }
     static size_t dataTypeParamIdx() { return 0; }
-    // the index of the type parameter for the register index, in the type
-    // parameter list of the extern type declaration.
+    /// the index of the type parameter for the register index, in the type
+    /// parameter list of the extern type declaration.
     static std::optional<size_t> indexTypeParamIdx() { return 1; }
 };
 
@@ -157,93 +159,93 @@ namespace Helpers {
 template <typename Kind>
 struct CounterlikeTraits;
 
-// According to the C++11 standard: An explicit specialization shall be declared
-// in a namespace enclosing the specialized template. An explicit specialization
-// whose declarator-id is not qualified shall be declared in the nearest
-// enclosing namespace of the template, or, if the namespace is inline (7.3.1),
-// any namespace from its enclosing namespace set. Such a declaration may also
-// be a definition. If the declaration is not a definition, the specialization
-// may be defined later (7.3.1.2).
-//
-// gcc reports an error when trying so specialize CounterlikeTraits<> for
-// Standard::CounterExtern & Standard::MeterExtern outside of the Helpers
-// namespace, even when qualifying CounterlikeTraits<> with Helpers::. It seems
-// to be related to this bug:
-// https://gcc.gnu.org/bugzilla/show_bug.cgi?id=56480.
+/// According to the C++11 standard: An explicit specialization shall be declared
+/// in a namespace enclosing the specialized template. An explicit specialization
+/// whose declarator-id is not qualified shall be declared in the nearest
+/// enclosing namespace of the template, or, if the namespace is inline (7.3.1),
+/// any namespace from its enclosing namespace set. Such a declaration may also
+/// be a definition. If the declaration is not a definition, the specialization
+/// may be defined later (7.3.1.2).
+///
+/// GCC reports an error when trying so specialize CounterlikeTraits<> for
+/// Standard::CounterExtern & Standard::MeterExtern outside of the Helpers
+/// namespace, even when qualifying CounterlikeTraits<> with Helpers::. It seems
+/// to be related to this bug:
+/// https://gcc.gnu.org/bugzilla/show_bug.cgi?id=56480.
 
 /// @ref CounterlikeTraits<> specialization for @ref CounterExtern for v1model
 template <>
 struct CounterlikeTraits<Standard::CounterExtern<Standard::Arch::V1MODEL>> {
-    static const cstring name() { return "counter"; }
+    static const cstring name() { return "counter"_cs; }
     static const cstring directPropertyName() {
         return P4V1::V1Model::instance.tableAttributes.counters.name;
     }
     static const cstring typeName() { return P4V1::V1Model::instance.counter.name; }
     static const cstring directTypeName() { return P4V1::V1Model::instance.directCounter.name; }
-    static const cstring sizeParamName() { return "size"; }
+    static const cstring sizeParamName() { return "size"_cs; }
     static std::optional<size_t> indexTypeParamIdx() { return std::nullopt; }
 };
 
 template <>
 struct CounterlikeTraits<Standard::CounterExtern<Standard::Arch::V1MODEL2020>> {
-    static const cstring name() { return "counter"; }
+    static const cstring name() { return "counter"_cs; }
     static const cstring directPropertyName() {
         return P4V1::V1Model::instance.tableAttributes.counters.name;
     }
     static const cstring typeName() { return P4V1::V1Model::instance.counter.name; }
     static const cstring directTypeName() { return P4V1::V1Model::instance.directCounter.name; }
-    static const cstring sizeParamName() { return "size"; }
+    static const cstring sizeParamName() { return "size"_cs; }
     static std::optional<size_t> indexTypeParamIdx() { return 0; }
 };
 
 /// @ref CounterlikeTraits<> specialization for @ref CounterExtern for PSA
 template <>
 struct CounterlikeTraits<Standard::CounterExtern<Standard::Arch::PSA>> {
-    static const cstring name() { return "counter"; }
-    static const cstring directPropertyName() { return "psa_direct_counter"; }
-    static const cstring typeName() { return "Counter"; }
-    static const cstring directTypeName() { return "DirectCounter"; }
-    static const cstring sizeParamName() { return "n_counters"; }
-    // the index of the type parameter for the counter index, in the type
-    // parameter list of the extern type declaration.
+    static const cstring name() { return "counter"_cs; }
+    static const cstring directPropertyName() { return "psa_direct_counter"_cs; }
+    static const cstring typeName() { return "Counter"_cs; }
+    static const cstring directTypeName() { return "DirectCounter"_cs; }
+    static const cstring sizeParamName() { return "n_counters"_cs; }
+    /// the index of the type parameter for the counter index, in the type
+    /// parameter list of the extern type declaration.
     static std::optional<size_t> indexTypeParamIdx() { return 1; }
 };
 
 /// @ref CounterlikeTraits<> specialization for @ref MeterExtern for v1model
 template <>
 struct CounterlikeTraits<Standard::MeterExtern<Standard::Arch::V1MODEL>> {
-    static const cstring name() { return "meter"; }
+    static const cstring name() { return "meter"_cs; }
     static const cstring directPropertyName() {
         return P4V1::V1Model::instance.tableAttributes.meters.name;
     }
     static const cstring typeName() { return P4V1::V1Model::instance.meter.name; }
     static const cstring directTypeName() { return P4V1::V1Model::instance.directMeter.name; }
-    static const cstring sizeParamName() { return "size"; }
+    static const cstring sizeParamName() { return "size"_cs; }
     static std::optional<size_t> indexTypeParamIdx() { return std::nullopt; }
 };
 
 template <>
 struct CounterlikeTraits<Standard::MeterExtern<Standard::Arch::V1MODEL2020>> {
-    static const cstring name() { return "meter"; }
+    static const cstring name() { return "meter"_cs; }
     static const cstring directPropertyName() {
         return P4V1::V1Model::instance.tableAttributes.meters.name;
     }
     static const cstring typeName() { return P4V1::V1Model::instance.meter.name; }
     static const cstring directTypeName() { return P4V1::V1Model::instance.directMeter.name; }
-    static const cstring sizeParamName() { return "size"; }
+    static const cstring sizeParamName() { return "size"_cs; }
     static std::optional<size_t> indexTypeParamIdx() { return 0; }
 };
 
 /// @ref CounterlikeTraits<> specialization for @ref MeterExtern for PSA
 template <>
 struct CounterlikeTraits<Standard::MeterExtern<Standard::Arch::PSA>> {
-    static const cstring name() { return "meter"; }
-    static const cstring directPropertyName() { return "psa_direct_meter"; }
-    static const cstring typeName() { return "Meter"; }
-    static const cstring directTypeName() { return "DirectMeter"; }
-    static const cstring sizeParamName() { return "n_meters"; }
-    // the index of the type parameter for the meter index, in the type
-    // parameter list of the extern type declaration.
+    static const cstring name() { return "meter"_cs; }
+    static const cstring directPropertyName() { return "psa_direct_meter"_cs; }
+    static const cstring typeName() { return "Meter"_cs; }
+    static const cstring directTypeName() { return "DirectMeter"_cs; }
+    static const cstring sizeParamName() { return "n_meters"_cs; }
+    /// the index of the type parameter for the meter index, in the type
+    /// parameter list of the extern type declaration.
     static std::optional<size_t> indexTypeParamIdx() { return 0; }
 };
 
@@ -251,28 +253,28 @@ struct CounterlikeTraits<Standard::MeterExtern<Standard::Arch::PSA>> {
 
 using BlockTypeMap = std::map<const IR::Block *, const IR::Type *>;
 
-// XXX(hanw): This convenience class stores pointers to the data structures
-// that are commonly used during the program translation. Due to the limitation
-// of current IR structure, these data structure are only refreshed by the
-// evaluator pass. In the long term, integrating these data structures as part
-// of the IR tree would simplify this kind of bookkeeping effort.
+/// XXX(hanw): This convenience class stores pointers to the data structures
+/// that are commonly used during the program translation. Due to the limitation
+/// of current IR structure, these data structure are only refreshed by the
+/// evaluator pass. In the long term, integrating these data structures as part
+/// of the IR tree would simplify this kind of bookkeeping effort.
 using SelectorInput = std::vector<const IR::Expression *>;
 
 struct ConversionContext {
-    // context
+    /// context
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
     const IR::ToplevelBlock *toplevel;
-    // Block currently being converted
+    /// Block currently being converted.
     BlockConverted blockConverted;
-    //
+    /// ProgramStructure pointer.
     ProgramStructure *structure;
-    // expression converter is used in many places.
+    /// Expression converter is used in many places.
     ExpressionConverter *conv;
-    // final json output.
+    /// Final json output.
     BMV2::JsonObjects *json;
 
-    // for action profile conversion
+    /// For action profile conversion.
     Util::JsonArray *action_profiles = nullptr;
 
     std::map<const IR::Declaration_Instance *, SelectorInput> selector_input_map;

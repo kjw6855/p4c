@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "backends/p4tools/common/compiler/reachability.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/node.h"
+#include "ir/solver.h"
 #include "midend/coverage.h"
 
 #include "backends/p4tools/modules/testgen/core/program_info.h"
@@ -30,7 +30,7 @@ class SmallStepEvaluator {
 
         ExecutionStateReference nextState;
 
-        P4::Coverage::CoverageSet potentialStatements;
+        P4::Coverage::CoverageSet potentialNodes;
 
         /// Simple branch without any constraint.
         explicit Branch(ExecutionState &nextState);
@@ -43,7 +43,7 @@ class SmallStepEvaluator {
         /// Branch constrained by a condition. prevState is the state in which the condition
         /// is later evaluated.
         Branch(std::optional<const Constraint *> c, const ExecutionState &prevState,
-               ExecutionState &nextState, P4::Coverage::CoverageSet potentialStatements);
+               ExecutionState &nextState, P4::Coverage::CoverageSet potentialNodes);
     };
 
     using Result = std::vector<Branch> *;

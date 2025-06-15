@@ -1,0 +1,64 @@
+name: Build Doxygen and deploy to GitHub Pages
+permissions:
+    actions: read
+    contents: write
+    pages: write
+
+on:
+    push:
+        branches:
+        - main
+
+env:
+  DOXYGEN_VERSION: 1.11.0
+  DOXYGEN_AWESOME_VERSION: 2.3.3
+        
+jobs:
+    build-and-deploy:
+        runs-on: ubuntu-latest
+        concurrency: ci-${{github. ref}}
+        steps: 
+            - name : Checkout
+              uses: actions/checkout@v4
+
+            - name: Install Clang
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y clang
+            
+            - name: Install Doxygen 
+              shell: bash
+              run: |
+                wget https://github.com/doxygen/doxygen/releases/download/Release_${DOXYGEN_VERSION//./_}/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz
+                tar xzvf doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz
+                cd doxygen-${DOXYGEN_VERSION}
+                sudo make install
+                cd ..
+                rm -rf doxygen-${DOXYGEN_VERSION}*  
+            
+            - name: Install graphviz
+              run: sudo apt-get install graphviz -y
+
+            - name: Clone Doxygen Awesome CSS Themes
+              working-directory: ./docs/doxygen
+              run: |
+                git clone --depth 1 -b v${{ env.DOXYGEN_AWESOME_VERSION }} https://github.com/jothepro/doxygen-awesome-css awesome_css
+
+            - name: Generate Doxygen Documentation
+              run: |
+                   cd docs/doxygen
+                   doxygen doxygen.cfg
+              shell: bash
+            
+            - name: Create .nojekyll 
+              run: |
+                    cd docs/doxygen/build
+                    touch html/.nojekyll
+              shell: bash
+
+            - name: Deploy to GitHub Pages
+              uses: JamesIves/github-pages-deploy-action@v4
+              with:
+                token: ${{ secrets.GITHUB_TOKEN }}
+                branch: gh-pages
+                folder: docs/doxygen/build/html

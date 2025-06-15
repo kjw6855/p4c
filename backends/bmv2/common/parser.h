@@ -42,13 +42,13 @@ class ParserConverter : public Inspector {
     Util::IJson *convertSelectKey(const IR::SelectExpression *expr);
     Util::IJson *convertPathExpression(const IR::PathExpression *expr);
     Util::IJson *createDefaultTransition();
-    cstring jsonAssignment(const IR::Type *type, bool inParser);
+    cstring jsonAssignment(const IR::Type *type);
     std::vector<Util::IJson *> convertSelectExpression(const IR::SelectExpression *expr);
     void addValueSets(const IR::P4Parser *parser);
 
  public:
     bool preorder(const IR::P4Parser *p) override;
-    explicit ParserConverter(ConversionContext *ctxt, cstring name = "parser")
+    explicit ParserConverter(ConversionContext *ctxt, cstring name = "parser"_cs)
         : ctxt(ctxt), name(name), corelib(P4::P4CoreLibrary::instance()) {
         setName("ParserConverter");
     }

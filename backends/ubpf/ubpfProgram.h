@@ -44,7 +44,7 @@ class UBPFProgram : public EBPF::EBPFProgram {
     cstring contextVar, outerHdrOffsetVar, outerHdrLengthVar;
     cstring stdMetadataVar;
     cstring packetTruncatedSizeVar;
-    cstring arrayIndexType = "uint32_t";
+    cstring arrayIndexType = "uint32_t"_cs;
 
     UBPFProgram(const EbpfOptions &options, const IR::P4Program *program, P4::ReferenceMap *refMap,
                 P4::TypeMap *typeMap, const IR::ToplevelBlock *toplevel)
@@ -62,8 +62,8 @@ class UBPFProgram : public EBPF::EBPFProgram {
     }
 
     bool build() override;
-    void emitC(UbpfCodeBuilder *builder, cstring headerFile);
-    void emitH(EBPF::CodeBuilder *builder, cstring headerFile) override;
+    void emitC(UbpfCodeBuilder *builder, const std::filesystem::path &headerFile);
+    void emitH(EBPF::CodeBuilder *builder, const std::filesystem::path &headerFile) override;
     void emitPreamble(EBPF::CodeBuilder *builder) override;
     void emitTypes(EBPF::CodeBuilder *builder) override;
     void emitTableDefinition(EBPF::CodeBuilder *builder) const;
@@ -73,6 +73,15 @@ class UBPFProgram : public EBPF::EBPFProgram {
     void emitMetadataInstance(EBPF::CodeBuilder *builder) const;
     void emitLocalVariables(EBPF::CodeBuilder *builder) override;
     void emitPipeline(EBPF::CodeBuilder *builder) override;
+
+    bool isLibraryMethod(cstring methodName) override {
+        static std::set<cstring> DEFAULT_METHODS = {
+            "mark_to_drop"_cs, "mark_to_pass"_cs,  "ubpf_time_get_ns"_cs, "truncate"_cs,
+            "hash"_cs,         "csum_replace2"_cs, "csum_replace4"_cs,
+        };
+        return DEFAULT_METHODS.find(methodName) != DEFAULT_METHODS.end() ||
+               EBPFProgram::isLibraryMethod(methodName);
+    }
 };
 
 }  // namespace UBPF

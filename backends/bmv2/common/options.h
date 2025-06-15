@@ -25,11 +25,11 @@ namespace BMV2 {
 
 class BMV2Options : public CompilerOptions {
  public:
-    // Externs generation
+    /// Generate externs.
     bool emitExterns = false;
-    // file to output to
-    cstring outputFile = nullptr;
-    // read from json
+    /// File to output to.
+    std::filesystem::path outputFile;
+    /// Read from json.
     bool loadIRFromJson = false;
 
     BMV2Options() {

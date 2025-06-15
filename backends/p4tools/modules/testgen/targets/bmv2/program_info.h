@@ -2,15 +2,13 @@
 #define BACKENDS_P4TOOLS_MODULES_TESTGEN_TARGETS_BMV2_PROGRAM_INFO_H_
 
 #include <cstddef>
-#include <map>
-#include <vector>
 
+#include "control-plane/p4RuntimeSerializer.h"
 #include "ir/ir.h"
 #include "lib/cstring.h"
-#include "lib/ordered_map.h"
 
 #include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/lib/continuation.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/compiler_result.h"
 
 namespace P4Tools::P4Testgen::Bmv2 {
 
@@ -31,18 +29,22 @@ class Bmv2V1ModelProgramInfo : public ProgramInfo {
     std::vector<Continuation::Command> processDeclaration(const IR::Type_Declaration *typeDecl,
                                                           size_t blockIdx) const;
 
-    std::map<const IR::IDeclaration *, const IR::P4Table *> directExternMap;
-
  public:
-    Bmv2V1ModelProgramInfo(const IR::P4Program *program,
+    Bmv2V1ModelProgramInfo(const BMv2V1ModelCompilerResult &compilerResult,
                            ordered_map<cstring, const IR::Type_Declaration *> inputBlocks,
                            std::map<int, int> declIdToGress);
 
     /// @returns the gress associated with the given parser.
     int getGress(const IR::Type_Declaration *) const;
 
+    /// @returns the P4Runtime API produced by the compiler.
+    [[nodiscard]] P4::P4RuntimeAPI getP4RuntimeAPI() const;
+
     /// @returns the table associated with the direct extern
     const IR::P4Table *getTableofDirectExtern(const IR::IDeclaration *directExternDecl) const;
+
+    /// @see ProgramInfo::getArchSpec
+    [[nodiscard]] const ArchSpec &getArchSpec() const override;
 
     /// @returns the programmable blocks of the program. Should be 6.
     [[nodiscard]] const ordered_map<cstring, const IR::Type_Declaration *> *getProgrammableBlocks()
@@ -68,6 +70,8 @@ class Bmv2V1ModelProgramInfo : public ProgramInfo {
 
     [[nodiscard]] const IR::Type_Bits *getParserErrorType() const override;
 
+    [[nodiscard]] const BMv2V1ModelCompilerResult &getCompilerResult() const override;
+
     /// @returns the Member variable corresponding to the parameter index for the given parameter.
     /// The Member variable uses the parameter struct label as parent and the @param paramLabel as
     /// member. @param type is the type of the member. If the parser does not have this parameter
@@ -75,6 +79,11 @@ class Bmv2V1ModelProgramInfo : public ProgramInfo {
     /// variable.
     static const IR::Member *getParserParamVar(const IR::P4Parser *parser, const IR::Type *type,
                                                size_t paramIndex, cstring paramLabel);
+
+    /// @see ProgramInfo::getArchSpec
+    static const ArchSpec ARCH_SPEC;
+
+    DECLARE_TYPEINFO(Bmv2V1ModelProgramInfo, ProgramInfo);
 };
 
 }  // namespace P4Tools::P4Testgen::Bmv2

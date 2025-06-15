@@ -16,7 +16,8 @@ limitations under the License.
 
 #include "constantFolding.h"
 
-#include "frontends/common/options.h"
+#include "frontends/common/parser_options.h"
+#include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/enumInstance.h"
 #include "lib/big_int_util.h"
 #include "lib/log.h"
@@ -37,7 +38,7 @@ class CloneConstants : public Transform {
         } else if (auto ii = type->to<IR::Type_InfInt>()) {
             // You can't just clone a InfInt value, because
             // you get the same declid.  We want a new declid.
-            type = new IR::Type_InfInt(ii->srcInfo);
+            type = IR::Type_InfInt::get(ii->srcInfo);
         } else {
             BUG("unexpected type %2% for constant %2%", type, constant);
         }
@@ -87,6 +88,7 @@ const IR::Expression *DoConstantFolding::getConstant(const IR::Expression *expr)
 }
 
 const IR::Node *DoConstantFolding::postorder(IR::PathExpression *e) {
+    if (const auto *r = policy->hook(*this, e)) return r;
     if (refMap == nullptr || assignmentTarget) return e;
     auto decl = refMap->getDeclaration(e->path);
     if (decl == nullptr) return e;
@@ -162,7 +164,7 @@ const IR::Node *DoConstantFolding::postorder(IR::Declaration_Constant *d) {
             } else {
                 // Destination type is InfInt; we must "erase" the width of the source
                 if (!cst->type->is<IR::Type_InfInt>()) {
-                    init = new IR::Constant(cst->srcInfo, new IR::Type_InfInt(), cst->value,
+                    init = new IR::Constant(cst->srcInfo, IR::Type_InfInt::get(), cst->value,
                                             cst->base);
                 }
             }
@@ -236,6 +238,43 @@ const IR::Node *DoConstantFolding::preorder(IR::ArrayIndex *e) {
     return e;
 }
 
+namespace {
+
+// Returns true if the given expression is of the form "some_table.apply().action_run."
+bool isActionRun(const IR::Expression *e, const DeclarationLookup *refMap) {
+    const auto *actionRunMem = e->to<IR::Member>();
+    if (!actionRunMem) return false;
+    if (actionRunMem->member.name != IR::Type_Table::action_run) return false;
+
+    const auto *applyMce = actionRunMem->expr->to<IR::MethodCallExpression>();
+    if (!applyMce) return false;
+    const auto *applyMceMem = applyMce->method->to<IR::Member>();
+    if (!applyMceMem) return false;
+    if (applyMceMem->member.name != IR::IApply::applyMethodName) return false;
+
+    const auto *tablePathExpr = applyMceMem->expr->to<IR::PathExpression>();
+    if (!tablePathExpr) return false;
+    const auto *tableDecl = refMap->getDeclaration(tablePathExpr->path);
+    if (!tableDecl) return false;
+
+    return tableDecl->is<IR::P4Table>();
+}
+
+}  // namespace
+
+const IR::Node *DoConstantFolding::preorder(IR::SwitchCase *c) {
+    // Action enum switch case labels must be action names.
+    // Do not fold the switch case's 'label' expression so that it can be inspected by the
+    // TypeInference pass.
+    // Note: static_cast is used as a SwitchCase's parent is always SwitchStatement.
+    const auto *parent = static_cast<const IR::SwitchStatement *>(getContext()->node);
+    if (isActionRun(parent->expression, refMap)) {
+        visit(c->statement);
+        prune();
+    }
+    return c;
+}
+
 const IR::Node *DoConstantFolding::postorder(IR::Cmpl *e) {
     auto op = getConstant(e->expr);
     if (op == nullptr) return e;
@@ -307,8 +346,7 @@ const IR::Node *DoConstantFolding::postorder(IR::Add *e) {
 }
 
 const IR::Node *DoConstantFolding::postorder(IR::AddSat *e) {
-    return binary(
-        e, [](big_int a, big_int b) -> big_int { return a + b; }, true);
+    return binary(e, [](big_int a, big_int b) -> big_int { return a + b; }, true);
 }
 
 const IR::Node *DoConstantFolding::postorder(IR::Sub *e) {
@@ -316,8 +354,7 @@ const IR::Node *DoConstantFolding::postorder(IR::Sub *e) {
 }
 
 const IR::Node *DoConstantFolding::postorder(IR::SubSat *e) {
-    return binary(
-        e, [](big_int a, big_int b) -> big_int { return a - b; }, true);
+    return binary(e, [](big_int a, big_int b) -> big_int { return a - b; }, true);
 }
 
 const IR::Node *DoConstantFolding::postorder(IR::Mul *e) {
@@ -425,9 +462,9 @@ const IR::Node *DoConstantFolding::compare(const IR::Operation_Binary *e) {
                 auto ri = rlist->components.at(i);
                 const IR::Operation_Binary *tmp;
                 if (eqTest)
-                    tmp = new IR::Equ(li, ri);
+                    tmp = new IR::Equ(IR::Type_Boolean::get(), li, ri);
                 else
-                    tmp = new IR::Neq(li, ri);
+                    tmp = new IR::Neq(IR::Type_Boolean::get(), li, ri);
                 auto cmp = compare(tmp);
                 auto boolLit = cmp->to<IR::BoolLiteral>();
                 if (boolLit == nullptr) return e;
@@ -608,6 +645,10 @@ const IR::Node *DoConstantFolding::postorder(IR::Slice *e) {
         ::error(ErrorType::ERR_EXPECTED, "%1%: bit slicing should be specified as [msb:lsb]", e);
         return e;
     }
+    if (l < 0) {
+        ::error(ErrorType::ERR_EXPECTED, "%1%: expected slice indexes to be non-negative", e->e2);
+        return e;
+    }
     if (overflowWidth(e, m) || overflowWidth(e, l)) return e;
     big_int value = cbase->value >> l;
     big_int mask = 1;
@@ -707,9 +748,6 @@ const IR::Node *DoConstantFolding::postorder(IR::LNot *e) {
 }
 
 const IR::Node *DoConstantFolding::postorder(IR::Mux *e) {
-    if (!typesKnown)
-        // We want the typechecker to look at the expression first
-        return e;
     auto cond = getConstant(e->e0);
     if (cond == nullptr) return e;
     auto b = cond->to<IR::BoolLiteral>();
@@ -793,6 +831,9 @@ const IR::Node *DoConstantFolding::postorder(IR::Cast *e) {
         if (auto arg = expr->to<IR::Constant>()) {
             return cast(arg, arg->base, type);
         } else if (auto arg = expr->to<IR::BoolLiteral>()) {
+            if (type->isSigned || type->size != 1)
+                error(ErrorType::ERR_INVALID, "%1%: Cannot cast %1% directly to %2% (use bit<1>)",
+                      arg, type);
             int v = arg->value ? 1 : 0;
             return new IR::Constant(e->srcInfo, type, v, 10);
         } else if (expr->is<IR::Member>()) {
@@ -803,6 +844,16 @@ const IR::Node *DoConstantFolding::postorder(IR::Cast *e) {
             }
         } else {
             return e;
+        }
+    } else if (etype->is<IR::Type_InfInt>()) {
+        if (const auto *constant = expr->to<IR::Constant>()) {
+            const auto *ctype = constant->type;
+            if (!ctype->is<IR::Type_Bits>() && !ctype->is<IR::Type_InfInt>()) {
+                ::error(ErrorType::ERR_INVALID, "%1%: Cannot cast %1% to arbitrary presion integer",
+                        ctype);
+                return e;
+            }
+            return new IR::Constant(e->srcInfo, etype, constant->value, constant->base);
         }
     } else if (etype->is<IR::Type_Boolean>()) {
         if (expr->is<IR::BoolLiteral>()) return expr;
@@ -878,6 +929,7 @@ DoConstantFolding::Result DoConstantFolding::setContains(const IR::Expression *k
             return Result::No;
         }
         auto sel = getConstant(select);
+        BUG_CHECK(sel, "%1%: expected a constant expression", select);
         // For Enum and SerEnum instances we can just use expression equivalence.
         // This assumes that type checking does not allow us to compare constants to SerEnums.
         if (key->equiv(*sel)) return Result::Yes;
@@ -956,7 +1008,8 @@ const IR::Node *DoConstantFolding::postorder(IR::SelectExpression *expression) {
             finished = true;
             if (someUnknown) {
                 if (!c->keyset->is<IR::DefaultExpression>()) changes = true;
-                auto newc = new IR::SelectCase(c->srcInfo, new IR::DefaultExpression(), c->state);
+                auto newc = new IR::SelectCase(
+                    c->srcInfo, new IR::DefaultExpression(expression->select->type), c->state);
                 cases.push_back(newc);
             } else {
                 // This is the result.

@@ -1,11 +1,11 @@
 #include "backends/p4tools/common/compiler/compiler_target.h"
 
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "backends/p4tools/common/compiler/context.h"
-#include "backends/p4tools/common/compiler/convert_hs_index.h"
 #include "backends/p4tools/common/compiler/midend.h"
 #include "backends/p4tools/common/core/target.h"
 #include "frontends/common/applyOptionsPragmas.h"
@@ -20,22 +20,26 @@
 
 namespace P4Tools {
 
-ICompileContext *CompilerTarget::makeContext() { return get().makeContextImpl(); }
-
-std::vector<const char *> *CompilerTarget::initCompiler(int argc, char **argv) {
-    return get().initCompilerImpl(argc, argv);
+ICompileContext *CompilerTarget::makeContext(std::string_view toolName) {
+    return get(toolName).makeContextImpl();
 }
 
-std::optional<const IR::P4Program *> CompilerTarget::runCompiler() {
+std::vector<const char *> *CompilerTarget::initCompiler(std::string_view toolName, int argc,
+                                                        char **argv) {
+    return get(toolName).initCompilerImpl(argc, argv);
+}
+
+CompilerResultOrError CompilerTarget::runCompiler(std::string_view toolName) {
     const auto *program = P4Tools::CompilerTarget::runParser();
     if (program == nullptr) {
         return std::nullopt;
     }
 
-    return runCompiler(program);
+    return runCompiler(toolName, program);
 }
 
-std::optional<const IR::P4Program *> CompilerTarget::loadProgram(cstring irJsonFile) {
+std::optional<const IR::P4Program *> CompilerTarget::loadProgram(std::string_view toolName,
+                                                                 cstring irJsonFile) {
     std::filebuf fb;
     auto &options = P4CContext::get().options();
 
@@ -56,7 +60,7 @@ std::optional<const IR::P4Program *> CompilerTarget::loadProgram(cstring irJsonF
     P4::serializeP4RuntimeIfRequired(program, compilerOptions);
     if (::errorCount() > 0) return std::nullopt;
 
-    const auto &self = get();
+    const auto &self = get(toolName);
     program = self.runMidEnd(program, true);
     if (program == nullptr) {
         return std::nullopt;
@@ -67,34 +71,33 @@ std::optional<const IR::P4Program *> CompilerTarget::loadProgram(cstring irJsonF
     return program;
 }
 
-std::optional<const IR::P4Program *> CompilerTarget::runCompiler(const std::string &source) {
+CompilerResultOrError CompilerTarget::runCompiler(std::string_view toolName,
+                                                  const std::string &source) {
     const auto *program = P4::parseP4String(source, P4CContext::get().options().langVersion);
     if (program == nullptr) {
         return std::nullopt;
     }
 
-    return runCompiler(program);
+    return runCompiler(toolName, program);
 }
 
-std::optional<const IR::P4Program *> CompilerTarget::runCompiler(const IR::P4Program *program) {
-    return get().runCompilerImpl(program);
+CompilerResultOrError CompilerTarget::runCompiler(std::string_view toolName,
+                                                  const IR::P4Program *program) {
+    return get(toolName).runCompilerImpl(program);
 }
 
-std::optional<const IR::P4Program *> CompilerTarget::runCompilerImpl(
-    const IR::P4Program *program) const {
-    const auto &self = get();
-
-    program = self.runFrontend(program);
+CompilerResultOrError CompilerTarget::runCompilerImpl(const IR::P4Program *program) const {
+    program = runFrontend(program);
     if (program == nullptr) {
         return std::nullopt;
     }
 
-    program = self.runMidEnd(program, false);
+    program = runMidEnd(program, false);
     if (program == nullptr) {
         return std::nullopt;
     }
 
-    return program;
+    return *new CompilerResult(*program);
 }
 
 ICompileContext *CompilerTarget::makeContextImpl() const {
@@ -137,6 +140,7 @@ P4::FrontEnd CompilerTarget::mkFrontEnd() const { return {}; }
 MidEnd CompilerTarget::mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const {
     MidEnd midEnd(options);
     midEnd.addDefaultPasses(loadIRFromJson);
+    midEnd.setStopOnError(true);
     return midEnd;
 }
 
@@ -149,9 +153,12 @@ const IR::P4Program *CompilerTarget::runMidEnd(const IR::P4Program *program, boo
     return program->apply(midEnd);
 }
 
-CompilerTarget::CompilerTarget(std::string deviceName, std::string archName)
-    : Target("compiler", std::move(deviceName), std::move(archName)) {}
+CompilerTarget::CompilerTarget(std::string_view toolName, const std::string &deviceName,
+                               const std::string &archName)
+    : Target(toolName, deviceName, archName) {}
 
-const CompilerTarget &CompilerTarget::get() { return Target::get<CompilerTarget>("compiler"); }
+const CompilerTarget &CompilerTarget::get(std::string_view toolName) {
+    return Target::get<CompilerTarget>(toolName);
+}
 
 }  // namespace P4Tools

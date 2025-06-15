@@ -17,12 +17,20 @@ limitations under the License.
 #ifndef CONTROL_PLANE_P4RUNTIMEARCHHANDLER_H_
 #define CONTROL_PLANE_P4RUNTIMEARCHHANDLER_H_
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wpedantic"
+#include <google/protobuf/util/json_util.h>
+#pragma GCC diagnostic pop
+
 #include <optional>
 #include <set>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include "p4/config/v1/p4info.pb.h"
+#include "p4/v1/p4runtime.pb.h"
 #pragma GCC diagnostic pop
 
 #include "frontends/common/resolveReferences/referenceMap.h"
@@ -30,10 +38,13 @@ limitations under the License.
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/typeMap.h"
 #include "ir/ir.h"
+#include "lib/cstring.h"
 #include "lib/ordered_set.h"
 #include "typeSpecConverter.h"
 
 namespace P4 {
+
+using namespace literals;
 
 /** \addtogroup control_plane
  *  @{
@@ -69,6 +80,10 @@ class P4RuntimeSymbolType {
     }
     static P4RuntimeSymbolType P4RT_CONTROLLER_HEADER() {
         return P4RuntimeSymbolType(::p4::config::v1::P4Ids::CONTROLLER_HEADER);
+    }
+
+    static P4RuntimeSymbolType P4RT_OTHER_EXTERNS_START() {
+        return P4RuntimeSymbolType(::p4::config::v1::P4Ids::OTHER_EXTERNS_START);
     }
 
     bool operator==(const P4RuntimeSymbolType &other) const { return id == other.id; }
@@ -127,7 +142,7 @@ class P4RuntimeArchHandlerIface {
     /// Get control plane name for @block
     virtual cstring getControlPlaneName(const IR::Block *block) {
         auto decl = block->getContainer();
-        return decl ? decl->controlPlaneName() : "";
+        return decl ? decl->controlPlaneName() : cstring::empty;
     }
     /// Collects architecture-specific properties for @tableBlock in @symbols
     /// table.
@@ -136,6 +151,12 @@ class P4RuntimeArchHandlerIface {
     /// Collects architecture-specific @externBlock instance in @symbols table.
     virtual void collectExternInstance(P4RuntimeSymbolTableIface *symbols,
                                        const IR::ExternBlock *externBlock) = 0;
+    /// Collects architecture-specific used in assignment statements
+    virtual void collectAssignmentStatement(P4RuntimeSymbolTableIface *symbols,
+                                            const IR::AssignmentStatement *assign) = 0;
+    /// Collects architecture-specific @externMethod instance in @symbols table.
+    virtual void collectExternMethod(P4RuntimeSymbolTableIface *symbols,
+                                     const P4::ExternMethod *externMethod) = 0;
     /// Collects extern method call @externFunction in @symbols table in case it
     /// needs to be exposed to the control-plane (e.g. digest call for v1model).
     virtual void collectExternFunction(P4RuntimeSymbolTableIface *symbols,
@@ -166,6 +187,15 @@ class P4RuntimeArchHandlerIface {
     /// requires some logic to be performed then.
     virtual void postAdd(const P4RuntimeSymbolTableIface &symbols,
                          ::p4::config::v1::P4Info *p4info) = 0;
+    /// This method is called to add target specific extern entries
+    virtual void addExternEntries(const p4::v1::WriteRequest *entries,
+                                  const P4RuntimeSymbolTableIface &symbols,
+                                  const IR::ExternBlock *externBlock) = 0;
+    /// called when processing annotations via setPreamble
+    virtual bool filterAnnotations(cstring anno) = 0;
+
+    /// Control how JSON is output
+    virtual google::protobuf::util::JsonPrintOptions getJsonPrintOptions() = 0;
 };
 
 /// A functor interface that needs to be implemented for each
@@ -369,7 +399,7 @@ struct Counterlike {
         // Counter and meter externs refer to their unit as a "type"; this is
         // (confusingly) unrelated to the "type" field of a counter or meter in
         // P4Info.
-        auto unit = instance->getParameterValue("type");
+        auto unit = instance->getParameterValue("type"_cs);
         if (!unit->is<IR::Declaration_ID>()) {
             ::error(ErrorType::ERR_INVALID,
                     "%1% '%2%' has a unit type which is not an enum constant: %3%",
@@ -430,7 +460,7 @@ struct Counterlike {
             return std::nullopt;
         }
 
-        auto unitArgument = instance.substitution.lookupByName("type")->expression;
+        auto unitArgument = instance.substitution.lookupByName("type"_cs)->expression;
         if (unitArgument == nullptr) {
             ::error(ErrorType::ERR_EXPECTED,
                     "Direct %1% instance %2% should take a constructor argument",
@@ -450,7 +480,7 @@ struct Counterlike {
                                  unit,
                                  Helpers::getTableSize(table),
                                  table->controlPlaneName(),
-                                 ""};
+                                 cstring::empty};
     }
 };
 

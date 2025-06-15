@@ -14,14 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-/**
- * DPDK architecture assume the following control block signature
- *
- * control ingress(header h, metadata m);
- * control egress(header h, metadata m);
- *
- * We need to convert psa control blocks to this form.
- */
+/// DPDK architecture assume the following control block signature.
+///
+/// control ingress(header h, metadata m);
+/// control egress(header h, metadata m);
+/// We need to convert psa control blocks to this form.
 
 #include "dpdkArch.h"
 
@@ -32,6 +29,7 @@ limitations under the License.
 #include "frontends/p4/externInstance.h"
 #include "frontends/p4/tableApply.h"
 #include "frontends/p4/typeMap.h"
+#include "lib/cstring.h"
 
 namespace DPDK {
 
@@ -39,13 +37,13 @@ cstring TypeStruct2Name(const cstring s) {
     if (isStandardMetadata(s)) {
         return s.substr(0, s.size() - 2);
     } else {
-        return "local_metadata";
+        return "local_metadata"_cs;
     }
 }
 
-// This function is a sanity to check whether the component of a Expression
-// falls into following classes, if not, it means we haven't implemented a
-// handle for that class.
+/// This function is a sanity to check whether the component of a Expression
+/// falls into following classes, if not, it means we haven't implemented a
+/// handle for that class.
 void expressionUnrollSanityCheck(const IR::Expression *e) {
     if (!e->is<IR::Operation_Unary>() && !e->is<IR::MethodCallExpression>() &&
         !e->is<IR::Member>() && !e->is<IR::PathExpression>() && !e->is<IR::Operation_Binary>() &&
@@ -82,7 +80,7 @@ const IR::Type_Control *ConvertToDpdkArch::rewriteDeparserType(const IR::Type_Co
                                                                cstring name) {
     // Dpdk requires all local variables to be collected in a structure called
     // metadata, and we perform read/write on this struct fields, so here we unify
-    // direction of this metadata decl to always be inout
+    // direction of this metadata decl to always be inout.
     auto applyParams = new IR::ParameterList();
     if (name == "IngressDeparser") {
         applyParams->push_back(c->applyParams->parameters.at(0));
@@ -107,7 +105,7 @@ const IR::Type_Control *ConvertToDpdkArch::rewriteDeparserType(const IR::Type_Co
     return tc;
 }
 
-// translate control block signature in arch.p4
+/// translate control block signature in arch.p4
 const IR::Node *ConvertToDpdkArch::postorder(IR::Type_Control *c) {
     const IR::Type_Control *t = nullptr;
     for (auto kv : structure->pipelines) {
@@ -181,8 +179,8 @@ const IR::Node *ConvertToDpdkArch::preorder(IR::PathExpression *pe) {
 }
 
 const IR::Node *ConvertToDpdkArch::preorder(IR::Member *m) {
-    /* PathExpressions are handled in a separate preorder function
-       Hence do not process them here */
+    // PathExpressions are handled in a separate preorder function
+    // Hence do not process them here.
     if (!m->expr->is<IR::Member>() && !m->expr->is<IR::ArrayIndex>()) prune();
 
     if (auto p = m->expr->to<IR::PathExpression>()) {
@@ -228,13 +226,10 @@ void ConvertLookahead::Collect::postorder(const IR::AssignmentStatement *stateme
 
     LOG2("Collecting lookahead in statement:" << std::endl << " " << statement);
 
-    /**
-     * Store new header in following format in the map:
-     *
-     * header lookahead_tmp_hdr {
-     *   T f;
-     * }
-     */
+    // Store new header in following format in the map:
+    // header lookahead_tmp_hdr {
+    //   T f;
+    // }
     IR::ID newHeaderFieldName("f");
     auto program = findOrigCtxt<IR::P4Program>();
     IR::IndexedVector<IR::StructField> newHeaderFields;
@@ -244,12 +239,10 @@ void ConvertLookahead::Collect::postorder(const IR::AssignmentStatement *stateme
 
     repl->insertHeader(program, newHeader);
 
-    /**
-     * Store following declaration of new local variable which is of
-     * new header type in the map:
-     *
-     * lookahead_tmp_hdr lookahead_tmp;
-     */
+    // Store following declaration of new local variable which is of
+    // new header type in the map:
+    //
+    // lookahead_tmp_hdr lookahead_tmp;
     auto parser = findOrigCtxt<IR::P4Parser>();
     IR::ID newLocalVarName(refMap->newName("lookahead_tmp"));
     auto newLocalVarType = new IR::Type_Name(newHeaderName);
@@ -257,16 +250,14 @@ void ConvertLookahead::Collect::postorder(const IR::AssignmentStatement *stateme
 
     repl->insertVar(parser, newLocalVar);
 
-    /**
-     * Replace current statement with 2 new statements:
-     * - assignment statement with lookahead method using
-     *   newly created header definiton
-     * - assignment statement which assigns the field from
-     *   newly created header into the original variable
-     *
-     * lookahead_tmp = pkt.lookahead<lookahead_tmp_hdr>();
-     * var_name = lookahead_tmp.f;
-     */
+    // Replace current statement with 2 new statements:
+    // - assignment statement with lookahead method using
+    //   newly created header definiton
+    // - assignment statement which assigns the field from
+    //   newly created header into the original variable
+    //
+    // lookahead_tmp = pkt.lookahead<lookahead_tmp_hdr>();
+    // var_name = lookahead_tmp.f;
     auto newStatements = new IR::IndexedVector<IR::StatOrDecl>;
     const IR::Expression *newLeft;
     const IR::Expression *newRight;
@@ -508,7 +499,7 @@ const IR::Node *AlignHdrMetaField::preorder(IR::Type_StructLike *st) {
                 field_name_list.emplace(field->name, obj);
             }
         }
-        cstring modifiedName = "";
+        cstring modifiedName = cstring::empty;
         auto size = field_name_list.size();
         unsigned i = 0;
         // Check if the sum of width of non-aligned field is divisble by 8.
@@ -553,8 +544,8 @@ const IR::Node *AlignHdrMetaField::preorder(IR::Type_StructLike *st) {
                 fieldObj.headerStr = st->name.name;
                 fieldObj.modifiedWidth = size_sum_so_far;
                 fieldObj.fieldWidth = s->second.fieldWidth;
-                fieldObj.lsb = offset;
-                fieldObj.msb = offset + s->second.fieldWidth - 1;
+                fieldObj.lsb = size_sum_so_far - (offset + fieldObj.fieldWidth);
+                fieldObj.msb = fieldObj.lsb + s->second.fieldWidth - 1;
                 fieldObj.offset = offset;
                 structure->hdrFieldInfoList[s->first].push_back(fieldObj);
                 offset += s->second.fieldWidth;
@@ -562,11 +553,11 @@ const IR::Node *AlignHdrMetaField::preorder(IR::Type_StructLike *st) {
             fields->push_back(
                 new IR::StructField(IR::ID(modifiedName), IR::Type_Bits::get(size_sum_so_far)));
             size_sum_so_far = 0;
-            modifiedName = "";
+            modifiedName = cstring::empty;
             field_name_list.clear();
         }
     }
-    /* Throw error if there is non-aligned field present at the end in header */
+    // Throw error if there is non-aligned field present at the end in header.
     if (size_sum_so_far != 0) {
         ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                 "8-bit Alignment for Header Structure '%1%' is not possible as no more header"
@@ -602,8 +593,8 @@ const IR::Node *AlignHdrMetaField::preorder(IR::Type_StructLike *st) {
            if (hdrs.ipv4.flags_fragOffset[15:3] == 4) ....
 */
 const IR::Node *AlignHdrMetaField::preorder(IR::Member *m) {
-    cstring hdrStrName = "";
-    /* Get the member's header structure name */
+    cstring hdrStrName = cstring::empty;
+    // Get the member's header structure name.
     if ((m != nullptr) && (m->expr != nullptr) && (m->expr->type != nullptr) &&
         (m->expr->type->is<IR::Type_Header>())) {
         auto str_type = m->expr->type->to<IR::Type_Header>();
@@ -611,25 +602,24 @@ const IR::Node *AlignHdrMetaField::preorder(IR::Member *m) {
     } else {
         return m;
     }
-    /* Check if the member has been modified due to 8-bit header field aligment
-       and its related information is stored in "hdrFieldInfoList" data structure */
+    // Check if the member has been modified due to 8-bit header field aligment
+    // and its related information is stored in "hdrFieldInfoList" data structure.
     auto it = structure->hdrFieldInfoList.find(m->member.name);
     if (it != structure->hdrFieldInfoList.end()) {
         for (auto memVec : structure->hdrFieldInfoList[m->member.name]) {
-            /* header structure name is matched to handle the scenario where
-               two different headers have field with same name */
+            // header structure name is matched to handle the scenario where
+            // two different headers have field with same name.
             if (memVec.headerStr != hdrStrName) continue;
             auto mem = new IR::Member(m->expr, IR::ID(memVec.modifiedName));
-            auto sliceMem =
-                new IR::Slice(mem->clone(), (memVec.offset + memVec.fieldWidth - 1), memVec.offset);
+            auto sliceMem = new IR::Slice(mem->clone(), memVec.msb, memVec.lsb);
             return sliceMem;
         }
     }
     return m;
 }
 
-/* This function processes the metadata structure and modify the metadata field width
-   to 32/64 bits if it is not 8-bit aligned */
+/// This function processes the metadata structure and modify the metadata field width
+///   to 32/64 bits if it is not 8-bit aligned
 const IR::Node *ReplaceHdrMetaField::postorder(IR::Type_Struct *st) {
     auto fields = new IR::IndexedVector<IR::StructField>;
     if (st->is<IR::Type_Struct>()) {
@@ -652,15 +642,15 @@ const IR::Node *ReplaceHdrMetaField::postorder(IR::Type_Struct *st) {
     return st;
 }
 
-// This function collects the match key information of a table. This is later used for
-// generating context JSON.
+/// This function collects the match key information of a table. This is later used for
+/// generating context JSON.
 bool CollectTableInfo::preorder(const IR::Key *keys) {
     std::vector<std::pair<cstring, cstring>> tableKeys;
     if (!keys || keys->keyElements.size() == 0) {
         return false;
     }
-    /* Push all non-selector keys to the key_map for this table.
-       Selector keys become part of the selector table */
+    // Push all non-selector keys to the key_map for this table.
+    //   Selector keys become part of the selector table
     for (auto key : keys->keyElements) {
         cstring keyName = key->expression->toString();
         cstring keyNameAnnon = key->expression->toString();
@@ -914,9 +904,9 @@ const IR::Node *IfStatementUnroll::postorder(IR::P4Parser *a) {
     return injector.inject_parser(parser, a);
 }
 
-// TODO(GordonWuCn): simplify with a postorder visitor if it is a statement,
-// return the expression, else introduce a temporary for the current expression
-// and return the temporary in a pathexpression.
+/// TODO(GordonWuCn): simplify with a postorder visitor if it is a statement,
+/// return the expression, else introduce a temporary for the current expression
+/// and return the temporary in a pathexpression.
 bool LogicalExpressionUnroll::preorder(const IR::Operation_Unary *u) {
     expressionUnrollSanityCheck(u->expr);
 
@@ -1036,6 +1026,8 @@ const IR::Node *ConvertBinaryOperationTo2Params::postorder(IR::AssignmentStateme
     // This pass does not apply to 'bool foo = (a == b)' or 'bool foo = (a > b)' etc.
     if (right->to<IR::Operation_Relation>()) return a;
     if (auto r = right->to<IR::Operation_Binary>()) {
+        // Array Index is replaced with flattened variable for array.
+        if (right->to<IR::ArrayIndex>()) return a;
         if (!isSimpleExpression(r->right) || !isSimpleExpression(r->left))
             BUG("%1%: Statement Unroll pass failed", a);
         if (left->equiv(*r->left)) {
@@ -1231,10 +1223,10 @@ const IR::Node *CollectLocalVariables::postorder(IR::P4Parser *p) {
     return p;
 }
 
-/* This function stores the information about parameters of default action
-   for each table */
+/// This function stores the information about parameters of default action
+/// for each table.
 void DefActionValue::postorder(const IR::P4Table *t) {
-    auto default_action = t->properties->getProperty("default_action");
+    auto default_action = t->properties->getProperty("default_action"_cs);
     if (default_action != nullptr && default_action->value->is<IR::ExpressionValue>()) {
         auto expr = default_action->value->to<IR::ExpressionValue>()->expression;
         auto mi =
@@ -1465,7 +1457,7 @@ const IR::Node *DismantleMuxExpressions::postorder(IR::AssignmentStatement *stat
 
 bool CopyMatchKeysToSingleStruct::isLearnerTable(const IR::P4Table *t) {
     bool use_add_on_miss = false;
-    auto add_on_miss = t->properties->getProperty("add_on_miss");
+    auto add_on_miss = t->properties->getProperty("add_on_miss"_cs);
     if (add_on_miss == nullptr) return false;
     if (add_on_miss->value->is<IR::ExpressionValue>()) {
         auto expr = add_on_miss->value->to<IR::ExpressionValue>()->expression;
@@ -1541,7 +1533,45 @@ struct keyInfo *CopyMatchKeysToSingleStruct::getKeyInfo(IR::Key *keys) {
     return oneKey;
 }
 
+cstring CopyMatchKeysToSingleStruct::getTableKeyName(const IR::Expression *e) {
+    cstring keyName;
+    if (auto pe = e->to<IR::PathExpression>()) {
+        keyName = pe->path->name;
+    } else if (auto mem = e->to<IR::Member>()) {
+        // We expect all nested structures are flattened and only
+        // expected expressions are 'h.<hdrname>.<fieldname> or m.<fieldname>
+        if (isValidMemberField(mem)) {
+            if (auto mexpr = mem->expr->to<IR::Member>()) {
+                keyName = "h." + mexpr->member + "." + mem->member;
+            } else if (mem->expr->is<IR::PathExpression>()) {
+                keyName = "m." + mem->member;
+            }
+        } else {
+            ::error(ErrorType::ERR_INVALID, "Invalid member expression '%1%' used as table key",
+                    mem);
+        }
+    } else if (auto m = e->to<IR::MethodCallExpression>()) {
+        BUG_CHECK(isValidCall(m),
+                  "Method calls except isValid must be simplified before"
+                  " reaching here, found %1%",
+                  m->method);
+        // Moving h.<hdr>.isValid() used as table key to Metadata.
+        auto mem = m->method->to<IR::Member>();
+        CHECK_NULL(mem);
+        keyName = "h." + mem->expr->to<IR::Member>()->member + "." + IR::Type_Header::isValid;
+    } else {
+        ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "Unsupported key expression %1%",
+                e->toString());
+    }
+    return keyName;
+}
+
 const IR::Node *CopyMatchKeysToSingleStruct::preorder(IR::Key *keys) {
+    // If copyNeeded is false at this point, it means the keys are from same struct.
+    // Check remaining conditions to see if the copy is needed or not
+    // TODO: This indirection should not be needed. Instead of using a visitor for IR::KeyElement
+    // just resolve each key element directly.
+    metaCopyNeeded = false;
     // If any key field is from different structure, put all keys in metadata
     LOG3("Visiting " << keys);
     bool copyNeeded = false;
@@ -1551,32 +1581,30 @@ const IR::Node *CopyMatchKeysToSingleStruct::preorder(IR::Key *keys) {
         return keys;
     }
 
-    cstring firstKeyStr = "";
+    cstring firstKeyStr = cstring::empty;
     bool firstKeyHdr = false;
 
     if (auto firstKeyField = keys->keyElements.at(0)->expression->to<IR::Member>()) {
         firstKeyStr = firstKeyField->expr->toString();
-        /* ReplaceMetadataHeaderName pass converts all header fields to the form
-           "h.<header_name>.<field_name> and similarly metadata fields are prefixed with "m.".
-           Check if the match key is part of a header by checking the "h" prefix. */
+        // ReplaceMetadataHeaderName pass converts all header fields to the form
+        // "h.<header_name>.<field_name> and similarly metadata fields are prefixed with "m.".
+        // Check if the match key is part of a header by checking the "h" prefix.
         if (firstKeyStr.startsWith("h")) firstKeyHdr = true;
     }
 
-    /* Key fields should be part of same header/metadata struct */
+    // Key fields should be part of same header/metadata struct.
     for (auto key : keys->keyElements) {
-        cstring keyTypeStr = "";
+        cstring keyTypeStr = cstring::empty;
         if (auto keyField = key->expression->to<IR::Member>()) {
             keyTypeStr = keyField->expr->toString();
         } else if (auto m = key->expression->to<IR::MethodCallExpression>()) {
-            /* When isValid is present as table key, it should be moved to metadata */
-            auto mi = P4::MethodInstance::resolve(m, refMap, typeMap);
-            if (auto b = mi->to<P4::BuiltInMethod>()) {
-                if (b->name == "isValid") {
-                    copyNeeded = true;
-                    break;
-                }
+            // When isValid is present as table key, it should be moved to metadata.
+            if (isValidCall(m)) {
+                copyNeeded = true;
+                break;
             }
         }
+
         if (firstKeyStr != keyTypeStr) {
             if (firstKeyHdr || keyTypeStr.startsWith("h")) {
                 copyNeeded = true;
@@ -1623,10 +1651,6 @@ const IR::Node *CopyMatchKeysToSingleStruct::preorder(IR::Key *keys) {
     } else {
         structure->table_type_map.emplace(table->name.name, InternalTableType::WILDCARD);
     }
-
-    /* If copyNeeded is false at this point, it means the keys are from same struct.
-     * Check remaining conditions to see if the copy is needed or not */
-    metaCopyNeeded = false;
     if (copyNeeded) contiguous = false;
 
     if (!contiguous &&
@@ -1664,10 +1688,11 @@ const IR::Node *CopyMatchKeysToSingleStruct::postorder(IR::KeyElement *element) 
         insertions = it->second;
     }
 
-    auto keyName = element->expression->toString();
+    cstring keyName = getTableKeyName(element->expression);
+    if (keyName.isNullOrEmpty()) return element;
     bool isHeader = false;
-    /* All header fields are prefixed with "h." and metadata fields are prefixed with "m."
-     * Prefix the match field with control and table name */
+    // All header fields are prefixed with "h." and metadata fields are prefixed with "m."
+    // Prefix the match field with control and table name
     if (keyName.startsWith("h.")) {
         isHeader = true;
         keyName = keyName.replace('.', '_');
@@ -1684,7 +1709,7 @@ const IR::Node *CopyMatchKeysToSingleStruct::postorder(IR::KeyElement *element) 
     }
 
     if (isHeader || metaCopyNeeded) {
-        IR::ID keyNameId(refMap->newName(keyName));
+        IR::ID keyNameId(nameGen.newName(keyName.string_view()));
         auto decl = new IR::Declaration_Variable(keyNameId, element->expression->type, nullptr);
         // Store the compiler generated table keys in Program structure. These will be
         // inserted to Metadata by CollectLocalVariables pass.
@@ -1699,11 +1724,12 @@ const IR::Node *CopyMatchKeysToSingleStruct::postorder(IR::KeyElement *element) 
 }
 
 const IR::Node *CopyMatchKeysToSingleStruct::doStatement(const IR::Statement *statement,
-                                                         const IR::Expression *expression) {
+                                                         const IR::Expression *expression,
+                                                         const Visitor::Context *ctxt) {
     LOG3("Visiting " << getOriginal());
-    P4::HasTableApply hta(refMap, typeMap);
+    P4::HasTableApply hta(this, typeMap);
     hta.setCalledBy(this);
-    (void)expression->apply(hta);
+    (void)expression->apply(hta, ctxt);
     if (hta.table == nullptr) return statement;
     auto insertions = get(toInsert, hta.table);
     if (insertions == nullptr) return statement;
@@ -1753,12 +1779,12 @@ std::optional<P4::ExternInstance> getExternInstanceFromProperty(
 
 }  // namespace Helpers
 
-// create P4Table object that represents the matching part of the original P4
-// table. This table sets the internal group_id or member_id which are used
-// for subsequent table lookup.
+/// create P4Table object that represents the matching part of the original P4
+/// table. This table sets the internal group_id or member_id which are used
+/// for subsequent table lookup.
 std::tuple<const IR::P4Table *, cstring, cstring> SplitP4TableCommon::create_match_table(
     const IR::P4Table *tbl) {
-    cstring grpActionName = "", memActionName;
+    cstring grpActionName = cstring::empty, memActionName;
     if (implementation == TableImplementation::ACTION_SELECTOR) {
         grpActionName = refMap->newName(tbl->name.originalName + "_set_group_id");
         memActionName = refMap->newName(tbl->name.originalName + "_set_member_id");
@@ -1790,7 +1816,7 @@ std::tuple<const IR::P4Table *, cstring, cstring> SplitP4TableCommon::create_mat
         }
     }
 
-    auto constDefAction = tbl->properties->getProperty("default_action");
+    auto constDefAction = tbl->properties->getProperty("default_action"_cs);
     bool isConstDefAction = constDefAction ? constDefAction->isConstant : false;
 
     IR::IndexedVector<IR::Property> properties;
@@ -1893,16 +1919,16 @@ const IR::P4Table *SplitP4TableCommon::create_group_table(const IR::P4Table *tbl
 const IR::Node *SplitActionSelectorTable::postorder(IR::P4Table *tbl) {
     bool isConstructedInPlace = false;
     bool isAsInstanceShared = false;
-    cstring externName = "";
-    cstring prefix = "psa_";
+    cstring externName = cstring::empty;
+    cstring prefix = "psa_"_cs;
 
     if (structure->isPNA()) {
-        prefix = "pna_";
+        prefix = "pna_"_cs;
     }
 
-    auto property = tbl->properties->getProperty(prefix + "implementation");
-    auto counterProperty = tbl->properties->getProperty(prefix + "direct_counter");
-    auto meterProperty = tbl->properties->getProperty(prefix + "direct_meter");
+    auto property = tbl->properties->getProperty(prefix + "implementation"_cs);
+    auto counterProperty = tbl->properties->getProperty(prefix + "direct_counter"_cs);
+    auto meterProperty = tbl->properties->getProperty(prefix + "direct_meter"_cs);
 
     if (property != nullptr && (counterProperty != nullptr || meterProperty != nullptr)) {
         ::error(ErrorType::ERR_UNEXPECTED,
@@ -1949,7 +1975,7 @@ const IR::Node *SplitActionSelectorTable::postorder(IR::P4Table *tbl) {
 
     // Remove the control block name prefix from instance name
     cstring instance_name = *instance->name;
-    instance_name = instance_name.findlast('.');
+    instance_name = cstring(instance_name.findlast('.'));
     instance_name = instance_name.trim(".\t\n\r");
 
     cstring member_id = instance_name + "_member_id";
@@ -1975,8 +2001,8 @@ const IR::Node *SplitActionSelectorTable::postorder(IR::P4Table *tbl) {
     cstring grpActionName, memActionName;
     const IR::P4Table *match_table;
     std::tie(match_table, grpActionName, memActionName) = create_match_table(tbl);
-    auto grpAction = create_action(grpActionName, group_id, "group_id");
-    auto memAction = create_action(memActionName, member_id, "member_id");
+    auto grpAction = create_action(grpActionName, group_id, "group_id"_cs);
+    auto memAction = create_action(memActionName, member_id, "member_id"_cs);
     decls->push_back(grpAction);
     decls->push_back(memAction);
     decls->push_back(match_table);
@@ -2024,10 +2050,10 @@ const IR::Node *SplitActionSelectorTable::postorder(IR::P4Table *tbl) {
 const IR::Node *SplitActionProfileTable::postorder(IR::P4Table *tbl) {
     bool isConstructedInPlace = false;
     bool isApInstanceShared = false;
-    cstring externName = "";
-    cstring implementation = "psa_implementation";
+    cstring externName = cstring::empty;
+    cstring implementation = "psa_implementation"_cs;
 
-    if (structure->isPNA()) implementation = "pna_implementation";
+    if (structure->isPNA()) implementation = "pna_implementation"_cs;
 
     auto instance = Helpers::getExternInstanceFromProperty(tbl, implementation, refMap, typeMap,
                                                            &isConstructedInPlace, externName);
@@ -2047,8 +2073,9 @@ const IR::Node *SplitActionProfileTable::postorder(IR::P4Table *tbl) {
     }
 
     // Remove the control block name prefix from instance name
+    // FIXME: simplify
     cstring instance_name = *instance->name;
-    instance_name = instance_name.findlast('.');
+    instance_name = cstring(instance_name.findlast('.'));
     instance_name = instance_name.trim(".\t\n\r");
 
     auto decls = new IR::IndexedVector<IR::Declaration>();
@@ -2070,19 +2097,19 @@ const IR::Node *SplitActionProfileTable::postorder(IR::P4Table *tbl) {
     cstring actionName, ignoreGroup;
     const IR::P4Table *match_table;
     std::tie(match_table, ignoreGroup, actionName) = create_match_table(tbl);
-    auto action = create_action(actionName, member_id, "member_id");
+    auto action = create_action(actionName, member_id, "member_id"_cs);
     decls->push_back(action);
     decls->push_back(match_table);
     cstring member_table_name = instance_name;
 
-    // Create member table for the first table using this action profile instance
+    // Create member table for the first table using this action profile instance.
     if (!isApInstanceShared) {
         // member table match on member_id
         auto member_table = create_member_table(tbl, member_table_name, member_id);
         decls->push_back(member_table);
         structure->member_tables.emplace(tbl->name, member_table);
     } else {
-        // Use existing member table created for this action profile instance
+        // Use existing member table created for this action profile instance.
         for (auto mt : structure->member_tables) {
             if (mt.second->name == member_table_name) {
                 auto memTable = mt.second;
@@ -2097,14 +2124,14 @@ const IR::Node *SplitActionProfileTable::postorder(IR::P4Table *tbl) {
     return decls;
 }
 
-// Member_id and/or group_id must be initialized prior to member table apply.
-// An action selector table can either set a group_id which in turns set the member_id or it
-// can directly set a member_id. Member table is always applied in either case.
-// Hence, we initialize member_id with 0 as it will always have a valid value based on the base
-// table match Since the values of member_id and group_id are set during run-time, to make a
-// decision whether to apply the group table or not, we initialize group_id with the maximum
-// possible value (this is 32-bit as per PSA specification) and compare this initial value with the
-// group_id at run-time.
+/// Member_id and/or group_id must be initialized prior to member table apply.
+/// An action selector table can either set a group_id which in turns set the member_id or it
+/// can directly set a member_id. Member table is always applied in either case.
+/// Hence, we initialize member_id with 0 as it will always have a valid value based on the base
+/// table match Since the values of member_id and group_id are set during run-time, to make a
+/// decision whether to apply the group table or not, we initialize group_id with the maximum
+/// possible value (this is 32-bit as per PSA specification) and compare this initial value with the
+/// group_id at run-time.
 IR::Expression *SplitP4TableCommon::initializeMemberAndGroupId(
     cstring tableName, IR::IndexedVector<IR::StatOrDecl> *decls) {
     IR::Expression *group_id_expr = nullptr;
@@ -2190,7 +2217,7 @@ const IR::Node *SplitP4TableCommon::postorder(IR::MethodCallStatement *statement
     return statement;
 }
 
-// assume the RemoveMiss and SimplifyControlFlow pass is applied
+/// assume the RemoveMiss and SimplifyControlFlow pass is applied
 const IR::Node *SplitP4TableCommon::postorder(IR::IfStatement *statement) {
     auto cond = statement->condition;
     if (!P4::TableApplySolver::isHit(cond, refMap, typeMap)) return statement;
@@ -2409,8 +2436,8 @@ const IR::Node *SplitP4TableCommon::postorder(IR::P4Control *a) {
     return injector.inject_control(control, a);
 }
 
-/* For regular tables, the direct counter array size is same as table size
- * For learner tables, the direct counter/meter array size is 4 times the table size */
+/// For regular tables, the direct counter array size is same as table size.
+/// For learner tables, the direct counter/meter array size is 4 times the table size.
 int CollectDirectCounterMeter::getTableSize(const IR::P4Table *tbl) {
     int tableSize = dpdk_default_table_size;
     auto size = tbl->getSizeProperty();
@@ -2462,7 +2489,7 @@ bool CollectDirectCounterMeter::preorder(const IR::AssignmentStatement *assn) {
 
 bool CollectDirectCounterMeter::ifMethodFound(const IR::P4Action *a, cstring methodName,
                                               cstring instance) {
-    oneInstance = "";
+    oneInstance = cstring::empty;
     instancename = instance;
     method = methodName;
     methodCallFound = false;
@@ -2470,28 +2497,27 @@ bool CollectDirectCounterMeter::ifMethodFound(const IR::P4Action *a, cstring met
     return methodCallFound;
 }
 
-/* ifMethodFound() is called from here to make sure that an action only contains count/dpdk_execute
- * method calls for only one Direct counter/meter instance. The error for the same is emitted
- * in the ifMethodFound function itself and return value is not required to be checked here.
- */
+/// ifMethodFound() is called from here to make sure that an action only contains count/dpdk_execute
+/// method calls for only one Direct counter/meter instance. The error for the same is emitted
+/// in the ifMethodFound function itself and return value is not required to be checked here.
 bool CollectDirectCounterMeter::preorder(const IR::P4Action *a) {
-    ifMethodFound(a, "count");
-    ifMethodFound(a, "dpdk_execute");
+    ifMethodFound(a, "count"_cs);
+    ifMethodFound(a, "dpdk_execute"_cs);
     return false;
 }
 
 bool CollectDirectCounterMeter::preorder(const IR::P4Table *tbl) {
     bool isConstructedInPlace = false;
-    cstring implementation = "psa_implementation";
-    cstring counterExternName = "";
-    cstring meterExternName = "";
-    cstring direct_counter = "psa_direct_counter";
-    cstring direct_meter = "psa_direct_meter";
+    cstring implementation = "psa_implementation"_cs;
+    cstring counterExternName = cstring::empty;
+    cstring meterExternName = cstring::empty;
+    cstring direct_counter = "psa_direct_counter"_cs;
+    cstring direct_meter = "psa_direct_meter"_cs;
 
     if (structure->isPNA()) {
-        implementation = "pna_implementation";
-        direct_counter = "pna_direct_counter";
-        direct_meter = "pna_direct_meter";
+        implementation = "pna_implementation"_cs;
+        direct_counter = "pna_direct_counter"_cs;
+        direct_meter = "pna_direct_meter"_cs;
     }
 
     auto counterInstance = Helpers::getExternInstanceFromProperty(
@@ -2501,7 +2527,7 @@ bool CollectDirectCounterMeter::preorder(const IR::P4Table *tbl) {
     int table_size = getTableSize(tbl);
     auto table_type = ::get(structure->table_type_map, tbl->name.name);
 
-    // Direct Counter and Meter are not supported with Wildcard match tables
+    // Direct Counter and Meter are not supported with Wildcard match tables.
     if (table_type == InternalTableType::WILDCARD && (counterInstance || meterInstance)) {
         ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                 "Direct counters and direct meters are"
@@ -2522,7 +2548,7 @@ bool CollectDirectCounterMeter::preorder(const IR::P4Table *tbl) {
         BUG_CHECK(path, "Default action path %s cannot be found", default_action);
         if (auto defaultActionDecl = refMap->getDeclaration(path->path)->to<IR::P4Action>()) {
             if (defaultActionDecl->name.originalName != "NoAction") {
-                if (!ifMethodFound(defaultActionDecl, "count", counterExternName)) {
+                if (!ifMethodFound(defaultActionDecl, "count"_cs, counterExternName)) {
                     if (counterInstance) {
                         ::error(ErrorType::ERR_EXPECTED,
                                 "Expected default action %1% to have "
@@ -2531,7 +2557,7 @@ bool CollectDirectCounterMeter::preorder(const IR::P4Table *tbl) {
                         return false;
                     }
                 }
-                if (!ifMethodFound(defaultActionDecl, "dpdk_execute", meterExternName)) {
+                if (!ifMethodFound(defaultActionDecl, "dpdk_execute"_cs, meterExternName)) {
                     if (meterInstance) {
                         ::error(ErrorType::ERR_EXPECTED,
                                 "Expected default action %1% to have "
@@ -2617,7 +2643,8 @@ void ValidateDirectCounterMeter::postorder(const IR::MethodCallStatement *mcs) {
 
 void CollectAddOnMissTable::postorder(const IR::P4Table *t) {
     bool use_add_on_miss = false;
-    auto add_on_miss = t->properties->getProperty("add_on_miss");
+    auto add_on_miss = t->properties->getProperty("add_on_miss"_cs);
+    cstring default_actname = "NoAction"_cs;
     if (add_on_miss == nullptr) return;
     if (add_on_miss->value->is<IR::ExpressionValue>()) {
         auto expr = add_on_miss->value->to<IR::ExpressionValue>()->expression;
@@ -2631,13 +2658,13 @@ void CollectAddOnMissTable::postorder(const IR::P4Table *t) {
         }
     }
 
-    /* sanity checks */
-    auto default_action = t->properties->getProperty("default_action");
+    // sanity checks
+    auto default_action = t->properties->getProperty("default_action"_cs);
     if (use_add_on_miss && default_action == nullptr) {
         ::error(ErrorType::ERR_UNEXPECTED,
                 "%1%: add_on_miss property is defined, "
                 "but default_action not specificed for table %2%",
-                default_action, t->name);
+                add_on_miss, t->name);
         return;
     }
     if (default_action->value->is<IR::ExpressionValue>()) {
@@ -2648,11 +2675,13 @@ void CollectAddOnMissTable::postorder(const IR::P4Table *t) {
             P4::MethodInstance::resolve(expr->to<IR::MethodCallExpression>(), refMap, typeMap);
         BUG_CHECK(mi->is<P4::ActionCall>(), "%1%: expected action in default_action",
                   default_action);
+        auto ac = mi->to<P4::ActionCall>()->action;
         if (mi->to<P4::ActionCall>()->action->parameters->parameters.size() != 0) {
             ::error(ErrorType::ERR_UNEXPECTED,
                     "%1%: action cannot have action argument when used with add_on_miss",
                     default_action);
         }
+        default_actname = ac->name.name;
     }
     if (use_add_on_miss) {
         for (auto action : t->getActionList()->actionList) {
@@ -2660,10 +2689,12 @@ void CollectAddOnMissTable::postorder(const IR::P4Table *t) {
             // Map the compiler generated internal name of action (emitted in .spec file) with
             // user visible name in P4 program.
             // To get the user visible name, strip any prefixes from externalName.
+            // FIXME: Simplify
             cstring userVisibleName = action_decl->externalName();
-            userVisibleName = userVisibleName.findlast('.');
+            userVisibleName = cstring(userVisibleName.findlast('.'));
             userVisibleName = userVisibleName.trim(".\t\n\r");
-            structure->learner_action_map.emplace(userVisibleName, action_decl->name.name);
+            structure->learner_action_map.emplace(std::make_pair(userVisibleName, default_actname),
+                                                  action_decl->name.name);
             structure->learner_action_table.emplace(action_decl->externalName(), t);
         }
     }
@@ -2684,7 +2715,7 @@ void CollectAddOnMissTable::postorder(const IR::MethodCallStatement *mcs) {
     // In p4c, by design, only  backend checks args of an extern.
     BUG_CHECK(mce->arguments->size() == 3, "%1%: expected 3 arguments in add_entry extern", mcs);
     auto action = mce->arguments->at(0);
-    // assuming syntax check is already performed earlier
+    // assuming syntax check is already performed earlier.
     auto action_name = action->expression->to<IR::StringLiteral>()->value;
     structure->learner_actions.insert(action_name);
     return;
@@ -2692,7 +2723,7 @@ void CollectAddOnMissTable::postorder(const IR::MethodCallStatement *mcs) {
 
 void ValidateAddOnMissExterns::postorder(const IR::MethodCallStatement *mcs) {
     bool isValidExternCall = false;
-    cstring propName = "";
+    cstring propName = cstring::empty;
     auto mce = mcs->methodCall;
     auto mi = P4::MethodInstance::resolve(mce, refMap, typeMap);
     if (!mi->is<P4::ExternFunction>()) {
@@ -2710,9 +2741,9 @@ void ValidateAddOnMissExterns::postorder(const IR::MethodCallStatement *mcs) {
         bool use_idle_timeout_with_auto_delete = false;
         if (tbl) {
             auto idle_timeout_with_auto_delete =
-                tbl->properties->getProperty("idle_timeout_with_auto_delete");
+                tbl->properties->getProperty("idle_timeout_with_auto_delete"_cs);
             if (idle_timeout_with_auto_delete != nullptr) {
-                propName = "idle_timeout_with_auto_delete";
+                propName = "idle_timeout_with_auto_delete"_cs;
                 if (idle_timeout_with_auto_delete->value->is<IR::ExpressionValue>()) {
                     auto expr =
                         idle_timeout_with_auto_delete->value->to<IR::ExpressionValue>()->expression;
@@ -2736,9 +2767,9 @@ void ValidateAddOnMissExterns::postorder(const IR::MethodCallStatement *mcs) {
             auto args = mce->arguments;
             auto at = args->at(0)->expression;
             auto an = at->to<IR::StringLiteral>()->value;
-            auto add_on_miss = tbl->properties->getProperty("add_on_miss");
+            auto add_on_miss = tbl->properties->getProperty("add_on_miss"_cs);
             if (add_on_miss != nullptr) {
-                propName = "add_on_miss";
+                propName = "add_on_miss"_cs;
                 if (add_on_miss->value->is<IR::ExpressionValue>()) {
                     auto expr = add_on_miss->value->to<IR::ExpressionValue>()->expression;
                     if (!expr->is<IR::BoolLiteral>()) {
@@ -2847,12 +2878,9 @@ const IR::Node *ElimHeaderCopy::preorder(IR::AssignmentStatement *as) {
     return as;
 }
 
-/**
- * Replace method call expression with temporary instances
- * like eth_0.setInvalid()
- * with empty statement as all uses of eth_0 already replaced
- *
- */
+/// Replace method call expression with temporary instances
+/// like eth_0.setInvalid()
+/// with empty statement as all uses of eth_0 already replaced.
 const IR::Node *ElimHeaderCopy::preorder(IR::MethodCallStatement *mcs) {
     auto me = mcs->methodCall;
     auto m = me->method->to<IR::Member>();
@@ -2886,7 +2914,7 @@ const IR::Node *DpdkAddPseudoHeaderDecl::preorder(IR::P4Program *program) {
     return program;
 }
 
-// add pseudo header field to the headers struct for it be instantiated
+/// Add pseudo header field to the headers struct for it be instantiated.
 const IR::Node *DpdkAddPseudoHeaderDecl::preorder(IR::Type_Struct *st) {
     if (is_all_args_header) return st;
     bool header_found = isHeadersStruct(st);
@@ -3007,7 +3035,7 @@ const IR::Node *MoveNonHeaderFieldsToPseudoHeader::postorder(IR::MethodCallState
                                 }
                                 if (!is_header_field) {
                                     // replace non header expression with pseudo header field,
-                                    // after initializing it with existing expression
+                                    // after initializing it with existing expression.
                                     added_copy = true;
                                     auto stm = addAssignmentStmt(c->expression);
                                     result->push_back(stm.first);
@@ -3015,7 +3043,7 @@ const IR::Node *MoveNonHeaderFieldsToPseudoHeader::postorder(IR::MethodCallState
                                         new IR::NamedExpression(c->srcInfo, c->name, stm.second));
                                 }
                             }
-                            // Creating Byte Aligned struct, it is type of struct expression
+                            // Creating Byte Aligned struct, it is type of struct expression.
                             IR::IndexedVector<IR::StructField> fields;
                             auto tmps0 = tmp->type->to<IR::Type_Struct>();
                             for (auto f : tmps0->fields) {
@@ -3024,7 +3052,7 @@ const IR::Node *MoveNonHeaderFieldsToPseudoHeader::postorder(IR::MethodCallState
                                 fields.push_back(
                                     new IR::StructField(f->name, getEightBitAlignedType(type)));
                             }
-                            auto newName = refMap->newName(tmps0->name);
+                            auto newName = refMap->newName(tmps0->name.name.string_view());
                             newTname = new IR::Type_Name(newName);
                             auto newStructType =
                                 new IR::Type_Struct(tmps0->srcInfo, newName, tmps0->annotations,
@@ -3076,7 +3104,7 @@ const IR::Node *MoveNonHeaderFieldsToPseudoHeader::postorder(IR::MethodCallState
 
 const IR::Node *AddFieldsToPseudoHeader::preorder(IR::Type_Header *h) {
     if (is_all_args_header) return h;
-    auto annon = h->getAnnotation("__pseudo_header__");
+    auto annon = h->getAnnotation("__pseudo_header__"_cs);
     if (annon == nullptr) return h;
     IR::IndexedVector<IR::StructField> fields = h->fields;
     for (auto &p : MoveNonHeaderFieldsToPseudoHeader::pseudoFieldNameType) {
@@ -3190,7 +3218,7 @@ const IR::Node *CollectStructLocalVariables::postorder(IR::P4Parser *p) {
 }
 const IR::Type_Struct *CollectStructLocalVariables::metadataStrct = nullptr;
 
-// create and add register declaration instance to program
+/// Create and add register declaration instance to program.
 IR::IndexedVector<IR::StatOrDecl> *InsertReqDeclForIPSec::addRegDeclInstance(
     std::vector<cstring> portRegs) {
     auto decls = new IR::IndexedVector<IR::StatOrDecl>;
@@ -3203,7 +3231,7 @@ IR::IndexedVector<IR::StatOrDecl> *InsertReqDeclForIPSec::addRegDeclInstance(
 
 const IR::Node *InsertReqDeclForIPSec::preorder(IR::P4Program *program) {
     if (!is_ipsec_used) return program;
-    cstring resName = "";
+    cstring resName = cstring::empty;
     if (!reservedNames(refMap, registerInstanceNames, resName)) {
         ::error(ErrorType::ERR_RESERVED, "%1% name is reserved for DPDK IPSec port register",
                 resName);
@@ -3252,7 +3280,7 @@ const IR::Node *InsertReqDeclForIPSec::preorder(IR::P4Program *program) {
     return program;
 }
 
-// Create an instance of ipsec_hdr in the header struct
+/// Create an instance of ipsec_hdr in the header struct.
 const IR::Node *InsertReqDeclForIPSec::preorder(IR::Type_Struct *s) {
     if (!is_ipsec_used) return s;
     if (s->name.name == structure->header_type) {

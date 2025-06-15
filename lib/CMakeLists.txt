@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set (LIBP4CTOOLKIT_SRCS
-    backtrace.cpp
+set(LIBP4CTOOLKIT_SRCS
+    alloc_trace.cpp
+    backtrace_exception.cpp
+    bitrange.cpp
     bitvec.cpp
     compile_context.cpp
     crash.cpp
@@ -24,21 +26,24 @@ set (LIBP4CTOOLKIT_SRCS
     gc.cpp
     big_int_util.cpp
     hash.cpp
+    hashvec.cpp
     hex.cpp
     indent.cpp
     json.cpp
     log.cpp
     match.cpp
+    nethash.cpp
     nullstream.cpp
     options.cpp
-    path.cpp
     source_file.cpp
     stringify.cpp
     timer.cpp
 )
 
-set (LIBP4CTOOLKIT_HDRS
+set(LIBP4CTOOLKIT_HDRS
     algorithm.h
+    alloc_trace.h
+    backtrace_exception.h
     bitops.h
     bitrange.h
     bitvec.h
@@ -56,7 +61,10 @@ set (LIBP4CTOOLKIT_HDRS
     gc.h
     big_int_util.h
     hash.h
+    nethash.h
+    hashvec.h
     hex.h
+    hvec_map.h
     indent.h
     json.h
     log.h
@@ -69,7 +77,6 @@ set (LIBP4CTOOLKIT_HDRS
     options.h
     ordered_map.h
     ordered_set.h
-    path.h
     range.h
     safe_vector.h
     set.h
@@ -81,9 +88,14 @@ set (LIBP4CTOOLKIT_HDRS
     timer.h
 )
 
+
 add_library(p4ctoolkit STATIC ${LIBP4CTOOLKIT_SRCS})
 
 # Disable libcall (realloc, malloc) optimizations which may cause infinite loops.
-if (ENABLE_GC)
-    set_target_properties(p4ctoolkit PROPERTIES COMPILE_FLAGS -fno-builtin)
-endif()
+set_target_properties(p4ctoolkit PROPERTIES COMPILE_FLAGS -fno-builtin)
+target_link_libraries(p4ctoolkit
+  # These libraries are exposed by a header.
+  PUBLIC absl::bits
+  PUBLIC absl::strings
+  PUBLIC ${LIBGC_LIBRARIES}
+)

@@ -55,7 +55,8 @@ int main(int argc, char *const argv[]) {
     try {
         P4::P4COptionPragmaParser optionsPragmaParser;
         program->apply(P4::ApplyOptionsPragmas(optionsPragmaParser));
-        P4::FrontEnd frontend(hook);
+        P4::FrontEnd frontend;
+        frontend.addDebugHook(hook);
         program = frontend.run(options, program);
     } catch (const Util::P4CExceptionBase &bug) {
         std::cerr << bug.what() << std::endl;
@@ -79,7 +80,7 @@ int main(int argc, char *const argv[]) {
             ::error("Cannot process input file. Program does not contain a 'main' module");
             return 1;
         }
-        if (options.dumpJsonFile)
+        if (!options.dumpJsonFile.empty())
             JSONGenerator(*openFile(options.dumpJsonFile, true)) << toplevel << std::endl;
     } catch (const Util::P4CExceptionBase &bug) {
         std::cerr << bug.what() << std::endl;
@@ -90,22 +91,20 @@ int main(int argc, char *const argv[]) {
     }
     TC::Backend backend(toplevel, &midEnd.refMap, &midEnd.typeMap, options);
     if (!backend.process()) return 1;
-
-    if (!options.introspecFile.isNullOrEmpty()) {
-        std::ostream *outIntro = openFile(options.introspecFile, false);
-        if (outIntro != nullptr) {
-            bool serialized = backend.serializeIntrospectionJson(*outIntro);
-            if (!serialized) {
-                std::remove(options.introspecFile);
-                return 1;
-            }
+    std::string progName = backend.tcIR->getPipelineName().string();
+    std::string introspecFile = options.outputFolder / (progName + ".json");
+    std::ostream *outIntro = openFile(introspecFile, false);
+    if (outIntro != nullptr) {
+        bool serialized = backend.serializeIntrospectionJson(*outIntro);
+        if (!serialized) {
+            std::remove(introspecFile.c_str());
+            return 1;
         }
     }
+    backend.serialize();
     if (::errorCount() > 0) {
+        std::remove(introspecFile.c_str());
         return 1;
-    }
-    if (!options.outputFile.isNullOrEmpty() || !options.cFile.isNullOrEmpty()) {
-        backend.serialize();
     }
     return ::errorCount() > 0;
 }

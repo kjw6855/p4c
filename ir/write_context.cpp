@@ -14,19 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <string>
-#include <vector>
-
-#include <boost/format.hpp>
-
 #include "ir/indexed_vector.h"
 #include "ir/ir.h"
 #include "ir/node.h"
-#include "ir/vector.h"
 #include "ir/visitor.h"
-#include "lib/cstring.h"
-#include "lib/ordered_map.h"
-#include "lib/safe_vector.h"
 
 /* Determine from the Visitor context whether the currently being visited IR node
  * denotes something that might be written to by the code.  This is always conservative
@@ -63,6 +54,8 @@ bool P4WriteContext::isWrite(bool root_value) {
             return true;
         }
     }
+    // The `ref` of a for..in is written and read
+    if (ctxt->node->is<IR::ForInStatement>()) return ctxt->child_index == 1;
     if (ctxt->node->is<IR::MethodCallExpression>()) {
         /* receiver of a method call -- some methods might be 'const' and not modify
          * their receiver, but we currently have no way of determining that */

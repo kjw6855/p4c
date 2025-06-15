@@ -18,13 +18,14 @@ limitations under the License.
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <gtest/gtest.h>
+
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 
-#include "gtest/gtest.h"
 #include "helpers.h"
 #include "ir/ir.h"
 #include "lib/log.h"
@@ -38,7 +39,7 @@ class FromJSONTest : public P4CTest {};
 
 TEST_F(FromJSONTest, load_ir_from_json) {
     int exitCode = system(
-        "./p4c-bm2-ss -o outputTO.json ../test/test_fromJSON.p4 "
+        "./p4c-bm2-ss -o outputTO.json test/test_fromJSON.p4 "
         "--toJSON jsonFile.json");
     ASSERT_FALSE(exitCode);
     exitCode = system("./p4c-bm2-ss -o outputFROM.json --fromJSON jsonFile.json");

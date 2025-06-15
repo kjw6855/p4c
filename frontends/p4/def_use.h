@@ -17,13 +17,15 @@ limitations under the License.
 #ifndef FRONTENDS_P4_DEF_USE_H_
 #define FRONTENDS_P4_DEF_USE_H_
 
-#include <typeindex>  // IWYU pragma: keep
-#include <unordered_set>
-
-#include "frontends/p4/typeChecking/typeChecker.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/container/inlined_vector.h"
+#include "frontends/common/resolveReferences/referenceMap.h"
 #include "ir/ir.h"
-#include "lib/ordered_map.h"
+#include "lib/alloc_trace.h"
+#include "lib/hash.h"
+#include "lib/hvec_map.h"
 #include "lib/ordered_set.h"
+#include "typeMap.h"
 
 namespace P4 {
 
@@ -31,7 +33,7 @@ class StorageFactory;
 class LocationSet;
 
 /// Abstraction for something that is has a left value (variable, parameter)
-class StorageLocation : public IHasDbPrint {
+class StorageLocation : public IHasDbPrint, public ICastable {
     static unsigned crtid;
 
  public:
@@ -41,16 +43,6 @@ class StorageLocation : public IHasDbPrint {
     const cstring name;
     StorageLocation(const IR::Type *type, cstring name) : id(crtid++), type(type), name(name) {
         CHECK_NULL(type);
-    }
-    template <class T>
-    const T *to() const {
-        auto result = dynamic_cast<const T *>(this);
-        return result;
-    }
-    template <class T>
-    bool is() const {
-        auto result = dynamic_cast<const T *>(this);
-        return result != nullptr;
     }
     void dbprint(std::ostream &out) const override { out << id << " " << name; }
     cstring toString() const { return name; }
@@ -64,6 +56,8 @@ class StorageLocation : public IHasDbPrint {
     /// @returns All locations inside that represent the 'lastIndex' of an array.
     const LocationSet *getLastIndexField() const;
     virtual void addLastIndexField(LocationSet *result) const = 0;
+
+    DECLARE_TYPEINFO(StorageLocation);
 };
 
 /** Represents a storage location with a simple type or a tuple type.
@@ -87,12 +81,14 @@ class BaseLocation : public StorageLocation {
     void addValidBits(LocationSet *) const override {}
     void addLastIndexField(LocationSet *) const override {}
     void removeHeaders(LocationSet *result) const override;
+
+    DECLARE_TYPEINFO(BaseLocation, StorageLocation);
 };
 
 /// Base class for location sets that contain fields
 class WithFieldsLocation : public StorageLocation {
  protected:
-    ordered_map<cstring, const StorageLocation *> fieldLocations;
+    hvec_map<cstring, const StorageLocation *> fieldLocations;
     friend class StorageFactory;
     WithFieldsLocation(const IR::Type *type, cstring name) : StorageLocation(type, name) {}
 
@@ -104,12 +100,14 @@ class WithFieldsLocation : public StorageLocation {
     void replaceField(cstring field, StorageLocation *replacement) {
         fieldLocations[field] = replacement;
     }
-    IterValues<ordered_map<cstring, const StorageLocation *>::const_iterator> fields() const {
+    IterValues<hvec_map<cstring, const StorageLocation *>::const_iterator> fields() const {
         return Values(fieldLocations);
     }
     void dbprint(std::ostream &out) const override {
         for (auto f : fieldLocations) out << *f.second << " ";
     }
+
+    DECLARE_TYPEINFO(WithFieldsLocation, StorageLocation);
 };
 
 /** Represents the locations for a struct, header or union */
@@ -125,12 +123,14 @@ class StructLocation : public WithFieldsLocation {
     bool isHeader() const { return type->is<IR::Type_Header>(); }
     bool isHeaderUnion() const { return type->is<IR::Type_HeaderUnion>(); }
     bool isStruct() const { return type->is<IR::Type_Struct>(); }
+
+    DECLARE_TYPEINFO(StructLocation, WithFieldsLocation);
 };
 
 /// Interface for locations that support an index operation
 class IndexedLocation : public StorageLocation {
  protected:
-    std::vector<const StorageLocation *> elements;
+    absl::InlinedVector<const StorageLocation *, 8> elements;
     friend class StorageFactory;
 
     void createElement(unsigned index, StorageLocation *element) {
@@ -146,8 +146,10 @@ class IndexedLocation : public StorageLocation {
         elements.resize(it->getSize());
     }
     void addElement(unsigned index, LocationSet *result) const;
-    std::vector<const StorageLocation *>::const_iterator begin() const { return elements.cbegin(); }
-    std::vector<const StorageLocation *>::const_iterator end() const { return elements.cend(); }
+    auto begin() const { return elements.cbegin(); }
+    auto end() const { return elements.cend(); }
+
+    DECLARE_TYPEINFO(IndexedLocation, StorageLocation);
 };
 
 /** Represents the locations for a tuple or list */
@@ -158,6 +160,8 @@ class TupleLocation : public IndexedLocation {
     void addValidBits(LocationSet *) const override {}
     void addLastIndexField(LocationSet *) const override {}
     void removeHeaders(LocationSet *result) const override;
+
+    DECLARE_TYPEINFO(TupleLocation, IndexedLocation);
 };
 
 class ArrayLocation : public IndexedLocation {
@@ -173,6 +177,8 @@ class ArrayLocation : public IndexedLocation {
     void addValidBits(LocationSet *result) const override;
     void removeHeaders(LocationSet *) const override {}  // no results added
     void addLastIndexField(LocationSet *result) const override;
+
+    DECLARE_TYPEINFO(ArrayLocation, IndexedLocation);
 };
 
 class StorageFactory {
@@ -225,13 +231,14 @@ class LocationSet : public IHasDbPrint {
     }
     // only defined for canonical representations
     bool overlaps(const LocationSet *other) const;
+    bool operator==(const LocationSet &other) const;
     bool isEmpty() const { return locations.empty(); }
 };
 
 /// Maps a declaration to its associated storage.
 class StorageMap : public IHasDbPrint {
     /// Storage location for each declaration.
-    ordered_map<const IR::IDeclaration *, StorageLocation *> storage;
+    hvec_map<const IR::IDeclaration *, StorageLocation *> storage;
     StorageFactory factory;
 
  public:
@@ -273,14 +280,14 @@ class ProgramPoint : public IHasDbPrint {
     /// the previous context.  E.g., a stack [Function] is the context before
     /// the function, while [Function, nullptr] is the context after the
     /// function terminates.
-    std::vector<const IR::Node *> stack;
+    absl::InlinedVector<const IR::Node *, 8> stack;  // Has inline space for 8 nodes
 
  public:
     ProgramPoint() = default;
     ProgramPoint(const ProgramPoint &other) : stack(other.stack) {}
     explicit ProgramPoint(const IR::Node *node) {
         CHECK_NULL(node);
-        stack.push_back(node);
+        assign(node);
     }
     ProgramPoint(const ProgramPoint &context, const IR::Node *node);
     /// A point logically before the function/control/action start.
@@ -308,10 +315,13 @@ class ProgramPoint : public IHasDbPrint {
                 out << "[[" << l << "]]";
         }
     }
+    void assign(const ProgramPoint &context, const IR::Node *node);
+    void assign(const IR::Node *node) { stack.assign({node}); }
+    void clear() { stack.clear(); }
     const IR::Node *last() const { return stack.empty() ? nullptr : stack.back(); }
     bool isBeforeStart() const { return stack.empty(); }
-    std::vector<const IR::Node *>::const_iterator begin() const { return stack.begin(); }
-    std::vector<const IR::Node *>::const_iterator end() const { return stack.end(); }
+    auto begin() const { return stack.begin(); }
+    auto end() const { return stack.end(); }
     ProgramPoint &operator=(const ProgramPoint &) = default;
     ProgramPoint &operator=(ProgramPoint &&) = default;
 };
@@ -327,9 +337,16 @@ struct hash<P4::ProgramPoint> {
 };
 }  // namespace std
 
+namespace Util {
+template <>
+struct Hasher<P4::ProgramPoint> {
+    size_t operator()(const P4::ProgramPoint &p) const { return p.hash(); }
+};
+}  // namespace Util
+
 namespace P4 {
 class ProgramPoints : public IHasDbPrint {
-    typedef std::unordered_set<ProgramPoint> Points;
+    typedef absl::flat_hash_set<ProgramPoint, Util::Hash> Points;
     Points points;
     explicit ProgramPoints(const Points &points) : points(points) {}
 
@@ -337,6 +354,7 @@ class ProgramPoints : public IHasDbPrint {
     ProgramPoints() = default;
     explicit ProgramPoints(ProgramPoint point) { points.emplace(point); }
     void add(ProgramPoint point) { points.emplace(point); }
+    void add(const ProgramPoints *from);
     const ProgramPoints *merge(const ProgramPoints *with) const;
     bool operator==(const ProgramPoints &other) const;
     void dbprint(std::ostream &out) const override {
@@ -356,7 +374,7 @@ class ProgramPoints : public IHasDbPrint {
 class Definitions : public IHasDbPrint {
     /// Set of program points that have written last to each location
     /// (conservative approximation).
-    ordered_map<const BaseLocation *, const ProgramPoints *> definitions;
+    hvec_map<const BaseLocation *, const ProgramPoints *> definitions;
     /// If true the current program point is actually unreachable.
     bool unreachable = false;
 
@@ -404,6 +422,7 @@ class Definitions : public IHasDbPrint {
     Definitions *cloneDefinitions() const { return new Definitions(*this); }
     void removeLocation(const StorageLocation *loc);
     bool empty() const { return definitions.empty(); }
+    size_t size() const { return definitions.size(); }
 };
 
 class AllDefinitions : public IHasDbPrint {
@@ -411,7 +430,7 @@ class AllDefinitions : public IHasDbPrint {
     /// However, for ProgramPoints representing P4Control, P4Action,
     /// P4Table, P4Function -- the definitions are BEFORE the
     /// ProgramPoint.
-    std::unordered_map<ProgramPoint, Definitions *> atPoint;
+    hvec_map<ProgramPoint, Definitions *> atPoint;
 
  public:
     StorageMap *storageMap;
@@ -448,8 +467,8 @@ class AllDefinitions : public IHasDbPrint {
 /**
  * Computes the write set for each expression and statement.
  *
- * This pass is run for each parser and control separately.  It
- * controls precisely the visit order --- to simulate a simbolic
+ * This pass is run for each parser and control separately. It
+ * controls precisely the visit order --- to simulate a symbolic
  * execution of the program.
  *
  * @pre Must be executed after variable initializers have been removed.
@@ -458,17 +477,22 @@ class AllDefinitions : public IHasDbPrint {
 
 class ComputeWriteSet : public Inspector, public IHasDbPrint {
  protected:
-    AllDefinitions *allDefinitions;    /// Result computed by this pass.
-    Definitions *currentDefinitions;   /// Before statement currently processed.
-    Definitions *returnedDefinitions;  /// Definitions after return statements.
-    Definitions *exitDefinitions;      /// Definitions after exit statements.
+    AllDefinitions *allDefinitions;              /// Result computed by this pass.
+    Definitions *currentDefinitions;             /// Before statement currently processed.
+    Definitions *returnedDefinitions;            /// Definitions after return statements.
+    Definitions *exitDefinitions;                /// Definitions after exit statements.
+    Definitions *breakDefinitions = nullptr;     /// Definitions at break statements.
+    Definitions *continueDefinitions = nullptr;  /// Definitions at continue statements.
     ProgramPoint callingContext;
     const StorageMap *storageMap;
     /// if true we are processing an expression on the lhs of an assignment
     bool lhs;
     /// For each expression the location set it writes
-    ordered_map<const IR::Expression *, const LocationSet *> writes;
+    hvec_map<const IR::Expression *, const LocationSet *> writes;
     bool virtualMethod;  /// True if we are analyzing a virtual method
+    AllocTrace memuse;
+    alloc_trace_cb_t nested_trace;
+    static int nest_count;
 
     /// Creates new visitor, but with same underlying data structures.
     /// Needed to visit some program fragments repeatedly.
@@ -477,6 +501,8 @@ class ComputeWriteSet : public Inspector, public IHasDbPrint {
           currentDefinitions(definitions),
           returnedDefinitions(nullptr),
           exitDefinitions(source->exitDefinitions),
+          breakDefinitions(source->breakDefinitions),
+          continueDefinitions(source->continueDefinitions),
           callingContext(context),
           storageMap(source->storageMap),
           lhs(false),
@@ -501,13 +527,32 @@ class ComputeWriteSet : public Inspector, public IHasDbPrint {
         CHECK_NULL(expression);
         CHECK_NULL(loc);
         LOG3(expression << dbp(expression) << " writes " << loc);
-        BUG_CHECK(writes.find(expression) == writes.end() || expression->is<IR::Literal>(),
-                  "Expression %1% write set already set", expression);
-        writes.emplace(expression, loc);
+        if (auto it = writes.find(expression); it != writes.end()) {
+            BUG_CHECK(*it->second == *loc || expression->is<IR::Literal>(),
+                      "Expression %1% write set already set", expression);
+        } else {
+            writes.emplace(expression, loc);
+        }
     }
     void dbprint(std::ostream &out) const override {
         if (writes.empty()) out << "No writes";
         for (auto &it : writes) out << it.first << " writes " << it.second << Log::endl;
+    }
+    profile_t init_apply(const IR::Node *root) override {
+        auto rv = Inspector::init_apply(root);
+        LOG1("starting ComputWriteSet" << Log::indent);
+        if (nest_count++ == 0 && LOGGING(2)) {
+            memuse.clear();
+            nested_trace = memuse.start();
+        }
+        return rv;
+    }
+    void end_apply() override {
+        LOG1("finished CWS" << Log::unindent);
+        if (--nest_count == 0 && LOGGING(2)) {
+            memuse.stop(nested_trace);
+            LOG2(memuse);
+        }
     }
 
  public:
@@ -552,7 +597,12 @@ class ComputeWriteSet : public Inspector, public IHasDbPrint {
     bool preorder(const IR::AssignmentStatement *statement) override;
     bool preorder(const IR::ReturnStatement *statement) override;
     bool preorder(const IR::ExitStatement *statement) override;
+    bool preorder(const IR::BreakStatement *statement) override;
+    bool handleJump(const char *tok, Definitions *&defs);
+    bool preorder(const IR::ContinueStatement *statement) override;
     bool preorder(const IR::IfStatement *statement) override;
+    bool preorder(const IR::ForStatement *statement) override;
+    bool preorder(const IR::ForInStatement *statement) override;
     bool preorder(const IR::BlockStatement *statement) override;
     bool preorder(const IR::SwitchStatement *statement) override;
     bool preorder(const IR::EmptyStatement *statement) override;

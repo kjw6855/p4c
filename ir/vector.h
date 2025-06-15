@@ -17,7 +17,6 @@ limitations under the License.
 #ifndef IR_VECTOR_H_
 #define IR_VECTOR_H_
 
-#include "ir/dbprint.h"
 #include "ir/node.h"
 #include "lib/enumerator.h"
 #include "lib/null.h"
@@ -47,6 +46,8 @@ class VectorBase : public Node {
 
  protected:
     explicit VectorBase(JSONLoader &json) : Node(json) {}
+
+    DECLARE_TYPEINFO_WITH_TYPEID(VectorBase, NodeKind::VectorBase, Node);
 };
 
 // This class should only be used in the IR.
@@ -95,7 +96,7 @@ class Vector : public VectorBase {
     iterator erase(iterator s, iterator e) { return vec.erase(s, e); }
     template <typename ForwardIter>
     iterator insert(iterator i, ForwardIter b, ForwardIter e) {
-        /* FIXME -- gcc prior to 4.9 is broken and the insert routine returns void
+        /* FIXME -- GCC prior to 4.9 is broken and the insert routine returns void
          * FIXME -- rather than an iterator.  So we recalculate it from an index */
         int index = i - vec.begin();
         vec.insert(i, b, e);
@@ -128,14 +129,14 @@ class Vector : public VectorBase {
     }
 
     iterator insert(iterator i, const T *v) {
-        /* FIXME -- gcc prior to 4.9 is broken and the insert routine returns void
+        /* FIXME -- GCC prior to 4.9 is broken and the insert routine returns void
          * FIXME -- rather than an iterator.  So we recalculate it from an index */
         int index = i - vec.begin();
         vec.insert(i, v);
         return vec.begin() + index;
     }
     iterator insert(iterator i, size_t n, const T *v) {
-        /* FIXME -- gcc prior to 4.9 is broken and the insert routine returns void
+        /* FIXME -- GCC prior to 4.9 is broken and the insert routine returns void
          * FIXME -- rather than an iterator.  So we recalculate it from an index */
         int index = i - vec.begin();
         vec.insert(i, n, v);
@@ -183,7 +184,7 @@ class Vector : public VectorBase {
      * than a concrete class, as most of those appear in .def files. */
     bool equiv(const Node &a_) const override {
         if (static_cast<const Node *>(this) == &a_) return true;
-        if (typeid(*this) != typeid(a_)) return false;
+        if (this->typeId() != a_.typeId()) return false;
         auto &a = static_cast<const Vector<T> &>(a_);
         if (size() != a.size()) return false;
         auto it = a.begin();
@@ -198,14 +199,14 @@ class Vector : public VectorBase {
     virtual void parallel_visit_children(Visitor &v);
     virtual void parallel_visit_children(Visitor &v) const;
     void toJSON(JSONGenerator &json) const override;
-    Util::Enumerator<const T *> *getEnumerator() const {
-        return Util::Enumerator<const T *>::createEnumerator(vec);
-    }
+    Util::Enumerator<const T *> *getEnumerator() const { return Util::enumerate(vec); }
     template <typename S>
     Util::Enumerator<const S *> *only() const {
-        std::function<bool(const T *)> filter = [](const T *d) { return d->template is<S>(); };
-        return getEnumerator()->where(filter)->template as<const S *>();
+        return getEnumerator()->template as<const S *>()->where(
+            [](const T *d) { return d != nullptr; });
     }
+
+    DECLARE_TYPEINFO_WITH_DISCRIMINATOR(Vector<T>, NodeDiscriminator::VectorT, T, VectorBase);
 };
 
 }  // namespace IR

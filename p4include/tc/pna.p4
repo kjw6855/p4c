@@ -437,20 +437,32 @@ enum PNA_CounterType_t {
 /// Indirect counter with n_counters independent counter values, where
 /// every counter value has a data plane size specified by type W.
 
-@noWarn("unused")
+@noWarn("unused") @tc_acl("RP:RUXP")
 extern Counter<W, S> {
-  Counter(bit<32> n_counters, PNA_CounterType_t type);
-  void count(in S index);
+  Counter(@tc_numel bit<32> n_counters, PNA_CounterType_t type);
+  @tc_md_exec void count(in S index);
 }
 // END:Counter_extern
 
+struct tc_ControlPath_Counter<W, S> {
+  @tc_key S index;
+  @tc_data W pkts;
+  @tc_data W bytes;
+}
+
 // BEGIN:DirectCounter_extern
-@noWarn("unused")
+@noWarn("unused") @tc_acl("RP:RUXP")
 extern DirectCounter<W> {
   DirectCounter(PNA_CounterType_t type);
-  void count();
+  @tc_md_exec void count();
 }
 // END:DirectCounter_extern
+
+struct tc_ControlPath_DirectCounter<W> {
+    @tc_key bit<32> index;
+    @tc_data W pkts;
+    @tc_data W bytes;
+}
 
 // BEGIN:MeterType_defn
 enum PNA_MeterType_t {
@@ -494,15 +506,20 @@ extern DirectMeter {
 extern Register<T, S> {
   /// Instantiate an array of <size> registers. The initial value is
   /// undefined.
-  Register(bit<32> size);
+  Register(@tc_numel bit<32> size);
   /// Initialize an array of <size> registers and set their value to
   /// initial_value.
-  Register(bit<32> size, T initial_value);
+  Register(@tc_numel bit<32> size, @tc_init_val T initial_value);
 
-  T    read  (in S index);
-  void write (in S index, in T value);
+  @tc_md_read T    read  (@tc_key in S index);
+  @tc_md_write void write (@tc_key in S index, @tc_data in T value);
 }
 // END:Register_extern
+
+struct tc_ControlPath_Register<T> {
+    @tc_key bit<32> index;
+    @tc_data T a_value;
+}
 
 // BEGIN:Random_extern
 extern Random<T> {
@@ -587,7 +604,6 @@ struct pna_main_output_metadata_t {
 }
 // END:Metadata_main_output
 // END:Metadata_types
-
 
 // The following extern functions are "forwarding" functions -- they
 // all set the destination of the packet.  Calling one of them
@@ -864,7 +880,7 @@ control MainControlT<MH, MM>(
 
 control MainDeparserT<MH, MM>(
     packet_out pkt,
-    in    MH main_hdr,
+    inout    MH main_hdr,
     in    MM main_user_meta,
     in    pna_main_output_metadata_t ostd);
 

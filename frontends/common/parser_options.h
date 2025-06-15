@@ -19,6 +19,7 @@ limitations under the License.
 #ifndef FRONTENDS_COMMON_PARSER_OPTIONS_H_
 #define FRONTENDS_COMMON_PARSER_OPTIONS_H_
 
+#include <filesystem>
 #include <set>
 #include <unordered_map>
 
@@ -43,6 +44,9 @@ class ParserOptions : public Util::Options {
     // annotation names that are to be ignored by the compiler
     std::set<cstring> disabledAnnotations;
 
+    // used to generate dump file names
+    mutable size_t dump_uid = 0;
+
  protected:
     // Function that is returned by getDebugHook.
     void dumpPass(const char *manager, unsigned seq, const char *pass, const IR::Node *node) const;
@@ -58,9 +62,9 @@ class ParserOptions : public Util::Options {
     // Which language to compile
     FrontendVersion langVersion = FrontendVersion::P4_16;
     // options to pass to preprocessor
-    cstring preprocessor_options = "";
+    cstring preprocessor_options = cstring::empty;
     // file to compile (- for stdin)
-    cstring file = nullptr;
+    std::filesystem::path file;
     // if true preprocess only
     bool doNotCompile = false;
     // Compiler version.
@@ -70,7 +74,7 @@ class ParserOptions : public Util::Options {
     // substrings matched against pass names
     std::vector<cstring> top4;
     // debugging dumps of programs written in this folder
-    cstring dumpFolder = ".";
+    std::filesystem::path dumpFolder = ".";
     // If false, optimization of callee parsers (subparsers) inlining is disabled.
     bool optimizeParserInlining = false;
     // Expect that the only remaining argument is the input file.
@@ -80,7 +84,7 @@ class ParserOptions : public Util::Options {
     // Returns the output of the preprocessor.
     FILE *preprocess();
     // Closes the input stream returned by preprocess.
-    void closeInput(FILE *input) const;
+    void closePreprocessedInput(FILE *input) const;
     // True if we are compiling a P4 v1.0 or v1.1 program
     bool isv1() const;
     // Get a debug hook function suitable for insertion
@@ -115,6 +119,16 @@ class P4CContext : public BaseCompileContext {
     /// @return the compiler options for this compilation context.
     virtual ParserOptions &options() = 0;
 
+    /// @return the default diagnostic action for calls to `::info()`.
+    DiagnosticAction getDefaultInfoDiagnosticAction() final {
+        return errorReporter().getDefaultInfoDiagnosticAction();
+    }
+
+    /// set the default diagnostic action for calls to `::info()`.
+    void setDefaultInfoDiagnosticAction(DiagnosticAction action) {
+        errorReporter().setDefaultInfoDiagnosticAction(action);
+    }
+
     /// @return the default diagnostic action for calls to `::warning()`.
     DiagnosticAction getDefaultWarningDiagnosticAction() final {
         return errorReporter().getDefaultWarningDiagnosticAction();
@@ -132,7 +146,7 @@ class P4CContext : public BaseCompileContext {
     }
 
     /// Set the action to take for the given diagnostic.
-    void setDiagnosticAction(cstring diagnostic, DiagnosticAction action) {
+    void setDiagnosticAction(std::string_view diagnostic, DiagnosticAction action) {
         errorReporter().setDiagnosticAction(diagnostic, action);
     }
 
@@ -163,6 +177,11 @@ class P4CContextWithOptions final : public P4CContext {
 
     template <typename OptionsDerivedType>
     P4CContextWithOptions(P4CContextWithOptions<OptionsDerivedType> &context) {
+        optionsInstance = context.options();
+    }
+
+    template <typename OptionsDerivedType>
+    P4CContextWithOptions &operator=(P4CContextWithOptions<OptionsDerivedType> &context) {
         optionsInstance = context.options();
     }
 

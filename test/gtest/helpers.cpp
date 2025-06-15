@@ -29,7 +29,7 @@ limitations under the License.
 #include "frontends/p4/frontend.h"
 #include "frontends/p4/parseAnnotations.h"
 
-namespace detail {
+namespace TestDetail {
 
 std::string makeP4Source(const char *file, unsigned line, P4Headers headers,
                          const char *rawSource) {
@@ -85,7 +85,7 @@ std::string makeP4Source(const char *file, unsigned line, const char *rawSource)
     return makeP4Source(file, line, P4Headers::NONE, rawSource);
 }
 
-}  // namespace detail
+}  // namespace TestDetail
 
 /* static */ P4CTestEnvironment *P4CTestEnvironment::get() {
     static P4CTestEnvironment *instance = new P4CTestEnvironment;
@@ -139,7 +139,7 @@ std::string P4CTestEnvironment::readHeader(const char *filename, bool preprocess
 P4CTestEnvironment::P4CTestEnvironment() {
     // Locate the headers based on the relative path of the file.
     std::filesystem::path srcFilePath{__FILE__};
-    auto srcFileDir = srcFilePath.parent_path();
+    auto srcFileDir = std::filesystem::absolute(srcFilePath.parent_path());
     auto corePath = srcFileDir / "../../p4include/core.p4";
     auto v1modelPath = srcFileDir / "../../p4include/v1model.p4";
     auto psaPath = srcFileDir / "../../p4include/bmv2/psa.p4";
@@ -148,14 +148,21 @@ P4CTestEnvironment::P4CTestEnvironment() {
     _psaP4 = readHeader(psaPath.c_str(), true);
 }
 
+std::filesystem::path P4CTestEnvironment::getProjectRoot() {
+    return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+}
+
 namespace Test {
 
 /* static */ std::optional<FrontendTestCase> FrontendTestCase::create(
     const std::string &source,
     CompilerOptions::FrontendVersion langVersion
     /* = CompilerOptions::FrontendVersion::P4_16 */,
-    P4::ParseAnnotations parseAnnotations
-    /* = P4::ParseAnnotations() */) {
+    P4::FrontEndPolicy *policy
+    /* = nullptr */) {
+    if (policy == nullptr) {
+        policy = new P4::FrontEndPolicy();
+    }
     auto *program = P4::parseP4String(source, langVersion);
     if (program == nullptr) {
         std::cerr << "Couldn't parse test case source" << std::endl;
@@ -177,7 +184,7 @@ namespace Test {
 
     CompilerOptions options;
     options.langVersion = langVersion;
-    program = P4::FrontEnd(parseAnnotations).run(options, program, true);
+    program = P4::FrontEnd(policy).run(options, program);
     if (program == nullptr) {
         std::cerr << "Frontend failed" << std::endl;
         return std::nullopt;

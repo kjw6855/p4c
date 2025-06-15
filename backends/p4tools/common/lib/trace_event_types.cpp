@@ -25,6 +25,17 @@ Generic::Generic(cstring label) : label(label) {}
 void Generic::print(std::ostream &os) const { os << "[" << label << "]"; }
 
 /* =============================================================================================
+ *   GenericDescription
+ * ============================================================================================= */
+
+GenericDescription::GenericDescription(cstring label, cstring description)
+    : Generic(label), description(description) {}
+
+void GenericDescription::print(std::ostream &os) const {
+    Generic::print(os);
+    os << ": " << description;
+}
+/* =============================================================================================
  *   Expression
  * ============================================================================================= */
 
@@ -39,15 +50,48 @@ const Expression *Expression::apply(Transform &visitor) const {
 }
 
 const Expression *Expression::evaluate(const Model &model, bool doComplete) const {
-    if (Taint::hasTaint(value)) {
-        return new Expression(&Taint::TAINTED_STRING_LITERAL, label);
+    const IR::Expression *evaluatedValue = nullptr;
+    if (const auto *structExpr = value->to<IR::StructExpression>()) {
+        evaluatedValue = model.evaluateStructExpr(structExpr, doComplete);
+    } else if (const auto *listExpr = value->to<IR::BaseListExpression>()) {
+        evaluatedValue = model.evaluateListExpr(listExpr, doComplete);
+    } else if (Taint::hasTaint(value)) {
+        evaluatedValue = &Taint::TAINTED_STRING_LITERAL;
+    } else {
+        evaluatedValue = model.evaluate(value, doComplete);
     }
-    return new Expression(model.evaluate(value, doComplete), label);
+    return new Expression(evaluatedValue, label);
 }
 
 void Expression::print(std::ostream &os) const {
+    // Convert the assignment to a string and strip any new lines.
+    // TODO: Maybe there is a better way to format newlines?
+    std::stringstream exprStream;
+    value->dbprint(exprStream);
+    auto expString = exprStream.str();
+    expString.erase(std::remove(expString.begin(), expString.end(), '\n'), expString.cend());
     Generic::print(os);
-    os << " = " << formatHexExpr(value, true);
+    os << ": " << expString;
+}
+
+/* =============================================================================================
+ *   MethodCall
+ * ============================================================================================= */
+
+MethodCall::MethodCall(const IR::MethodCallExpression *call) : call(call) {}
+
+void MethodCall::print(std::ostream &os) const {
+    const auto &srcInfo = call->getSourceInfo();
+    // Convert the method call to a string and strip any new lines.
+    std::stringstream callStream;
+    call->dbprint(callStream);
+    auto callString = callStream.str();
+    callString.erase(std::remove(callString.begin(), callString.end(), '\n'), callString.cend());
+    if (srcInfo.isValid()) {
+        os << "[MethodCall]: " << callString;
+    } else {
+        os << "[P4Testgen MethodCall]: " << callString;
+    }
 }
 
 /* =============================================================================================
@@ -91,13 +135,69 @@ void IfStatementCondition::print(std::ostream &os) const {
     CHECK_NULL(preEvalCond);
     const auto &srcInfo = preEvalCond->getSourceInfo();
     if (srcInfo.isValid()) {
-        os << "[If Statement]: " << preEvalCond->getSourceInfo().toBriefSourceFragment();
+        os << "[If Statement]: " << srcInfo.toBriefSourceFragment();
     } else {
-        os << "[Internal If Statement]: " << preEvalCond;
+        os << "[P4Testgen If Statement]: " << preEvalCond;
     }
-    os << " -> " << preEvalCond;
+    os << " Condition: " << preEvalCond;
     const auto *boolResult = postEvalCond->checkedTo<IR::BoolLiteral>()->value ? "true" : "false";
-    os << " -> " << boolResult;
+    os << " Result: " << boolResult;
+}
+
+/* =============================================================================================
+ *   AssignmentStatement
+ * ============================================================================================= */
+
+AssignmentStatement::AssignmentStatement(const IR::AssignmentStatement &stmt) : stmt(stmt) {}
+
+const AssignmentStatement *AssignmentStatement::subst(const SymbolicEnv &env) const {
+    const auto *right = env.subst(stmt.right);
+    auto *traceEvent =
+        new AssignmentStatement(*new IR::AssignmentStatement(stmt.srcInfo, stmt.left, right));
+    return traceEvent;
+}
+
+const AssignmentStatement *AssignmentStatement::apply(Transform &visitor) const {
+    const auto *right = stmt.right->apply(visitor);
+    auto *traceEvent =
+        new AssignmentStatement(*new IR::AssignmentStatement(stmt.srcInfo, stmt.left, right));
+    return traceEvent;
+}
+
+const AssignmentStatement *AssignmentStatement::evaluate(const Model &model,
+                                                         bool doComplete) const {
+    const IR::Expression *right = nullptr;
+    if (const auto *structExpr = stmt.right->to<IR::StructExpression>()) {
+        right = model.evaluateStructExpr(structExpr, doComplete);
+    } else if (const auto *listExpr = stmt.right->to<IR::BaseListExpression>()) {
+        right = model.evaluateListExpr(listExpr, doComplete);
+    } else if (Taint::hasTaint(stmt.right)) {
+        right = &Taint::TAINTED_STRING_LITERAL;
+    } else {
+        right = model.evaluate(stmt.right, doComplete);
+    }
+
+    auto *traceEvent =
+        new AssignmentStatement(*new IR::AssignmentStatement(stmt.srcInfo, stmt.left, right));
+    return traceEvent;
+}
+
+void AssignmentStatement::print(std::ostream &os) const {
+    const auto &srcInfo = stmt.getSourceInfo();
+    // Convert the assignment to a string and strip any new lines.
+    // TODO: Maybe there is a better way to format newlines?
+    std::stringstream assignStream;
+    stmt.dbprint(assignStream);
+    auto assignString = assignStream.str();
+    assignString.erase(std::remove(assignString.begin(), assignString.end(), '\n'),
+                       assignString.cend());
+    if (srcInfo.isValid()) {
+        auto fragment = srcInfo.toSourceFragment(false);
+        fragment = fragment.trim();
+        os << "[AssignmentStatement]: " << fragment << "| Computed: " << assignString;
+    } else {
+        os << "[P4Testgen AssignmentStatement]: " << assignString;
+    }
 }
 
 /* =============================================================================================
@@ -149,7 +249,7 @@ void ExtractSuccess::print(std::ostream &os) const {
        << " | Condition: " << condition
        << " | Extract Size: " << extractedHeader->type->width_bits() << " -> ";
     for (const auto &field : fields) {
-        os << field.first->toString() << " = " << formatHexExpr(field.second, true);
+        os << field.first->toString() << " = " << formatHexExpr(field.second, {true});
         if (field != fields.back()) {
             os << " | ";
         }
@@ -179,49 +279,31 @@ void ExtractFailure::print(std::ostream &os) const {
  *   Emit
  * ============================================================================================= */
 
-Emit::Emit(const IR::Expression *emitHeader,
-           std::vector<std::pair<IR::StateVariable, const IR::Expression *>> fields)
-    : emitHeader(emitHeader), fields(std::move(fields)) {}
+Emit::Emit(const IR::HeaderExpression *emitHeader) : emitHeader(emitHeader) {}
 
 const Emit *Emit::subst(const SymbolicEnv &env) const {
     std::vector<std::pair<IR::StateVariable, const IR::Expression *>> applyFields;
-    applyFields.reserve(fields.size());
-    for (const auto &field : fields) {
-        applyFields.emplace_back(field.first, env.subst(field.second));
-    }
-    return new Emit(emitHeader, applyFields);
+    return new Emit(env.subst(emitHeader)->checkedTo<IR::HeaderExpression>());
 }
 
 const Emit *Emit::apply(Transform &visitor) const {
-    std::vector<std::pair<IR::StateVariable, const IR::Expression *>> applyFields;
-    applyFields.reserve(fields.size());
-    for (const auto &field : fields) {
-        applyFields.emplace_back(field.first, field.second->apply(visitor));
-    }
-    return new Emit(emitHeader, applyFields);
+    return new Emit(emitHeader->apply(visitor)->checkedTo<IR::HeaderExpression>());
 }
 
 const Emit *Emit::evaluate(const Model &model, bool doComplete) const {
-    std::vector<std::pair<IR::StateVariable, const IR::Expression *>> applyFields;
-    applyFields.reserve(fields.size());
-    for (const auto &field : fields) {
-        if (Taint::hasTaint(field.second)) {
-            applyFields.emplace_back(field.first, &Taint::TAINTED_STRING_LITERAL);
-        } else {
-            applyFields.emplace_back(field.first, model.evaluate(field.second, doComplete));
-        }
-    }
-    return new Emit(emitHeader, applyFields);
+    return new Emit(
+        model.evaluateStructExpr(emitHeader, doComplete)->checkedTo<IR::HeaderExpression>());
 }
 
 void Emit::print(std::ostream &os) const {
-    os << "[Emit] " << emitHeader->toString() << " -> ";
-    for (const auto &field : fields) {
-        os << field.first->toString() << " = " << formatHexExpr(field.second, true);
-        if (field != fields.back()) {
-            os << " | ";
-        }
-    }
+    // Convert the header expression to a string and strip any new lines.
+    // TODO: Maybe there is a better way to format newlines?
+    std::stringstream assignStream;
+    emitHeader->dbprint(assignStream);
+    auto headerString = assignStream.str();
+    headerString.erase(std::remove(headerString.begin(), headerString.end(), '\n'),
+                       headerString.cend());
+    os << "[Emit]: " << headerString;
 }
 
 /* =============================================================================================
@@ -247,7 +329,7 @@ const Packet *Packet::evaluate(const Model &model, bool doComplete) const {
 }
 
 void Packet::print(std::ostream &os) const {
-    os << "[Packet " << direction << "] " << formatHexExpr(packetValue, true);
+    os << "[Packet " << direction << "] " << formatHexExpr(packetValue, {true});
 }
 
 std::ostream &operator<<(std::ostream &os, const Packet::Direction &direction) {

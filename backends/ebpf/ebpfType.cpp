@@ -39,15 +39,19 @@ EBPFType *EBPFTypeFactory::create(const IR::Type *type) {
         auto canon = typeMap->getTypeType(type, true);
         result = create(canon);
         result = new EBPFTypeName(tn, result);
-    } else if (auto te = type->to<IR::Type_Enum>()) {
+    } else if (const auto *te = type->to<IR::Type_Enum>()) {
         result = new EBPFEnumType(te);
+    } else if (auto te = type->to<IR::Type_Error>()) {
+        result = new EBPFErrorType(te);
     } else if (auto ts = type->to<IR::Type_Stack>()) {
         auto et = create(ts->elementType);
         if (et == nullptr) return nullptr;
         result = new EBPFStackType(ts, et);
+    } else if (auto tv = type->to<IR::Type_Varbits>()) {
+        result = new EBPFScalarType(tv);
     } else if (type->is<IR::Type_Error>()) {
         // Implement error type as scalar of width 8 bits
-        result = new EBPFScalarType(new IR::Type_Bits(8, false));
+        result = new EBPFScalarType(IR::Type_Bits::get(8, false));
     } else {
         ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "Type %1% not supported", type);
     }
@@ -84,9 +88,11 @@ void EBPFStackType::emitInitializer(CodeBuilder *builder) {
     builder->append(" }");
 }
 
-unsigned EBPFStackType::widthInBits() { return size * elementType->to<IHasWidth>()->widthInBits(); }
+unsigned EBPFStackType::widthInBits() const {
+    return size * elementType->to<IHasWidth>()->widthInBits();
+}
 
-unsigned EBPFStackType::implementationWidthInBits() {
+unsigned EBPFStackType::implementationWidthInBits() const {
     return size * elementType->to<IHasWidth>()->implementationWidthInBits();
 }
 
@@ -162,11 +168,11 @@ void EBPFScalarType::emitInitializer(CodeBuilder *builder) {
 
 EBPFStructType::EBPFStructType(const IR::Type_StructLike *strct) : EBPFType(strct) {
     if (strct->is<IR::Type_Struct>())
-        kind = "struct";
+        kind = "struct"_cs;
     else if (strct->is<IR::Type_Header>())
-        kind = "struct";
+        kind = "struct"_cs;
     else if (strct->is<IR::Type_HeaderUnion>())
-        kind = "union";
+        kind = "union"_cs;
     else
         BUG("Unexpected struct type %1%", strct);
     name = strct->name.name;
@@ -175,7 +181,7 @@ EBPFStructType::EBPFStructType(const IR::Type_StructLike *strct) : EBPFType(strc
 
     for (auto f : strct->fields) {
         auto type = EBPFTypeFactory::instance->create(f->type);
-        auto wt = dynamic_cast<IHasWidth *>(type);
+        auto wt = type->to<IHasWidth>();
         if (wt == nullptr) {
             ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "EBPF: Unsupported type in struct: %s",
                     f->type);
@@ -210,7 +216,8 @@ void EBPFStructType::emitInitializer(CodeBuilder *builder) {
         }
     } else if (type->is<IR::Type_Header>()) {
         builder->emitIndent();
-        builder->appendLine(".ebpf_valid = 0");
+        builder->append(".ebpf_valid = 0");
+        builder->newline();
     } else {
         BUG("Unexpected type %1%", type);
     }
@@ -245,7 +252,7 @@ void EBPFStructType::emit(CodeBuilder *builder) {
         builder->emitIndent();
         auto type = EBPFTypeFactory::instance->create(IR::Type_Boolean::get());
         if (type != nullptr) {
-            type->declare(builder, "ebpf_valid", false);
+            type->declare(builder, "ebpf_valid"_cs, false);
             builder->endOfStatement(true);
         }
     }
@@ -272,8 +279,8 @@ void EBPFTypeName::emitInitializer(CodeBuilder *builder) {
     if (canonical != nullptr) canonical->emitInitializer(builder);
 }
 
-unsigned EBPFTypeName::widthInBits() {
-    auto wt = dynamic_cast<IHasWidth *>(canonical);
+unsigned EBPFTypeName::widthInBits() const {
+    auto wt = canonical->to<IHasWidth>();
     if (wt == nullptr) {
         ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "Type %1% does not have a fixed witdh", type);
         return 0;
@@ -281,8 +288,8 @@ unsigned EBPFTypeName::widthInBits() {
     return wt->widthInBits();
 }
 
-unsigned EBPFTypeName::implementationWidthInBits() {
-    auto wt = dynamic_cast<IHasWidth *>(canonical);
+unsigned EBPFTypeName::implementationWidthInBits() const {
+    auto wt = canonical->to<IHasWidth>();
     if (wt == nullptr) {
         ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "Type %1% does not have a fixed witdh", type);
         return 0;
@@ -316,9 +323,63 @@ void EBPFEnumType::emit(EBPF::CodeBuilder *builder) {
     builder->blockStart();
     for (auto m : et->members) {
         builder->append(m->name);
-        builder->appendLine(",");
+        builder->append(",");
+        builder->newline();
     }
     builder->blockEnd(true);
+}
+
+////////////////////////////////////////////////////////////////
+
+void EBPFErrorType::declare(EBPF::CodeBuilder *builder, cstring id, bool asPointer) {
+    builder->append("enum ");
+    builder->append(getType()->name);
+    if (asPointer) builder->append("*");
+    builder->append(" ");
+    builder->append(id);
+}
+
+void EBPFErrorType::declareInit(CodeBuilder *builder, cstring id, bool asPointer) {
+    declare(builder, id, asPointer);
+}
+
+void EBPFErrorType::emit(EBPF::CodeBuilder *builder) {
+    builder->append("enum ");
+    auto et = getType();
+    builder->append(et->name);
+    builder->blockStart();
+    for (auto m : et->members) {
+        builder->append(m->name);
+        builder->append(",");
+        builder->newline();
+    }
+    builder->blockEnd(true);
+}
+
+////////////////////////////////////////////////////////////////
+
+EBPFMethodDeclaration::EBPFMethodDeclaration(const IR::Method *method) : method_(method) {}
+
+void EBPFMethodDeclaration::emit(CodeBuilder *builder) {
+    auto *returnType = EBPFTypeFactory::instance->create(method_->type->returnType);
+    builder->append("extern ");
+    returnType->emit(builder);
+    builder->append(" ");
+    builder->append(method_->name);
+    builder->append("(");
+    for (const auto *parameter : method_->getParameters()->parameters) {
+        if (parameter->direction == IR::Direction::None ||
+            parameter->direction == IR::Direction::In) {
+            builder->append("const ");
+        }
+        auto *type = EBPFTypeFactory::instance->create(parameter->type);
+        type->declare(builder, parameter->name, false);
+        if (parameter != method_->getParameters()->parameters.back()) {
+            builder->append(", ");
+        }
+    }
+    builder->append(");");
+    builder->newline();
 }
 
 }  // namespace EBPF

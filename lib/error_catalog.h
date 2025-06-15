@@ -21,15 +21,18 @@ limitations under the License.
 #include <string>
 
 #include "cstring.h"
+#include "lib/error_message.h"
+#include "lib/exceptions.h"
+
+using MessageType = ErrorMessage::MessageType;
 
 /// enumerate supported errors
-/// Backends should extend this class with additional errors in the range 500-999 and
-/// warnings in the range 1500-2141.
 /// It is a class and not an enum class because in C++11 you can't extend an enum class
 class ErrorType {
  public:
     // -------- Errors -------------
     // errors as initially defined with a format string
+    // FIXME: make these constexpr
     static const int LEGACY_ERROR;
     static const int ERR_UNKNOWN;                // unknown construct (in context)
     static const int ERR_UNSUPPORTED;            // unsupported construct
@@ -48,9 +51,9 @@ class ErrorType {
     static const int ERR_UNREACHABLE;            // unreachable parser state
     static const int ERR_MODEL;                  // something is wrong with the target model
     static const int ERR_RESERVED;               // Reserved for target use
-
-    // If we specialize for 1000 error types we're good!
-    static const int ERR_MAX_ERRORS;
+    // Backends should extend this class with additional errors in the range 500-999.
+    static const int ERR_MIN_BACKEND = 500;  // first allowed backend error code
+    static const int ERR_MAX = 999;          // last allowed error code
 
     // -------- Warnings -----------
     // warnings as initially defined with a format string
@@ -77,8 +80,19 @@ class ErrorType {
     static const int WARN_INVALID_HEADER;           // access to fields of an invalid header
     static const int WARN_DUPLICATE_PRIORITIES;     // two entries with the same priority
     static const int WARN_ENTRIES_OUT_OF_ORDER;     // entries with priorities out of order
+    static const int WARN_MULTI_HDR_EXTRACT;        // same header may be extracted more than once
+    // Backends should extend this class with additional warnings in the range 1500-2141.
+    static const int WARN_MIN_BACKEND = 1500;  // first allowed backend warning code
+    static const int WARN_MAX = 2141;          // last allowed warning code
 
-    static const int WARN_MAX_WARNINGS;
+    // -------- Info messages -------------
+    // info messages as initially defined with a format string
+    static const int INFO_INFERRED;  // information inferred by compiler
+    static const int INFO_PROGRESS;  // compilation progress
+
+    // Backends should extend this class with additional info messages in the range 3000-3999.
+    static const int INFO_MIN_BACKEND = 3000;  // first allowed backend info code
+    static const int INFO_MAX = 3999;          // last allowed info code
 };
 
 class ErrorCatalog {
@@ -91,19 +105,47 @@ class ErrorCatalog {
 
     /// add to the catalog
     /// returns false if the code already exists and forceReplace was not set to true
+    /// @param type      - error/warning/info message
     /// @param errorCode - integer value for the error/warning
     /// @param name      - name for the error. Used to enable/disable all errors of that type
     /// @param forceReplace - override an existing error type in the catalog
-    bool add(int errorCode, const char *name, bool forceReplace = false) {
+    template <MessageType type, int errorCode>
+    bool add(const char *name, bool forceReplace = false) {
+        static_assert(type != MessageType::Error ||
+                      (errorCode >= ErrorType::ERR_MIN_BACKEND && errorCode <= ErrorType::ERR_MAX));
+        static_assert(type != MessageType::Warning || (errorCode >= ErrorType::WARN_MIN_BACKEND &&
+                                                       errorCode <= ErrorType::WARN_MAX));
+        static_assert(type != MessageType::Info || (errorCode >= ErrorType::INFO_MIN_BACKEND &&
+                                                    errorCode <= ErrorType::INFO_MAX));
+        static_assert(type != MessageType::None);
         if (forceReplace) errorCatalog.erase(errorCode);
         auto it = errorCatalog.emplace(errorCode, name);
         return it.second;
     }
 
     /// retrieve the name for errorCode
-    const cstring getName(int errorCode) {
+    cstring getName(int errorCode) {
+        using namespace P4::literals;
+
         if (errorCatalog.count(errorCode)) return errorCatalog.at(errorCode);
-        return "--unknown--";
+        return "--unknown--"_cs;
+    }
+
+    /// return true if the given diagnostic can _only_ be an error; false otherwise
+    bool isError(std::string_view name) {
+        cstring lookup(name);
+        // Some diagnostics might be both errors and warning/info
+        // (e.g. "invalid" -> both ERR_INVALID and WARN_INVALID).
+        bool error = false;
+        for (const auto &pair : errorCatalog) {
+            if (pair.second == lookup) {
+                if (pair.first < ErrorType::LEGACY_ERROR || pair.first > ErrorType::ERR_MAX)
+                    return false;
+                error = true;
+            }
+        }
+
+        return error;
     }
 
  private:

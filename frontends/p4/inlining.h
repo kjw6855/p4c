@@ -402,13 +402,12 @@ class GeneralInliner : public AbstractInliner<InlineList, InlineSummary> {
     bool optimizeParserInlining;
 
  public:
-    explicit GeneralInliner(bool isv1, bool _optimizeParserInlining)
-        : refMap(new ReferenceMap()),
+    explicit GeneralInliner(ReferenceMap *refMap, bool _optimizeParserInlining)
+        : refMap(refMap),
           typeMap(new TypeMap()),
           workToDo(nullptr),
           optimizeParserInlining(_optimizeParserInlining) {
         setName("GeneralInliner");
-        refMap->setIsV1(isv1);
         visitDagOnce = false;
     }
     // controlled visiting order
@@ -432,12 +431,12 @@ class InlinePass : public PassManager {
 
  public:
     InlinePass(ReferenceMap *refMap, TypeMap *typeMap, EvaluatorPass *evaluator,
-               bool optimizeParserInlining)
+               const RemoveUnusedPolicy &policy, bool optimizeParserInlining)
         : PassManager({new TypeChecking(refMap, typeMap),
                        new DiscoverInlining(&toInline, refMap, typeMap, evaluator),
                        new InlineDriver<InlineList, InlineSummary>(
-                           &toInline, new GeneralInliner(refMap->isV1(), optimizeParserInlining)),
-                       new RemoveAllUnusedDeclarations(refMap)}) {
+                           &toInline, new GeneralInliner(refMap, optimizeParserInlining)),
+                       new RemoveAllUnusedDeclarations(refMap, policy)}) {
         setName("InlinePass");
     }
 };
@@ -452,8 +451,8 @@ class Inline : public PassRepeated {
 
  public:
     Inline(ReferenceMap *refMap, TypeMap *typeMap, EvaluatorPass *evaluator,
-           bool optimizeParserInlining)
-        : PassManager({new InlinePass(refMap, typeMap, evaluator, optimizeParserInlining),
+           const RemoveUnusedPolicy &policy, bool optimizeParserInlining)
+        : PassManager({new InlinePass(refMap, typeMap, evaluator, policy, optimizeParserInlining),
                        // After inlining the output of the evaluator changes, so
                        // we have to run it again
                        evaluator}) {

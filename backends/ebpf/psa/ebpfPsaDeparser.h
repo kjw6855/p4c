@@ -22,6 +22,7 @@ limitations under the License.
 #include "backends/ebpf/psa/externs/ebpfPsaChecksum.h"
 #include "backends/ebpf/psa/externs/ebpfPsaDigest.h"
 #include "ebpfPsaControl.h"
+#include "lib/rtti.h"
 
 namespace EBPF {
 
@@ -64,6 +65,13 @@ class EBPFDeparserPSA : public EBPFDeparser {
         BUG_CHECK(result != nullptr, "No digest named %1%", name);
         return result;
     }
+
+    void emitDeparserExternCalls(EBPF::CodeBuilder *builder) override {
+        controlBlock->container->body->apply(*codeGen);
+        builder->newline();
+    }
+
+    DECLARE_TYPEINFO(EBPFDeparserPSA, EBPFDeparser);
 };
 
 class IngressDeparserPSA : public EBPFDeparserPSA {
@@ -73,6 +81,8 @@ class IngressDeparserPSA : public EBPFDeparserPSA {
         : EBPFDeparserPSA(program, control, parserHeaders, istd) {}
 
     bool build() override;
+
+    DECLARE_TYPEINFO(IngressDeparserPSA, EBPFDeparserPSA);
 };
 
 class EgressDeparserPSA : public EBPFDeparserPSA {
@@ -82,6 +92,8 @@ class EgressDeparserPSA : public EBPFDeparserPSA {
         : EBPFDeparserPSA(program, control, parserHeaders, istd) {}
 
     bool build() override;
+
+    DECLARE_TYPEINFO(EgressDeparserPSA, EBPFDeparserPSA);
 };
 
 class TCIngressDeparserPSA : public IngressDeparserPSA {
@@ -91,6 +103,8 @@ class TCIngressDeparserPSA : public IngressDeparserPSA {
         : IngressDeparserPSA(program, control, parserHeaders, istd) {}
 
     void emitPreDeparser(CodeBuilder *builder) override;
+
+    DECLARE_TYPEINFO(TCIngressDeparserPSA, IngressDeparserPSA);
 };
 
 class TCEgressDeparserPSA : public EgressDeparserPSA {
@@ -98,6 +112,8 @@ class TCEgressDeparserPSA : public EgressDeparserPSA {
     TCEgressDeparserPSA(const EBPFProgram *program, const IR::ControlBlock *control,
                         const IR::Parameter *parserHeaders, const IR::Parameter *istd)
         : EgressDeparserPSA(program, control, parserHeaders, istd) {}
+
+    DECLARE_TYPEINFO(TCEgressDeparserPSA, EgressDeparserPSA);
 };
 
 class TCIngressDeparserForTrafficManagerPSA : public TCIngressDeparserPSA {
@@ -112,6 +128,8 @@ class TCIngressDeparserForTrafficManagerPSA : public TCIngressDeparserPSA {
         (void)builder;
         // do not emit deparser extern calls for TCIngressDeparserForTrafficManagerPSA
     }
+
+    DECLARE_TYPEINFO(TCIngressDeparserForTrafficManagerPSA, TCIngressDeparserPSA);
 };
 
 class XDPIngressDeparserPSA : public IngressDeparserPSA {
@@ -121,6 +139,8 @@ class XDPIngressDeparserPSA : public IngressDeparserPSA {
         : IngressDeparserPSA(program, control, parserHeaders, istd) {}
 
     void emitPreDeparser(CodeBuilder *builder) override;
+
+    DECLARE_TYPEINFO(XDPIngressDeparserPSA, IngressDeparserPSA);
 };
 
 class XDPEgressDeparserPSA : public EgressDeparserPSA {
@@ -130,6 +150,8 @@ class XDPEgressDeparserPSA : public EgressDeparserPSA {
         : EgressDeparserPSA(program, control, parserHeaders, istd) {}
 
     void emitPreDeparser(CodeBuilder *builder) override;
+
+    DECLARE_TYPEINFO(XDPEgressDeparserPSA, EgressDeparserPSA);
 };
 
 }  // namespace EBPF

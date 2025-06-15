@@ -3,15 +3,15 @@
 
 #include <cstddef>
 #include <optional>
-#include <vector>
 
 #include "backends/p4tools/common/compiler/reachability.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
-#include "ir/declaration.h"
 #include "ir/ir.h"
 #include "lib/castable.h"
+#include "lib/rtti.h"
 #include "midend/coverage.h"
 
+#include "backends/p4tools/modules/testgen/core/compiler_result.h"
 #include "backends/p4tools/modules/testgen/lib/concolic.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
 
@@ -19,15 +19,17 @@ namespace P4Tools::P4Testgen {
 
 /// Stores target-specific information about a P4 program.
 class ProgramInfo : public ICastable {
+ private:
+    /// The program info object stores the results of the compilation, which includes the P4 program
+    /// and any information extracted from the program using static analysis.
+    std::reference_wrapper<const TestgenCompilerResult> compilerResult;
+
  protected:
-    explicit ProgramInfo(const IR::P4Program *program);
+    explicit ProgramInfo(const TestgenCompilerResult &compilerResult);
 
     /// The list of concolic methods implemented by the target. This list is assembled during
     /// initialization.
     ConcolicMethodImpls concolicMethodImpls;
-
-    /// Set of all visitable nodes in the input P4 program.
-    P4::Coverage::CoverageSet coverableNodes;
 
     /// The execution sequence of the P4 program.
     std::vector<Continuation::Command> pipelineSequence;
@@ -49,11 +51,12 @@ class ProgramInfo : public ICastable {
 
     ~ProgramInfo() override = default;
 
-    /// The P4 program from which this object is derived.
-    const IR::P4Program *program;
-
-    /// The generated dcg.
-    const NodesCallGraph *dcg;
+    /// A vector that maps the architecture parameters of each pipe to the corresponding
+    /// global architecture variables. For example, this map specifies which parameter of each pipe
+    /// refers to the input header.
+    // The arch map needs to be public to be subclassed.
+    /// @returns a reference to the architecture map defined in this target
+    [[nodiscard]] virtual const ArchSpec &getArchSpec() const = 0;
 
     /// @returns the series of nodes that has been computed by this particular target.
     [[nodiscard]] const std::vector<Continuation::Command> *getPipelineSequence() const;
@@ -87,21 +90,19 @@ class ProgramInfo : public ICastable {
     // @returns the width of the parser error for this specific target.
     [[nodiscard]] virtual const IR::Type_Bits *getParserErrorType() const = 0;
 
-    /// Looks up a declaration from a path. A BUG occurs if no declaration is found.
-    static const IR::IDeclaration *findProgramDecl(const IR::IGeneralNamespace *ns,
-                                                   const IR::Path *path);
-
-    /// Looks up a declaration from a path expression. A BUG occurs if no declaration is found.
-    static const IR::IDeclaration *findProgramDecl(const IR::IGeneralNamespace *ns,
-                                                   const IR::PathExpression *pathExpr);
-
-    /// Resolves a Type_Name in the top-level namespace.
-    static const IR::Type_Declaration *resolveProgramType(const IR::IGeneralNamespace *ns,
-                                                          const IR::Type_Name *type);
-
     /// @returns the canonical name of the program block that is passed in.
     /// Throws a BUG, if the name can not be found.
     [[nodiscard]] cstring getCanonicalBlockName(cstring programBlockName) const;
+
+    /// @returns a reference to the compiler result that this program info object was initialized
+    /// with.
+    [[nodiscard]] virtual const TestgenCompilerResult &getCompilerResult() const;
+
+    /// @returns the P4 program associated with this ProgramInfo.
+    [[nodiscard]] const IR::P4Program &getP4Program() const;
+
+    /// @returns the call graph associated with this ProgramInfo.
+    [[nodiscard]] const NodesCallGraph &getCallGraph() const;
 
     /// Helper function to produce copy-in and copy-out helper calls.
     /// Copy-in and copy-out is needed to correctly model the value changes of data when it is
@@ -113,6 +114,8 @@ class ProgramInfo : public ICastable {
                               const ArchSpec::ArchMember *archMember,
                               std::vector<Continuation::Command> *copyIns,
                               std::vector<Continuation::Command> *copyOuts) const;
+
+    DECLARE_TYPEINFO(ProgramInfo);
 };
 
 }  // namespace P4Tools::P4Testgen

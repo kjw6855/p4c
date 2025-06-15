@@ -1,16 +1,13 @@
 #include "backends/p4tools/modules/testgen/targets/ebpf/program_info.h"
 
-#include <list>
 #include <optional>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <boost/multiprecision/cpp_int.hpp>
 
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/util.h"
-#include "backends/p4tools/common/lib/variables.h"
 #include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"
@@ -18,8 +15,8 @@
 #include "lib/exceptions.h"
 
 #include "backends/p4tools/modules/testgen//lib/exceptions.h"
+#include "backends/p4tools/modules/testgen/core/compiler_result.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
-#include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/lib/concolic.h"
 #include "backends/p4tools/modules/testgen/lib/continuation.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
@@ -29,19 +26,21 @@
 
 namespace P4Tools::P4Testgen::EBPF {
 
+using namespace P4::literals;
+
 const IR::Type_Bits EBPFProgramInfo::PARSER_ERR_BITS = IR::Type_Bits(32, false);
 
-EBPFProgramInfo::EBPFProgramInfo(const IR::P4Program *program,
+EBPFProgramInfo::EBPFProgramInfo(const TestgenCompilerResult &compilerResult,
                                  ordered_map<cstring, const IR::Type_Declaration *> inputBlocks)
-    : ProgramInfo(program), programmableBlocks(std::move(inputBlocks)) {
+    : ProgramInfo(compilerResult), programmableBlocks(std::move(inputBlocks)) {
     concolicMethodImpls.add(*EBPFConcolic::getEBPFConcolicMethodImpls());
 
     // Just concatenate everything together.
     // Iterate through the (ordered) pipes of the target architecture.
-    const auto *archSpec = TestgenTarget::getArchSpec();
-    BUG_CHECK(archSpec->getArchVectorSize() == programmableBlocks.size(),
+    const auto &archSpec = getArchSpec();
+    BUG_CHECK(archSpec.getArchVectorSize() == programmableBlocks.size(),
               "The eBPF architecture requires %1% pipes (provided %2% pipes).",
-              archSpec->getArchVectorSize(), programmableBlocks.size());
+              archSpec.getArchVectorSize(), programmableBlocks.size());
 
     /// Compute the series of nodes corresponding to the in-order execution of top-level
     /// pipeline-component instantiations. For a standard ebpf_model, this produces
@@ -59,8 +58,10 @@ EBPFProgramInfo::EBPFProgramInfo(const IR::P4Program *program,
     // The input packet should be larger than 0.
     targetConstraints =
         new IR::Grt(IR::Type::Boolean::get(), ExecutionState::getInputPacketSizeVar(),
-                    IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, 0));
+                    IR::Constant::get(&PacketVars::PACKET_SIZE_VAR_TYPE, 0));
 }
+
+const ArchSpec &EBPFProgramInfo::getArchSpec() const { return ARCH_SPEC; }
 
 const ordered_map<cstring, const IR::Type_Declaration *> *EBPFProgramInfo::getProgrammableBlocks()
     const {
@@ -69,9 +70,6 @@ const ordered_map<cstring, const IR::Type_Declaration *> *EBPFProgramInfo::getPr
 
 std::vector<Continuation::Command> EBPFProgramInfo::processDeclaration(
     const IR::Type_Declaration *typeDecl, size_t blockIdx) const {
-    // Get the architecture specification for this target.
-    const auto *archSpec = TestgenTarget::getArchSpec();
-
     // Collect parameters.
     const auto *applyBlock = typeDecl->to<IR::IApply>();
     if (applyBlock == nullptr) {
@@ -79,19 +77,23 @@ std::vector<Continuation::Command> EBPFProgramInfo::processDeclaration(
                               typeDecl->node_type_name());
     }
     // Retrieve the current canonical pipe in the architecture spec using the pipe index.
-    const auto *archMember = archSpec->getArchMember(blockIdx);
+    const auto *archMember = getArchSpec().getArchMember(blockIdx);
 
     std::vector<Continuation::Command> cmds;
 
     // Copy-in.
-    const auto *copyInCall = new IR::MethodCallStatement(
-        Utils::generateInternalMethodCall("copy_in", {new IR::PathExpression(typeDecl->name)}));
+    const auto *copyInCall = new IR::MethodCallStatement(Utils::generateInternalMethodCall(
+        "copy_in", {IR::StringLiteral::get(typeDecl->name)}, IR::Type_Void::get(),
+        new IR::ParameterList(
+            {new IR::Parameter("blockRef", IR::Direction::In, IR::Type_Unknown::get())})));
     cmds.emplace_back(copyInCall);
     // Insert the actual pipeline.
     cmds.emplace_back(typeDecl);
     // Copy-out.
-    const auto *copyOutCall = new IR::MethodCallStatement(
-        Utils::generateInternalMethodCall("copy_out", {new IR::PathExpression(typeDecl->name)}));
+    const auto *copyOutCall = new IR::MethodCallStatement(Utils::generateInternalMethodCall(
+        "copy_out", {IR::StringLiteral::get(typeDecl->name)}, IR::Type_Void::get(),
+        new IR::ParameterList(
+            {new IR::Parameter("blockRef", IR::Direction::In, IR::Type_Unknown::get())})));
     cmds.emplace_back(copyOutCall);
 
     // After some specific pipelines (filter), we check whether the packet has been dropped.
@@ -106,12 +108,12 @@ std::vector<Continuation::Command> EBPFProgramInfo::processDeclaration(
 }
 
 const IR::StateVariable &EBPFProgramInfo::getTargetInputPortVar() const {
-    return *new IR::StateVariable(new IR::Member(IR::getBitType(EBPFConstants::PORT_BIT_WIDTH),
+    return *new IR::StateVariable(new IR::Member(IR::Type_Bits::get(EBPFConstants::PORT_BIT_WIDTH),
                                                  new IR::PathExpression("*"), "input_port"));
 }
 
 const IR::StateVariable &EBPFProgramInfo::getTargetOutputPortVar() const {
-    return *new IR::StateVariable(new IR::Member(IR::getBitType(EBPFConstants::PORT_BIT_WIDTH),
+    return *new IR::StateVariable(new IR::Member(IR::Type_Bits::get(EBPFConstants::PORT_BIT_WIDTH),
                                                  new IR::PathExpression("*"), "output_port"));
 }
 
@@ -120,5 +122,11 @@ const IR::Expression *EBPFProgramInfo::dropIsActive() const {
 }
 
 const IR::Type_Bits *EBPFProgramInfo::getParserErrorType() const { return &PARSER_ERR_BITS; }
+
+const ArchSpec EBPFProgramInfo::ARCH_SPEC =
+    ArchSpec("ebpfFilter"_cs, {// parser parse<H>(packet_in packet, out H headers);
+                               {"parse"_cs, {nullptr, "*hdr"_cs}},
+                               // control filter<H>(inout H headers, out bool accept);
+                               {"filter"_cs, {"*hdr"_cs, "*accept"_cs}}});
 
 }  // namespace P4Tools::P4Testgen::EBPF

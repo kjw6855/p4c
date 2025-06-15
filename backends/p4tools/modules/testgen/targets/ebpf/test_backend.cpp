@@ -31,9 +31,10 @@ const big_int EBPFTestBackend::ZERO_PKT_VAL = 0x2000000;
 const big_int EBPFTestBackend::ZERO_PKT_MAX = 0xffffffff;
 const std::vector<std::string> EBPFTestBackend::SUPPORTED_BACKENDS = {"STF"};
 
-EBPFTestBackend::EBPFTestBackend(const ProgramInfo &programInfo, SymbolicExecutor &symbex,
-                                 const std::filesystem::path &testPath)
-    : TestBackEnd(programInfo, symbex) {
+EBPFTestBackend::EBPFTestBackend(const ProgramInfo &programInfo,
+                                 const TestBackendConfiguration &testBackendConfiguration,
+                                 SymbolicExecutor &symbex)
+    : TestBackEnd(programInfo, testBackendConfiguration, symbex) {
     cstring testBackendString = TestgenOptions::get().testBackend;
     if (testBackendString.isNullOrEmpty()) {
         ::error(
@@ -44,7 +45,7 @@ EBPFTestBackend::EBPFTestBackend(const ProgramInfo &programInfo, SymbolicExecuto
     }
 
     if (testBackendString == "STF") {
-        testWriter = new STF(testPath.c_str(), TestgenOptions::get().seed);
+        testWriter = new STF(testBackendConfiguration);
     } else {
         P4C_UNIMPLEMENTED(
             "Test back end %1% not implemented for this target. Supported back ends are %2%.",
@@ -63,15 +64,16 @@ TestBackEnd::TestInfo EBPFTestBackend::produceTestInfo(
     if (testInfo.outputPacket->type->width_bits() == 0) {
         int outPktSize = ZERO_PKT_WIDTH;
         testInfo.outputPacket =
-            IR::getConstant(IR::getBitType(outPktSize), EBPFTestBackend::ZERO_PKT_VAL);
+            IR::Constant::get(IR::Type_Bits::get(outPktSize), EBPFTestBackend::ZERO_PKT_VAL);
         testInfo.packetTaintMask =
-            IR::getConstant(IR::getBitType(outPktSize), EBPFTestBackend::ZERO_PKT_MAX);
+            IR::Constant::get(IR::Type_Bits::get(outPktSize), EBPFTestBackend::ZERO_PKT_MAX);
+    } else {
+        // eBPF actually can not modify the input packet. It can only filter. Thus we reuse our
+        // input packet here.
+        testInfo.outputPacket = testInfo.inputPacket;
+        testInfo.packetTaintMask = IR::Constant::get(testInfo.inputPacket->type,
+                                                     IR::getMaxBvVal(testInfo.inputPacket->type));
     }
-    // eBPF actually can not modify the input packet. It can only filter. Thus we reuse our input
-    // packet here.
-    testInfo.outputPacket = testInfo.inputPacket;
-    testInfo.packetTaintMask =
-        IR::getConstant(testInfo.inputPacket->type, IR::getMaxBvVal(testInfo.inputPacket->type));
     return testInfo;
 }
 
@@ -81,7 +83,7 @@ const TestSpec *EBPFTestBackend::createTestSpec(const ExecutionState *executionS
     TestSpec *testSpec = nullptr;
 
     const auto *ingressPayload = testInfo.inputPacket;
-    const auto *ingressPayloadMask = IR::getConstant(IR::getBitType(1), 1);
+    const auto *ingressPayloadMask = IR::Constant::get(IR::Type_Bits::get(1), 1);
     const auto ingressPacket = Packet(testInfo.inputPort, ingressPayload, ingressPayloadMask);
 
     std::optional<Packet> egressPacket = std::nullopt;
@@ -90,14 +92,14 @@ const TestSpec *EBPFTestBackend::createTestSpec(const ExecutionState *executionS
     }
     testSpec = new TestSpec(ingressPacket, egressPacket, testInfo.programTraces);
     // We retrieve the individual table configurations from the execution state.
-    const auto uninterpretedTableConfigs = executionState->getTestObjectCategory("tableconfigs");
+    const auto uninterpretedTableConfigs = executionState->getTestObjectCategory("tableconfigs"_cs);
     // Since these configurations are uninterpreted we need to convert them. We launch a
     // helper function to solve the variables involved in each table configuration.
     for (const auto &tablePair : uninterpretedTableConfigs) {
         const auto tableName = tablePair.first;
         const auto *uninterpretedTableConfig = tablePair.second->checkedTo<TableConfig>();
         const auto *const tableConfig = uninterpretedTableConfig->evaluate(*finalModel, true);
-        testSpec->addTestObject("tables", tableName, tableConfig);
+        testSpec->addTestObject("tables"_cs, tableName, tableConfig);
     }
     return testSpec;
 }

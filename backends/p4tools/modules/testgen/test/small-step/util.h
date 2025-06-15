@@ -8,9 +8,9 @@
 #include <stack>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
+#include "backends/p4tools/common/compiler/compiler_target.h"
 #include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/common/lib/namespace_context.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
@@ -46,6 +46,8 @@ class SmallStepTest : public P4ToolsTest {
 
 namespace SmallStepUtil {
 
+using namespace P4::literals;
+
 /// Creates a test case with the given header fields for
 /// stepping on a given expression.
 std::optional<const P4ToolsTestCase> createSmallStepExprTest(const std::string &,
@@ -53,16 +55,13 @@ std::optional<const P4ToolsTestCase> createSmallStepExprTest(const std::string &
 
 /// Extract the expression from the P4Program.
 template <class T>
-const T *extractExpr(const IR::P4Program *program) {
+const T *extractExpr(const IR::P4Program &program) {
     // Get the mau declarations in the P4Program.
-    const auto *decls = program->getDeclsByName("mau")->toVector();
-    if (decls->size() != 1) {
-        return nullptr;
-    }
+    auto *decl = program.getDeclsByName("mau"_cs)->single();
 
     // Convert the mau declaration to a control and ensure that
     // there is a single statement in the body.
-    const auto *control = (*decls)[0]->to<IR::P4Control>();
+    const auto *control = decl->checkedTo<IR::P4Control>();
     if (control->body->components.size() != 1) {
         return nullptr;
     }
@@ -83,13 +82,13 @@ const T *extractExpr(const IR::P4Program *program) {
 
 /// Step on the @value, and examine the resulting state in the @program.
 template <class T>
-void stepAndExamineValue(const T *value, const IR::P4Program *program) {
+void stepAndExamineValue(const T *value, const P4Tools::CompilerResult &compilerResult) {
     // Produce a ProgramInfo, which is needed to create a SmallStepEvaluator.
-    const auto *progInfo = TestgenTarget::initProgram(program);
+    const auto *progInfo = TestgenTarget::produceProgramInfo(compilerResult);
     ASSERT_TRUE(progInfo);
 
     // Create a base state with a parameter continuation to apply the value on.
-    const auto *v = Continuation::genParameter(value->type, "v", NamespaceContext::Empty);
+    const auto *v = Continuation::genParameter(value->type, "v"_cs, NamespaceContext::Empty);
     Body bodyBase({Return(v->param)});
     Continuation continuationBase(v, bodyBase);
     ExecutionState esBase = SmallStepTest::mkState(bodyBase);
@@ -127,10 +126,10 @@ void stepAndExamineValue(const T *value, const IR::P4Program *program) {
 ///     Rebuilds the pushed continuation body with the given parameter.
 template <class T>
 void stepAndExamineOp(
-    const T *op, const IR::Expression *subexpr, const IR::P4Program *program,
+    const T *op, const IR::Expression *subexpr, const P4Tools::CompilerResult &compilerResult,
     std::function<const IR::Expression *(const IR::PathExpression *)> rebuildNode) {
     // Produce a ProgramInfo, which is needed to create a SmallStepEvaluator.
-    const auto *progInfo = TestgenTarget::initProgram(program);
+    const auto *progInfo = TestgenTarget::produceProgramInfo(compilerResult);
     ASSERT_TRUE(progInfo);
 
     // Step on the operation.

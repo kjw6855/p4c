@@ -10,8 +10,10 @@ set(
   options.cpp
   version.cpp
 
+  compiler/compiler_result.cpp
   compiler/compiler_target.cpp
   compiler/convert_hs_index.cpp
+  compiler/convert_struct_expr.cpp
   compiler/convert_varbits.cpp
   compiler/midend.cpp
   compiler/reachability.cpp
@@ -23,6 +25,7 @@ set(
   lib/arch_spec.cpp
   lib/format_int.cpp
   lib/gen_eq.cpp
+  lib/logging.cpp
   lib/model.cpp
   lib/namespace_context.cpp
   lib/symbolic_env.cpp
@@ -34,20 +37,21 @@ set(
   lib/variables.cpp
 )
 
-add_p4tools_library(p4tools-common ${P4C_TOOLS_COMMON_SOURCES})
+add_library(p4tools-common OBJECT ${P4C_TOOLS_COMMON_SOURCES})
 
 target_link_libraries(
   p4tools-common
+  # We export Z3' with the common library.
   PUBLIC ${P4TOOLS_Z3_LIB}
+    # For Abseil includes.
+  PRIVATE frontend
 )
 
 target_include_directories(
   p4tools-common
+  # We export Z3's includes with the common library.
   SYSTEM BEFORE PUBLIC ${P4TOOLS_Z3_INCLUDE_DIR}
-  PUBLIC "${CMAKE_BINARY_DIR}/common"
-  PUBLIC "${P4C_SOURCE_DIR}"
-  PUBLIC "${P4C_SOURCE_DIR}/test/frameworks/gtest/googletest/include"
-  PUBLIC "${P4C_BINARY_DIR}"
 )
 
-add_dependencies(p4tools-common ir-generated frontend)
+# Add control-plane-specific extensions.
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/control_plane)

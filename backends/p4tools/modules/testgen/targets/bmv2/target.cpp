@@ -4,8 +4,10 @@
 #include <map>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
+#include "backends/bmv2/common/annotations.h"
+#include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
+#include "ir/solver.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 #include "lib/ordered_map.h"
@@ -16,9 +18,12 @@
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/cmd_stepper.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/cmd_visitor.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/compiler_result.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/constants.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/expr_stepper.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/expr_visitor.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/p4_refers_to_parser.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/p4runtime_translation.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/program_info.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/test_backend.h"
 
@@ -37,13 +42,92 @@ void Bmv2V1ModelTestgenTarget::make() {
     }
 }
 
-const Bmv2V1ModelProgramInfo *Bmv2V1ModelTestgenTarget::initProgramImpl(
-    const IR::P4Program *program, const IR::Declaration_Instance *mainDecl) const {
+CompilerResultOrError Bmv2V1ModelTestgenTarget::runCompilerImpl(
+    const IR::P4Program *program) const {
+    program = runFrontend(program);
+    if (program == nullptr) {
+        return std::nullopt;
+    }
+
+    /// After the front end, get the P4Runtime API for the V1model architecture.
+    auto p4runtimeApi = P4::P4RuntimeSerializer::get()->generateP4Runtime(program, "v1model"_cs);
+
+    if (::errorCount() > 0) {
+        return std::nullopt;
+    }
+
+    program = runMidEnd(program);
+    if (program == nullptr) {
+        return std::nullopt;
+    }
+
+    // Create DCG.
+    NodesCallGraph *dcg = nullptr;
+    if (TestgenOptions::get().dcg || !TestgenOptions::get().pattern.empty()) {
+        dcg = new NodesCallGraph("NodesCallGraph");
+        P4ProgramDCGCreator dcgCreator(dcg);
+        program->apply(dcgCreator);
+    }
+    if (::errorCount() > 0) {
+        return std::nullopt;
+    }
+    /// Collect coverage information about the program.
+    auto coverage = P4::Coverage::CollectNodes(TestgenOptions::get().coverageOptions);
+    program->apply(coverage);
+    if (::errorCount() > 0) {
+        return std::nullopt;
+    }
+
+    // Parses any @refers_to annotations and converts them into a vector of restrictions.
+    auto refersToParser = RefersToParser();
+    program->apply(refersToParser);
+    if (::errorCount() > 0) {
+        return std::nullopt;
+    }
+    ConstraintsVector p4ConstraintsRestrictions = refersToParser.getRestrictionsVector();
+
+    // Defines all "entry_restriction" and then converts restrictions from string to IR
+    // expressions, and stores them in p4ConstraintsRestrictions to move targetConstraints
+    // further.
+    program->apply(AssertsParser(p4ConstraintsRestrictions));
+    if (::errorCount() > 0) {
+        return std::nullopt;
+    }
+    // Try to map all instances of direct externs to the table they are attached to.
+    // Save the map in @var directExternMap.
+    auto directExternMapper = MapDirectExterns();
+    program->apply(directExternMapper);
+    if (::errorCount() > 0) {
+        return std::nullopt;
+    }
+
+    return {*new BMv2V1ModelCompilerResult{
+        TestgenCompilerResult(CompilerResult(*program), coverage.getCoverableNodes(), dcg),
+        p4runtimeApi, directExternMapper.getDirectExternMap(), p4ConstraintsRestrictions}};
+}
+
+MidEnd Bmv2V1ModelTestgenTarget::mkMidEnd(const CompilerOptions &options) const {
+    MidEnd midEnd(options);
+    auto *refMap = midEnd.getRefMap();
+    auto *typeMap = midEnd.getTypeMap();
+    midEnd.addPasses({
+        // Parse BMv2-specific annotations.
+        new BMV2::ParseAnnotations(),
+        new P4::TypeChecking(refMap, typeMap, true),
+        new PropagateP4RuntimeTranslation(*typeMap),
+    });
+    midEnd.addDefaultPasses();
+
+    return midEnd;
+}
+
+const Bmv2V1ModelProgramInfo *Bmv2V1ModelTestgenTarget::produceProgramInfoImpl(
+    const CompilerResult &compilerResult, const IR::Declaration_Instance *mainDecl) const {
     // The blocks in the main declaration are just the arguments in the constructor call.
     // Convert mainDecl->arguments into a vector of blocks, represented as constructor-call
     // expressions.
-    std::vector<const IR::Type_Declaration *> blocks;
-    argumentsToTypeDeclarations(program, mainDecl->arguments, blocks);
+    const auto blocks =
+        argumentsToTypeDeclarations(&compilerResult.getProgram(), mainDecl->arguments);
 
     // We should have six arguments.
     BUG_CHECK(blocks.size() == 6, "%1%: The BMV2 architecture requires 6 pipes. Received %2%.",
@@ -56,7 +140,7 @@ const Bmv2V1ModelProgramInfo *Bmv2V1ModelTestgenTarget::initProgramImpl(
     for (size_t idx = 0; idx < blocks.size(); ++idx) {
         const auto *declType = blocks.at(idx);
 
-        auto canonicalName = ARCH_SPEC.getArchMember(idx)->blockName;
+        auto canonicalName = Bmv2V1ModelProgramInfo::ARCH_SPEC.getArchMember(idx)->blockName;
         programmableBlocks.emplace(canonicalName, declType);
 
         if (idx < 3) {
@@ -66,13 +150,15 @@ const Bmv2V1ModelProgramInfo *Bmv2V1ModelTestgenTarget::initProgramImpl(
         }
     }
 
-    return new Bmv2V1ModelProgramInfo(program, programmableBlocks, declIdToGress);
+    return new Bmv2V1ModelProgramInfo(*compilerResult.checkedTo<BMv2V1ModelCompilerResult>(),
+                                      programmableBlocks, declIdToGress);
 }
 
 Bmv2TestBackend *Bmv2V1ModelTestgenTarget::getTestBackendImpl(
-    const ProgramInfo &programInfo, SymbolicExecutor &symbex,
-    const std::filesystem::path &testPath) const {
-    return new Bmv2TestBackend(programInfo, symbex, testPath);
+    const ProgramInfo &programInfo, const TestBackendConfiguration &testBackendConfiguration,
+    SymbolicExecutor &symbex) const {
+    return new Bmv2TestBackend(*programInfo.checkedTo<Bmv2V1ModelProgramInfo>(),
+                               testBackendConfiguration, symbex);
 }
 
 Bmv2V1ModelCmdStepper *Bmv2V1ModelTestgenTarget::getCmdStepperImpl(
@@ -94,30 +180,5 @@ Bmv2V1ModelExprVisitor *Bmv2V1ModelTestgenTarget::getExprVisitorImpl(
     ExecutionState &state, const ProgramInfo &programInfo, TestCase &testCase) const {
     return new Bmv2V1ModelExprVisitor(state, programInfo, testCase);
 }
-
-const ArchSpec Bmv2V1ModelTestgenTarget::ARCH_SPEC =
-    ArchSpec("V1Switch", {// parser Parser<H, M>(packet_in b,
-                          //                     out H parsedHdr,
-                          //                     inout M meta,
-                          //                     inout standard_metadata_t standard_metadata);
-                          {"Parser", {nullptr, "*hdr", "*meta", "*standard_metadata"}},
-                          // control VerifyChecksum<H, M>(inout H hdr,
-                          //                              inout M meta);
-                          {"VerifyChecksum", {"*hdr", "*meta"}},
-                          // control Ingress<H, M>(inout H hdr,
-                          //                       inout M meta,
-                          //                       inout standard_metadata_t standard_metadata);
-                          {"Ingress", {"*hdr", "*meta", "*standard_metadata"}},
-                          // control Egress<H, M>(inout H hdr,
-                          //            inout M meta,
-                          //            inout standard_metadata_t standard_metadata);
-                          {"Egress", {"*hdr", "*meta", "*standard_metadata"}},
-                          // control ComputeChecksum<H, M>(inout H hdr,
-                          //                       inout M meta);
-                          {"ComputeChecksum", {"*hdr", "*meta"}},
-                          // control Deparser<H>(packet_out b, in H hdr);
-                          {"Deparser", {nullptr, "*hdr"}}});
-
-const ArchSpec *Bmv2V1ModelTestgenTarget::getArchSpecImpl() const { return &ARCH_SPEC; }
 
 }  // namespace P4Tools::P4Testgen::Bmv2

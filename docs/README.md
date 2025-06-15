@@ -1,50 +1,81 @@
 # Repository
 
 This folder contains documentation for the P4_16 prototype compiler.
-The code and documentation are hosted in the following repository: https://github.com/p4lang/p4c
+The code and documentation are hosted in the [p4c repository](https://github.com/p4lang/p4c). 
 
 # Compiler source code organization
 
 ```
 p4c
-├── build                     -- recommended place to build binary
-├── backends
-│   ├── p4test                -- "fake" back-end for testing
-│   ├── ebpf                  -- extended Berkeley Packet Filters back-end
-│   ├── graphs                -- backend that can draw graphiz graphs of P4 programs
-│   └── bmv2                  -- behavioral model version 2 (switch simulator) back-end
-├── control-plane             -- control plane API
-├── docs                      -- documentation
-│   └── doxygen               -- documentation generation support
-├── extensions
-│   └── XXXX                  -- symlinks to custom back-ends
+├── build                          -- recommended place to build binary
+├── backends          
+│   ├── bmv2                       -- behavioral model version 2 (switch simulator) back end
+│   ├── common                     -- code shared by multiple back ends
+│   ├── dpdk                       -- translates P4 code to DPDK instructions
+│   ├── ebpf                       -- extended Berkeley Packet Filters back end
+│   ├── graphs                     -- backend that can draw graphiz graphs of P4 programs
+│   ├── p4test                     -- "fake" back end for testing
+│   ├── p4tools                    -- testing library for different static analysis tools
+│   ├── tc                         -- translates P4 code to Linux TC rules
+│   └── ubpf                       -- translates P4 programs to uBPF code
+├── bazel                          -- bazel files for building p4c
+|   └──example                     -- basic Bazel project example using p4c
+├── cmake                          -- CMake support and build systems 
+├── control-plane                  -- control plane API
+|   └──google/rpc                  -- Definitions of Google Protobuf APIs.
+├── debian                         -- Debian/Ubuntu packaging files
+│   └── source/format              -- Specification of the packaging format
+├── docs                           -- documentation
+│   ├── assets                     -- p4 logos in PNG and SVG formats
+│   └── doxygen                    -- documentation generation support
 ├── frontends
-│   ├── common                -- common front-end code
-│   ├── parsers               -- parser and lexer code for P4_14 and P4_16
-│   ├── p4-14                 -- P4_14 front-end
-│   └── p4                    -- P4_16 front-end
-├── ir                        -- core internal representation
-├── lib                       -- common utilities (libp4toolkit.a)
-├── midend                    -- code that may be useful for writing mid-ends
-├── p4include                 -- standard P4 files needed by the compiler (e.g., core.p4)
-├── test                      -- test code
-│   └── gtest                 -- unit test code written using gtest
-├── tools                     -- external programs used in the build/test process
-│   ├── driver                -- p4c compiler driver: a script that invokes various compilers
-│   ├── stf                   -- Python code to parse STF files (used for testing P4 programs)
-|   └── ir-generator          -- code for the IR C++ class hierarchy generator
-└── testdata                  -- test inputs and reference outputs
-    ├── p4_16_samples         -- P4_16 input test programs
-    ├── p4_16_errors          -- P4_16 negative input test programs
-    ├── p4_16_samples_outputs -- Expected outputs from P4_16 tests
-    ├── p4_16_errors_outputs  -- Expected outputs from P4_16 negative tests
-    ├── p4_16_bmv_errors      -- P4_16 negative input tests for the bmv2 backend
-    ├── v1_1_samples          -- P4 v1.1 sample programs
-    ├── p4_14_errors          -- P4_14 negative input test programs
-    ├── p4_14_errors_outputs  -- Expected outputs from P4_14 negative tests
-    ├── p4_14_samples         -- P4_14 input test programs
-    ├── p4_14_samples_outputs -- Expected outputs from P4_14 tests
-    └── p4_14_errors          -- P4_14 negative input test programs
+│   ├── common                     -- common front end code
+│   ├── p4-14                      -- P4_14 front end
+│   ├── p4                         -- P4_16 front end
+│   └── parsers                    -- parser and lexer code for P4_14 and P4_16
+├── ir                             -- core internal representation
+├── lib                            -- common utilities (libp4toolkit.a)
+├── midend                         -- code that may be useful for writing mid-ends
+├── p4include                      -- standard P4 files needed by the compiler (e.g., core.p4)
+│   ├── bmv2                       -- bmv2 specific customizations of psa.p4 include file
+│   ├── dpdk                       -- dpdk specific pna.p4 & psa.p4
+│   └── tc                         -- tc specific pna
+├── test                           -- test code
+│   └── gtest                      -- unit test code written using gtest
+├── testdata                       -- test inputs and reference outputs
+│   ├───extern_modules             -- Extern module input test programs
+│   ├───p4_14_errors               -- P4_14 negative input test programs
+│   ├───p4_14_errors_outputs       -- Expected outputs from P4_14 negative tests
+│   ├───p4_14_samples              -- P4_14 input test programs
+│   ├───p4_14_samples_outputs      -- Expected outputs from P4_14 tests
+|   ├── p4_16_samples              -- P4_16 input test programs
+|   ├── p4_16_samples_outputs      -- Expected outputs from P4_16 tests
+│   ├───p4_16_bmv_errors           -- P4_16 negative input tests for the bmv2 backend
+│   ├───p4_16_dpdk_errors          -- P4_16 negative input tests for the dpdk backend
+│   ├───p4_16_dpdk_errors_outputs  -- Expected outputs from dpdk negative tests 
+│   ├───p4_16_ebpf_errors          -- P4_16 negative input tests for the ebpf backend
+│   ├───p4_16_ebpf_errors_outputs  -- Expected outputs from edpf negative tests 
+|   ├── p4_16_errors               -- P4_16 negative input test programs
+|   ├── p4_16_errors_outputs       -- Expected outputs from P4_16 negative tests
+│   ├───p4_16_pna_errors           -- P4_16 negative input test programs for pna
+│   ├───p4_16_pna_errors_outputs   -- Expected outputs from P4_16 pna negative tests
+│   ├───p4_16_psa_errors           -- P4_16 negative input test programs for psa
+│   ├───p4_16_psa_errors_outputs   -- Expected outputs from P4_16 psa negative tests
+│   ├───p4_16_samples              -- P4_16 input test programs
+│   ├───p4_16_samples_outputs      -- Expected outputs from P4_16 tests
+│   ├───p4tc_samples               -- P4 traffic control sample input test programs
+│   ├───p4tc_samples_outputs       -- Expected outputs from P4 traffic control tests
+│   └───v1_1_samples               -- P4 v1.1 sample programs
+└── tools                          -- external programs used in the build/test process
+    ├── ci-ptf                     -- scripts to run PSA PTF tests
+    ├── debian-build               -- resources and scripts for creating Ubuntu (or Debian) packages
+    ├── driver                     -- P4C compiler driver: a script that invokes various compilers
+    ├── hooks                      -- useful git hooks for development
+    ├── ir-generator               -- code to generate the P4C IR from .def files
+    ├── iwyu_mappings              -- mappings used by the Include What You Use (IWYU) tool for analyzing #include directives in C and C++ source files
+    ├── ptf                        -- utilities for the Packet Test Framework (PTF)
+    └── stf                        -- utilities for the Simple Test Framework (STF)
+
 ```
 
 # Additional documentation
@@ -75,23 +106,15 @@ p4c
 
 * Check out the [IntelliJ P4 plugin](https://github.com/TakeshiTseng/IntelliJ-P4-Plugin)
 
-# How to contribute
-
-* do write unit test code
-* code has to be reviewed before it is merged
-* make sure all tests pass when you send a pull request
-* make sure `make cpplint` produces no errors (`make check` will also run this)
-* write documentation
-
 # Writing documentation
 
 Documenting the workings of the compiler is a never-ending (many times
 overlooked) job. We can always write better documentation!
 
-In P4C, documentation is generated using Doxygen
-(http://www.stack.nl/~dimitri/doxygen/index.html). There are two main
-sources from which we generate documentation: comments in the code and
-markup documents in the docs/doxygen directory.
+In P4C, documentation is generated using Doxygen. The generated documentation depends on [Doxygen Awesome CSS](https://github.com/jothepro/doxygen-awesome-css). The documentation is dynamically updated and deployed on [GitHub Pages](https://p4lang.github.io/p4c/).
+
+There are two main sources from which we generate documentation: comments
+in the code and markup documents in the docs/doxygen directory.
 
 Code comments should capture the main intent of the implementation and
 the "why", rather than the "how". The how can be read from the code,
@@ -110,12 +133,20 @@ XX is a number between 02-99. Currently, 00_revision_history.md
 contains the documentation revision history, and 01_overview.md is the
 overview of the compiler goals and architecture.
 
+## Documentation Comments Style Guide 
+- Use triple slashes `///` for documenting functions and classes in files.
+- Double slashes `//` should be used for "internal" comments within functions.
+- Double slashes `//` should be used for inline comment.
+- For rare occasions such as adding comments to multi-line macros, you may use `/* ... */` style comments.
+- There should be no space at the end of the comment.
+- First letter of the comment should be a capital letter.
+- Each comment should end with a period.
+
 Happy writing! Should you have any questions, please don't hesitate to ask.
 
 ## Git usage
 
-* To contribute: fork the p4lang/p4c repository on github
-  (see https://help.github.com/articles/fork-a-repo/)
+* To contribute: fork the p4lang/p4c repository on github.  [Detailed instructions on forking a repository](https://help.github.com/articles/fork-a-repo/).
 * To merge a forked repository with the latest changes in the source use:
 
 ```
@@ -212,8 +243,8 @@ tests are run with a "recently built" version of `simple_switch` from
 the
 [p4lang/behavioral-model](https://github.com/p4lang/behavioral-model)
 repository, but it can be several hours old.  If you are working on
-p4c features that rely on newly committed changes to `simple_switch`
-you can find out which `simple_switch` version these p4c automated
+P4C features that rely on newly committed changes to `simple_switch`
+you can find out which `simple_switch` version these P4C automated
 tests are using at the link below:
 
 + [https://hub.docker.com/r/p4lang/behavioral-model/builds](https://hub.docker.com/r/p4lang/behavioral-model/builds)
@@ -237,9 +268,11 @@ To add a new input test with a sample P4 code file (under `testdata/p4_16_sample
 
 * We generally follow the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html). This is partially enforced by `cpplint` and `clang-format` and their respective configuration files. We have customized Google's `cpplint.py` tool for our purposes.  The tool can be invoked with `make cpplint`. To be able to run `clang-format` on Ubuntu 20.04, install it with `pip3 install --user clang-format`. Do not use the Debian package. Both tools run in a git hook and as part of CI.
 
+* Commenting Style is guided by the [following rules](#documentation-comments-style-guide).
+  
 * Watch out for `const`; it is very important.
 
-* Use `override` whenever possible (new gcc versions enforce this).
+* Use `override` whenever possible (new GCC versions enforce this).
 
 * Never use `const_cast` and `reinterpret_cast`.
 
@@ -327,7 +360,7 @@ makefile variable.
 p4c_PYTHON += p4c.custom.cfg
 ```
 
-There is an global variable `config` in p4c compiler driver that stores the build steps
+There is an global variable `config` in the `p4c` compiler driver that stores the build steps
 for a particular target. By default, the bmv2 and ebpf backends are supported. Each backend
 is identified with a triplet: **target-arch-vendor**. For example, the default bmv2 backend is
 identified as `bmv2-ss-p4org`. Users may choose to implement different architectures running
@@ -346,5 +379,5 @@ config.target.append("bmv2-newarch-p4org")
 
 After adding the new configuration file, rerun `bootstrap.sh`
 
-For testing purpose, p4c will be installed in the build/ directory when executing `make`.
-User can install `p4c` to other system path by running `make install`
+For testing purposes, `p4c` will be installed in the build/ directory when executing `make`.
+Users can install `p4c` to other system path by running `make install`

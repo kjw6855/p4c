@@ -2,8 +2,7 @@
 
 The **p4c-dpdk** backend translates the P4-16 programs to DPDK API to configure
 the DPDK software switch (SWX) pipeline. DPDK introduced the SWX pipeline in
-the DPDK 20.11 LTS release. For more information, please refer to the release
-note at https://doc.dpdk.org/guides/rel_notes/release_20_11.html.
+the DPDK 20.11 LTS release. For more information, please refer to the [release note](https://doc.dpdk.org/guides/rel_notes/release_20_11.html).
 
 The p4c-dpdk compiler accepts P4-16 programs written for the Portable
 Switch Architecture (PSA) and Portable NIC Architecture (PNA) (see the
@@ -19,7 +18,7 @@ generates the 'spec' file to configure the DPDK pipeline.
 
 ## How to use it?
 
-A sample P4 program can be found in the `examples` directory.  To
+A sample P4 program can be found in the [`examples` directory](./examples).  To
 generate the 'spec' file:
 ```bash
 p4c-dpdk --arch psa vxlan.p4 -o vxlan.spec

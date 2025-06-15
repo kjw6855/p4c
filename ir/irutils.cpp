@@ -1,103 +1,69 @@
 #include "ir/irutils.h"
 
-#include <algorithm>
 #include <cmath>
-#include <map>
-#include <tuple>
-#include <typeindex>
 #include <vector>
-
-#include <boost/core/enable_if.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
-#include <boost/multiprecision/detail/default_ops.hpp>
-#include <boost/multiprecision/detail/et_ops.hpp>
-#include <boost/multiprecision/number.hpp>
-#include <boost/multiprecision/traits/explicit_conversion.hpp>
 
 #include "ir/indexed_vector.h"
 #include "ir/ir.h"
 #include "ir/vector.h"
+#include "ir/visitor.h"
 #include "lib/exceptions.h"
 
 namespace IR {
+
+using namespace P4::literals;
 
 /* =============================================================================================
  *  Types
  * ============================================================================================= */
 
-const Type_Bits *getBitType(int size, bool isSigned) {
-    // Types are cached already.
-    return Type_Bits::get(size, isSigned);
-}
-
 const Type_Bits *getBitTypeToFit(int value) {
     // To represent a number N, we need ceil(log2(N + 1)) bits.
     int width = ceil(log2(value + 1));
-    return getBitType(width);
+    return Type_Bits::get(width);
 }
 
 /* =============================================================================================
  *  Expressions
  * ============================================================================================= */
 
-const Constant *getConstant(const Type *type, big_int v) {
-    // Only cache bits with width lower than 16 bit to restrict the size of the cache.
-    const auto *tb = type->to<Type_Bits>();
-    if (type->width_bits() > 16 || tb == nullptr) {
-        return new Constant(type, v);
+const IR::Constant *getMaxValueConstant(const Type *t, const Util::SourceInfo &srcInfo) {
+    if (t->is<Type_Bits>()) {
+        return IR::Constant::get(t, IR::getMaxBvVal(t), srcInfo);
     }
-    // Constants are interned. Keys in the intern map are pairs of types and values.
-    using key_t = std::tuple<int, std::type_index, bool, big_int>;
-    static std::map<key_t, const Constant *> CONSTANTS;
-
-    auto *&result = CONSTANTS[{tb->width_bits(), typeid(*type), tb->isSigned, v}];
-    if (result == nullptr) {
-        result = new Constant(tb, v);
+    if (t->is<Type_Boolean>()) {
+        return IR::Constant::get(IR::Type_Bits::get(1), 1, srcInfo);
     }
-
-    return result;
-}
-
-const BoolLiteral *getBoolLiteral(bool value) {
-    // Boolean literals are interned.
-    static std::map<bool, const BoolLiteral *> LITERALS;
-
-    auto *&result = LITERALS[value];
-    if (result == nullptr) {
-        result = new BoolLiteral(Type::Boolean::get(), value);
-    }
-    return result;
+    P4C_UNIMPLEMENTED("Maximum value calculation for type %1% not implemented.", t);
 }
 
 const IR::Constant *convertBoolLiteral(const IR::BoolLiteral *lit) {
-    return IR::getConstant(IR::getBitType(1), lit->value ? 1 : 0);
+    return IR::Constant::get(IR::Type_Bits::get(1), lit->value ? 1 : 0, lit->getSourceInfo());
 }
 
 const IR::Expression *getDefaultValue(const IR::Type *type, const Util::SourceInfo &srcInfo,
                                       bool valueRequired) {
     if (const auto *tb = type->to<IR::Type_Bits>()) {
-        // TODO: Use getConstant.
-        return new IR::Constant(srcInfo, tb, 0);
+        return IR::Constant::get(tb, 0, srcInfo);
     }
     if (type->is<IR::Type_Boolean>()) {
-        // TODO: Use getBoolLiteral.
-        return new BoolLiteral(srcInfo, Type::Boolean::get(), false);
+        return IR::BoolLiteral::get(false, srcInfo);
     }
     if (type->is<IR::Type_InfInt>()) {
-        return new IR::Constant(srcInfo, 0);
+        return IR::Constant::get(type, 0, srcInfo);
     }
     if (const auto *te = type->to<IR::Type_Enum>()) {
         return new IR::Member(srcInfo, new IR::TypeNameExpression(te->name),
                               te->members.at(0)->getName());
     }
     if (const auto *te = type->to<IR::Type_SerEnum>()) {
-        return new IR::Cast(srcInfo, type->getP4Type(), new IR::Constant(srcInfo, te->type, 0));
+        return new IR::Cast(srcInfo, type->getP4Type(), IR::Constant::get(te->type, 0, srcInfo));
     }
     if (const auto *te = type->to<IR::Type_Error>()) {
         return new IR::Member(srcInfo, new IR::TypeNameExpression(te->name), "NoError");
     }
     if (type->is<IR::Type_String>()) {
-        return new IR::StringLiteral(srcInfo, cstring(""));
+        return new IR::StringLiteral(srcInfo, ""_cs);
     }
     if (type->is<IR::Type_Varbits>()) {
         if (valueRequired) {
@@ -164,30 +130,22 @@ const IR::Expression *getDefaultValue(const IR::Type *type, const Util::SourceIn
     return nullptr;
 }
 
-const IR::Constant *getMaxValueConstant(const Type *t) {
-    if (t->is<Type_Bits>()) {
-        return IR::getConstant(t, IR::getMaxBvVal(t));
-    }
-    if (t->is<Type_Boolean>()) {
-        return IR::getConstant(IR::getBitType(1), 1);
-    }
-    P4C_UNIMPLEMENTED("Maximum value calculation for type %1% not implemented.", t);
-}
-
 std::vector<const Expression *> flattenStructExpression(const StructExpression *structExpr) {
     std::vector<const Expression *> exprList;
-    for (const auto *listElem : structExpr->components) {
+    // Ensure that the underlying type is a Type_StructLike.
+    const auto *structType = structExpr->type->to<IR::Type_StructLike>();
+    BUG_CHECK(structType != nullptr, "%1%: expected a struct-like type, received %2%",
+              structExpr->type, structExpr->node_type_name());
+
+    // We use the underlying struct type, which will gives us the right field ordering.
+    for (const auto *typeField : structType->fields) {
+        const auto *listElem = structExpr->getField(typeField->name);
         if (const auto *subStructExpr = listElem->expression->to<StructExpression>()) {
             auto subList = flattenStructExpression(subStructExpr);
             exprList.insert(exprList.end(), subList.begin(), subList.end());
-        } else if (const auto *headerStackExpr =
-                       listElem->expression->to<HeaderStackExpression>()) {
-            for (const auto *headerStackElem : headerStackExpr->components) {
-                // We assume there are no nested header stacks.
-                auto subList =
-                    flattenStructExpression(headerStackElem->checkedTo<IR::StructExpression>());
-                exprList.insert(exprList.end(), subList.begin(), subList.end());
-            }
+        } else if (const auto *subListExpr = listElem->to<BaseListExpression>()) {
+            auto subList = flattenListExpression(subListExpr);
+            exprList.insert(exprList.end(), subList.begin(), subList.end());
         } else {
             exprList.emplace_back(listElem->expression);
         }
@@ -195,11 +153,14 @@ std::vector<const Expression *> flattenStructExpression(const StructExpression *
     return exprList;
 }
 
-std::vector<const Expression *> flattenListExpression(const ListExpression *listExpr) {
+std::vector<const Expression *> flattenListExpression(const BaseListExpression *listExpr) {
     std::vector<const Expression *> exprList;
     for (const auto *listElem : listExpr->components) {
-        if (const auto *subListExpr = listElem->to<ListExpression>()) {
+        if (const auto *subListExpr = listElem->to<BaseListExpression>()) {
             auto subList = flattenListExpression(subListExpr);
+            exprList.insert(exprList.end(), subList.begin(), subList.end());
+        } else if (const auto *subStructExpr = listElem->to<IR::StructExpression>()) {
+            auto subList = flattenStructExpression(subStructExpr);
             exprList.insert(exprList.end(), subList.begin(), subList.end());
         } else {
             exprList.emplace_back(listElem);
@@ -255,6 +216,49 @@ big_int getMinBvVal(const Type *t) {
         return 0;
     }
     P4C_UNIMPLEMENTED("Maximum value calculation for type %1% not implemented.", t);
+}
+
+std::vector<const Expression *> flattenListOrStructExpression(const Expression *listLikeExpr) {
+    if (const auto *listExpr = listLikeExpr->to<IR::BaseListExpression>()) {
+        return IR::flattenListExpression(listExpr);
+    }
+    if (const auto *structExpr = listLikeExpr->to<IR::StructExpression>()) {
+        return IR::flattenStructExpression(structExpr);
+    }
+    P4C_UNIMPLEMENTED("Unsupported list-like expression %1% of type %2%.", listLikeExpr,
+                      listLikeExpr->node_type_name());
+}
+
+template <typename Stmts>
+const IR::Node *inlineBlockImpl(const Transform &t, Stmts &&stmts) {
+    if (stmts.size() == 1) {
+        // it could also be a declaration, and it that case, we need to wrap it in a block anyway
+        if (auto *stmt = (*stmts.begin())->template to<IR::Statement>()) {
+            return stmt;
+        }
+    }
+    if (t.getParent<IR::BlockStatement>()) {
+        return new IR::IndexedVector<IR::StatOrDecl>(std::forward<Stmts>(stmts));
+    }
+    Util::SourceInfo srcInfo;
+    if (stmts.size() > 0) {  // no .empty in initializer_list!
+        srcInfo = (*stmts.begin())->srcInfo;
+    }
+    return new IR::BlockStatement(srcInfo,
+                                  IR::IndexedVector<IR::StatOrDecl>(std::forward<Stmts>(stmts)));
+}
+
+const IR::Node *inlineBlock(const Transform &t,
+                            std::initializer_list<const IR::StatOrDecl *> stmts) {
+    return inlineBlockImpl(t, stmts);
+}
+
+const IR::Node *inlineBlock(const Transform &t, const IR::IndexedVector<IR::StatOrDecl> &stmts) {
+    return inlineBlockImpl(t, stmts);
+}
+
+const IR::Node *inlineBlock(const Transform &t, IR::IndexedVector<IR::StatOrDecl> &&stmts) {
+    return inlineBlockImpl(t, std::move(stmts));
 }
 
 }  // namespace IR

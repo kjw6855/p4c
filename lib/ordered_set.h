@@ -53,12 +53,12 @@ class ordered_set {
     typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
 
  private:
-    struct mapcmp : std::binary_function<const T *, const T *, bool> {
+    struct mapcmp {
         COMP comp;
         bool operator()(const T *a, const T *b) const { return comp(*a, *b); }
     };
-    using map_alloc =
-        typename ALLOC::template rebind<std::pair<const T *const, list_iterator>>::other;
+    using map_alloc = typename std::allocator_traits<ALLOC>::template rebind_alloc<
+        std::pair<const T *const, list_iterator>>;
     using map_type = std::map<const T *, list_iterator, mapcmp, map_alloc>;
     map_type data_map;
     void init_data_map() {

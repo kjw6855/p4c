@@ -18,6 +18,7 @@ limitations under the License.
 #define LIB_OPTIONS_H_
 
 #include <functional>
+#include <iostream>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -81,7 +82,8 @@ class Options {
                         const char *description,    // option help message
                         OptionFlags flags = OptionFlags::Default);  // additional flags
 
-    explicit Options(cstring message) : binaryName(nullptr), message(message), compileCommand("") {}
+    explicit Options(std::string_view message)
+        : binaryName(nullptr), message(message), compileCommand("") {}
 
  public:
     /**
@@ -98,7 +100,7 @@ class Options {
     cstring getCompileCommand() { return compileCommand; }
     cstring getBuildDate() { return buildDate; }
     cstring getBinaryName() { return cstring(binaryName); }
-    void usage();
+    virtual void usage();
 };
 
 }  // namespace Util

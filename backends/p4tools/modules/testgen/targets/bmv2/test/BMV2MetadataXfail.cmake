@@ -11,14 +11,6 @@
 
 p4tools_add_xfail_reason(
   "testgen-p4c-bmv2-metadata"
-  "Non-numeric, non-boolean member expression: .* Type: Type_Stack"
-  # We can not expand stacks in parsers because information about .next is lost.
-  # P4Testgen needs to maintain its own internal .next variable for stacks.
-  array-copy-bmv2.p4
-)
-
-p4tools_add_xfail_reason(
-  "testgen-p4c-bmv2-metadata"
   "Unknown or unimplemented extern method: recirculate_preserving_field_list"
 )
 
@@ -79,6 +71,12 @@ p4tools_add_xfail_reason(
 
 p4tools_add_xfail_reason(
   "testgen-p4c-bmv2-metadata"
+  "Unsupported type argument for Value Set"
+  pvs-nested-struct.p4
+)
+
+p4tools_add_xfail_reason(
+  "testgen-p4c-bmv2-metadata"
   "Computations are not supported in update_checksum"
 )
 
@@ -122,6 +120,13 @@ p4tools_add_xfail_reason(
   "with type Type_Specialized is not a Type_Declaration"
   # Pipeline as a parameter of a switch, not a valid v1model program
   issue1304.p4
+)
+
+p4tools_add_xfail_reason(
+  "testgen-p4c-bmv2-metadata"
+  "is not a constant"
+  # Using an uninitialized variable as a header stack index in the parser.
+  parser-unroll-test10.p4
 )
 
 ####################################################################################################

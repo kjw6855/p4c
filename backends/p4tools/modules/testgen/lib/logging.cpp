@@ -5,17 +5,13 @@
 
 namespace P4Tools::P4Testgen {
 
-void enableTraceLogging() { Log::addDebugSpec("test_traces:4"); }
-
-void enableInformationLogging() { Log::addDebugSpec("test_info:4"); }
+void enableTraceLogging() { ::Log::addDebugSpec("test_traces:4"); }
 
 void enableStepLogging() {
-    Log::addDebugSpec("small_step:4");
-    Log::addDebugSpec("small_visit:4");
+    ::Log::addDebugSpec("small_step:4");
+    ::Log::addDebugSpec("small_visit:4");
 }
 
-void enableCoverageLogging() { Log::addDebugSpec("coverage:4"); }
-
-void enablePerformanceLogging() { Log::addDebugSpec("performance:4"); }
+void enableCoverageLogging() { ::Log::addDebugSpec("coverage:4"); }
 
 }  // namespace P4Tools::P4Testgen

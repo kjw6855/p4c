@@ -45,7 +45,7 @@ class ActionTranslationVisitor : public virtual CodeGenInspector {
     bool isActionParameter(const IR::PathExpression *expression) const;
 };  // ActionTranslationVisitor
 
-// Also used to represent counters
+/// Also used to represent counters
 class EBPFTableBase : public EBPFObject {
  public:
     const EBPFProgram *program;
@@ -65,6 +65,8 @@ class EBPFTableBase : public EBPFObject {
         valueTypeName = instanceName + "_value";
         dataMapName = instanceName;
     }
+
+    DECLARE_TYPEINFO(EBPFTableBase, EBPFObject);
 };
 
 class EBPFTable : public EBPFTableBase {
@@ -92,10 +94,10 @@ class EBPFTable : public EBPFTableBase {
     cstring defaultActionMapName;
     std::map<const IR::KeyElement *, cstring> keyFieldNames;
     std::map<const IR::KeyElement *, EBPFType *> keyTypes;
-    // Use 1024 by default.
-    // TODO: make it configurable using compiler options.
+    /// Use 1024 by default.
+    /// TODO: make it configurable using compiler options.
     size_t size = 1024;
-    const cstring prefixFieldName = "prefixlen";
+    const cstring prefixFieldName = "prefixlen"_cs;
 
     EBPFTable(const EBPFProgram *program, const IR::TableBlock *table, CodeGenInspector *codeGen);
     EBPFTable(const EBPFProgram *program, CodeGenInspector *codeGen, cstring name);
@@ -110,7 +112,7 @@ class EBPFTable : public EBPFTableBase {
     virtual void emitValueType(CodeBuilder *builder);
     virtual void emitValueActionIDNames(CodeBuilder *builder);
     virtual void emitValueStructStructure(CodeBuilder *builder);
-    // Emits value types used by direct externs.
+    /// Emits value types used by direct externs.
     virtual void emitDirectValueTypes(CodeBuilder *builder) { (void)builder; }
     virtual void emitAction(CodeBuilder *builder, cstring valueName, cstring actionRunVariable);
     virtual void emitInitializer(CodeBuilder *builder);
@@ -126,8 +128,8 @@ class EBPFTable : public EBPFTableBase {
                matchType->name.name == P4::P4CoreLibrary::instance().ternaryMatch.name ||
                matchType->name.name == P4::P4CoreLibrary::instance().lpmMatch.name;
     }
-    // Whether to drop packet if no match entry found.
-    // Some table implementations may want to continue processing.
+    /// Whether to drop packet if no match entry found.
+    /// Some table implementations may want to continue processing.
     virtual bool dropOnNoMatchingEntryFound() const { return true; }
 
     virtual bool cacheEnabled() { return false; }
@@ -141,6 +143,8 @@ class EBPFTable : public EBPFTableBase {
         (void)key;
         (void)value;
     }
+
+    DECLARE_TYPEINFO(EBPFTable, EBPFTableBase);
 };
 
 class EBPFCounterTable : public EBPFTableBase {
@@ -160,6 +164,8 @@ class EBPFCounterTable : public EBPFTableBase {
                                       const IR::MethodCallExpression *expression);
     virtual void emitCounterAdd(CodeBuilder *builder, const IR::MethodCallExpression *expression);
     virtual void emitMethodInvocation(CodeBuilder *builder, const P4::ExternMethod *method);
+
+    DECLARE_TYPEINFO(EBPFCounterTable, EBPFTableBase);
 };
 
 class EBPFValueSet : public EBPFTableBase {
@@ -178,6 +184,8 @@ class EBPFValueSet : public EBPFTableBase {
     void emitKeyInitializer(CodeBuilder *builder, const IR::SelectExpression *expression,
                             cstring varName);
     void emitLookup(CodeBuilder *builder);
+
+    DECLARE_TYPEINFO(EBPFValueSet, EBPFTableBase);
 };
 
 }  // namespace EBPF

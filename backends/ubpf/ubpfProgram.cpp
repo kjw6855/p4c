@@ -60,7 +60,7 @@ bool UBPFProgram::build() {
     return success;
 }
 
-void UBPFProgram::emitC(UbpfCodeBuilder *builder, cstring headerFile) {
+void UBPFProgram::emitC(UbpfCodeBuilder *builder, const std::filesystem::path &headerFile) {
     emitGeneratedComment(builder);
 
     builder->appendFormat("#include \"%s\"", headerFile);
@@ -77,7 +77,7 @@ void UBPFProgram::emitC(UbpfCodeBuilder *builder, cstring headerFile) {
     builder->target->emitChecksumHelpers(builder);
 
     builder->emitIndent();
-    builder->target->emitMain(builder, "entry", contextVar.c_str(), stdMetadataVar.c_str());
+    builder->target->emitMain(builder, "entry"_cs, contextVar, stdMetadataVar);
     builder->blockStart();
 
     emitPktVariable(builder);
@@ -126,7 +126,7 @@ void UBPFProgram::emitC(UbpfCodeBuilder *builder, cstring headerFile) {
     builder->blockEnd(true);
 }
 
-void UBPFProgram::emitH(EBPF::CodeBuilder *builder, cstring) {
+void UBPFProgram::emitH(EBPF::CodeBuilder *builder, const std::filesystem::path &) {
     emitGeneratedComment(builder);
     builder->appendLine("#ifndef _P4_GEN_HEADER_");
     builder->appendLine("#define _P4_GEN_HEADER_");
@@ -167,6 +167,20 @@ void UBPFProgram::emitTypes(EBPF::CodeBuilder *builder) {
             auto type = UBPFTypeFactory::instance->create(d->to<IR::Type>());
             if (type == nullptr) continue;
             type->emit(builder);
+            builder->newline();
+        }
+        if (const auto *method = d->to<IR::Method>()) {
+            if (!method->srcInfo.isValid()) {
+                continue;
+            }
+            // Ignore methods originating from core.p4 and ubpf_model.p4 because they are already
+            // defined.
+            // TODO: Maybe we should still generate declarations for these methods?
+            if (isLibraryMethod(method->controlPlaneName())) {
+                continue;
+            }
+            EBPF::EBPFMethodDeclaration methodInstance(method);
+            methodInstance.emit(builder);
             builder->newline();
         }
     }
@@ -233,7 +247,7 @@ void UBPFProgram::emitPktVariable(UbpfCodeBuilder *builder) const {
 void UBPFProgram::emitPacketLengthVariable(UbpfCodeBuilder *builder) const {
     builder->emitIndent();
     builder->appendFormat("uint32_t %s = ", lengthVar.c_str());
-    builder->target->emitGetFromStandardMetadata(builder, stdMetadataVar, "packet_length");
+    builder->target->emitGetFromStandardMetadata(builder, stdMetadataVar, "packet_length"_cs);
     builder->endOfStatement(true);
 }
 

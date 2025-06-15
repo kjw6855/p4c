@@ -31,6 +31,8 @@ limitations under the License.
 
 namespace DPDK {
 
+using namespace P4::literals;
+
 cstring TypeStruct2Name(const cstring *s);
 bool isSimpleExpression(const IR::Expression *e);
 bool isNonConstantSimpleExpression(const IR::Expression *e);
@@ -593,7 +595,7 @@ class InjectInternetChecksumIntermediateValue : public Transform {
                     auto fields = new IR::IndexedVector<IR::StructField>;
                     for (auto fld : *csum_vec) {
                         fields->push_back(
-                            new IR::StructField(IR::ID(fld), new IR::Type_Bits(16, false)));
+                            new IR::StructField(IR::ID(fld), IR::Type::Bits::get(16, false)));
                     }
                     new_objs->push_back(new IR::Type_Header(IR::ID("cksum_state_t"), *fields));
                 }
@@ -826,21 +828,21 @@ struct keyInfo {
 class CopyMatchKeysToSingleStruct : public P4::KeySideEffect {
     IR::IndexedVector<IR::Declaration> decls;
     DpdkProgramStructure *structure;
-    bool metaCopyNeeded;
+    bool metaCopyNeeded = false;
 
  public:
-    CopyMatchKeysToSingleStruct(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-                                std::set<const IR::P4Table *> *invokedInKey,
+    CopyMatchKeysToSingleStruct(P4::TypeMap *typeMap, std::set<const IR::P4Table *> *invokedInKey,
                                 DpdkProgramStructure *structure)
-        : P4::KeySideEffect(refMap, typeMap, invokedInKey), structure(structure) {
+        : P4::KeySideEffect(typeMap, invokedInKey), structure(structure) {
         setName("CopyMatchKeysToSingleStruct");
     }
 
     const IR::Node *preorder(IR::Key *key) override;
     const IR::Node *postorder(IR::KeyElement *element) override;
-    const IR::Node *doStatement(const IR::Statement *statement,
-                                const IR::Expression *expression) override;
+    const IR::Node *doStatement(const IR::Statement *statement, const IR::Expression *expression,
+                                const Visitor::Context *ctxt) override;
     struct keyInfo *getKeyInfo(IR::Key *keys);
+    cstring getTableKeyName(const IR::Expression *e);
     int getFieldSizeBits(const IR::Type *field_type);
     bool isLearnerTable(const IR::P4Table *t);
 };
@@ -1008,7 +1010,8 @@ class CollectDirectCounterMeter : public Inspector {
     cstring oneInstance;
     bool methodCallFound;
     int getTableSize(const IR::P4Table *tbl);
-    bool ifMethodFound(const IR::P4Action *a, cstring method, cstring instancename = "");
+    bool ifMethodFound(const IR::P4Action *a, cstring method,
+                       cstring instancename = cstring::empty);
     void checkMethodCallInAction(const P4::ExternMethod *);
 
  public:
@@ -1018,9 +1021,9 @@ class CollectDirectCounterMeter : public Inspector {
         : refMap(refMap), typeMap(typeMap), structure(structure) {
         setName("CollectDirectCounterMeter");
         visitDagOnce = false;
-        method = "";
-        instancename = "";
-        oneInstance = "";
+        method = cstring::empty;
+        instancename = cstring::empty;
+        oneInstance = cstring::empty;
         methodCallFound = false;
     }
 
@@ -1078,6 +1081,39 @@ class ValidateAddOnMissExterns : public Inspector {
             return method->path->name;
         }
         return NULL;
+    }
+};
+
+// Dpdk does not allow operations (arithmetic, logical, bitwise, relational etc) on operands
+// greater than 64-bit.
+class ValidateOperandSize : public Inspector {
+ public:
+    ValidateOperandSize() { setName("ValidateOperandSize"); }
+    void isValidOperandSize(const IR::Expression *e) {
+        if (auto t = e->type->to<IR::Type_Bits>()) {
+            if (t->width_bits() > dpdk_max_operand_size) {
+                ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "Unsupported bitwidth %1% in %2%",
+                        t->width_bits(), e);
+                return;
+            }
+        }
+    }
+
+    void postorder(const IR::Operation_Binary *binop) override {
+        isValidOperandSize(binop->left);
+        isValidOperandSize(binop->right);
+    }
+
+    // Reject all operations except typecast if the operand size is beyond the supported limit
+    void postorder(const IR::Operation_Unary *unop) override {
+        if (unop->is<IR::Cast>()) return;
+        isValidOperandSize(unop->expr);
+    }
+
+    void postorder(const IR::Operation_Ternary *top) override {
+        isValidOperandSize(top->e0);
+        isValidOperandSize(top->e1);
+        isValidOperandSize(top->e2);
     }
 };
 
@@ -1140,6 +1176,17 @@ class ElimHeaderCopy : public Transform {
     const IR::Node *preorder(IR::AssignmentStatement *as) override;
     const IR::Node *preorder(IR::MethodCallStatement *mcs) override;
     const IR::Node *postorder(IR::Member *m) override;
+};
+
+class EliminateHeaderCopy : public PassManager {
+ public:
+    EliminateHeaderCopy(P4::ReferenceMap *refMap, P4::TypeMap *typeMap) {
+        passes.push_back(new P4::ClearTypeMap(typeMap));
+        passes.push_back(new P4::ResolveReferences(refMap));
+        passes.push_back(new P4::TypeInference(typeMap, false));
+        passes.push_back(new P4::TypeChecking(refMap, typeMap, true));
+        passes.push_back(new ElimHeaderCopy(typeMap));
+    }
 };
 
 /// This pass checks whether an assignment statement has large operands (>64-bit).
@@ -1387,13 +1434,13 @@ class CollectLocalStructAndFlatten : public PassManager {
     CollectLocalStructAndFlatten(P4::ReferenceMap *refMap, P4::TypeMap *typeMap) {
         passes.push_back(new P4::ClearTypeMap(typeMap));
         passes.push_back(new P4::ResolveReferences(refMap));
-        passes.push_back(new P4::TypeInference(refMap, typeMap, false));
+        passes.push_back(new P4::TypeInference(typeMap, false));
         passes.push_back(new P4::TypeChecking(refMap, typeMap, true));
         passes.push_back(new CollectStructLocalVariables(refMap, typeMap));
         passes.push_back(new MoveCollectedStructLocalVariableToMetadata(typeMap));
         passes.push_back(new P4::ClearTypeMap(typeMap));
         passes.push_back(new P4::ResolveReferences(refMap));
-        passes.push_back(new P4::TypeInference(refMap, typeMap, false));
+        passes.push_back(new P4::TypeInference(typeMap, false));
         passes.push_back(new P4::TypeChecking(refMap, typeMap, true));
         passes.push_back(new P4::FlattenInterfaceStructs(refMap, typeMap));
     }
@@ -1416,7 +1463,7 @@ class CollectIPSecInfo : public Inspector {
           typeMap(typeMap),
           structure(structure) {}
     bool preorder(const IR::MethodCallStatement *mcs) override {
-        auto mi = P4::MethodInstance::resolve(mcs->methodCall, refMap, typeMap);
+        auto mi = P4::MethodInstance::resolve(mcs, refMap, typeMap);
         if (auto a = mi->to<P4::ExternMethod>()) {
             if (a->originalExternType->getName().name == "ipsec_accelerator") {
                 if (structure->isPSA()) {
@@ -1457,11 +1504,11 @@ class InsertReqDeclForIPSec : public Transform {
     DpdkProgramStructure *structure;
     bool &is_ipsec_used;
     int &sa_id_width;
-    cstring newHeaderName = "platform_hdr_t";
+    cstring newHeaderName = "platform_hdr_t"_cs;
     IR::Type_Header *ipsecHeader = nullptr;
     std::vector<cstring> registerInstanceNames = {
-        "ipsec_port_out_inbound", "ipsec_port_out_outbound", "ipsec_port_in_inbound",
-        "ipsec_port_in_outbound"};
+        "ipsec_port_out_inbound"_cs, "ipsec_port_out_outbound"_cs, "ipsec_port_in_inbound"_cs,
+        "ipsec_port_in_outbound"_cs};
 
  public:
     InsertReqDeclForIPSec(P4::ReferenceMap *refMap, DpdkProgramStructure *structure,
@@ -1494,7 +1541,7 @@ struct DpdkHandleIPSec : public PassManager {
         passes.push_back(new InsertReqDeclForIPSec(refMap, structure, is_ipsec_used, sa_id_width));
         passes.push_back(new P4::ClearTypeMap(typeMap));
         passes.push_back(new P4::ResolveReferences(refMap));
-        passes.push_back(new P4::TypeInference(refMap, typeMap, false));
+        passes.push_back(new P4::TypeInference(typeMap, false));
     }
 };
 

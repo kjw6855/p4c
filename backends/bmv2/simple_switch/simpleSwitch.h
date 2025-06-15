@@ -79,29 +79,28 @@ class SimpleSwitchExpressionConverter : public ExpressionConverter {
         : ExpressionConverter(refMap, typeMap, structure, scalarsName), structure(structure) {}
 
     void modelError(const char *format, const IR::Node *node) {
-        ::error(ErrorType::ERR_MODEL,
-                (cstring(format) + "\nAre you using an up-to-date v1model.p4?").c_str(), node);
+        ::errorWithSuffix(ErrorType::ERR_MODEL, format, "\nAre you using an up-to-date v1model.p4?",
+                          node);
     }
 
     bool isStandardMetadataParameter(const IR::Parameter *param) {
-        auto st = dynamic_cast<V1ProgramStructure *>(structure);
-        auto params = st->parser->getApplyParameters();
+        auto params = structure->parser->getApplyParameters();
         if (params->size() != 4) {
-            modelError("%1%: Expected 4 parameter for parser", st->parser);
+            modelError("%1%: Expected 4 parameter for parser", structure->parser);
             return false;
         }
         if (params->parameters.at(3) == param) return true;
 
-        params = st->ingress->getApplyParameters();
+        params = structure->ingress->getApplyParameters();
         if (params->size() != 3) {
-            modelError("%1%: Expected 3 parameter for ingress", st->ingress);
+            modelError("%1%: Expected 3 parameter for ingress", structure->ingress);
             return false;
         }
         if (params->parameters.at(2) == param) return true;
 
-        params = st->egress->getApplyParameters();
+        params = structure->egress->getApplyParameters();
         if (params->size() != 3) {
-            modelError("%1%: Expected 3 parameter for egress", st->egress);
+            modelError("%1%: Expected 3 parameter for egress", structure->egress);
             return false;
         }
         if (params->parameters.at(2) == param) return true;
@@ -113,13 +112,13 @@ class SimpleSwitchExpressionConverter : public ExpressionConverter {
         if (isStandardMetadataParameter(param)) {
             auto result = new Util::JsonObject();
             if (fieldName != "") {
-                result->emplace("type", "field");
-                auto e = BMV2::mkArrayField(result, "value");
+                result->emplace("type"_cs, "field");
+                auto e = BMV2::mkArrayField(result, "value"_cs);
                 e->append("standard_metadata");
                 e->append(fieldName);
             } else {
-                result->emplace("type", "header");
-                result->emplace("value", "standard_metadata");
+                result->emplace("type"_cs, "header");
+                result->emplace("value"_cs, "standard_metadata");
             }
             return result;
         }

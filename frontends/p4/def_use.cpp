@@ -16,8 +16,6 @@ limitations under the License.
 
 #include "def_use.h"
 
-#include <boost/functional/hash.hpp>
-
 #include "frontends/p4/methodInstance.h"
 #include "frontends/p4/tableApply.h"
 #include "lib/ordered_set.h"
@@ -25,9 +23,11 @@ limitations under the License.
 
 namespace P4 {
 
+using namespace literals;
+
 // internal name for header valid bit; used only locally
-const cstring StorageFactory::validFieldName = "$valid";
-const cstring StorageFactory::indexFieldName = "$lastIndex";
+const cstring StorageFactory::validFieldName = "$valid"_cs;
+const cstring StorageFactory::indexFieldName = "$lastIndex"_cs;
 const LocationSet *LocationSet::empty = new LocationSet();
 ProgramPoint ProgramPoint::beforeStart;
 
@@ -82,8 +82,8 @@ StorageLocation *StorageFactory::create(const IR::Type *type, cstring name) cons
             cstring fieldName = name + "." + f->name;
             auto sl = create(f->type, fieldName);
             if (globalValid != nullptr)
-                dynamic_cast<StructLocation *>(sl)->replaceField(fieldName + "." + validFieldName,
-                                                                 globalValid);
+                sl->as<StructLocation>().replaceField(fieldName + "." + validFieldName,
+                                                      globalValid);
             result->createField(f->name.name, sl);
         }
         if (st->is<IR::Type_Header>()) {
@@ -255,14 +255,31 @@ bool LocationSet::overlaps(const LocationSet *other) const {
     return false;
 }
 
+bool LocationSet::operator==(const LocationSet &other) const {
+    auto it = other.begin();
+    for (auto s : locations) {
+        if (it == other.end() || *it != s) return false;
+        ++it;
+    }
+    return it == other.end();
+}
+
+void ProgramPoints::add(const ProgramPoints *from) {
+    points.insert(from->points.begin(), from->points.end());
+}
+
 const ProgramPoints *ProgramPoints::merge(const ProgramPoints *with) const {
-    auto result = new ProgramPoints(points);
-    for (auto p : with->points) result->points.emplace(p);
+    auto *result = new ProgramPoints(points);
+    result->points.insert(with->points.begin(), with->points.end());
     return result;
 }
 
 ProgramPoint::ProgramPoint(const ProgramPoint &context, const IR::Node *node) {
-    for (auto e : context.stack) stack.push_back(e);
+    assign(context, node);
+}
+
+void ProgramPoint::assign(const ProgramPoint &context, const IR::Node *node) {
+    stack.assign(context.stack.begin(), context.stack.end());
     stack.push_back(node);
 }
 
@@ -273,11 +290,7 @@ bool ProgramPoint::operator==(const ProgramPoint &other) const {
     return true;
 }
 
-std::size_t ProgramPoint::hash() const {
-    std::size_t result = 0;
-    boost::hash_range(result, stack.begin(), stack.end());
-    return result;
-}
+std::size_t ProgramPoint::hash() const { return Util::hash_range(stack.begin(), stack.end()); }
 
 bool ProgramPoints::operator==(const ProgramPoints &other) const {
     if (points.size() != other.points.size()) return false;
@@ -331,10 +344,10 @@ void Definitions::removeLocation(const StorageLocation *location) {
 }
 
 const ProgramPoints *Definitions::getPoints(const LocationSet *locations) const {
-    const ProgramPoints *result = new ProgramPoints();
-    for (auto sl : *locations->canonicalize()) {
-        auto points = getPoints(sl->to<BaseLocation>());
-        result = result->merge(points);
+    ProgramPoints *result = new ProgramPoints();
+    for (const auto *sl : *locations->canonicalize()) {
+        const auto *points = getPoints(sl->to<BaseLocation>());
+        result->add(points);
     }
     return result;
 }
@@ -360,6 +373,8 @@ bool Definitions::operator==(const Definitions &other) const {
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 // ComputeWriteSet implementation
+
+int ComputeWriteSet::nest_count = 0;
 
 // This assumes that all variable declarations have been pushed to the top.
 // We could remove this constraint if we also scanned variable declaration initializers.
@@ -402,9 +417,12 @@ void ComputeWriteSet::enterScope(const IR::ParameterList *parameters,
             }
         }
     }
-    allDefinitions->setDefinitionsAt(entryPoint, defs, false);
+    allDefinitions->setDefinitionsAt(entryPoint, defs, true);
     currentDefinitions = defs;
-    LOG3("CWS Entered scope " << entryPoint << " definitions are " << Log::endl << defs);
+    if (LOGGING(5))
+        LOG5("CWS Entered scope " << entryPoint << " definitions are " << Log::endl << defs);
+    else
+        LOG3("CWS Entered scope " << entryPoint << " with " << defs->size() << " definitions");
 }
 
 void ComputeWriteSet::exitScope(const IR::ParameterList *parameters,
@@ -453,8 +471,14 @@ bool ComputeWriteSet::setDefinitions(Definitions *defs, const IR::Node *node, bo
     // overwriting always in parser states.  In this case we actually expect
     // that the definitions are monotonically increasing.
     if (findContext<IR::ParserState>()) overwrite = true;
+    // Loop bodies get visited repeatedly until a fixed point, so we likewise
+    // expect monotonically increasing write sets.
+    if (continueDefinitions != nullptr) overwrite = true;  // in a loop
     allDefinitions->setDefinitionsAt(point, currentDefinitions, overwrite);
-    LOG3("CWS Definitions at " << point << " are " << Log::endl << defs);
+    if (LOGGING(5))
+        LOG5("CWS Definitions at " << point << " are " << Log::endl << defs);
+    else
+        LOG3("CWS " << defs->size() << " definitions at " << point);
     return false;  // always returns false
 }
 
@@ -693,8 +717,12 @@ bool ComputeWriteSet::preorder(const IR::MethodCallExpression *expression) {
         for (auto c : callees) (void)c->getNode()->apply(cw);
         currentDefinitions = cw.currentDefinitions;
         exitDefinitions = exitDefinitions->joinDefinitions(cw.exitDefinitions);
-        LOG3("Definitions after call of " << DBPrint::Brief << expression << ":" << Log::endl
-                                          << currentDefinitions << DBPrint::Reset);
+        if (LOGGING(5))
+            LOG5("Definitions after call of " << DBPrint::Brief << expression << ":" << Log::endl
+                                              << currentDefinitions << DBPrint::Reset);
+        else
+            LOG3(currentDefinitions->size() << " definitions after call of " << DBPrint::Brief
+                                            << expression << DBPrint::Reset);
     }
 
     auto result = LocationSet::empty;
@@ -806,6 +834,69 @@ bool ComputeWriteSet::preorder(const IR::IfStatement *statement) {
     return setDefinitions(result);
 }
 
+bool ComputeWriteSet::preorder(const IR::ForStatement *statement) {
+    LOG3("CWS Visiting " << dbp(statement));
+    if (currentDefinitions->isUnreachable()) return setDefinitions(currentDefinitions);
+    visit(statement->init, "init");
+
+    auto saveBreak = breakDefinitions;
+    auto saveContinue = continueDefinitions;
+    breakDefinitions = new Definitions();
+    continueDefinitions = new Definitions();
+    Definitions *startDefs = nullptr;
+    Definitions *exitDefs = nullptr;
+
+    do {
+        startDefs = currentDefinitions;
+        visit(statement->condition, "condition");
+        auto cond = getWrites(statement->condition);
+        // exitDefs are the definitions after evaluating the condition
+        exitDefs = currentDefinitions->writes(getProgramPoint(), cond);
+        (void)setDefinitions(exitDefs, statement->condition, true);
+        visit(statement->body, "body");
+        currentDefinitions = currentDefinitions->joinDefinitions(continueDefinitions);
+        visit(statement->updates, "updates");
+        currentDefinitions = currentDefinitions->joinDefinitions(startDefs);
+    } while (!(*startDefs == *currentDefinitions));
+
+    exitDefs = exitDefs->joinDefinitions(breakDefinitions);
+    breakDefinitions = saveBreak;
+    continueDefinitions = saveContinue;
+    return setDefinitions(exitDefs);
+}
+
+bool ComputeWriteSet::preorder(const IR::ForInStatement *statement) {
+    LOG3("CWS Visiting " << dbp(statement));
+    if (currentDefinitions->isUnreachable()) return setDefinitions(currentDefinitions);
+    visit(statement->collection, "collection");
+
+    auto saveBreak = breakDefinitions;
+    auto saveContinue = continueDefinitions;
+    breakDefinitions = new Definitions();
+    continueDefinitions = new Definitions();
+    Definitions *startDefs = nullptr;
+    Definitions *exitDefs = currentDefinitions;  // in case collection is empty;
+
+    do {
+        startDefs = currentDefinitions;
+        lhs = true;
+        visit(statement->ref, "ref");
+        lhs = false;
+        auto cond = getWrites(statement->ref);
+        auto defs = currentDefinitions->writes(getProgramPoint(), cond);
+        (void)setDefinitions(defs, statement->ref, true);
+        visit(statement->body, "body");
+        currentDefinitions = currentDefinitions->joinDefinitions(continueDefinitions);
+        currentDefinitions = currentDefinitions->joinDefinitions(startDefs);
+    } while (!(*startDefs == *currentDefinitions));
+
+    exitDefs = exitDefs->joinDefinitions(currentDefinitions);
+    exitDefs = exitDefs->joinDefinitions(breakDefinitions);
+    breakDefinitions = saveBreak;
+    continueDefinitions = saveContinue;
+    return setDefinitions(exitDefs);
+}
+
 bool ComputeWriteSet::preorder(const IR::BlockStatement *statement) {
     if (currentDefinitions->isUnreachable()) return setDefinitions(currentDefinitions);
     visit(statement->components, "components");
@@ -813,21 +904,35 @@ bool ComputeWriteSet::preorder(const IR::BlockStatement *statement) {
 }
 
 bool ComputeWriteSet::preorder(const IR::ReturnStatement *statement) {
+    if (currentDefinitions->isUnreachable()) return setDefinitions(currentDefinitions);
     if (statement->expression != nullptr) visit(statement->expression);
-    returnedDefinitions = returnedDefinitions->joinDefinitions(currentDefinitions);
-    LOG3("Return definitions " << returnedDefinitions);
-    auto defs = currentDefinitions->cloneDefinitions();
-    defs->setUnreachable();
-    return setDefinitions(defs);
+    return handleJump("Return", returnedDefinitions);
 }
 
 bool ComputeWriteSet::preorder(const IR::ExitStatement *) {
     if (currentDefinitions->isUnreachable()) return setDefinitions(currentDefinitions);
-    exitDefinitions = exitDefinitions->joinDefinitions(currentDefinitions);
-    LOG3("Exit definitions " << exitDefinitions);
-    auto defs = currentDefinitions->cloneDefinitions();
-    defs->setUnreachable();
-    return setDefinitions(defs);
+    return handleJump("Exit", exitDefinitions);
+}
+
+bool ComputeWriteSet::preorder(const IR::BreakStatement *) {
+    if (currentDefinitions->isUnreachable()) return setDefinitions(currentDefinitions);
+    return handleJump("Break", breakDefinitions);
+}
+
+bool ComputeWriteSet::preorder(const IR::ContinueStatement *) {
+    if (currentDefinitions->isUnreachable()) return setDefinitions(currentDefinitions);
+    return handleJump("Continue", continueDefinitions);
+}
+
+bool ComputeWriteSet::handleJump(const char *tok, Definitions *&defs) {
+    defs = defs->joinDefinitions(currentDefinitions);
+    if (LOGGING(5))
+        LOG5(tok << " definitions " << defs);
+    else
+        LOG3(tok << " with " << defs->size() << " definitions");
+    auto after = currentDefinitions->cloneDefinitions();
+    after->setUnreachable();
+    return setDefinitions(after);
 }
 
 bool ComputeWriteSet::preorder(const IR::EmptyStatement *) {
@@ -944,7 +1049,10 @@ bool ComputeWriteSet::preorder(const IR::Function *function) {
     returnedDefinitions = new Definitions();
     visit(function->body);
     currentDefinitions = currentDefinitions->joinDefinitions(returnedDefinitions);
-    LOG3("CWS @" << point.after() << "=" << currentDefinitions);
+    if (LOGGING(5))
+        LOG5("CWS @" << point.after() << "=" << currentDefinitions);
+    else
+        LOG3("CWS @" << point.after() << " with " << currentDefinitions->size() << " defs");
     allDefinitions->setDefinitionsAt(point.after(), currentDefinitions, false);
     exitScope(function->type->parameters, locals);
 

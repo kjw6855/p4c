@@ -16,7 +16,19 @@ limitations under the License.
 
 #include "cstring.h"
 
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_replace.h"
+
+#if HAVE_LIBGC
+#include <gc_cpp.h>
+#define IF_HAVE_LIBGC(X) X
+#else
+#define IF_HAVE_LIBGC(X)
+#endif /* HAVE_LIBGC */
+
 #include <algorithm>
+#include <cctype>
+#include <iomanip>
 #include <ios>
 #include <string>
 #include <unordered_set>
@@ -73,8 +85,8 @@ class table_entry {
             m_inplace_string[length] = '\0';
             m_flags = table_entry_flags::inplace;
         } else {
-            // Make copy of string elseware
-            auto copy = new char[length + 1];
+            // Make copy of string elsewhere
+            auto copy = new IF_HAVE_LIBGC((NoGC)) char[length + 1];
             std::memcpy(copy, string, length);
             copy[length] = '\0';
             m_string = copy;
@@ -134,7 +146,7 @@ namespace std {
 template <>
 struct hash<table_entry> {
     std::size_t operator()(const table_entry &entry) const {
-        return Util::Hash::murmur(entry.string(), entry.length());
+        return Util::hash(entry.string(), entry.length());
     }
 };
 }  // namespace std
@@ -183,55 +195,54 @@ size_t cstring::cache_size(size_t &count) {
     return rv;
 }
 
-cstring cstring::newline = cstring("\n");
-cstring cstring::empty = cstring("");
+cstring cstring::newline = cstring::literal("\n");
+cstring cstring::empty = cstring::literal("");
 
-bool cstring::startsWith(const cstring &prefix) const {
-    if (prefix.isNullOrEmpty()) return true;
-    return size() >= prefix.size() && memcmp(str, prefix.str, prefix.size()) == 0;
+bool cstring::startsWith(std::string_view prefix) const {
+    if (prefix.empty()) return true;
+    return size() >= prefix.size() && memcmp(str, prefix.data(), prefix.size()) == 0;
 }
 
-bool cstring::endsWith(const cstring &suffix) const {
-    if (suffix.isNullOrEmpty()) return true;
+bool cstring::endsWith(std::string_view suffix) const {
+    if (suffix.empty()) return true;
     return size() >= suffix.size() &&
-           memcmp(str + size() - suffix.size(), suffix.str, suffix.size()) == 0;
+           memcmp(str + size() - suffix.size(), suffix.data(), suffix.size()) == 0;
 }
 
 cstring cstring::before(const char *at) const { return substr(0, at - str); }
 
 cstring cstring::substr(size_t start, size_t length) const {
     if (size() <= start) return cstring::empty;
-    std::string s = str;
-    return s.substr(start, length);
+    return cstring(string_view().substr(start, length));
 }
 
 cstring cstring::replace(char c, char with) const {
+    if (isNullOrEmpty()) return *this;
     char *dup = strdup(c_str());
     for (char *p = dup; *p; ++p)
         if (*p == c) *p = with;
     return cstring(dup);
 }
 
-cstring cstring::replace(cstring search, cstring replace) const {
-    if (search.isNullOrEmpty() || isNullOrEmpty()) return *this;
+cstring cstring::replace(std::string_view search, std::string_view replace) const {
+    if (search.empty() || isNullOrEmpty()) return *this;
 
-    std::string s_str = str;
-    std::string s_search = search.str;
-    std::string s_replace = replace.str;
+    return cstring(absl::StrReplaceAll(str, {{search, replace}}));
+}
 
-    size_t pos = 0;
-    while ((pos = s_str.find(s_search, pos)) != std::string::npos) {
-        s_str.replace(pos, s_search.length(), s_replace);
-        pos += s_replace.length();
-    }
-    return cstring(s_str);
+cstring cstring::trim(const char *ws) const {
+    if (isNullOrEmpty()) return *this;
+
+    const char *start = str + strspn(str, ws);
+    size_t len = strlen(start);
+    while (len > 0 && strchr(ws, start[len - 1])) --len;
+    return cstring(start, len);
 }
 
 cstring cstring::indent(size_t amount) const {
-    std::string spaces = "";
-    for (size_t i = 0; i < amount; i++) spaces += " ";
-    cstring spc = cstring("\n") + spaces;
-    return cstring(spaces) + replace("\n", spc);
+    std::string spaces(amount, ' ');
+    std::string spc = "\n" + spaces;
+    return cstring(absl::StrCat(spaces, absl::StrReplaceAll(string_view(), {{"\n", spc}})));
 }
 
 // See https://stackoverflow.com/a/33799784/4538702
@@ -277,13 +288,17 @@ cstring cstring::escapeJson() const {
 cstring cstring::toUpper() const {
     std::string st = str;
     std::transform(st.begin(), st.end(), st.begin(), ::toupper);
-    cstring ret = cstring::to_cstring(st);
-    return ret;
+    return cstring(st);
+}
+
+cstring cstring::toLower() const {
+    std::string st = str;
+    std::transform(st.begin(), st.end(), st.begin(), ::tolower);
+    return cstring(st);
 }
 
 cstring cstring::capitalize() const {
     std::string st = str;
     st[0] = ::toupper(st[0]);
-    cstring ret = cstring::to_cstring(st);
-    return ret;
+    return cstring(st);
 }

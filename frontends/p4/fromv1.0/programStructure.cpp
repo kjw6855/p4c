@@ -19,9 +19,6 @@ limitations under the License.
 #include <algorithm>
 #include <set>
 
-#include <boost/iostreams/device/file_descriptor.hpp>
-#include <boost/iostreams/stream.hpp>
-
 #include "converters.h"
 #include "frontends/common/options.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
@@ -31,9 +28,9 @@ limitations under the License.
 #include "frontends/parsers/parserDriver.h"
 #include "lib/big_int_util.h"
 #include "lib/bitops.h"
-#include "lib/path.h"
 
 namespace P4V1 {
+using namespace P4::literals;
 
 static const IR::IDeclaration *getFirstDeclaration(const IR::Vector<IR::Node> *nodes,
                                                    cstring name) {
@@ -93,7 +90,7 @@ const IR::Annotations *ProgramStructure::addNameAnnotation(cstring name,
 
 const IR::Annotations *ProgramStructure::addGlobalNameAnnotation(cstring name,
                                                                  const IR::Annotations *annos) {
-    return addNameAnnotation(cstring(".") + name, annos);
+    return addNameAnnotation("."_cs + name, annos);
 }
 
 cstring ProgramStructure::makeUniqueName(cstring base) {
@@ -202,7 +199,7 @@ cstring ProgramStructure::createType(const IR::Type_StructLike *type, bool heade
 void ProgramStructure::createTypes() {
     if (allFieldLists.size()) {
         // An enum containing the recirculated/cloned/resubmitted field lists
-        fieldListsEnum = makeUniqueName("FieldLists");
+        fieldListsEnum = makeUniqueName("FieldLists"_cs);
         auto members = new IR::IndexedVector<IR::SerEnumMember>();
         unsigned index = 0;
         P4::MinimalNameGenerator mng;
@@ -242,7 +239,7 @@ void ProgramStructure::createTypes() {
 
             BUG_CHECK(type->is<IR::Type_Header>(), "%1%: unexpected type", type);
             // Must convert to a struct type
-            cstring type_name = makeUniqueName(st->name);
+            cstring type_name = makeUniqueName(st->name.name);
             // Registers always use struct types
             auto annos = addNameAnnotation(layoutTypeName, type->annotations);
             auto newType = new IR::Type_Struct(type->srcInfo, type_name, annos, st->fields);
@@ -281,7 +278,7 @@ const IR::Type_Struct *ProgramStructure::createFieldListType(const IR::Expressio
         return nullptr;
     }
 
-    auto name = makeUniqueName(nr->path->name);
+    auto name = makeUniqueName(nr->path->name.name);
     auto annos = addNameAnnotation(nr->path->name);
     auto result = new IR::Type_Struct(expression->srcInfo, name, annos);
     std::set<cstring> fieldNames;
@@ -558,7 +555,7 @@ const IR::ParserState *ProgramStructure::convertParser(
                 value_sets_implemented.emplace(first->path->name);
 
                 auto type = explodeType(fieldTypes);
-                auto sizeAnnotation = value_set->annotations->getSingle("parser_value_set_size");
+                auto sizeAnnotation = value_set->annotations->getSingle("parser_value_set_size"_cs);
                 const IR::Constant *sizeConstant;
                 if (sizeAnnotation) {
                     if (sizeAnnotation->expr.size() != 1) {
@@ -670,8 +667,8 @@ void ProgramStructure::include(cstring filename, cstring ppoptions) {
     // paths.  check the environment and add these to the command
     // line for the preporicessor
     char *drvP4IncludePath = getenv("P4C_16_INCLUDE_PATH");
-    Util::PathName path(drvP4IncludePath ? drvP4IncludePath : p4includePath);
-    path = path.join(filename);
+    std::filesystem::path path(drvP4IncludePath ? drvP4IncludePath : p4includePath);
+    path /= std::string(filename);
 
     CompilerOptions options;
     if (ppoptions) {
@@ -679,13 +676,13 @@ void ProgramStructure::include(cstring filename, cstring ppoptions) {
         options.preprocessor_options += ppoptions;
     }
     options.langVersion = CompilerOptions::FrontendVersion::P4_16;
-    options.file = path.toString();
+    options.file = path;
     if (!::errorCount()) {
         if (FILE *file = options.preprocess()) {
-            auto code = P4::P4ParserDriver::parse(file, options.file);
+            auto code = P4::P4ParserDriver::parse(file, options.file.string());
             if (code && !::errorCount())
                 for (auto decl : code->objects) declarations->push_back(decl);
-            options.closeInput(file);
+            options.closePreprocessedInput(file);
         }
     }
 }
@@ -899,9 +896,9 @@ const IR::Declaration_Instance *ProgramStructure::convertActionProfile(
         auto width = new IR::Constant(v1model.action_selector.widthType, flc->output_width);
         args->push_back(new IR::Argument(width));
         if (action_selector->mode)
-            annos = annos->addAnnotation("mode", new IR::StringLiteral(action_selector->mode));
+            annos = annos->addAnnotation("mode"_cs, new IR::StringLiteral(action_selector->mode));
         if (action_selector->type)
-            annos = annos->addAnnotation("type", new IR::StringLiteral(action_selector->type));
+            annos = annos->addAnnotation("type"_cs, new IR::StringLiteral(action_selector->type));
         auto fl = getFieldLists(flc);
         for (auto annot : fl->annotations->annotations) {
             annos = annos->add(annot);
@@ -939,7 +936,7 @@ const IR::P4Table *ProgramStructure::convertTable(const IR::V1Table *table, cstr
         if (mtr != nullptr || ctr != nullptr) {
             // we must synthesize a new action, which has a writeback to
             // the meter/counter
-            newname = makeUniqueName(a);
+            newname = makeUniqueName(a.name);
             auto actCont = convertAction(action, newname, mtr, ctr);
             stateful.push_back(actCont);
             mapNames[table->name + '.' + a] = newname;
@@ -1128,9 +1125,9 @@ const IR::Expression *ProgramStructure::convertHashAlgorithms(const IR::NameList
 
 static bool sameBitsType(const IR::Node *errorPosition, const IR::Type *left,
                          const IR::Type *right) {
-    if (typeid(*left) != typeid(*right)) return false;
-    if (left->is<IR::Type_Bits>())
-        return left->to<IR::Type_Bits>()->operator==(*right->to<IR::Type_Bits>());
+    if (left->typeId() != right->typeId()) return false;
+    if (const auto *leftBitsType = left->to<IR::Type_Bits>())
+        return leftBitsType->operator==(right->as<IR::Type_Bits>());
     ::error(ErrorType::ERR_TYPE_ERROR, "%1%: operation only defined for bit/int types",
             errorPosition);
     return true;  // to prevent inserting a cast
@@ -1139,10 +1136,10 @@ static bool sameBitsType(const IR::Node *errorPosition, const IR::Type *left,
 static bool isSaturatedField(const IR::Expression *expr) {
     auto member = expr->to<IR::Member>();
     if (!member) return false;
-    auto header_type = dynamic_cast<const IR::Type_StructLike *>(member->expr->type);
+    auto header_type = member->expr->type->to<IR::Type_StructLike>();
     if (!header_type) return false;
     auto field = header_type->getField(member->member.name);
-    if (field && field->getAnnotation("saturating")) {
+    if (field && field->getAnnotation("saturating"_cs)) {
         return true;
     }
     return false;
@@ -1228,7 +1225,7 @@ const IR::Statement *ProgramStructure::convertPrimitive(const IR::Primitive *pri
 #define OPS_CK(primitive, n) \
     BUG_CHECK((primitive)->operands.size() == n, "Expected " #n " operands for %1%", primitive)
 
-CONVERT_PRIMITIVE(modify_field) {
+CONVERT_PRIMITIVE(modify_field, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     auto args = convertArgs(structure, primitive);
     if (args.size() == 2) {
         return structure->assign(primitive->srcInfo, args[0], args[1],
@@ -1239,7 +1236,7 @@ CONVERT_PRIMITIVE(modify_field) {
     return nullptr;
 }
 
-CONVERT_PRIMITIVE(bit_xor) {
+CONVERT_PRIMITIVE(bit_xor, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1248,7 +1245,7 @@ CONVERT_PRIMITIVE(bit_xor) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(min) {
+CONVERT_PRIMITIVE(min, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1258,7 +1255,7 @@ CONVERT_PRIMITIVE(min) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(max) {
+CONVERT_PRIMITIVE(max, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1268,7 +1265,7 @@ CONVERT_PRIMITIVE(max) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_or) {
+CONVERT_PRIMITIVE(bit_or, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1277,7 +1274,7 @@ CONVERT_PRIMITIVE(bit_or) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_xnor) {
+CONVERT_PRIMITIVE(bit_xnor, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1286,7 +1283,7 @@ CONVERT_PRIMITIVE(bit_xnor) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(add) {
+CONVERT_PRIMITIVE(add, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     bool isSaturated = false;
@@ -1302,7 +1299,7 @@ CONVERT_PRIMITIVE(add) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_nor) {
+CONVERT_PRIMITIVE(bit_nor, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1311,7 +1308,7 @@ CONVERT_PRIMITIVE(bit_nor) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_nand) {
+CONVERT_PRIMITIVE(bit_nand, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1320,7 +1317,7 @@ CONVERT_PRIMITIVE(bit_nand) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_orca) {
+CONVERT_PRIMITIVE(bit_orca, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1329,7 +1326,7 @@ CONVERT_PRIMITIVE(bit_orca) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_orcb) {
+CONVERT_PRIMITIVE(bit_orcb, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1338,7 +1335,7 @@ CONVERT_PRIMITIVE(bit_orcb) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_andca) {
+CONVERT_PRIMITIVE(bit_andca, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1347,7 +1344,7 @@ CONVERT_PRIMITIVE(bit_andca) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_andcb) {
+CONVERT_PRIMITIVE(bit_andcb, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1356,7 +1353,7 @@ CONVERT_PRIMITIVE(bit_andcb) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_and) {
+CONVERT_PRIMITIVE(bit_and, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     if (!sameBitsType(primitive, args[1]->type, args[2]->type))
@@ -1365,7 +1362,7 @@ CONVERT_PRIMITIVE(bit_and) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(subtract) {
+CONVERT_PRIMITIVE(subtract, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     bool isSaturated = false;
@@ -1381,34 +1378,34 @@ CONVERT_PRIMITIVE(subtract) {
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(shift_left) {
+CONVERT_PRIMITIVE(shift_left, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     auto op = new IR::Shl(primitive->srcInfo, args[1], args[2]);
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(shift_right) {
+CONVERT_PRIMITIVE(shift_right, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 3);
     auto args = convertArgs(structure, primitive);
     auto op = new IR::Shr(primitive->srcInfo, args[1], args[2]);
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(bit_not) {
+CONVERT_PRIMITIVE(bit_not, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     OPS_CK(primitive, 2);
     auto args = convertArgs(structure, primitive);
     auto op = new IR::Cmpl(primitive->srcInfo, args[1]);
     return structure->assign(primitive->srcInfo, args[0], op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(no_op) {
+CONVERT_PRIMITIVE(no_op, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     (void)structure;
     (void)primitive;
     return new IR::EmptyStatement();
 }
 
-CONVERT_PRIMITIVE(add_to_field) {
+CONVERT_PRIMITIVE(add_to_field, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 2);
     auto left = conv.convert(primitive->operands.at(0));
@@ -1439,7 +1436,7 @@ CONVERT_PRIMITIVE(add_to_field) {
     return structure->assign(primitive->srcInfo, left2, op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(subtract_from_field) {
+CONVERT_PRIMITIVE(subtract_from_field, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 2);
     auto left = conv.convert(primitive->operands.at(0));
@@ -1456,7 +1453,7 @@ CONVERT_PRIMITIVE(subtract_from_field) {
     return structure->assign(primitive->srcInfo, left2, op, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(remove_header) {
+CONVERT_PRIMITIVE(remove_header, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 1);
     auto hdr = conv.convert(primitive->operands.at(0));
@@ -1464,7 +1461,7 @@ CONVERT_PRIMITIVE(remove_header) {
     return new IR::MethodCallStatement(primitive->srcInfo, method, {});
 }
 
-CONVERT_PRIMITIVE(add_header) {
+CONVERT_PRIMITIVE(add_header, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 1);
     auto hdr = conv.convert(primitive->operands.at(0));
@@ -1472,7 +1469,7 @@ CONVERT_PRIMITIVE(add_header) {
     return new IR::MethodCallStatement(primitive->srcInfo, method, {});
 }
 
-CONVERT_PRIMITIVE(copy_header) {
+CONVERT_PRIMITIVE(copy_header, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 2);
     auto left = conv.convert(primitive->operands.at(0));
@@ -1480,13 +1477,13 @@ CONVERT_PRIMITIVE(copy_header) {
     return new IR::AssignmentStatement(primitive->srcInfo, left, right);
 }
 
-CONVERT_PRIMITIVE(drop) {
+CONVERT_PRIMITIVE(drop, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     return new IR::MethodCallStatement(
         primitive->srcInfo, structure->v1model.drop.Id(),
         {new IR::Argument(structure->conversionContext->standardMetadata->clone())});
 }
 
-CONVERT_PRIMITIVE(mark_for_drop) {
+CONVERT_PRIMITIVE(mark_for_drop, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     return new IR::MethodCallStatement(
         primitive->srcInfo, structure->v1model.drop.Id(),
         {new IR::Argument(structure->conversionContext->standardMetadata->clone())});
@@ -1513,7 +1510,7 @@ static const IR::Constant *push_pop_size(ExpressionConverter &conv, const IR::Pr
     }
     return cst;
 }
-CONVERT_PRIMITIVE(push) {
+CONVERT_PRIMITIVE(push, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     BUG_CHECK(primitive->operands.size() >= 1 || primitive->operands.size() <= 2,
               "Expected 1 or 2 operands for %1%", primitive);
@@ -1531,7 +1528,7 @@ CONVERT_PRIMITIVE(push) {
     }
     return new IR::BlockStatement(primitive->srcInfo, std::move(block));
 }
-CONVERT_PRIMITIVE(pop) {
+CONVERT_PRIMITIVE(pop, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     BUG_CHECK(primitive->operands.size() >= 1 || primitive->operands.size() <= 2,
               "Expected 1 or 2 operands for %1%", primitive);
@@ -1542,7 +1539,7 @@ CONVERT_PRIMITIVE(pop) {
     return new IR::MethodCallStatement(primitive->srcInfo, method, {new IR::Argument(count)});
 }
 
-CONVERT_PRIMITIVE(count) {
+CONVERT_PRIMITIVE(count, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 2);
     auto ref = primitive->operands.at(0);
@@ -1564,7 +1561,8 @@ CONVERT_PRIMITIVE(count) {
     return new IR::MethodCallStatement(primitive->srcInfo, method, {new IR::Argument(arg)});
 }
 
-CONVERT_PRIMITIVE(modify_field_from_rng) {
+CONVERT_PRIMITIVE(
+    modify_field_from_rng, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     BUG_CHECK(primitive->operands.size() == 2 || primitive->operands.size() == 3,
               "Expected 2 or 3 operands for %1%", primitive);
@@ -1575,7 +1573,7 @@ CONVERT_PRIMITIVE(modify_field_from_rng) {
     auto block = new IR::BlockStatement;
     if (primitive->operands.size() == 3) {
         mask = conv.convert(primitive->operands.at(2));
-        cstring tmpvar = structure->makeUniqueName("tmp");
+        cstring tmpvar = structure->makeUniqueName("tmp"_cs);
         auto decl = new IR::Declaration_Variable(tmpvar, field->type);
         block->push_back(decl);
         dest = new IR::PathExpression(field->type, new IR::Path(tmpvar));
@@ -1598,7 +1596,8 @@ CONVERT_PRIMITIVE(modify_field_from_rng) {
     return block;
 }
 
-CONVERT_PRIMITIVE(modify_field_rng_uniform) {
+CONVERT_PRIMITIVE(
+    modify_field_rng_uniform, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     BUG_CHECK(primitive->operands.size() == 3, "Expected 3 operands for %1%", primitive);
     auto field = conv.convert(primitive->operands.at(0));
@@ -1616,7 +1615,7 @@ CONVERT_PRIMITIVE(modify_field_rng_uniform) {
     return call;
 }
 
-CONVERT_PRIMITIVE(recirculate) {
+CONVERT_PRIMITIVE(recirculate, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     unsigned opcount = primitive->operands.size();
     BUG_CHECK(opcount == 0 || opcount == 1, "Expected 0 or 1 operands for %1%", primitive);
     auto args = new IR::Vector<IR::Argument>();
@@ -1659,20 +1658,22 @@ static const IR::Statement *convertClone(ProgramStructure *structure,
     return new IR::MethodCallStatement(mc->srcInfo, mc);
 }
 
-CONVERT_PRIMITIVE(clone_egress_pkt_to_egress) {
+CONVERT_PRIMITIVE(
+    clone_egress_pkt_to_egress, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     return convertClone(structure, primitive, structure->v1model.clone.cloneType.e2e);
 }
-CONVERT_PRIMITIVE(clone_e2e) {
+CONVERT_PRIMITIVE(clone_e2e, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     return convertClone(structure, primitive, structure->v1model.clone.cloneType.e2e);
 }
-CONVERT_PRIMITIVE(clone_ingress_pkt_to_egress) {
+CONVERT_PRIMITIVE(
+    clone_ingress_pkt_to_egress, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     return convertClone(structure, primitive, structure->v1model.clone.cloneType.i2e);
 }
-CONVERT_PRIMITIVE(clone_i2e) {
+CONVERT_PRIMITIVE(clone_i2e, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     return convertClone(structure, primitive, structure->v1model.clone.cloneType.i2e);
 }
 
-CONVERT_PRIMITIVE(resubmit) {
+CONVERT_PRIMITIVE(resubmit, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     unsigned opcount = primitive->operands.size();
     BUG_CHECK(opcount <= 1, "Expected 0 or 1 operands for %1%", primitive);
@@ -1692,7 +1693,7 @@ CONVERT_PRIMITIVE(resubmit) {
                                      args));
 }
 
-CONVERT_PRIMITIVE(execute_meter) {
+CONVERT_PRIMITIVE(execute_meter, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     LOG3("convert execute meter" << primitive);
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 3);
@@ -1723,7 +1724,8 @@ CONVERT_PRIMITIVE(execute_meter) {
     return new IR::MethodCallStatement(primitive->srcInfo, mc);
 }
 
-CONVERT_PRIMITIVE(modify_field_with_hash_based_offset) {
+CONVERT_PRIMITIVE(modify_field_with_hash_based_offset, ) {  // NOLINT(whitespace/parens), remove
+                                                            // with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 4);
 
@@ -1757,7 +1759,8 @@ CONVERT_PRIMITIVE(modify_field_with_hash_based_offset) {
     return result;
 }
 
-CONVERT_PRIMITIVE(modify_field_conditionally) {
+CONVERT_PRIMITIVE(
+    modify_field_conditionally, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 3);
     auto dest = conv.convert(primitive->operands.at(0));
@@ -1768,7 +1771,8 @@ CONVERT_PRIMITIVE(modify_field_conditionally) {
     return structure->assign(primitive->srcInfo, dest, src, primitive->operands.at(0)->type);
 }
 
-CONVERT_PRIMITIVE(modify_field_with_shift) {
+CONVERT_PRIMITIVE(
+    modify_field_with_shift, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 4);
     auto dest = conv.convert(primitive->operands.at(0));
@@ -1779,7 +1783,7 @@ CONVERT_PRIMITIVE(modify_field_with_shift) {
     return result;
 }
 
-CONVERT_PRIMITIVE(generate_digest) {
+CONVERT_PRIMITIVE(generate_digest, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 2);
     auto args = new IR::Vector<IR::Argument>();
@@ -1802,7 +1806,7 @@ CONVERT_PRIMITIVE(generate_digest) {
     return result;
 }
 
-CONVERT_PRIMITIVE(register_read) {
+CONVERT_PRIMITIVE(register_read, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 3);
     auto left = conv.convert(primitive->operands.at(0));
@@ -1829,7 +1833,7 @@ CONVERT_PRIMITIVE(register_read) {
     return new IR::MethodCallStatement(mc->srcInfo, mc);
 }
 
-CONVERT_PRIMITIVE(register_write) {
+CONVERT_PRIMITIVE(register_write, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 3);
     auto ref = primitive->operands.at(0);
@@ -1865,7 +1869,7 @@ CONVERT_PRIMITIVE(register_write) {
     return new IR::MethodCallStatement(mc->srcInfo, mc);
 }
 
-CONVERT_PRIMITIVE(truncate) {
+CONVERT_PRIMITIVE(truncate, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 1);
     auto len = primitive->operands.at(0);
@@ -1879,13 +1883,13 @@ CONVERT_PRIMITIVE(truncate) {
     return new IR::MethodCallStatement(mc->srcInfo, mc);
 }
 
-CONVERT_PRIMITIVE(exit) {
+CONVERT_PRIMITIVE(exit, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 0);
     return new IR::ExitStatement(primitive->srcInfo);
 }
 
-CONVERT_PRIMITIVE(funnel_shift_right) {
+CONVERT_PRIMITIVE(funnel_shift_right, ) {  // NOLINT(whitespace/parens), remove with C++20 upgrade.
     ExpressionConverter conv(structure);
     OPS_CK(primitive, 4);
     auto dest = conv.convert(primitive->operands.at(0));
@@ -2085,9 +2089,9 @@ const IR::Declaration_Instance *ProgramStructure::convert(const IR::CounterOrMet
     auto annos = addGlobalNameAnnotation(cm->name, cm->annotations);
     if (auto *c = cm->to<IR::Counter>()) {
         if (c->min_width >= 0)
-            annos = annos->addAnnotation("min_width", new IR::Constant(c->min_width));
+            annos = annos->addAnnotation("min_width"_cs, new IR::Constant(c->min_width));
         if (c->max_width >= 0)
-            annos = annos->addAnnotation("max_width", new IR::Constant(c->max_width));
+            annos = annos->addAnnotation("max_width"_cs, new IR::Constant(c->max_width));
     }
     auto decl = new IR::Declaration_Instance(newName, annos, type, args, nullptr);
     return decl;
@@ -2116,7 +2120,7 @@ const IR::Declaration_Instance *ProgramStructure::convertDirectMeter(const IR::M
     auto annos = addGlobalNameAnnotation(m->name, m->annotations);
     if (m->pre_color != nullptr) {
         auto meterPreColor = ExpressionConverter(this).convert(m->pre_color);
-        if (meterPreColor != nullptr) annos = annos->addAnnotation("pre_color", meterPreColor);
+        if (meterPreColor != nullptr) annos = annos->addAnnotation("pre_color"_cs, meterPreColor);
     }
     auto decl = new IR::Declaration_Instance(newName, annos, specType, args, nullptr);
     return decl;
@@ -2134,9 +2138,9 @@ const IR::Declaration_Instance *ProgramStructure::convertDirectCounter(const IR:
     args->push_back(new IR::Argument(kindarg));
     auto annos = addGlobalNameAnnotation(c->name, c->annotations);
     if (c->min_width >= 0)
-        annos = annos->addAnnotation("min_width", new IR::Constant(c->min_width));
+        annos = annos->addAnnotation("min_width"_cs, new IR::Constant(c->min_width));
     if (c->max_width >= 0)
-        annos = annos->addAnnotation("max_width", new IR::Constant(c->max_width));
+        annos = annos->addAnnotation("max_width"_cs, new IR::Constant(c->max_width));
     auto decl = new IR::Declaration_Instance(newName, annos, type, args, nullptr);
     return decl;
 }
@@ -2622,6 +2626,7 @@ void ProgramStructure::tablesReferred(const IR::V1Control *control,
 }
 
 void ProgramStructure::populateOutputNames() {
+    // FIXME: modernize
     static const char *used_names[] = {
         // core.p4
         "packet_in", "packet_out", "NoAction", "exact", "ternary", "lpm",
@@ -2639,7 +2644,7 @@ void ProgramStructure::populateOutputNames() {
         "DeparserImpl",
         // parameters
         "packet", "hdr", "meta", nullptr};
-    for (const char **c = used_names; *c != nullptr; ++c) allNames.insert({*c, 0});
+    for (const char **c = used_names; *c != nullptr; ++c) allNames.emplace(cstring(*c), 0);
     ;
 }
 

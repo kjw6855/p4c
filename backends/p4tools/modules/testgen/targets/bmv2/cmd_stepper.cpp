@@ -8,13 +8,13 @@
 
 #include <boost/multiprecision/cpp_int.hpp>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "backends/p4tools/common/lib/constants.h"
 #include "backends/p4tools/common/lib/variables.h"
 #include "ir/id.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"
+#include "ir/solver.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
@@ -63,8 +63,7 @@ void Bmv2V1ModelCmdStepper::initializeTargetEnvironment(ExecutionState &nextStat
     // error parser_error;
     // bit<3> priority;
 
-    auto programInfo = getProgramInfo();
-    const auto *archSpec = TestgenTarget::getArchSpec();
+    const auto &programInfo = getProgramInfo();
     const auto &target = TestgenTarget::get();
     const auto *programmableBlocks = programInfo.getProgrammableBlocks();
 
@@ -73,32 +72,32 @@ void Bmv2V1ModelCmdStepper::initializeTargetEnvironment(ExecutionState &nextStat
     size_t blockIdx = 0;
     for (const auto &blockTuple : *programmableBlocks) {
         const auto *typeDecl = blockTuple.second;
-        const auto *archMember = archSpec->getArchMember(blockIdx);
+        const auto *archMember = programInfo.getArchSpec().getArchMember(blockIdx);
         nextState.initializeBlockParams(target, typeDecl, &archMember->blockParams);
         blockIdx++;
     }
 
-    const auto *nineBitType = IR::getBitType(9);
-    const auto *oneBitType = IR::getBitType(1);
+    const auto *nineBitType = IR::Type_Bits::get(9);
+    const auto *oneBitType = IR::Type_Bits::get(1);
     nextState.set(programInfo.getTargetInputPortVar(),
-                  ToolsVariables::getSymbolicVariable(nineBitType, "bmv2_ingress_port"));
+                  ToolsVariables::getSymbolicVariable(nineBitType, "bmv2_ingress_port"_cs));
     // BMv2 implicitly sets the output port to 0.
-    nextState.set(programInfo.getTargetOutputPortVar(), IR::getConstant(nineBitType, 0));
+    nextState.set(programInfo.getTargetOutputPortVar(), IR::Constant::get(nineBitType, 0));
     // Initialize parser_err with no error.
     const auto *parserErrVar =
         new IR::Member(programInfo.getParserErrorType(),
                        new IR::PathExpression("*standard_metadata"), "parser_error");
-    nextState.set(parserErrVar, IR::getConstant(parserErrVar->type, 0));
+    nextState.set(parserErrVar, IR::Constant::get(parserErrVar->type, 0));
     // Initialize checksum_error with no error.
     const auto *checksumErrVar =
         new IR::Member(oneBitType, new IR::PathExpression("*standard_metadata"), "checksum_error");
-    nextState.set(checksumErrVar, IR::getConstant(checksumErrVar->type, 0));
+    nextState.set(checksumErrVar, IR::Constant::get(checksumErrVar->type, 0));
     // The packet size meta data is the testgen packet length variable divided by 8.
     const auto *pktSizeType = &PacketVars::PACKET_SIZE_VAR_TYPE;
     const auto *packetSizeVar =
         new IR::Member(pktSizeType, new IR::PathExpression("*standard_metadata"), "packet_length");
     const auto *packetSizeConst = new IR::Div(pktSizeType, ExecutionState::getInputPacketSizeVar(),
-                                              IR::getConstant(pktSizeType, 8));
+                                              IR::Constant::get(pktSizeType, 8));
     nextState.set(packetSizeVar, packetSizeConst);
 }
 
@@ -106,7 +105,7 @@ std::optional<const Constraint *> Bmv2V1ModelCmdStepper::startParserImpl(
     const IR::P4Parser *parser, ExecutionState &nextState) const {
     // We need to explicitly map the parser error
     const auto *errVar = Bmv2V1ModelProgramInfo::getParserParamVar(
-        parser, programInfo.getParserErrorType(), 3, "parser_error");
+        parser, programInfo.getParserErrorType(), 3, "parser_error"_cs);
     nextState.setParserErrorLabel(errVar);
 
     return std::nullopt;
@@ -120,7 +119,7 @@ std::map<Continuation::Exception, Continuation> Bmv2V1ModelCmdStepper::getExcept
     auto gress = programInfo.getGress(parser);
 
     const auto *errVar = Bmv2V1ModelProgramInfo::getParserParamVar(
-        parser, programInfo.getParserErrorType(), 3, "parser_error");
+        parser, programInfo.getParserErrorType(), 3, "parser_error"_cs);
 
     switch (gress) {
         case BMV2_INGRESS:
@@ -136,7 +135,7 @@ std::map<Continuation::Exception, Continuation> Bmv2V1ModelCmdStepper::getExcept
                 Continuation::Exception::PacketTooShort,
                 Continuation::Body({new IR::AssignmentStatement(
                     errVar,
-                    IR::getConstant(errVar->type, P4Constants::PARSER_ERROR_PACKET_TOO_SHORT))}));
+                    IR::Constant::get(errVar->type, P4Constants::PARSER_ERROR_PACKET_TOO_SHORT))}));
             // NoMatch will transition to the next block.
             result.emplace(Continuation::Exception::NoMatch, Continuation::Body({}));
             break;

@@ -57,7 +57,7 @@ class ActionTranslationVisitorPSA : public ActionTranslationVisitor,
 
 class EBPFControlPSA : public EBPFControl {
  public:
-    // Keeps track if ingress_timestamp or egress_timestamp is used within a control block.
+    /// Keeps track if ingress_timestamp or egress_timestamp is used within a control block.
     bool timestampIsUsed = false;
 
     const IR::Parameter *user_metadata;
@@ -101,6 +101,8 @@ class EBPFControlPSA : public EBPFControl {
         BUG_CHECK(result != nullptr, "No meter named %1%", name);
         return result;
     }
+
+    DECLARE_TYPEINFO(EBPFControlPSA, EBPFControl);
 };
 
 }  // namespace EBPF

@@ -1,10 +1,10 @@
 #ifndef BACKENDS_P4TOOLS_COMMON_COMPILER_COMPILER_TARGET_H_
 #define BACKENDS_P4TOOLS_COMMON_COMPILER_COMPILER_TARGET_H_
 
-#include <optional>
 #include <string>
 #include <vector>
 
+#include "backends/p4tools/common/compiler/compiler_result.h"
 #include "backends/p4tools/common/compiler/midend.h"
 #include "backends/p4tools/common/core/target.h"
 #include "frontends/common/options.h"
@@ -18,37 +18,39 @@ namespace P4Tools {
 class CompilerTarget : public Target {
  public:
     /// @returns a new compilation context for the compiler.
-    static ICompileContext *makeContext();
+    static ICompileContext *makeContext(std::string_view toolName);
 
     /// Initializes the P4 compiler with the given compiler-specific command-line arguments.
     ///
     /// @returns any unprocessed arguments, or nullptr if there was an error.
-    static std::vector<const char *> *initCompiler(int argc, char **argv);
+    static std::vector<const char *> *initCompiler(std::string_view toolName, int argc,
+                                                   char **argv);
 
-    static std::optional<const IR::P4Program *> loadProgram(cstring irJsonFile);
+    static std::optional<const IR::P4Program *> loadProgram(std::string_view toolName, cstring irJsonFile);
 
-    /// Runs the P4 compiler to produce an IR.
+    /// Runs the P4 compiler to produce an IR and various other kinds of information on the input
+    /// program.
     ///
     /// @returns std::nullopt if an error occurs during compilation.
-    static std::optional<const IR::P4Program *> runCompiler();
+    static CompilerResultOrError runCompiler(std::string_view toolName);
 
-    /// Runs the P4 compiler to produce an IR for the given source code.
+    /// Runs the P4 compiler to produce an IR and other information for the given source code.
     ///
     /// @returns std::nullopt if an error occurs during compilation.
-    static std::optional<const IR::P4Program *> runCompiler(const std::string &source);
+    static CompilerResultOrError runCompiler(std::string_view toolName, const std::string &source);
 
  private:
     /// Runs the front and mid ends on the given parsed program.
     ///
     /// @returns std::nullopt if an error occurs during compilation.
-    static std::optional<const IR::P4Program *> runCompiler(const IR::P4Program *);
+    static CompilerResultOrError runCompiler(std::string_view toolName, const IR::P4Program *);
 
  protected:
     /// @see @makeContext.
-    virtual ICompileContext *makeContextImpl() const;
+    [[nodiscard]] virtual ICompileContext *makeContextImpl() const;
 
     /// @see runCompiler.
-    virtual std::optional<const IR::P4Program *> runCompilerImpl(const IR::P4Program *) const;
+    virtual CompilerResultOrError runCompilerImpl(const IR::P4Program *) const;
 
     /// This implementation just forwards the given arguments to the compiler.
     ///
@@ -76,11 +78,12 @@ class CompilerTarget : public Target {
     /// @returns nullptr if an error occurs during compilation.
     const IR::P4Program *runMidEnd(const IR::P4Program *program, bool loadIRFromJson) const;
 
-    explicit CompilerTarget(std::string deviceName, std::string archName);
+    explicit CompilerTarget(std::string_view toolName, const std::string &deviceName,
+                            const std::string &archName);
 
  private:
     /// @returns the singleton instance for the current target.
-    static const CompilerTarget &get();
+    static const CompilerTarget &get(std::string_view toolName);
 };
 
 }  // namespace P4Tools

@@ -43,7 +43,7 @@ int main(int argc, char *const argv[]) {
     AutoCompileContext autoPsaSwitchContext(new BMV2::PsaSwitchContext);
     auto &options = BMV2::PsaSwitchContext::get().options();
     options.langVersion = CompilerOptions::FrontendVersion::P4_16;
-    options.compilerVersion = BMV2_PSA_VERSION_STRING;
+    options.compilerVersion = cstring(BMV2_PSA_VERSION_STRING);
 
     if (options.process(argc, argv) != nullptr) {
         if (options.loadIRFromJson == false) options.setInputFile();
@@ -98,7 +98,7 @@ int main(int argc, char *const argv[]) {
     try {
         toplevel = midEnd.process(program);
         if (::errorCount() > 1 || toplevel == nullptr || toplevel->getMain() == nullptr) return 1;
-        if (options.dumpJsonFile)
+        if (!options.dumpJsonFile.empty())
             JSONGenerator(*openFile(options.dumpJsonFile, true), true) << program << std::endl;
     } catch (const std::exception &bug) {
         std::cerr << bug.what() << std::endl;
@@ -119,7 +119,7 @@ int main(int argc, char *const argv[]) {
     }
     if (::errorCount() > 0) return 1;
 
-    if (!options.outputFile.isNullOrEmpty()) {
+    if (!options.outputFile.empty()) {
         std::ostream *out = openFile(options.outputFile, false);
         if (out != nullptr) {
             backend->serialize(*out);

@@ -3,12 +3,14 @@
 #include <cstddef>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
+#include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
+#include "ir/solver.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 #include "lib/ordered_map.h"
 
+#include "backends/p4tools/modules/testgen/core/compiler_result.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/testgen/core/target.h"
@@ -33,13 +35,13 @@ void PnaDpdkTestgenTarget::make() {
     }
 }
 
-const PnaDpdkProgramInfo *PnaDpdkTestgenTarget::initProgramImpl(
-    const IR::P4Program *program, const IR::Declaration_Instance *mainDecl) const {
+const PnaDpdkProgramInfo *PnaDpdkTestgenTarget::produceProgramInfoImpl(
+    const CompilerResult &compilerResult, const IR::Declaration_Instance *mainDecl) const {
     // The blocks in the main declaration are just the arguments in the constructor call.
     // Convert mainDecl->arguments into a vector of blocks, represented as constructor-call
     // expressions.
-    std::vector<const IR::Type_Declaration *> blocks;
-    argumentsToTypeDeclarations(program, mainDecl->arguments, blocks);
+    const auto blocks =
+        argumentsToTypeDeclarations(&compilerResult.getProgram(), mainDecl->arguments);
 
     // We should have six arguments.
     BUG_CHECK(blocks.size() == 4, "%1%: The PNA architecture requires 4 pipes. Received %2%.",
@@ -50,17 +52,18 @@ const PnaDpdkProgramInfo *PnaDpdkTestgenTarget::initProgramImpl(
     for (size_t idx = 0; idx < blocks.size(); ++idx) {
         const auto *declType = blocks.at(idx);
 
-        auto canonicalName = getArchSpec()->getArchMember(idx)->blockName;
+        auto canonicalName = PnaDpdkProgramInfo::ARCH_SPEC.getArchMember(idx)->blockName;
         programmableBlocks.emplace(canonicalName, declType);
     }
 
-    return new PnaDpdkProgramInfo(program, programmableBlocks);
+    return new PnaDpdkProgramInfo(*compilerResult.checkedTo<TestgenCompilerResult>(),
+                                  programmableBlocks);
 }
 
 PnaTestBackend *PnaDpdkTestgenTarget::getTestBackendImpl(
-    const ProgramInfo &programInfo, SymbolicExecutor &symbex,
-    const std::filesystem::path &testPath) const {
-    return new PnaTestBackend(programInfo, symbex, testPath);
+    const ProgramInfo &programInfo, const TestBackendConfiguration &testBackendConfiguration,
+    SymbolicExecutor &symbex) const {
+    return new PnaTestBackend(programInfo, testBackendConfiguration, symbex);
 }
 
 PnaDpdkCmdStepper *PnaDpdkTestgenTarget::getCmdStepperImpl(ExecutionState &state,
@@ -89,36 +92,11 @@ ExprVisitor *PnaDpdkTestgenTarget::getExprVisitorImpl(ExecutionState &state,
     return nullptr;
 }
 
-const ArchSpec PnaDpdkTestgenTarget::ARCH_SPEC = ArchSpec(
-    "PNA_NIC", {
-                   // parser MainParserT<MH, MM>(
-                   //     packet_in pkt,
-                   //     //in    PM pre_user_meta,
-                   //     out   MH main_hdr,
-                   //     inout MM main_user_meta,
-                   //     in    pna_main_parser_input_metadata_t istd);
-                   {"MainParserT", {nullptr, "*main_hdr", "*main_user_meta", "*parser_istd"}},
-                   // control PreControlT<PH, PM>(
-                   //     in    PH pre_hdr,
-                   //     inout PM pre_user_meta,
-                   //     in    pna_pre_input_metadata_t  istd,
-                   //     inout pna_pre_output_metadata_t ostd);
-                   {"PreControlT", {"*main_hdr", "*main_user_meta", "*pre_istd", "*pre_ostd"}},
-                   // control MainControlT<MH, MM>(
-                   //     //in    PM pre_user_meta,
-                   //     inout MH main_hdr,
-                   //     inout MM main_user_meta,
-                   //     in    pna_main_input_metadata_t  istd,
-                   //     inout pna_main_output_metadata_t ostd);
-                   {"MainControlT", {"*main_hdr", "*main_user_meta", "*main_istd", "*ostd"}},
-                   // control MainDeparserT<MH, MM>(
-                   //     packet_out pkt,
-                   //     in    MH main_hdr,
-                   //     in    MM main_user_meta,
-                   //     in    pna_main_output_metadata_t ostd);
-                   {"MainDeparserT", {nullptr, "*main_hdr", "*main_user_meta", "*ostd"}},
-               });
+MidEnd PnaDpdkTestgenTarget::mkMidEnd(const CompilerOptions &options) const {
+    MidEnd midEnd(options);
+    midEnd.addDefaultPasses();
 
-const ArchSpec *PnaDpdkTestgenTarget::getArchSpecImpl() const { return &ARCH_SPEC; }
+    return midEnd;
+}
 
 }  // namespace P4Tools::P4Testgen::Pna

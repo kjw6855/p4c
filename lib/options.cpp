@@ -16,6 +16,8 @@ limitations under the License.
 
 #include "options.h"
 
+#include "lib/null.h"
+
 void Util::Options::registerOption(const char *option, const char *argName,
                                    OptionProcessor processor, const char *description,
                                    OptionFlags flags /* = OptionFlags::Default */) {
@@ -25,15 +27,15 @@ void Util::Options::registerOption(const char *option, const char *argName,
     if (option[0] != '-')
         throw std::logic_error(std::string("Expected option to start with -: ") + option);
     auto o = new Option();
-    o->option = option;
+    o->option = cstring(option);
     o->argName = argName;
     o->processor = processor;
     o->description = description;
     o->flags = flags;
-    auto opt = get(options, option);
+    auto opt = get(options, cstring(option));
     if (opt != nullptr) throw std::logic_error(std::string("Option already registered: ") + option);
     options.emplace(option, o);
-    optionOrder.push_back(option);
+    optionOrder.push_back(cstring(option));
 }
 
 // Process options; return list of remaining options.
@@ -55,7 +57,7 @@ std::vector<const char *> *Util::Options::process(int argc, char *const argv[]) 
     strftime(build_date, 50, "%c", localtime(&now));
     buildDate = cstring(build_date);
     for (int i = 1; i < argc; i++) {
-        cstring opt = argv[i];
+        cstring opt = cstring(argv[i]);
         const char *arg = nullptr;
         const Option *option = nullptr;
 
@@ -67,7 +69,7 @@ std::vector<const char *> *Util::Options::process(int argc, char *const argv[]) 
                 usage();
                 return nullptr;
             }
-        } else if (opt.startsWith("-")) {
+        } else if (opt.startsWith("-") && opt.size() > 1) {
             // Support GCC-style long options that begin with a single '-'.
             option = get(options, opt);
 
@@ -114,16 +116,18 @@ void Util::Options::usage() {
     *outStream << binaryName << ": " << message << std::endl;
 
     size_t labelLen = 0;
-    for (auto o : optionOrder) {
+    for (const auto &o : optionOrder) {
         size_t len = o.size();
         auto option = get(options, o);
+        CHECK_NULL(option);
         if (option->argName != nullptr) len += 1 + strlen(option->argName);
         if (labelLen < len) labelLen = len;
     }
 
     labelLen += 3;
-    for (auto o : optionOrder) {
+    for (const auto &o : optionOrder) {
         auto option = get(options, o);
+        CHECK_NULL(option);
         size_t len = strlen(o);
         if (option->flags & OptionFlags::Hide) continue;
         *outStream << option->option;

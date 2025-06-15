@@ -14,7 +14,7 @@ auto &origNameMap = DPDK::ShortenTokenLength::origNameMap;
 
 void add_space(std::ostream &out, int size) { out << std::setfill(' ') << std::setw(size) << " "; }
 
-void add_comment(std::ostream &out, cstring str, cstring sep = "") {
+void add_comment(std::ostream &out, cstring str, std::string_view sep = "") {
     if (origNameMap.count(str)) {
         out << sep << ";oldname:" << origNameMap.at(str) << "\n";
     }
@@ -109,8 +109,8 @@ std::ostream &IR::DpdkExternDeclaration::toSpec(std::ostream &out) const {
             if (counter_type->is<IR::Constant>())
                 value = counter_type->to<IR::Constant>()->asUnsigned();
             if (value == 2) {
-                /* For PACKETS_AND_BYTES counter type, two regarray declarations are emitted and
-                   the counter name is suffixed with _packets and _bytes */
+                // For PACKETS_AND_BYTES counter type, two regarray declarations are emitted and
+                // the counter name is suffixed with _packets and _bytes.
                 auto regDecl = new IR::DpdkRegisterDeclStatement(Name() + "_packets", n_counters,
                                                                  new IR::Constant(0));
                 regDecl->toSpec(out) << std::endl << std::endl;
@@ -141,8 +141,8 @@ std::ostream &IR::DpdkExternDeclaration::toSpec(std::ostream &out) const {
             if (counter_type->is<IR::Constant>())
                 value = counter_type->to<IR::Constant>()->asUnsigned();
             if (value == 2) {
-                /* For PACKETS_AND_BYTES counter type, two regarray declarations are emitted and
-                   the counter name is suffixed with _packets and _bytes */
+                // For PACKETS_AND_BYTES counter type, two regarray declarations are emitted and
+                // the counter name is suffixed with _packets and _bytes
                 auto regDecl = new IR::DpdkRegisterDeclStatement(Name() + "_packets", n_counters,
                                                                  new IR::Constant(0));
                 regDecl->toSpec(out) << std::endl << std::endl;
@@ -211,7 +211,7 @@ std::ostream &IR::DpdkHeaderType::toSpec(std::ostream &out) const {
 }
 
 std::ostream &IR::DpdkStructType::toSpec(std::ostream &out) const {
-    if (getAnnotations()->getSingle("__packet_data__")) {
+    if (getAnnotations()->getSingle("__packet_data__"_cs)) {
         for (auto it = fields.begin(); it != fields.end(); ++it) {
             add_comment(out, (*it)->name.toString());
             if (auto t = (*it)->type->to<IR::Type_Name>()) {
@@ -258,7 +258,7 @@ std::ostream &IR::DpdkStructType::toSpec(std::ostream &out) const {
             out << std::endl;
         }
         out << "}" << std::endl;
-        if (getAnnotations()->getSingle("__metadata__")) {
+        if (getAnnotations()->getSingle("__metadata__"_cs)) {
             out << "metadata instanceof " << name << std::endl;
         }
     }
@@ -353,16 +353,6 @@ std::ostream &IR::DpdkTxStatement::toSpec(std::ostream &out) const {
     return out;
 }
 
-std::ostream &IR::DpdkExternObjStatement::toSpec(std::ostream &out) const {
-    out << "extern_obj ";
-    return out;
-}
-
-std::ostream &IR::DpdkExternFuncStatement::toSpec(std::ostream &out) const {
-    out << "extern_func ";
-    return out;
-}
-
 std::ostream &IR::DpdkReturnStatement::toSpec(std::ostream &out) const {
     out << "return ";
     return out;
@@ -412,8 +402,8 @@ std::ostream &IR::DpdkTable::toSpec(std::ostream &out) const {
         } else {
             out << "\t\t" << DPDK::toStr(action->expression);
         }
-        if (action->annotations->getAnnotation("tableonly")) out << " @tableonly";
-        if (action->annotations->getAnnotation("defaultonly")) out << " @defaultonly";
+        if (action->annotations->getAnnotation("tableonly"_cs)) out << " @tableonly";
+        if (action->annotations->getAnnotation("defaultonly"_cs)) out << " @defaultonly";
         out << std::endl;
     }
     out << "\t}" << std::endl;
@@ -454,13 +444,13 @@ std::ostream &IR::DpdkTable::toSpec(std::ostream &out) const {
             }
         }
     }
-    auto def = properties->getProperty("default_action");
+    auto def = properties->getProperty("default_action"_cs);
     if (def->isConstant) out << "const";
     out << std::endl;
-    if (auto psa_implementation = properties->getProperty("psa_implementation")) {
+    if (auto psa_implementation = properties->getProperty("psa_implementation"_cs)) {
         out << "\taction_selector " << DPDK::toStr(psa_implementation->value) << std::endl;
     }
-    if (auto size = properties->getProperty("size")) {
+    if (auto size = properties->getProperty("size"_cs)) {
         out << "\tsize " << DPDK::toStr(size->value) << "" << std::endl;
     } else {
         out << "\tsize 0x10000" << std::endl;
@@ -499,8 +489,8 @@ std::ostream &IR::DpdkLearner::toSpec(std::ostream &out) const {
     out << "\tactions {" << std::endl;
     for (auto action : actions->actionList) {
         out << "\t\t" << DPDK::toStr(action->expression);
-        if (action->getAnnotation("tableonly")) out << " @tableonly";
-        if (action->getAnnotation("defaultonly")) out << " @defaultonly";
+        if (action->getAnnotation("tableonly"_cs)) out << " @tableonly";
+        if (action->getAnnotation("defaultonly"_cs)) out << " @defaultonly";
         out << std::endl;
     }
     out << "\t}" << std::endl;
@@ -512,7 +502,7 @@ std::ostream &IR::DpdkLearner::toSpec(std::ostream &out) const {
         BUG("non-zero default action arguments not supported yet");
     }
     out << std::endl;
-    if (auto size = properties->getProperty("size")) {
+    if (auto size = properties->getProperty("size"_cs)) {
         out << "\tsize " << DPDK::toStr(size->value) << "" << std::endl;
     } else {
         out << "\tsize 0x" << std::hex << std::uppercase << default_learner_table_size << std::endl;
@@ -550,21 +540,17 @@ std::ostream &IR::DpdkAction::toSpec(std::ostream &out) const {
 }
 
 std::ostream &IR::DpdkChecksumAddStatement::toSpec(std::ostream &out) const {
-    out << "ckadd "
-        << "h.cksum_state." << intermediate_value << " " << DPDK::toStr(field);
+    out << "ckadd " << "h.cksum_state." << intermediate_value << " " << DPDK::toStr(field);
     return out;
 }
 
 std::ostream &IR::DpdkChecksumSubStatement::toSpec(std::ostream &out) const {
-    out << "cksub "
-        << "h.cksum_state." << intermediate_value << " " << DPDK::toStr(field);
+    out << "cksub " << "h.cksum_state." << intermediate_value << " " << DPDK::toStr(field);
     return out;
 }
 
 std::ostream &IR::DpdkChecksumClearStatement::toSpec(std::ostream &out) const {
-    out << "mov "
-        << "h.cksum_state." << intermediate_value << " "
-        << "0x0";
+    out << "mov " << "h.cksum_state." << intermediate_value << " " << "0x0";
     return out;
 }
 
@@ -591,8 +577,7 @@ std::ostream &IR::DpdkGetHashStatement::toSpec(std::ostream &out) const {
 }
 
 std::ostream &IR::DpdkGetChecksumStatement::toSpec(std::ostream &out) const {
-    out << "mov " << DPDK::toStr(dst) << " "
-        << "h.cksum_state." << intermediate_value;
+    out << "mov " << DPDK::toStr(dst) << " " << "h.cksum_state." << intermediate_value;
     return out;
 }
 
@@ -618,9 +603,9 @@ std::ostream &IR::DpdkMeterExecuteStatement::toSpec(std::ostream &out) const {
     return out;
 }
 
-/* DPDK target uses Registers for implementing using Counters, atomic register add instruction
-   is used for incrementing the counter. Packet counters are incremented by packet length
-   specified as parameter and byte counters are incremente by 1 */
+/// DPDK target uses Registers for implementing using Counters, atomic register add instruction
+/// is used for incrementing the counter. Packet counters are incremented by packet length
+/// specified as parameter and byte counters are incremente by 1.
 std::ostream &IR::DpdkCounterCountStatement::toSpec(std::ostream &out) const {
     add_comment(out, counter);
     out << "regadd " << counter << " " << DPDK::toStr(index) << " ";

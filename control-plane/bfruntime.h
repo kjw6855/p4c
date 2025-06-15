@@ -16,23 +16,21 @@ limitations under the License.
 #define CONTROL_PLANE_BFRUNTIME_H_
 
 #include <algorithm>
-#include <iomanip>
 #include <iosfwd>
 #include <iterator>
-#include <limits>
 #include <optional>
 #include <ostream>
-#include <regex>
-#include <sstream>
 #include <string>
 
 #include "control-plane/p4RuntimeSerializer.h"
-#include "lib/big_int_util.h"
-#include "lib/exceptions.h"
+#include "lib/error.h"
+#include "lib/error_catalog.h"
 #include "lib/json.h"
-#include "lib/log.h"
-#include "lib/null.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include "p4/config/v1/p4info.pb.h"
+#pragma GCC diagnostic pop
 
 namespace p4configv1 = ::p4::config::v1;
 
@@ -57,7 +55,7 @@ static inline constexpr P4Id getIdPrefix(P4Id id) { return ((id >> 24) & 0xff); 
 static inline Util::JsonObject *findJsonTable(Util::JsonArray *tablesJson, cstring tblName) {
     for (auto *t : *tablesJson) {
         auto *tblObj = t->to<Util::JsonObject>();
-        auto tName = tblObj->get("name")->to<Util::JsonValue>()->getString();
+        auto tName = tblObj->get("name"_cs)->to<Util::JsonValue>()->getString();
         if (tName == tblName) {
             return tblObj;
         }
@@ -69,7 +67,7 @@ static inline Util::JsonObject *transformAnnotation(const cstring &annotation) {
     auto *annotationJson = new Util::JsonObject();
     // TODO(antonin): annotation string will need to be parsed so we can have it
     // in key/value format here.
-    annotationJson->emplace("name", annotation.escapeJson());
+    annotationJson->emplace("name"_cs, annotation.escapeJson());
     return annotationJson;
 }
 
@@ -135,60 +133,60 @@ static inline const p4configv1::DirectMeter *findDirectMeter(const p4configv1::P
 
 static inline Util::JsonObject *makeType(cstring type) {
     auto *typeObj = new Util::JsonObject();
-    typeObj->emplace("type", type);
+    typeObj->emplace("type"_cs, type);
     return typeObj;
 }
 
 template <typename T, typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
 static inline Util::JsonObject *makeType(cstring type, T defaultValue) {
     auto *typeObj = new Util::JsonObject();
-    typeObj->emplace("type", type);
-    typeObj->emplace("default_value", defaultValue);
+    typeObj->emplace("type"_cs, type);
+    typeObj->emplace("default_value"_cs, defaultValue);
     return typeObj;
 }
 
 static inline Util::JsonObject *makeTypeBool(std::optional<bool> defaultValue = std::nullopt) {
     auto *typeObj = new Util::JsonObject();
-    typeObj->emplace("type", "bool");
-    if (defaultValue != std::nullopt) typeObj->emplace("default_value", *defaultValue);
+    typeObj->emplace("type"_cs, "bool");
+    if (defaultValue != std::nullopt) typeObj->emplace("default_value"_cs, *defaultValue);
     return typeObj;
 }
 
 static inline Util::JsonObject *makeTypeBytes(int width,
                                               std::optional<int64_t> defaultValue = std::nullopt) {
     auto *typeObj = new Util::JsonObject();
-    typeObj->emplace("type", "bytes");
-    typeObj->emplace("width", width);
-    if (defaultValue != std::nullopt) typeObj->emplace("default_value", *defaultValue);
+    typeObj->emplace("type"_cs, "bytes");
+    typeObj->emplace("width"_cs, width);
+    if (defaultValue != std::nullopt) typeObj->emplace("default_value"_cs, *defaultValue);
     return typeObj;
 }
 
 static inline Util::JsonObject *makeTypeEnum(const std::vector<cstring> &choices,
                                              std::optional<cstring> defaultValue = std::nullopt) {
     auto *typeObj = new Util::JsonObject();
-    typeObj->emplace("type", "string");
+    typeObj->emplace("type"_cs, "string");
     auto *choicesArray = new Util::JsonArray();
     for (auto choice : choices) choicesArray->append(choice);
-    typeObj->emplace("choices", choicesArray);
-    if (defaultValue != std::nullopt) typeObj->emplace("default_value", *defaultValue);
+    typeObj->emplace("choices"_cs, choicesArray);
+    if (defaultValue != std::nullopt) typeObj->emplace("default_value"_cs, *defaultValue);
     return typeObj;
 }
 
 static inline void addSingleton(Util::JsonArray *dataJson, Util::JsonObject *dataField,
                                 bool mandatory, bool readOnly) {
     auto *singletonJson = new Util::JsonObject();
-    singletonJson->emplace("mandatory", mandatory);
-    singletonJson->emplace("read_only", readOnly);
-    singletonJson->emplace("singleton", dataField);
+    singletonJson->emplace("mandatory"_cs, mandatory);
+    singletonJson->emplace("read_only"_cs, readOnly);
+    singletonJson->emplace("singleton"_cs, dataField);
     dataJson->append(singletonJson);
 }
 
 static inline void addOneOf(Util::JsonArray *dataJson, Util::JsonArray *choicesJson, bool mandatory,
                             bool readOnly) {
     auto *oneOfJson = new Util::JsonObject();
-    oneOfJson->emplace("mandatory", mandatory);
-    oneOfJson->emplace("read_only", readOnly);
-    oneOfJson->emplace("oneof", choicesJson);
+    oneOfJson->emplace("mandatory"_cs, mandatory);
+    oneOfJson->emplace("read_only"_cs, readOnly);
+    oneOfJson->emplace("oneof"_cs, choicesJson);
     dataJson->append(oneOfJson);
 }
 
@@ -198,27 +196,25 @@ static inline std::optional<cstring> transformMatchType(
         case p4configv1::MatchField_MatchType_UNSPECIFIED:
             return std::nullopt;
         case p4configv1::MatchField_MatchType_EXACT:
-            return cstring("Exact");
+            return "Exact"_cs;
         case p4configv1::MatchField_MatchType_LPM:
-            return cstring("LPM");
+            return "LPM"_cs;
         case p4configv1::MatchField_MatchType_TERNARY:
-            return cstring("Ternary");
+            return "Ternary"_cs;
         case p4configv1::MatchField_MatchType_RANGE:
-            return cstring("Range");
+            return "Range"_cs;
         case p4configv1::MatchField_MatchType_OPTIONAL:
-            return cstring("Optional");
+            return "Optional"_cs;
         default:
             return std::nullopt;
     }
 }
 
 static inline std::optional<cstring> transformOtherMatchType(std::string matchType) {
-    if (matchType == "atcam_partition_index")
-        return cstring("ATCAM");
-    else if (matchType == "dleft_hash")
-        return cstring("DLEFT_HASH");
-    else
-        return std::nullopt;
+    if (matchType == "atcam_partition_index") return "ATCAM"_cs;
+    if (matchType == "dleft_hash") return "DLEFT_HASH"_cs;
+
+    return std::nullopt;
 }
 
 template <typename It>
@@ -255,7 +251,8 @@ class TypeSpecParser {
                                const p4configv1::P4DataTypeSpec &typeSpec, cstring instanceType,
                                cstring instanceName,
                                const std::vector<cstring> *fieldNames = nullptr,
-                               cstring prefix = "", cstring suffix = "", P4Id idOffset = 1);
+                               cstring prefix = cstring::empty, cstring suffix = cstring::empty,
+                               P4Id idOffset = 1);
 
     iterator begin() { return fields.begin(); }
     const_iterator cbegin() { return fields.cbegin(); }
@@ -426,8 +423,8 @@ class BFRuntimeGenerator {
                                        const p4configv1::P4DataTypeSpec &typeSpec,
                                        cstring instanceType, cstring instanceName,
                                        const std::vector<cstring> *fieldNames = nullptr,
-                                       cstring prefix = "", cstring suffix = "",
-                                       P4Id idOffset = 1) const;
+                                       cstring prefix = cstring::empty,
+                                       cstring suffix = cstring::empty, P4Id idOffset = 1) const;
 
     static void addMeterDataFields(Util::JsonArray *dataJson, const Meter &meter);
     static Util::JsonObject *makeCommonDataField(P4Id id, cstring name, Util::JsonObject *type,

@@ -50,12 +50,12 @@ std::optional<ICompileContext *> AbstractP4cToolOptions::process(
     }
 
     // Establish the real compilation context.
-    auto *compilerContext = P4Tools::CompilerTarget::makeContext();
+    auto *compilerContext = P4Tools::CompilerTarget::makeContext(_toolName);
     AutoCompileContext autoContext(compilerContext);
 
     // Initialize the compiler, forwarding any compiler-specific options.
     std::tie(argc, argv) = convertArgs(compilerArgs);
-    auto *unprocessedCompilerArgs = P4Tools::CompilerTarget::initCompiler(argc, argv);
+    auto *unprocessedCompilerArgs = P4Tools::CompilerTarget::initCompiler(_toolName, argc, argv);
 
     if ((unprocessedCompilerArgs == nullptr) || ::errorCount() > 0) {
         return std::nullopt;
@@ -77,6 +77,10 @@ std::optional<ICompileContext *> AbstractP4cToolOptions::process(
         return std::nullopt;
     }
     P4CContext::get().options().file = remainingArgs->at(0);
+
+    if (!validateOptions()) {
+        return std::nullopt;
+    }
 
     return compilerContext;
 }
@@ -104,7 +108,8 @@ struct InheritedCompilerOptionSpec {
     std::optional<std::function<bool(const char *)>> handler;
 };
 
-AbstractP4cToolOptions::AbstractP4cToolOptions(cstring message) : Options(message) {
+AbstractP4cToolOptions::AbstractP4cToolOptions(std::string_view toolName, std::string_view message)
+    : Options(message), _toolName(toolName) {
     // Register some common options.
     registerOption(
         "--help", nullptr,
@@ -185,6 +190,14 @@ AbstractP4cToolOptions::AbstractP4cToolOptions(cstring message) : Options(messag
         },
         "Fail on unimplemented features instead of trying the next branch.");
 
+    registerOption(
+        "--disable-info-logging", nullptr,
+        [this](const char * /*arg*/) {
+            disableInformationLogging = true;
+            return true;
+        },
+        "Disable printing of information messages to standard output.");
+
     for (const auto &optionSpec : inheritedCompilerOptions) {
         registerOption(
             optionSpec.option, optionSpec.argName,
@@ -204,5 +217,9 @@ AbstractP4cToolOptions::AbstractP4cToolOptions(cstring message) : Options(messag
             optionSpec.description);
     }
 }
+
+bool AbstractP4cToolOptions::validateOptions() const { return true; }
+
+const std::string &AbstractP4cToolOptions::getToolName() const { return _toolName; }
 
 }  // namespace P4Tools

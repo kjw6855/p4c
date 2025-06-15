@@ -23,6 +23,7 @@ limitations under the License.
 #include "backends/dpdk/control-plane/bfruntime_arch_handler.h"
 #include "backends/dpdk/midend.h"
 #include "backends/dpdk/options.h"
+#include "backends/dpdk/tdiConf.h"
 #include "backends/dpdk/version.h"
 #include "control-plane/bfruntime_ext.h"
 #include "control-plane/p4RuntimeSerializer.h"
@@ -39,17 +40,19 @@ limitations under the License.
 #include "lib/log.h"
 #include "lib/nullstream.h"
 
+using namespace P4::literals;
+
 void generateTDIBfrtJson(bool isTDI, const IR::P4Program *program, DPDK::DpdkOptions &options) {
     auto p4RuntimeSerializer = P4::P4RuntimeSerializer::get();
     if (options.arch == "psa")
         p4RuntimeSerializer->registerArch(
-            "psa", new P4::ControlPlaneAPI::Standard::PSAArchHandlerBuilderForDPDK());
+            "psa"_cs, new P4::ControlPlaneAPI::Standard::PSAArchHandlerBuilderForDPDK());
     if (options.arch == "pna")
         p4RuntimeSerializer->registerArch(
-            "pna", new P4::ControlPlaneAPI::Standard::PNAArchHandlerBuilderForDPDK());
+            "pna"_cs, new P4::ControlPlaneAPI::Standard::PNAArchHandlerBuilderForDPDK());
     auto p4Runtime = P4::generateP4Runtime(program, options.arch);
 
-    cstring filename = isTDI ? options.tdiFile : options.bfRtSchema;
+    std::filesystem::path filename = isTDI ? options.tdiFile : options.bfRtSchema;
     auto p4rt = new P4::BFRT::BFRuntimeSchemaGenerator(*p4Runtime.p4Info, isTDI, options);
     std::ostream *out = openFile(filename, false);
     if (!out) {
@@ -65,7 +68,7 @@ int main(int argc, char *const argv[]) {
     AutoCompileContext autoDpdkContext(new DPDK::DpdkContext);
     auto &options = DPDK::DpdkContext::get().options();
     options.langVersion = CompilerOptions::FrontendVersion::P4_16;
-    options.compilerVersion = DPDK_VERSION_STRING;
+    options.compilerVersion = cstring(DPDK_VERSION_STRING);
 
     if (options.process(argc, argv) != nullptr) {
         if (options.loadIRFromJson == false) options.setInputFile();
@@ -112,10 +115,14 @@ int main(int argc, char *const argv[]) {
     P4::serializeP4RuntimeIfRequired(program, options);
     if (::errorCount() > 0) return 1;
 
-    if (!options.bfRtSchema.isNullOrEmpty()) {
+    if (!options.tdiBuilderConf.empty()) {
+        DPDK::TdiBfrtConf::generate(program, options);
+    }
+
+    if (!options.bfRtSchema.empty()) {
         generateTDIBfrtJson(false, program, options);
     }
-    if (!options.tdiFile.isNullOrEmpty()) {
+    if (!options.tdiFile.empty()) {
         generateTDIBfrtJson(true, program, options);
     }
 
@@ -126,7 +133,7 @@ int main(int argc, char *const argv[]) {
     try {
         toplevel = midEnd.process(program);
         if (::errorCount() > 1 || toplevel == nullptr || toplevel->getMain() == nullptr) return 1;
-        if (options.dumpJsonFile)
+        if (!options.dumpJsonFile.empty())
             JSONGenerator(*openFile(options.dumpJsonFile, true), true) << program << std::endl;
     } catch (const std::exception &bug) {
         std::cerr << bug.what() << std::endl;
@@ -139,7 +146,7 @@ int main(int argc, char *const argv[]) {
     backend->convert(toplevel);
     if (::errorCount() > 0) return 1;
 
-    if (!options.outputFile.isNullOrEmpty()) {
+    if (!options.outputFile.empty()) {
         std::ostream *out = openFile(options.outputFile, false);
         if (out != nullptr) {
             backend->codegen(*out);

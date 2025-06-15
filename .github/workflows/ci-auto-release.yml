@@ -2,7 +2,7 @@ name: Automated Release
 
 on:
   schedule:
-    - cron: '0 12 1 * *'  # At 12:00 on day-of-month 1
+    - cron: "0 12 1 * *" # At 12:00 on day-of-month 1
 
 jobs:
   build:
@@ -11,7 +11,7 @@ jobs:
     if: ${{ github.repository == 'p4lang/p4c' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           # Fetch all history for all branches and tags
           fetch-depth: 0
@@ -48,6 +48,7 @@ jobs:
         run: |
           COMMIT_MSG=$(cat << EOF
           Release v${{ env.VERSION }}
+          Signed-off-by: rst0git <9142901+rst0git@users.noreply.github.com>
 
           ${{ steps.changelog.outputs.content }}
           EOF
@@ -74,11 +75,11 @@ jobs:
           echo "::set-output name=content::$MSG"
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v4
+        uses: peter-evans/create-pull-request@v6
         with:
           base: main
           add-paths: Version.txt
-          reviewers: mbudiu-vmw
+          reviewers: fruffy, jafingerhut, jnfoster
           commit-message: ${{ steps.message.outputs.content }}
           signoff: false
           branch: v${{ env.VERSION }}

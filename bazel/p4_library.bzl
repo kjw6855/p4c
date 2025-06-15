@@ -1,6 +1,6 @@
 """P4 compilation rule."""
 
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain", "use_cpp_toolchain")
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "CPP_TOOLCHAIN_TYPE", "find_cpp_toolchain", "use_cpp_toolchain")
 
 def _extract_common_p4c_args(ctx):
     """Extract common arguments for p4c build rules."""
@@ -25,12 +25,12 @@ def _extract_p4c_inputs(ctx):
     return ctx.files._p4include + ctx.files.deps + [ctx.file.src]
 
 def _run_shell_cmd_with_p4c(ctx, command, **run_shell_kwargs):
-    """Run given shell command using `run_shell` action after setting up
-       the C compiler toolchain.
+    """Run given shell command using the `run_shell` action.
 
-       This function also sets up the `tools` parameter for `run_shell` to
-       set up p4c and the cpp toolchain, and `kwargs` is passed to
-       `run_shell`.
+    This is done after setting up the C compiler toolchain.
+    This function also sets up the `tools` parameter for `run_shell` to
+    set up p4c and the cpp toolchain, and `kwargs` is passed to
+    `run_shell`.
     """
 
     if not hasattr(ctx.executable, "p4c_backend"):
@@ -54,6 +54,7 @@ def _run_shell_cmd_with_p4c(ctx, command, **run_shell_kwargs):
             transitive = [cpp_toolchain.all_files],
         ),
         use_default_shell_env = True,
+        toolchain = CPP_TOOLCHAIN_TYPE,
         **run_shell_kwargs
     )
 
@@ -171,7 +172,6 @@ p4_library = rule(
         ),
         "_cc_toolchain": attr.label(default = Label("@bazel_tools//tools/cpp:current_cc_toolchain")),
     },
-    incompatible_use_toolchain_transition = True,
     toolchains = use_cpp_toolchain(),
 )
 
@@ -252,6 +252,5 @@ p4_graphs = rule(
         ),
         "_cc_toolchain": attr.label(default = Label("@bazel_tools//tools/cpp:current_cc_toolchain")),
     },
-    incompatible_use_toolchain_transition = True,
     toolchains = use_cpp_toolchain(),
 )

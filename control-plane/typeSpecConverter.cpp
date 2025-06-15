@@ -29,7 +29,6 @@ limitations under the License.
 #include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/null.h"
-#include "p4/config/v1/p4types.pb.h"
 #include "p4RuntimeArchHandler.h"
 
 namespace p4configv1 = ::p4::config::v1;
@@ -42,7 +41,7 @@ namespace P4 {
 namespace ControlPlaneAPI {
 
 bool hasTranslationAnnotation(const IR::Type *type, TranslationAnnotation *payload) {
-    auto ann = type->getAnnotation("p4runtime_translation");
+    auto ann = type->getAnnotation("p4runtime_translation"_cs);
     if (!ann) return false;
 
     // Syntax: @pruntime_translation(<uri>, <basic_type>).

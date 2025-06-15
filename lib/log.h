@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "config.h"
 #include "indent.h"
+#include "stringify.h"
 
 #ifndef __GNUC__
 #define __attribute__(X)
@@ -105,6 +106,7 @@ void increaseVerbosity();
 #define MAX_LOGGING_LEVEL 10
 #endif
 
+// NOLINTBEGIN(bugprone-macro-parentheses)
 #define LOGGING(N)                                                            \
     ((N) <= MAX_LOGGING_LEVEL && ::Log::fileLogLevelIsAtLeast(__FILE__, N) && \
      ::Log::enableLogging())
@@ -144,25 +146,11 @@ void increaseVerbosity();
 #define P4C_ERROR(X) (std::clog << "ERROR: " << X << std::endl)
 #define P4C_WARNING(X) (::Log::verbose() ? std::clog << "WARNING: " << X << std::endl : std::clog)
 #define ERRWARN(C, X) ((C) ? P4C_ERROR(X) : P4C_WARNING(X))
+// NOLINTEND(bugprone-macro-parentheses)
 
 static inline std::ostream &operator<<(std::ostream &out,
                                        std::function<std::ostream &(std::ostream &)> fn) {
     return fn(out);
-}
-
-template <class T>
-inline auto operator<<(std::ostream &out, const T &obj) -> decltype((void)obj.dbprint(out), out) {
-    obj.dbprint(out);
-    return out;
-}
-
-template <class T>
-inline auto operator<<(std::ostream &out, const T *obj) -> decltype((void)obj->dbprint(out), out) {
-    if (obj)
-        obj->dbprint(out);
-    else
-        out << "<null>";
-    return out;
 }
 
 /// Serializes the @p container into the stream @p out, delimining it by bracketing it with

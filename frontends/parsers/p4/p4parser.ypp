@@ -94,14 +94,17 @@ typedef const IR::Type ConstType;
 #define YY_NULLPTR nullptr
 
 namespace P4 {
+using namespace literals;
+
 class Token {
  public:
     int type;
     cstring text;
     UnparsedConstant* unparsedConstant;
 
-    Token() : Token(0, "", nullptr) { }
+    Token() : Token(0, cstring::empty, nullptr) { }
     Token(int type, cstring text) : Token(type, text, nullptr) { }
+    Token(int type, const char* text) : Token(type, cstring(text), nullptr) { }    
     Token(int type, UnparsedConstant unparsedConstant)
             : Token(type, unparsedConstant.text,
                     new UnparsedConstant(unparsedConstant)) { }
@@ -227,8 +230,8 @@ inline std::ostream& operator<<(std::ostream& out, const P4::Token& t) {
 %token<Token>      DOTS "..."
 %token<Token>      RANGE ".."
 %token<Token>      TRUE FALSE THIS
-%token<Token>      ABSTRACT ACTION ACTIONS APPLY BOOL BIT CONST CONTROL DEFAULT
-                   ELSE ENTRIES ENUM ERROR EXIT EXTERN HEADER HEADER_UNION IF IN INOUT
+%token<Token>      ABSTRACT ACTION ACTIONS APPLY BOOL BIT BREAK CONST CONTINUE CONTROL DEFAULT
+                   ELSE ENTRIES ENUM ERROR EXIT EXTERN FOR HEADER HEADER_UNION IF IN INOUT
                    INT KEY  LIST SELECT MATCH_KIND TYPE OUT PACKAGE PARSER PRAGMA PRIORITY RETURN
                    STATE STRING STRUCT SWITCH TABLE TRANSITION TUPLE TYPEDEF VARBIT VALUESET VOID
 
@@ -247,7 +250,7 @@ inline std::ostream& operator<<(std::ostream& out, const P4::Token& t) {
                             stateExpression optInitializer initializer
                             simpleKeysetExpression transitionStatement switchLabel
                             p4rtControllerType reducedSimpleKeysetExpression entryPriority
-                            nonBraceExpression
+                            nonBraceExpression forCollectionExpr
 %type<ConstType*>           baseType typeOrVoid specializedType headerStackType
                             typeRef tupleType typeArg realTypeArg namedType p4listType
 %type<IR::Type_Name*>       typeName
@@ -270,19 +273,23 @@ inline std::ostream& operator<<(std::ostream& out, const P4::Token& t) {
 %type<IR::Statement*>       statement emptyStatement returnStatement
                             switchStatement exitStatement
                             assignmentOrMethodCallStatement conditionalStatement
+                            assignmentOrMethodCallStatementWithoutSemicolon
                             directApplication
+                            forStatement breakStatement continueStatement
 %type<IR::BlockStatement*>  blockStatement parserBlockStatement controlBody
                             objInitializer
 %type<IR::StatOrDecl*>      statementOrDeclaration parserStatement
-%type<IR::IndexedVector<IR::StatOrDecl>*>  objDeclarations statOrDeclList
-                                           parserStatements
+                            declOrAssignmentOrMethodCallStatement
+%type<IR::IndexedVector<IR::StatOrDecl>*>  objDeclarations statOrDeclList parserStatements
+                            forInitStatements forInitStatementsNonEmpty
+                            forUpdateStatements forUpdateStatementsNonEmpty
 %type<IR::SwitchCase*>      switchCase
 %type<IR::Vector<IR::SwitchCase>*>  switchCases
 %type<IR::Vector<IR::Type>*>  typeArgumentList realTypeArgumentList
 %type<IR::ParserState*>     parserState
 %type<IR::IndexedVector<IR::ParserState>*>  parserStates
 %type<IR::Declaration*>     constantDeclaration actionDeclaration
-                            variableDeclaration instantiation functionDeclaration
+                            variableDeclaration variableDeclarationWithoutSemicolon instantiation functionDeclaration
                             objDeclaration tableDeclaration controlLocalDeclaration
                             parserLocalElement valueSetDeclaration
 %type<IR::Type_Declaration*>  headerTypeDeclaration structTypeDeclaration
@@ -436,7 +443,7 @@ fragment
 // TODO: Could this be redesigned to avoid this hack?
 p4rtControllerType
     : STRING
-        { $$ = new IR::StringLiteral(@1, ""); }
+        { $$ = new IR::StringLiteral(@1, ""_cs); }
     | BIT l_angle INTEGER r_angle
         { $$ = new IR::Constant(parseConstantChecked(@3, $3)); }
     // Legacy syntax; to be removed in P4RT 2.0
@@ -467,28 +474,28 @@ declaration
 
 nonTypeName
     : IDENTIFIER  { $$ = new IR::ID(@1, $1); }
-    | APPLY       { $$ = new IR::ID(@1, "apply"); }
-    | KEY         { $$ = new IR::ID(@1, "key"); }
-    | ACTIONS     { $$ = new IR::ID(@1, "actions"); }
-    | STATE       { $$ = new IR::ID(@1, "state"); }
-    | ENTRIES     { $$ = new IR::ID(@1, "entries"); }
-    | TYPE        { $$ = new IR::ID(@1, "type"); }
-    | PRIORITY    { $$ = new IR::ID(@1, "priority"); }
+    | APPLY       { $$ = new IR::ID(@1, "apply"_cs); }
+    | KEY         { $$ = new IR::ID(@1, "key"_cs); }
+    | ACTIONS     { $$ = new IR::ID(@1, "actions"_cs); }
+    | STATE       { $$ = new IR::ID(@1, "state"_cs); }
+    | ENTRIES     { $$ = new IR::ID(@1, "entries"_cs); }
+    | TYPE        { $$ = new IR::ID(@1, "type"_cs); }
+    | PRIORITY    { $$ = new IR::ID(@1, "priority"_cs); }
     ;
 
 name
     : nonTypeName { $$ = $1; }
-    | LIST { $$ = new IR::ID(@1, "list"); }
+    | LIST { $$ = new IR::ID(@1, "list"_cs); }
     | TYPE_IDENTIFIER  { $$ = new IR::ID(@1, $1); }
     ;
 
 nonTableKwName
     : IDENTIFIER       { $$ = new IR::ID(@1, $1); }
     | TYPE_IDENTIFIER  { $$ = new IR::ID(@1, $1); }
-    | APPLY            { $$ = new IR::ID(@1, "apply"); }
-    | STATE            { $$ = new IR::ID(@1, "state"); }
-    | TYPE             { $$ = new IR::ID(@1, "type"); }
-    | PRIORITY         { $$ = new IR::ID(@1, "priority"); }
+    | APPLY            { $$ = new IR::ID(@1, "apply"_cs); }
+    | STATE            { $$ = new IR::ID(@1, "state"_cs); }
+    | TYPE             { $$ = new IR::ID(@1, "type"_cs); }
+    | PRIORITY         { $$ = new IR::ID(@1, "priority"_cs); }
     ;
 
 optCONST
@@ -558,7 +565,9 @@ annotationToken
     | APPLY            { $$ = $1; }
     | BOOL             { $$ = $1; }
     | BIT              { $$ = $1; }
+    | BREAK            { $$ = $1; }
     | CONST            { $$ = $1; }
+    | CONTINUE         { $$ = $1; }
     | CONTROL          { $$ = $1; }
     | DEFAULT          { $$ = $1; }
     | ELSE             { $$ = $1; }
@@ -568,6 +577,7 @@ annotationToken
     | EXIT             { $$ = $1; }
     | EXTERN           { $$ = $1; }
     | FALSE            { $$ = $1; }
+    | FOR              { $$ = $1; }
     | HEADER           { $$ = $1; }
     | HEADER_UNION     { $$ = $1; }
     | IF               { $$ = $1; }
@@ -1012,12 +1022,12 @@ specializedType
     ;
 
 baseType
-    : BOOL   { $$ = new IR::Type_Boolean(@1); }
-    | MATCH_KIND { $$ = new IR::Type_MatchKind(@1); }
-    | ERROR  { $$ = new IR::Type_Name(@1, new IR::Path(IR::ID(@1, "error"))); }
+    : BOOL   { $$ = IR::Type_Boolean::get(@1); }
+    | MATCH_KIND { $$ = IR::Type_MatchKind::get(@1); }
+    | ERROR  { $$ = new IR::Type_Name(@1, new IR::Path(IR::ID(@1, "error"_cs))); }
     | BIT    { $$ = IR::Type::Bits::get(@1, 1); }
-    | STRING { $$ = new IR::Type::String(@1); }
-    | INT    { $$ = new IR::Type_InfInt(@1); }
+    | STRING { $$ = IR::Type::String::get(@1); }
+    | INT    { $$ = IR::Type_InfInt::get(@1); }
     | BIT l_angle INTEGER r_angle
       { $$ = IR::Type::Bits::get(@1+@4, parseConstantChecked(@3, $3), false); }
     | INT l_angle INTEGER r_angle
@@ -1026,16 +1036,16 @@ baseType
       { $$ = IR::Type::Varbits::get(@1+@4, parseConstantChecked(@3, $3)); }
 
     | BIT l_angle "(" expression ")" r_angle
-      { $$ = new IR::Type_Bits(@1+@6, $4, false); }
+      { $$ = IR::Type_Bits::get(@1+@6, $4, false); }
     | INT l_angle "(" expression ")" r_angle
-      { $$ = new IR::Type_Bits(@1+@6, $4, true); }
+      { $$ = IR::Type_Bits::get(@1+@6, $4, true); }
     | VARBIT l_angle "(" expression ")" r_angle
-      { $$ = new IR::Type_Varbits(@1+@6, $4); }
+      { $$ = IR::Type_Varbits::get(@1+@6, $4); }
     ;
 
 typeOrVoid
     : typeRef     { $$ = $1; }
-    | VOID        { $$ = IR::Type_Void::get(); }
+    | VOID        { $$ = IR::Type_Void::get(@1); }
     | IDENTIFIER  { $$ = new IR::Type_Name(@1, new IR::Path(*(new IR::ID(@1, $1)))); }
         // This is necessary because template arguments may introduce the return type
     ;
@@ -1059,8 +1069,8 @@ typeArg
     : typeRef                     { $$ = $1; }
     | nonTypeName                 { $$ = new IR::Type_Name(@1, new IR::Path(*$1)); }
         // This is necessary because template arguments may introduce the return type
-    | VOID                        { $$ = IR::Type_Void::get(); }
-    | "_"                         { $$ = new IR::Type_Dontcare(@1); }
+    | VOID                        { $$ = IR::Type_Void::get(@1); }
+    | "_"                         { $$ = IR::Type_Dontcare::get(@1); }
     ;
 
 typeArgumentList
@@ -1071,8 +1081,8 @@ typeArgumentList
 
 realTypeArg
     : typeRef                     { $$ = $1; }
-    | VOID                        { $$ = IR::Type_Void::get(); }
-    | "_"                         { $$ = new IR::Type_Dontcare(@1); }
+    | VOID                        { $$ = IR::Type_Void::get(@1); }
+    | "_"                         { $$ = IR::Type_Dontcare::get(@1); }
     ;
 
 // For use in contexts where the `<` might be a less-than rather than introducing a type
@@ -1135,10 +1145,10 @@ enumDeclaration
         ENUM name { driver.structure->declareType(*$3); }
         "{" identifierList optTrailingComma "}" { $$ = new IR::Type_Enum(@3, *$3, *$6); }
     | optAnnotations ENUM typeRef name { driver.structure->declareType(*$4); }
-	 "{" specifiedIdentifierList optTrailingComma "}" {
+         "{" specifiedIdentifierList optTrailingComma "}" {
               auto type = $typeRef;
               $$ = new IR::Type_SerEnum(@4, *$4, type, *$7);
-	  }
+          }
     ;
 
 specifiedIdentifierList
@@ -1153,7 +1163,7 @@ specifiedIdentifier
 
 errorDeclaration
     : ERROR "{" identifierList "}"
-        { $$ = new IR::Type_Error(@1 + @4, IR::ID(@1, "error"), *$3); }
+        { $$ = new IR::Type_Error(@1 + @4, IR::ID(@1, "error"_cs), *$3); }
     ;
 
 matchKindDeclaration
@@ -1180,18 +1190,22 @@ typedefDeclaration
 /*************************** STATEMENTS *************************/
 
 assignmentOrMethodCallStatement
+    : assignmentOrMethodCallStatementWithoutSemicolon ";"  { $$ = $1; }
+    ;
+
+assignmentOrMethodCallStatementWithoutSemicolon
     // These rules are overly permissive, but they avoid some conflicts
-    : lvalue "(" argumentList ")" ";"
+    : lvalue "(" argumentList ")"
         { auto mc = new IR::MethodCallExpression(@1 + @4, $1,
                                                  new IR::Vector<IR::Type>(), $3);
           $$ = new IR::MethodCallStatement(@1 + @4, mc); }
 
-    | lvalue l_angle typeArgumentList r_angle "(" argumentList ")" ";"
+    | lvalue l_angle typeArgumentList r_angle "(" argumentList ")"
         { auto mc = new IR::MethodCallExpression(@1 + @7,
                                                  $1, $3, $6);
           $$ = new IR::MethodCallStatement(@1 + @7, mc); }
 
-    | lvalue "=" expression ";"
+    | lvalue "=" expression
         { $$ = new IR::AssignmentStatement(@2, $1, $3); }
 
     ;
@@ -1216,16 +1230,24 @@ conditionalStatement
         { $$ = new IR::IfStatement(@1, $3, $5, $7); }
     ;
 
+breakStatement
+    : BREAK ";" { $$ = new IR::BreakStatement(@1); }
+    ;
+
+continueStatement
+    : CONTINUE ";" { $$ = new IR::ContinueStatement(@1); }
+    ;
+
 // To support direct invocation of a control or parser without instantiation
 directApplication
     : typeName "." APPLY "(" argumentList ")" ";" {
                                   auto method = new IR::Member(
-                                      @1 + @3, new IR::TypeNameExpression($1), IR::ID(@3, "apply"));
+                                      @1 + @3, new IR::TypeNameExpression($1), IR::ID(@3, "apply"_cs));
                                   auto mce = new IR::MethodCallExpression(@1 + @6, method, $5);
                                   $$ = new IR::MethodCallStatement(@1 + @6, mce); }
     | specializedType "." APPLY "(" argumentList ")" ";" {
                                   auto method = new IR::Member(
-                                      @1 + @3, new IR::TypeNameExpression($1), IR::ID(@3, "apply"));
+                                      @1 + @3, new IR::TypeNameExpression($1), IR::ID(@3, "apply"_cs));
                                   auto mce = new IR::MethodCallExpression(@1 + @6, method, $5);
                                   $$ = new IR::MethodCallStatement(@1 + @6, mce); }
     ;
@@ -1237,8 +1259,11 @@ statement
     | emptyStatement                   { $$ = $1; }
     | blockStatement                   { $$ = $1; }
     | returnStatement                  { $$ = $1; }
+    | breakStatement                   { $$ = $1; }
+    | continueStatement                { $$ = $1; }
     | exitStatement                    { $$ = $1; }
     | switchStatement                  { $$ = $1; }
+    | forStatement                     { $$ = $1; }
     ;
 
 blockStatement
@@ -1276,7 +1301,58 @@ statementOrDeclaration
     : variableDeclaration      { $$ = $1; }
     | constantDeclaration      { $$ = $1; }
     | statement                { $$ = $1; }
+      // The transition to instantiation below is not required by the
+      // languge spec, but it does help p4c give a more clear error
+      // message if one erroneously attempts to perform an
+      // instantiation inside of a block.
     | instantiation            { $$ = $1; }
+    ;
+
+forStatement
+    : optAnnotations FOR "(" forInitStatements ";"
+              expression ";"
+	      forUpdateStatements ")"
+      statement
+    { $$ = new IR::ForStatement(@2+@9, *$4, $6, *$8, $10); }
+    | optAnnotations FOR "(" typeRef name IN forCollectionExpr ")" statement
+    { auto decl = new IR::Declaration_Variable(@4+@5, *$5, $4);
+      $$ = new IR::ForInStatement(@2+@7, $1, decl, $7, $9); }
+    | optAnnotations FOR "(" prefixedNonTypeName IN forCollectionExpr ")" statement
+    { $$ = new IR::ForInStatement(@2+@7, $1, new IR::PathExpression(@4, $4), $6, $8); }
+    ;
+
+forInitStatements
+    : %empty                    { $$ = new IR::IndexedVector<IR::StatOrDecl>(); }
+    | forInitStatementsNonEmpty { $$ = $1; }
+    ;
+
+forInitStatementsNonEmpty
+    : declOrAssignmentOrMethodCallStatement     { $$ = new IR::IndexedVector<IR::StatOrDecl>($1); }
+    | forInitStatementsNonEmpty "," declOrAssignmentOrMethodCallStatement {
+            ($$ = $1)->push_back($3); }
+    ;
+
+declOrAssignmentOrMethodCallStatement
+    : variableDeclarationWithoutSemicolon               { $$ = $1; }
+    | assignmentOrMethodCallStatementWithoutSemicolon   { $$ = $1; }
+    ;
+
+forUpdateStatements
+    : %empty                            { $$ = new IR::IndexedVector<IR::StatOrDecl>(); }
+    | forUpdateStatementsNonEmpty       { $$ = $1; }
+    ;
+
+forUpdateStatementsNonEmpty
+    : assignmentOrMethodCallStatementWithoutSemicolon   {
+            $$ = new IR::IndexedVector<IR::StatOrDecl>($1); }
+    | forUpdateStatementsNonEmpty "," assignmentOrMethodCallStatementWithoutSemicolon {
+            ($$ = $1)->push_back($3); }
+    ;
+
+forCollectionExpr
+    : expression                        { $$ = $1; }
+    | expression ".." expression        { $$ = new IR::Range(@1 + @3, $1, $3); }
+    | typeRef                           { $$ = new IR::ConstructorCallExpression(@1, $1, {}); }
     ;
 
 /************************* TABLE *********************************/
@@ -1296,15 +1372,15 @@ tablePropertyList
 tableProperty
     : KEY "=" "{" keyElementList "}"
         { auto v = new IR::Key(@4, *$4);
-          auto id = IR::ID(@1, "key");
+          auto id = IR::ID(@1, "key"_cs);
           $$ = new IR::Property( @1 + @5, id, v, false); }
     | ACTIONS "=" "{" actionList "}"
         { auto v = new IR::ActionList(@4, *$4);
-          auto id = IR::ID(@1, "actions");
+          auto id = IR::ID(@1, "actions"_cs);
           $$ = new IR::Property(@1 + @5, id, v, false); }
     | optAnnotations optCONST ENTRIES "=" "{" entriesList "}"
         { auto l = new IR::EntriesList(@3, *$6);
-          auto id = IR::ID(@3+@7, "entries");
+          auto id = IR::ID(@3+@7, "entries"_cs);
           $$ = new IR::Property(@3, id, $1, l, $2.isConst); }
     | optAnnotations optCONST nonTableKwName "=" initializer ";"
         { auto v = new IR::ExpressionValue(@5, $5);
@@ -1382,12 +1458,16 @@ actionDeclaration
 /************************* VARIABLES *****************************/
 
 variableDeclaration
-    : annotations typeRef name optInitializer ";"
+    : variableDeclarationWithoutSemicolon ";"    { $$ = $1; }
+    ;
+
+variableDeclarationWithoutSemicolon
+    : annotations typeRef name optInitializer
                                      { auto ann = new IR::Annotations(@1, *$1);
                                        $$ = new IR::Declaration_Variable(@1+@4, *$3, ann, $2, $4);
                                        driver.structure->declareObject(*$3, $2->toString()); }
-    | typeRef name optInitializer ";"
-                                     { $$ = new IR::Declaration_Variable(@1+@4, *$2, $1, $3);
+    | typeRef name optInitializer
+                                     { $$ = new IR::Declaration_Variable(@1+@3, *$2, $1, $3);
                                        driver.structure->declareObject(*$2, $1->toString()); }
     ;
 
@@ -1409,7 +1489,11 @@ initializer
 /**************** Expressions ****************/
 
 functionDeclaration
-    : functionPrototype blockStatement   {
+    : annotations functionPrototype blockStatement   {
+            auto ann = new IR::Annotations(@1, *$1);
+            driver.structure->pop();
+            $$ = new IR::Function($2->srcInfo, $2->name, ann, $2->type, $3); }
+    | functionPrototype blockStatement   {
             driver.structure->pop();
             $$ = new IR::Function($1->srcInfo, $1->name, $1->type, $2); }
     ;
@@ -1456,6 +1540,7 @@ lvalue
     | lvalue dot_name %prec DOT          { $$ = new IR::Member(@1 + @2, $1, *$2); }
     | lvalue "[" expression "]"          { $$ = new IR::ArrayIndex(@1 + @4, $1, $3); }
     | lvalue "[" expression ":" expression "]" { $$ = new IR::Slice(@1 + @6, $1, $3, $5); }
+    | "(" lvalue ")"                     { $$ = $2; }
     ;
 
 expression
@@ -1487,7 +1572,7 @@ expression
     | typeName dot_name %prec DOT
         { $$ = new IR::Member(@1 + @2, new IR::TypeNameExpression(@1, $1), *$2); }
     | ERROR "." name
-        { auto typeName = new IR::Type_Name(@1, new IR::Path(IR::ID(@1, "error")));
+        { auto typeName = new IR::Type_Name(@1, new IR::Path(IR::ID(@1, "error"_cs)));
           $$ = new IR::Member(@1+@3, new IR::TypeNameExpression(@1+@3, typeName), *$3); }
     | expression dot_name %prec DOT      { $$ = new IR::Member(@1 + @2, $1, *$2); }
     | expression "*" expression          { $$ = new IR::Mul(@1 + @3, $1, $3); }
@@ -1540,7 +1625,7 @@ nonBraceExpression
     | typeName dot_name %prec DOT
         { $$ = new IR::Member(@1 + @2, new IR::TypeNameExpression(@1, $1), *$2); }
     | ERROR "." name
-        { auto typeName = new IR::Type_Name(@1, new IR::Path(IR::ID(@1, "error")));
+        { auto typeName = new IR::Type_Name(@1, new IR::Path(IR::ID(@1, "error"_cs)));
           $$ = new IR::Member(@1+@3, new IR::TypeNameExpression(@1+@3, typeName), *$3); }
     | nonBraceExpression dot_name %prec DOT      { $$ = new IR::Member(@1 + @2, $1, *$2); }
     | nonBraceExpression "*" expression          { $$ = new IR::Mul(@1 + @3, $1, $3); }

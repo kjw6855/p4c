@@ -5,9 +5,9 @@
 #include <optional>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/model.h"
 #include "backends/p4tools/common/lib/trace_event.h"
+#include "ir/solver.h"
 #include "midend/coverage.h"
 
 #include "backends/p4tools/modules/testgen/lib/concolic.h"
@@ -71,7 +71,7 @@ class FinalState {
     /// @returns the computed traces of this final state.
     [[nodiscard]] const std::vector<std::reference_wrapper<const TraceEvent>> *getTraces() const;
 
-    /// @returns the list of visited statements of this state.
+    /// @returns the list of visited nodes of this state.
     [[nodiscard]] const P4::Coverage::CoverageSet &getVisited() const;
 };
 

@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
+#include "ir/solver.h"
 #include "lib/error.h"
 #include "lib/timer.h"
 #include "midend/coverage.h"
@@ -38,7 +38,7 @@ SymbolicExecutor::StepResult SymbolicExecutor::step(ExecutionState &state) {
 }
 
 void SymbolicExecutor::run(const Callback &callBack) {
-    runImpl(callBack, ExecutionState::create(programInfo.program));
+    runImpl(callBack, ExecutionState::create(&programInfo.getP4Program()));
 }
 
 bool SymbolicExecutor::handleTerminalState(const Callback &callback,
@@ -81,7 +81,6 @@ bool SymbolicExecutor::evaluateBranch(const SymbolicExecutor::Branch &branch,
 
 SymbolicExecutor::Branch SymbolicExecutor::popRandomBranch(
     std::vector<SymbolicExecutor::Branch> &candidateBranches) {
-    // If we did not find any new statements, fall back to random.
     auto branchIdx = Utils::getRandInt(candidateBranches.size() - 1);
     auto branch = candidateBranches[branchIdx];
     candidateBranches[branchIdx] = candidateBranches.back();
@@ -101,8 +100,12 @@ SymbolicExecutor::SymbolicExecutor(AbstractSolver &solver, const ProgramInfo &pr
     }
 }
 
-void SymbolicExecutor::updateVisitedNodes(const P4::Coverage::CoverageSet &newNodes) {
-    visitedNodes.insert(newNodes.begin(), newNodes.end());
+bool SymbolicExecutor::updateVisitedNodes(const P4::Coverage::CoverageSet &newNodes) {
+    auto hasUpdated = false;
+    for (auto newNode : newNodes) {
+        hasUpdated |= visitedNodes.insert(newNode).second;
+    }
+    return hasUpdated;
 }
 
 const P4::Coverage::CoverageSet &SymbolicExecutor::getVisitedNodes() { return visitedNodes; }

@@ -3,9 +3,22 @@
 #include <vector>
 
 #include "lib/crash.h"
-#include "lib/exceptions.h"
+#include "lib/timer.h"
 
+#include "backends/p4tools/modules/testgen/lib/logging.h"
 #include "backends/p4tools/modules/testgen/testgen.h"
+#include "backends/p4tools/modules/testgen/toolname.h"
+
+std::string updateErrorMsg(std::string errorMsg) {
+    for (const std::string_view toReplace : {"Compiler", "compiler"}) {
+        if (const auto pos = errorMsg.find(toReplace); pos != std::string::npos) {
+            errorMsg.replace(pos, toReplace.size(), "P4Testgen");
+            break;
+        }
+    }
+
+    return errorMsg;
+}
 
 int main(int argc, char **argv) {
     setup_signals();
@@ -16,27 +29,28 @@ int main(int argc, char **argv) {
         args.push_back(argv[i]);
     }
 
+    int result = EXIT_SUCCESS;
     try {
-        return P4Tools::P4Testgen::Testgen().main(args);
+        Util::ScopedTimer timer("P4Testgen Main");
+        result = P4Tools::P4Testgen::Testgen().main(P4Tools::P4Testgen::TOOL_NAME, args);
     } catch (const Util::CompilerBug &e) {
-        std::cerr << "Internal error: " << e.what() << "\n";
-        std::cerr << "Please submit a bug report with your code."
-                  << "\n";
-        return EXIT_FAILURE;
+        std::cerr << "Internal error: " << updateErrorMsg(e.what()) << "\n";
+        std::cerr << "Please submit a bug report with your code." << "\n";
+        result = EXIT_FAILURE;
     } catch (const Util::CompilerUnimplemented &e) {
-        std::cerr << e.what() << "\n";
-        return EXIT_FAILURE;
+        std::cerr << updateErrorMsg(e.what()) << "\n";
+        result = EXIT_FAILURE;
     } catch (const Util::CompilationError &e) {
-        std::cerr << e.what() << "\n";
-        return EXIT_FAILURE;
+        std::cerr << updateErrorMsg(e.what()) << "\n";
+        result = EXIT_FAILURE;
     } catch (const std::exception &e) {
-        std::cerr << "Internal error: " << e.what() << "\n";
-        std::cerr << "Please submit a bug report with your code."
-                  << "\n";
-        return EXIT_FAILURE;
+        std::cerr << "Internal error: " << updateErrorMsg(e.what()) << "\n";
+        std::cerr << "Please submit a bug report with your code." << "\n";
+        result = EXIT_FAILURE;
     } catch (...) {
-        std::cerr << "Internal error. Please submit a bug report with your code."
-                  << "\n";
-        return EXIT_FAILURE;
+        std::cerr << "Internal error. Please submit a bug report with your code." << "\n";
+        result = EXIT_FAILURE;
     }
+    P4Tools::printPerformanceReport();
+    return result;
 }

@@ -145,6 +145,9 @@ void ValidateParsedProgram::postorder(const IR::Declaration_Variable *decl) {
 /// Instance names cannot be don't care
 /// Do not declare instances in apply {} blocks, parser states or actions
 void ValidateParsedProgram::postorder(const IR::Declaration_Instance *decl) {
+    if (!decl->type->is<IR::Type_Name>() && !decl->type->is<IR::Type_Specialized>() &&
+        !decl->type->is<IR::Type_Extern>())  // P4_14 only?
+        ::error(ErrorType::ERR_INVALID, "%1%: invalid type for declaration", decl->type);
     if (decl->name.isDontCare())
         ::error(ErrorType::ERR_INVALID, "%1%: invalid instance name.", decl);
     if (findContext<IR::BlockStatement>() &&         // we're looking for the apply block
@@ -228,7 +231,7 @@ void ValidateParsedProgram::postorder(const IR::P4Program *program) {
         auto existing = declarations.getDeclaration(name);
         if (existing != nullptr) {
             if (!existing->is<IR::IFunctional>() || !decl->is<IR::IFunctional>() ||
-                typeid(*existing) != typeid(*decl) || decl->is<IR::P4Action>()) {
+                existing->typeId() != decl->typeId() || decl->is<IR::P4Action>()) {
                 ::error(ErrorType::ERR_DUPLICATE, "%1% duplicates %2%.", decl->getName(),
                         existing->getName());
             }
@@ -246,6 +249,19 @@ void ValidateParsedProgram::postorder(const IR::Dots *dots) {
         if (context->child_index != (int)list->size() - 1)
             ::error(ErrorType::ERR_INVALID, "%1% must be the last element", dots);
     }
+}
+
+/// Check that continue and break statements are only used in the context of a for statement.
+void ValidateParsedProgram::postorder(const IR::BreakStatement *s) {
+    if (!findContext<IR::ForStatement>() && !findContext<IR::ForInStatement>())
+        ::error(ErrorType::ERR_INVALID,
+                "%1%: break statement must be used in the context of a for statement.", s);
+}
+
+void ValidateParsedProgram::postorder(const IR::ContinueStatement *s) {
+    if (!findContext<IR::ForStatement>() && !findContext<IR::ForInStatement>())
+        ::error(ErrorType::ERR_INVALID,
+                "%1%: continue statement must be used in the context of a for statement.", s);
 }
 
 }  // namespace P4

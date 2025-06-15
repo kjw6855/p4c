@@ -14,8 +14,8 @@
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
 #include "backends/p4tools/modules/testgen/lib/final_state.h"
+#include "backends/p4tools/modules/testgen/lib/test_framework.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
-#include "backends/p4tools/modules/testgen/lib/tf.h"
 #include "backends/p4tools/modules/testgen/options.h"
 
 namespace P4Tools::P4Testgen {
@@ -28,29 +28,34 @@ class TestBackEnd {
     /// Indicates the number of generated tests after which we reset memory.
     static const int64_t RESET_THRESHOLD = 10000;
 
- protected:
     /// ProgramInfo is used to access some target specific information for test generation.
-    const ProgramInfo &programInfo;
+    std::reference_wrapper<const ProgramInfo> programInfo;
 
+    /// Configuration options for the test back end.
+    std::reference_wrapper<const TestBackendConfiguration> testBackendConfiguration;
+
+ protected:
     /// Writes the tests out to a file.
-    TF *testWriter = nullptr;
+    TestFramework *testWriter = nullptr;
 
     /// Pointer to the symbolic executor.
-    /// TODO: Remove this.
+    /// TODO: Remove this. We only need to update coverage tracking.
     SymbolicExecutor &symbex;
 
     /// Test maximum number of tests that are to be produced.
     int64_t maxTests;
 
-    explicit TestBackEnd(const ProgramInfo &programInfo, SymbolicExecutor &symbex)
-        : programInfo(programInfo), symbex(symbex), maxTests(TestgenOptions::get().maxTests) {
-        // If we select a specific branch, the number of tests should be 1.
-        if (!TestgenOptions::get().selectedBranches.empty()) {
-            maxTests = 1;
-        }
-    }
+    /// The accumulated coverage of all finished test cases. Number in range [0, 1].
+    float coverage = 0;
 
-    [[nodiscard]] bool needsToTerminate(int64_t testCount) const { return testCount == maxTests; }
+    /// The list of tests accumulated in the test back end.
+    AbstractTestList tests;
+
+    explicit TestBackEnd(const ProgramInfo &programInfo,
+                         const TestBackendConfiguration &testBackendConfiguration,
+                         SymbolicExecutor &symbex);
+
+    [[nodiscard]] bool needsToTerminate(int64_t testCount) const;
 
  public:
     TestBackEnd(const TestBackEnd &) = default;
@@ -111,13 +116,21 @@ class TestBackEnd {
     /// The callback that is executed by the symbolic executor.
     virtual bool run(const FinalState &state);
 
-    /// Print out some performance numbers if logging feature "performance" is enabled.
-    /// Also log performance numbers to a separate file in the test folder if @param write is
-    /// enabled.
-    void printPerformanceReport(bool write) const;
-
-    /// Accessors.
+    /// Returns test count.
     [[nodiscard]] int64_t getTestCount() const;
+
+    /// Returns coverage achieved by all the processed tests.
+    [[nodiscard]] float getCoverage() const;
+
+    /// Returns the program info.
+    [[nodiscard]] const ProgramInfo &getProgramInfo() const;
+
+    /// Returns the configuration options for the test back end.
+    [[nodiscard]] const TestBackendConfiguration &getTestBackendConfiguration() const;
+
+    /// Returns the list of tests accumulated in the test back end.
+    /// If the test write is in file mode this list will be empty.
+    [[nodiscard]] const AbstractTestList &getTests() const { return tests; }
 };
 
 }  // namespace P4Tools::P4Testgen

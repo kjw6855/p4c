@@ -12,94 +12,82 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The standard P4Runtime protocol buffers message definitions live in the PI
-# repo, which is included in this repo as a submodule.
-set (P4RUNTIME_STD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/p4runtime/proto)
-set (P4RUNTIME_INFO_PROTO ${P4RUNTIME_STD_DIR}/p4/config/v1/p4info.proto)
-set (P4RUNTIME_INFO_GEN_SRCS ${CMAKE_CURRENT_BINARY_DIR}/p4/config/v1/p4info.pb.cc)
-set (P4RUNTIME_INFO_GEN_HDRS ${CMAKE_CURRENT_BINARY_DIR}/p4/config/v1/p4info.pb.h)
+set(P4RUNTIME_INFO_PROTO ${P4RUNTIME_STD_DIR}/p4/config/v1/p4info.proto)
+set(P4RUNTIME_TYPES_PROTO ${P4RUNTIME_STD_DIR}/p4/config/v1/p4types.proto)
+set(P4RUNTIME_RT_PROTO ${P4RUNTIME_STD_DIR}/p4/v1/p4runtime.proto)
+set(P4RUNTIME_DATA_PROTO ${P4RUNTIME_STD_DIR}/p4/v1/p4data.proto)
+set(P4RUNTIME_DEPS_PROTO ${CMAKE_CURRENT_SOURCE_DIR}/google/rpc/status.proto)
 
-set (P4RUNTIME_TYPES_PROTO ${P4RUNTIME_STD_DIR}/p4/config/v1/p4types.proto)
-set (P4RUNTIME_TYPES_GEN_SRCS ${CMAKE_CURRENT_BINARY_DIR}/p4/config/v1/p4types.pb.cc)
-set (P4RUNTIME_TYPES_GEN_HDRS ${CMAKE_CURRENT_BINARY_DIR}/p4/config/v1/p4types.pb.h)
+set(P4RUNTIME_PROTO ${P4RUNTIME_DEPS_PROTO} ${P4RUNTIME_INFO_PROTO} ${P4RUNTIME_TYPES_PROTO}
+                    ${P4RUNTIME_RT_PROTO} ${P4RUNTIME_DATA_PROTO}
+)
 
-set (P4RUNTIME_RT_PROTO ${P4RUNTIME_STD_DIR}/p4/v1/p4runtime.proto)
-set (P4RUNTIME_RT_GEN_SRCS ${CMAKE_CURRENT_BINARY_DIR}/p4/v1/p4runtime.pb.cc)
-set (P4RUNTIME_RT_GEN_HDRS ${CMAKE_CURRENT_BINARY_DIR}/p4/v1/p4runtime.pb.h)
+# Generate source code from the .proto definitions using protoc. The output is placed in the build
+# directory inside `control-plane`. For example, p4info.proto produces:
+# control-plane/p4/config/p4info.pb.h control-plane/p4/config/p4info.pb.cc
+add_custom_target(mkP4configdir ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/p4/config)
 
-set (P4RUNTIME_DATA_PROTO ${P4RUNTIME_STD_DIR}/p4/v1/p4data.proto)
-set (P4RUNTIME_DATA_GEN_SRCS ${CMAKE_CURRENT_BINARY_DIR}/p4/v1/p4data.pb.cc)
-set (P4RUNTIME_DATA_GEN_HDRS ${CMAKE_CURRENT_BINARY_DIR}/p4/v1/p4data.pb.h)
-
-set (P4RUNTIME_DEPS_PROTO ${CMAKE_CURRENT_SOURCE_DIR}/google/rpc/status.proto)
-set (P4RUNTIME_DEPS_GEN_SRCS ${CMAKE_CURRENT_BINARY_DIR}/google/rpc/status.pb.cc)
-set (P4RUNTIME_DEPS_GEN_HDRS ${CMAKE_CURRENT_BINARY_DIR}/google/rpc/status.pb.h)
-
-set (P4RUNTIME_GEN_SRCS ${P4RUNTIME_DEPS_GEN_SRCS}
-                        ${P4RUNTIME_INFO_GEN_SRCS} ${P4RUNTIME_TYPES_GEN_SRCS}
-                        ${P4RUNTIME_RT_GEN_SRCS} ${P4RUNTIME_DATA_GEN_SRCS})
-set (P4RUNTIME_GEN_HDRS ${P4RUNTIME_DEPS_GEN_HDRS}
-                        ${P4RUNTIME_INFO_GEN_HDRS} ${P4RUNTIME_TYPES_GEN_HDRS}
-                        ${P4RUNTIME_RT_GEN_HDRS} ${P4RUNTIME_DATA_GEN_HDRS})
-set (P4RUNTIME_PROTO ${P4RUNTIME_DEPS_PROTO}
-                     ${P4RUNTIME_INFO_PROTO} ${P4RUNTIME_TYPES_PROTO}
-                     ${P4RUNTIME_RT_PROTO} ${P4RUNTIME_DATA_PROTO})
-set (P4RUNTIME_GEN_PYTHON "control-plane")
-
-# Generate source code from the .proto definitions using protoc. The output is
-# placed in the build directory inside `control-plane`. For example,
-# p4info.proto produces:
-#   control-plane/p4/config/p4info.pb.h
-#   control-plane/p4/config/p4info.pb.cc
-add_custom_target (mkP4configdir
-  ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/p4/config)
-add_custom_command(OUTPUT ${P4RUNTIME_GEN_SRCS} ${P4RUNTIME_GEN_HDRS}
-  COMMAND ${PROTOBUF_PROTOC_EXECUTABLE}
-          -I ${P4RUNTIME_STD_DIR} -I${CMAKE_CURRENT_SOURCE_DIR}
-          --cpp_out ${CMAKE_CURRENT_BINARY_DIR}
-          --python_out ${CMAKE_CURRENT_BINARY_DIR}
-          ${P4RUNTIME_PROTO}
-  DEPENDS ${P4RUNTIME_PROTO}
-  COMMENT "Generating protobuf files"
-  )
-
-# These macros are much nicer than the custom command, but do not work for generating
-# files in a different directory (e.g. p4/config). If we are ok with just generating
-# the output in ${CMAKE_CURRENT_BINARY_DIR}, then these are fine. Also, for python there
-# is no explicit dependency, so we need to make a target that always generates them (yuk!)
-#PROTOBUF_GENERATE_CPP (P4RUNTIME_GEN_SRCS P4RUNTIME_INFO_HDRS ${P4RUNTIME_PROTO})
-#PROTOBUF_GENERATE_PYTHON (P4RUNTIME_GEN_PYTHON P4RUNTIME_INFO_GEN_HDRS ${P4RUNTIME_INFO_PROTO})
-
-set (CONTROLPLANE_SRCS
+set(CONTROLPLANE_SRCS
   addMissingIds.cpp
   bytestrings.cpp
   flattenHeader.cpp
+  p4infoApi.cpp
   p4RuntimeArchHandler.cpp
   p4RuntimeArchStandard.cpp
   p4RuntimeSerializer.cpp
   p4RuntimeSymbolTable.cpp
   typeSpecConverter.cpp
   bfruntime.cpp
-  )
+)
 
-set (CONTROLPLANE_HDRS
+set(CONTROLPLANE_HDRS
   addMissingIds.h
   bytestrings.h
   flattenHeader.h
+  p4infoApi.h
   p4RuntimeArchHandler.h
   p4RuntimeArchStandard.h
   p4RuntimeSerializer.h
   p4RuntimeSymbolTable.h
+  p4RuntimeTypes.h
   typeSpecConverter.h
   bfruntime.h
-  )
+)
 
-add_library(controlplane-gen OBJECT ${P4RUNTIME_GEN_SRCS})
+add_library(controlplane-gen OBJECT ${P4RUNTIME_PROTO})
+target_include_directories(controlplane-gen PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(controlplane-gen PUBLIC protobuf::libprotobuf PRIVATE absl::log)
+# Ideally we use DEPENDENCIES, but it only works in later versions (3.28).
+add_dependencies(controlplane-gen mkP4configdir)
+protobuf_generate(
+  TARGET controlplane-gen
+  LANGUAGE cpp
+  IMPORT_DIRS ${P4RUNTIME_STD_DIR} ${CMAKE_CURRENT_LIST_DIR} ${Protobuf_INCLUDE_DIRS}
+  PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}
+  OUT_VAR P4RUNTIME_GEN_CPP_SRCS
+  DEPENDENCIES ${P4RUNTIME_PROTO} controlplane-gen mkP4configdir
+)
+protobuf_generate(
+  TARGET controlplane-gen
+  LANGUAGE python
+  IMPORT_DIRS ${P4RUNTIME_STD_DIR} ${CMAKE_CURRENT_LIST_DIR} ${Protobuf_INCLUDE_DIRS}
+  PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}
+  OUT_VAR P4RUNTIME_GEN_PY_SRCS
+  DEPENDENCIES ${P4RUNTIME_PROTO} controlplane-gen mkP4configdir
+)
 
-include_directories (${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
-# Silence -Warray-bounds as the root issue is out of our control: https://github.com/protocolbuffers/protobuf/issues/7140
-set_source_files_properties (${P4RUNTIME_GEN_SRCS} PROPERTIES COMPILE_FLAGS "-Wno-unused-parameter -Wno-array-bounds")
+# Silence various warnings as the root issue is out of our control, example
+# https://github.com/protocolbuffers/protobuf/issues/7140
+set_source_files_properties(${P4RUNTIME_GEN_CPP_SRCS} PROPERTIES COMPILE_FLAGS "-Wno-unused-parameter -Wno-array-bounds -Wno-error"
+)
 
-add_library (controlplane STATIC ${CONTROLPLANE_SRCS} )
-target_link_libraries (controlplane ${PROTOBUF_LIBRARY} ${CMAKE_THREAD_LIBS_INIT} controlplane-gen)
-add_dependencies (controlplane mkP4configdir ir-generated controlplane-gen frontend-parser-gen)
+add_library(controlplane STATIC ${CONTROLPLANE_SRCS})
+target_link_libraries(controlplane
+  # Export Protobuf includes with controlplane-gen.
+  PUBLIC controlplane-gen
+  # Required for the generated parser and the Abseil includes.
+  PRIVATE frontend
+  PRIVATE absl::strings
+)
+
+add_dependencies(controlplane mkP4configdir)

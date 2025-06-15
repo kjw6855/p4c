@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "ir/ir.h"
+#include "lib/cstring.h"
 
 namespace P4 {
 
@@ -67,7 +68,7 @@ struct StructTypeReplacement : public IHasDbPrint {
     StructTypeReplacement(const P4::TypeMap *typeMap, const IR::Type_StructLike *type,
                           AnnotationSelectionPolicy *policy) {
         auto vec = new IR::IndexedVector<IR::StructField>();
-        flatten(typeMap, "", type, type->annotations, vec, policy);
+        flatten(typeMap, cstring::empty, type, type->annotations, vec, policy);
         if (type->is<IR::Type_Struct>()) {
             replacementType =
                 new IR::Type_Struct(type->srcInfo, type->name, IR::Annotations::empty, *vec);
@@ -105,17 +106,13 @@ struct StructTypeReplacement : public IHasDbPrint {
                  const IR::Annotations *annotations, IR::IndexedVector<IR::StructField> *fields,
                  AnnotationSelectionPolicy *policy) {
         // Drop name annotations
-        IR::Annotations::Filter f = [](const IR::Annotation *a) {
-            return a->name != IR::Annotation::nameAnnotation;
-        };
-        annotations = annotations->where(f);
+        annotations = annotations->where(
+            [](const IR::Annotation *a) { return a->name != IR::Annotation::nameAnnotation; });
         if (auto st = type->to<T>()) {
-            std::function<bool(const IR::Annotation *)> selector =
-                [&policy](const IR::Annotation *annot) {
-                    if (!policy) return false;
-                    return policy->keep(annot);
-                };
-            auto sannotations = st->annotations->where(selector);
+            auto sannotations = st->annotations->where([policy](const IR::Annotation *annot) {
+                if (!policy) return false;
+                return policy->keep(annot);
+            });
             structFieldMap.emplace(prefix, st);
             for (auto f : st->fields) {
                 auto na = new IR::Annotations();
@@ -127,7 +124,7 @@ struct StructTypeReplacement : public IHasDbPrint {
             }
             return;
         }
-        cstring fieldName = prefix.replace(".", "_") + cstring::to_cstring(fieldNameRemap.size());
+        cstring fieldName = prefix.replace('.', '_') + std::to_string(fieldNameRemap.size());
         fieldNameRemap.emplace(prefix, fieldName);
         fields->push_back(new IR::StructField(IR::ID(fieldName), annotations, type->getP4Type()));
         LOG3("Flatten: " << type << " | " << prefix);

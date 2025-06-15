@@ -24,6 +24,7 @@ limitations under the License.
 #include "lib/enumerator.h"
 #include "lib/error.h"
 #include "lib/exceptions.h"
+#include "lib/map.h"
 
 class JSONLoader;
 
@@ -45,7 +46,7 @@ class NameMap : public Node {
     auto obj_name(const U *obj) -> decltype(obj->name) {
         return obj->name;
     }
-    cstring obj_name(const void *) { return cstring(0); }
+    cstring obj_name(const void *) { return nullptr; }
 
  public:
     NameMap() = default;
@@ -97,7 +98,7 @@ class NameMap : public Node {
     template <class U>
     const U *get(cstring name) const {
         for (auto it = symbols.find(name); it != symbols.end() && it->first == name; it++)
-            if (auto rv = dynamic_cast<const U *>(it->second)) return rv;
+            if (auto rv = it->second->template to<U>()) return rv;
         return nullptr;
     }
     void add(cstring name, const T *n) {
@@ -129,11 +130,11 @@ class NameMap : public Node {
     }
 
     IRNODE_SUBCLASS(NameMap)
-    bool operator==(const Node &a) const override { return a == *this; }
+    bool operator==(const Node &a) const override { return a.operator==(*this); }
     bool operator==(const NameMap &a) const { return symbols == a.symbols; }
     bool equiv(const Node &a_) const override {
         if (static_cast<const Node *>(this) == &a_) return true;
-        if (typeid(*this) != typeid(a_)) return false;
+        if (this->typeId() != a_.typeId()) return false;
         auto &a = static_cast<const NameMap<T, MAP, COMP, ALLOC> &>(a_);
         if (size() != a.size()) return false;
         auto it = a.begin();
@@ -149,14 +150,15 @@ class NameMap : public Node {
     static NameMap<T, MAP, COMP, ALLOC> *fromJSON(JSONLoader &json);
 
     Util::Enumerator<const T *> *valueEnumerator() const {
-        return Util::Enumerator<const T *>::createEnumerator(Values(symbols).begin(),
-                                                             Values(symbols).end());
+        return Util::enumerate(Values(symbols));
     }
     template <typename S>
     Util::Enumerator<const S *> *only() const {
-        std::function<bool(const T *)> filter = [](const T *d) { return d->template is<S>(); };
-        return valueEnumerator()->where(filter)->template as<const S *>();
+        return valueEnumerator()->template as<const S *>()->where(
+            [](const T *d) { return d != nullptr; });
     }
+
+    DECLARE_TYPEINFO(NameMap, Node);
 };
 
 }  // namespace IR

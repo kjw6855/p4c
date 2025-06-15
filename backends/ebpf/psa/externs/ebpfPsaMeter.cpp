@@ -99,11 +99,11 @@ EBPFMeterPSA::MeterType EBPFMeterPSA::toType(const int typeCode) {
 IR::IndexedVector<IR::StructField> EBPFMeterPSA::getValueFields() {
     auto vec = IR::IndexedVector<IR::StructField>();
     auto bits_64 = IR::Type_Bits::get(64, false);
-    const std::initializer_list<cstring> fieldsNames = {"pir_period", "pir_unit_per_period",
-                                                        "cir_period", "cir_unit_per_period",
-                                                        "pbs",        "cbs",
-                                                        "pbs_left",   "cbs_left",
-                                                        "time_p",     "time_c"};
+    const std::vector<cstring> fieldsNames = {"pir_period"_cs, "pir_unit_per_period"_cs,
+                                              "cir_period"_cs, "cir_unit_per_period"_cs,
+                                              "pbs"_cs,        "cbs"_cs,
+                                              "pbs_left"_cs,   "cbs_left"_cs,
+                                              "time_p"_cs,     "time_c"_cs};
     for (auto fieldName : fieldsNames) {
         vec.push_back(new IR::StructField(IR::ID(fieldName), bits_64));
     }
@@ -158,14 +158,14 @@ void EBPFMeterPSA::emitInstance(CodeBuilder *builder) const {
 
 void EBPFMeterPSA::emitExecute(CodeBuilder *builder, const P4::ExternMethod *method,
                                ControlBodyTranslatorPSA *translator) const {
-    auto pipeline = dynamic_cast<const EBPFPipeline *>(program);
+    auto pipeline = program->to<EBPFPipeline>();
     CHECK_NULL(pipeline);
 
     cstring functionNameSuffix;
     if (method->expr->arguments->size() == 2) {
-        functionNameSuffix = "_color_aware";
+        functionNameSuffix = "_color_aware"_cs;
     } else {
-        functionNameSuffix = "";
+        functionNameSuffix = ""_cs;
     }
 
     if (type == BYTES) {
@@ -202,14 +202,14 @@ void EBPFMeterPSA::emitIndex(CodeBuilder *builder, const P4::ExternMethod *metho
 
 void EBPFMeterPSA::emitDirectExecute(CodeBuilder *builder, const P4::ExternMethod *method,
                                      cstring valuePtr) const {
-    auto pipeline = dynamic_cast<const EBPFPipeline *>(program);
+    auto pipeline = program->to<EBPFPipeline>();
     CHECK_NULL(pipeline);
 
     cstring functionNameSuffix;
     if (method->expr->arguments->size() == 1) {
-        functionNameSuffix = "_color_aware";
+        functionNameSuffix = "_color_aware"_cs;
     } else {
-        functionNameSuffix = "";
+        functionNameSuffix = ""_cs;
     }
 
     cstring lockVar = valuePtr + "->" + spinlockField;
@@ -409,40 +409,39 @@ cstring EBPFMeterPSA::meterExecuteFunc(bool trace, P4::ReferenceMap *refMap) {
         "    return meter_execute_packets_value_color_aware(value, ((void *)value) + "
         "sizeof(%meter_struct%), "
         "time_ns, color);\n"
-        "}\n";
+        "}\n"_cs;
 
     if (trace) {
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_green%"),
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_green%",
                                                     "        bpf_trace_message(\""
                                                     "Meter: GREEN\\n\");\n");
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_yellow%"),
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_yellow%",
                                                     "            bpf_trace_message(\""
                                                     "Meter: YELLOW\\n\");\n");
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_red%"),
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_red%",
                                                     "            bpf_trace_message(\""
                                                     "Meter: RED\\n\");\n");
         meterExecuteFunc =
-            meterExecuteFunc.replace(cstring("%trace_msg_meter_no_value%"),
+            meterExecuteFunc.replace("%trace_msg_meter_no_value%",
                                      "        bpf_trace_message(\"Meter: No meter value! "
                                      "Returning default GREEN\\n\");\n");
         meterExecuteFunc =
-            meterExecuteFunc.replace(cstring("%trace_msg_meter_execute_bytes%"),
+            meterExecuteFunc.replace("%trace_msg_meter_execute_bytes%",
                                      "    bpf_trace_message(\"Meter: execute BYTES\\n\");\n");
         meterExecuteFunc =
-            meterExecuteFunc.replace(cstring("%trace_msg_meter_execute_packets%"),
+            meterExecuteFunc.replace("%trace_msg_meter_execute_packets%",
                                      "    bpf_trace_message(\"Meter: execute PACKETS\\n\");\n");
     } else {
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_green%"), "");
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_yellow%"), "");
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_red%"), "");
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_no_value%"), "");
-        meterExecuteFunc = meterExecuteFunc.replace(cstring("%trace_msg_meter_execute_bytes%"), "");
-        meterExecuteFunc =
-            meterExecuteFunc.replace(cstring("%trace_msg_meter_execute_packets%"), "");
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_green%", "");
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_yellow%", "");
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_red%", "");
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_no_value%", "");
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_execute_bytes%", "");
+        meterExecuteFunc = meterExecuteFunc.replace("%trace_msg_meter_execute_packets%", "");
     }
 
-    meterExecuteFunc = meterExecuteFunc.replace(cstring("%meter_struct%"),
-                                                cstring("struct ") + getBaseStructName(refMap));
+    meterExecuteFunc =
+        meterExecuteFunc.replace("%meter_struct%", "struct " + getBaseStructName(refMap));
 
     return meterExecuteFunc;
 }

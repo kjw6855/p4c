@@ -20,6 +20,7 @@ limitations under the License.
 #include <string>
 
 #include "backends/ebpf/version.h"
+#include "control-plane/p4RuntimeSerializer.h"
 #include "ebpfBackend.h"
 #include "ebpfOptions.h"
 #include "frontends/common/applyOptionsPragmas.h"
@@ -71,10 +72,16 @@ void compile(EbpfOptions &options) {
         program = frontend.run(options, program);
         if (::errorCount() > 0) return;
     }
+
+    if (!options.arch.isNullOrEmpty() && options.arch != "filter") {
+        P4::serializeP4RuntimeIfRequired(program, options);
+        if (::errorCount() > 0) return;
+    }
+
     EBPF::MidEnd midend;
     midend.addDebugHook(hook);
     auto toplevel = midend.run(options, program);
-    if (options.dumpJsonFile)
+    if (!options.dumpJsonFile.empty())
         JSONGenerator(*openFile(options.dumpJsonFile, true)) << program << std::endl;
     if (::errorCount() > 0) return;
 
@@ -87,7 +94,7 @@ int main(int argc, char *const argv[]) {
 
     AutoCompileContext autoEbpfContext(new EbpfContext);
     auto &options = EbpfContext::get().options();
-    options.compilerVersion = P4C_EBPF_VERSION_STRING;
+    options.compilerVersion = cstring(P4C_EBPF_VERSION_STRING);
 
     if (options.process(argc, argv) != nullptr) {
         if (options.loadIRFromJson == false) options.setInputFile();

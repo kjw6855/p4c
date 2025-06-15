@@ -1,32 +1,66 @@
 #! /bin/bash
 
-# Install some custom requirements on OS X using brew
-BREW=/usr/local/bin/brew
-if [[ ! -x $BREW ]]; then
-    /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+# Script to install P4C dependencies on MacOS.
+
+set -e  # Exit on error.
+
+# Installation helper.
+brew_install() {
+    echo "\nInstalling $1"
+    if brew list $1 &>/dev/null; then
+        echo "${1} is already installed"
+    else
+        brew install $1 && echo "$1 is installed"
+    fi
+}
+
+# Check if brew shellenv command is already in zprofile.
+if ! grep -q 'brew shellenv' ~/.zprofile; then
+    # Set up Homebrew differently for arm64.
+    if [[ $(uname -m) == 'arm64' ]]; then
+        (echo; echo 'eval "$(/opt/homebrew/bin/brew shellenv)"') >> ~/.zprofile
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    else
+        (echo; echo 'eval "$(/usr/local/bin/brew shellenv)"') >> ~/.zprofile
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
+fi
+# Source zprofile.
+source ~/.zprofile
+
+# Check if Homebrew is already installed.
+if ! which brew > /dev/null 2>&1; then
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+fi
+HOMEBREW_PREFIX=$(brew --prefix)
+
+# Fetch the latest formulae
+brew update
+
+BOOST_LIB="boost@1.85"
+REQUIRED_PACKAGES=(
+    autoconf automake ccache cmake libtool
+    openssl pkg-config coreutils bison grep ninja
+    ${BOOST_LIB}
+)
+for package in "${REQUIRED_PACKAGES[@]}"; do
+  brew_install ${package}
+done
+
+# Check if linking is needed.
+if ! brew ls --linked --formula ${BOOST_LIB} > /dev/null 2>&1; then
+  brew link ${BOOST_LIB}
 fi
 
-# Google introduced another breaking change with protobuf 22.x by adding abseil as a new dependency.
-# https://protobuf.dev/news/2022-08-03/#abseil-dep
-# We do not want abseil, so we stay with 21.x for now.
-PROTOBUF_LIB="protobuf@21"
-BOOST_LIB="boost@1.76"
+# Check if PATH modification is needed.
+if ! grep -q "$(brew --prefix bison)/bin" ~/.bash_profile; then
+  echo 'export PATH="$(brew --prefix bison)/bin:$PATH"' >> ~/.bash_profile
+fi
+if ! grep -q "$HOMEBREW_PREFIX/opt/grep/libexec/gnubin" ~/.bash_profile; then
+  echo 'export PATH="$HOMEBREW_PREFIX/opt/grep/libexec/gnubin:$PATH"' >> ~/.bash_profile
+fi
+source ~/.bash_profile
 
-$BREW update
-$BREW install autoconf automake bdw-gc bison ${BOOST_LIB} ccache cmake \
-      libtool openssl pkg-config python coreutils grep ${PROTOBUF_LIB}
-$BREW install protobuf
-
-# Prefer Homebrew's bison, grep, and protobuf over the macOS-provided version
-$BREW link --force bison grep ${PROTOBUF_LIB} ${BOOST_LIB}
-echo 'export PATH="/usr/local/opt/bison/bin:$PATH"' >> ~/.bash_profile
-echo 'export PATH="/usr/local/opt/${PROTOBUF_LIB}/bin:$PATH"' >> ~/.bash_profile
-eecho 'export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"' >> ~/.bash_profile
-export PATH="/usr/local/opt/bison/bin:$PATH"
-export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
-
-# install pip and required pip packages
-# curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-# python get-pip.py --user
-# use scapy 2.4.5, which is the version on which ptf depends
-pip3 install --user scapy==2.4.5 ply==3.8
+# Install required pip packages
+# TODO: Should we use --break-system-packages or should we set up a venv?
+pip3 install --user --break-system-packages -r requirements.txt

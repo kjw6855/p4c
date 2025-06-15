@@ -3,9 +3,9 @@
 
 #include <string>
 
-#include "backends/p4tools/common/core/solver.h"
 #include "ir/id.h"
 #include "ir/ir.h"
+#include "ir/solver.h"
 #include "ir/vector.h"
 
 #include "backends/p4tools/modules/testgen/core/externs.h"

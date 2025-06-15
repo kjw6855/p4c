@@ -16,6 +16,8 @@ limitations under the License.
 #include "dpdkUtils.h"
 
 namespace DPDK {
+using namespace P4::literals;
+
 bool isSimpleExpression(const IR::Expression *e) {
     if (e->is<IR::Member>() || e->is<IR::PathExpression>() || e->is<IR::Constant>() ||
         e->is<IR::BoolLiteral>())
@@ -38,6 +40,7 @@ bool isCommutativeBinaryOperation(const IR::Operation_Binary *bin) {
 }
 
 bool isStandardMetadata(cstring name) {
+    // FIXME: should be better structured (e.g. a set)
     bool isStdMeta =
         name == "psa_ingress_parser_input_metadata_t" || name == "psa_ingress_input_metadata_t" ||
         name == "psa_ingress_output_metadata_t" || name == "psa_egress_parser_input_metadata_t" ||
@@ -50,13 +53,13 @@ bool isStandardMetadata(cstring name) {
 
 bool isHeadersStruct(const IR::Type_Struct *st) {
     if (!st) return false;
-    auto annon = st->getAnnotation("__packet_data__");
+    auto annon = st->getAnnotation("__packet_data__"_cs);
     if (annon) return true;
     return false;
 }
 bool isMetadataStruct(const IR::Type_Struct *st) {
     for (auto anno : st->annotations->annotations) {
-        if (anno->name == "__metadata__") {
+        if (anno->name == "__metadata__"_cs) {
             return true;
         }
     }
@@ -93,6 +96,27 @@ bool isInsideHeader(const IR::Expression *expr) {
     return false;
 }
 
+bool isValidCall(const IR::MethodCallExpression *m) {
+    CHECK_NULL(m->method);
+    if (auto mc = m->method->to<IR::Member>()) {
+        if (mc->member.name == IR::Type_Header::isValid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isValidMemberField(const IR::Member *mem) {
+    if (auto mexpr = mem->expr->to<IR::Member>()) {
+        auto pe = mexpr->expr->to<IR::PathExpression>();
+        CHECK_NULL(pe);
+        if (pe->path->name == "h") return true;
+    } else if (auto mexpr = mem->expr->to<IR::PathExpression>()) {
+        if (mexpr->path->name == "m") return true;
+    }
+    return false;
+}
+
 const IR::Type_Bits *getEightBitAlignedType(const IR::Type_Bits *tb) {
     auto width = (tb->width_bits() + 7) & (~7);
     return IR::Type_Bits::get(width);
@@ -105,7 +129,7 @@ bool isDirection(const IR::Member *m) {
            m->member.name == "pna_main_parser_input_metadata_direction";
 }
 
-// Creates Register extern declaration for holding persistent information
+/// Creates Register extern declaration for holding persistent information.
 IR::Declaration_Instance *createRegDeclarationInstance(cstring instanceName, int regSize,
                                                        int indexBitWidth, int initValBitWidth) {
     auto typepath = new IR::Path("Register");
@@ -121,10 +145,10 @@ IR::Declaration_Instance *createRegDeclarationInstance(cstring instanceName, int
     return decl;
 }
 
-// Check for reserved names for DPDK target
-bool reservedNames(P4::ReferenceMap *refMap, std::vector<cstring> names, cstring &resName) {
-    for (auto name : names) {
-        auto newname = refMap->newName(name);
+/// Check for reserved names for DPDK target.
+bool reservedNames(P4::ReferenceMap *refMap, const std::vector<cstring> &names, cstring &resName) {
+    for (const auto &name : names) {
+        auto newname = refMap->newName(name.string_view());
         if (newname != name) {
             resName = name;
             return false;
@@ -133,10 +157,11 @@ bool reservedNames(P4::ReferenceMap *refMap, std::vector<cstring> names, cstring
     return true;
 }
 
-// Update bitwidth of Metadata fields to 32 or 64 bits if it 8-bit aligned.
+/// Update bitwidth of Metadata fields to 32 or 64 bits if it 8-bit aligned.
 int getMetadataFieldWidth(int width) {
-    BUG_CHECK(width <= 64, "Metadata bit-width expected to be within 64-bits");
     if (width % 8 != 0) {
+        BUG_CHECK(width <= 64, "Metadata bit-width expected to be within 64-bits, found %1%",
+                  width);
         if (width < 32)
             return 32;
         else

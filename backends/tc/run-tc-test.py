@@ -21,6 +21,7 @@ import shutil
 import stat
 import sys
 import tempfile
+from pathlib import Path
 from subprocess import Popen, call
 from threading import Thread
 
@@ -95,19 +96,23 @@ timeout = 10 * 60
 
 
 def compare_files(options, produced, expected):
+    if options.verbose:
+        print("Comparing ", produced, " and ", expected)
+    if produced.endswith(".c"):
+        sedcommand = "sed -i.bak '1d;2d' " + produced
+        call(sedcommand, shell=True)
+    if produced.endswith(".h"):
+        sedcommand = "sed -i.bak '1d;2d' " + produced
+        call(sedcommand, shell=True)
+    sedcommand = "sed -i -e 's/[a-zA-Z0-9_\/\-]*testdata\///g' " + produced
+    call(sedcommand, shell=True)
+
     if options.replace:
         if options.verbose:
             print("Saving new version of ", expected)
         shutil.copy2(produced, expected)
         return SUCCESS
 
-    if options.verbose:
-        print("Comparing ", produced, " and ", expected)
-    if produced.endswith(".c"):
-        sedcommand = "sed -i.bak '1d;2d' " + produced
-        call(sedcommand, shell=True)
-    sedcommand = "sed -i -e 's/[a-zA-Z0-9_\/\-]*testdata\///g' " + produced
-    call(sedcommand, shell=True)
     diff = difflib.Differ().compare(open(produced).readlines(), open(expected).readlines())
     result = SUCCESS
 
@@ -146,7 +151,7 @@ def check_generated_files(options, tmpdir, expecteddir):
 def process_file(options, argv):
     assert isinstance(options, Options)
 
-    tmpdir = tempfile.mkdtemp(dir=".")
+    tmpdir = tempfile.mkdtemp(dir=Path(".").absolute())
     basename = os.path.basename(options.p4filename)
     base, ext = os.path.splitext(basename)
     dirname = os.path.dirname(options.p4filename)
@@ -154,14 +159,12 @@ def process_file(options, argv):
 
     if options.verbose:
         print("Writing temporary files into ", tmpdir)
-    ppfile = tmpdir + "/" + base + ".template"
-    cfile = tmpdir + "/" + base + ".c"
-    introfile = tmpdir + "/" + base + "_introspection.json"
+    outputfolder = tmpdir + "/"
     stderr = tmpdir + "/" + basename + "-stderr"
 
     if not os.path.isfile(options.p4filename):
         raise Exception("No such file " + options.p4filename)
-    args = ["./p4c-pna-p4tc", "-o", ppfile, "-c", cfile, "-i", introfile]
+    args = ["./p4c-pna-p4tc", "-o", outputfolder]
     args.extend(argv)
     print("input: ", options, args, timeout, stderr)
     result = run_timeout(options, args, timeout, stderr)
@@ -227,6 +230,9 @@ def main(argv):
             print("Unknown option ", argv[0], file=sys.stderr)
             usage(options)
         argv = argv[1:]
+
+    if "P4TEST_REPLACE" in os.environ:
+        options.replace = True
 
     options.p4filename = argv[-1]
     options.testName = None

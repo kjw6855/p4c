@@ -84,14 +84,6 @@ p4tools_add_xfail_reason(
 
 p4tools_add_xfail_reason(
   "testgen-p4c-bmv2-ptf"
-  "Non-numeric, non-boolean member expression: .* Type: Type_Stack"
-  # We can not expand stacks in parsers because information about .next is lost.
-  # P4Testgen needs to maintain its own internal .next variable for stacks.
-  array-copy-bmv2.p4
-)
-
-p4tools_add_xfail_reason(
-  "testgen-p4c-bmv2-ptf"
   "Computations are not supported in update_checksum"
 )
 
@@ -239,6 +231,13 @@ p4tools_add_xfail_reason(
   "expected a struct"
   hashing-non-tuple-bmv2.p4
   issue584-1-bmv2.p4
+)
+
+p4tools_add_xfail_reason(
+  "testgen-p4c-bmv2-ptf"
+  "is not a constant"
+  # Using an uninitialized variable as a header stack index in the parser.
+  parser-unroll-test10.p4
 )
 
 ####################################################################################################

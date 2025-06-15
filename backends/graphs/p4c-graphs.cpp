@@ -62,7 +62,7 @@ MidEnd::MidEnd(CompilerOptions &options) {
 
 class Options : public CompilerOptions {
  public:
-    cstring graphsDir{"."};
+    std::filesystem::path graphsDir{"."};
     bool loadIRFromJson = false;  // read from json
     bool graphs = true;           // default behavior
     bool fullGraph = false;
@@ -129,7 +129,7 @@ int main(int argc, char *const argv[]) {
     AutoCompileContext autoGraphsContext(new ::graphs::GraphsContext);
     auto &options = ::graphs::GraphsContext::get().options();
     options.langVersion = CompilerOptions::FrontendVersion::P4_16;
-    options.compilerVersion = P4C_GRAPHS_VERSION_STRING;
+    options.compilerVersion = cstring(P4C_GRAPHS_VERSION_STRING);
 
     if (options.process(argc, argv) != nullptr) {
         if (options.loadIRFromJson == false) options.setInputFile();
@@ -178,7 +178,7 @@ int main(int argc, char *const argv[]) {
     const IR::ToplevelBlock *top = nullptr;
     try {
         top = midEnd.process(program);
-        if (options.dumpJsonFile)
+        if (!options.dumpJsonFile.empty())
             JSONGenerator(*openFile(options.dumpJsonFile, true)) << program << std::endl;
     } catch (const std::exception &bug) {
         std::cerr << bug.what() << std::endl;

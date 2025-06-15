@@ -19,7 +19,6 @@ limitations under the License.
 
 #include "node.h"
 
-#include <memory>
 #include <ostream>
 // use in combination with "raise" below
 // #include <csignal>
@@ -28,7 +27,6 @@ limitations under the License.
 #include "ir/ir.h"
 #include "ir/json_generator.h"
 #include "ir/json_loader.h"
-#include "ir/visitor.h"
 #include "lib/indent.h"
 #include "lib/json.h"
 #include "lib/log.h"
@@ -122,18 +120,18 @@ Util::JsonObject *IR::Node::sourceInfoJsonObj() const {
             // Added source_info for jsonObject when "--fromJSON" flag is used
             // which parameters are saved in srcInfo fileds(filename, line, column and srcBrief)
             auto json1 = new Util::JsonObject();
-            json1->emplace("filename", srcInfo.filename);
-            json1->emplace("line", srcInfo.line);
-            json1->emplace("column", srcInfo.column);
-            json1->emplace("source_fragment", srcInfo.srcBrief);
+            json1->emplace("filename"_cs, srcInfo.filename);
+            json1->emplace("line"_cs, srcInfo.line);
+            json1->emplace("column"_cs, srcInfo.column);
+            json1->emplace("source_fragment"_cs, srcInfo.srcBrief);
             return json1;
         }
     } else {
         auto json = new Util::JsonObject();
-        json->emplace("filename", fName);
-        json->emplace("line", lineNumber);
-        json->emplace("column", columnNumber);
-        json->emplace("source_fragment", si.toBriefSourceFragment().escapeJson());
+        json->emplace("filename"_cs, fName);
+        json->emplace("line"_cs, lineNumber);
+        json->emplace("column"_cs, columnNumber);
+        json->emplace("source_fragment"_cs, si.toBriefSourceFragment().escapeJson());
         return json;
     }
 }
