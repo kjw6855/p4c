@@ -234,7 +234,7 @@ const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::Table
 
         const auto *nameAnnot = key->getAnnotation("name"_cs);
         if (nameAnnot != nullptr) {
-            if (nameAnnot->getName() != match.field_name()) {
+            if (nameAnnot->getName().string() != match.field_name()) {
                 LOG_FEATURE("small_visit", 4, "** Different match name: "
                     << match.field_name() << " (testCase) vs. "
                     << nameAnnot->getName() << " (table)");
@@ -486,7 +486,7 @@ bool TableVisitor::verifyAction(::p4::v1::Action *p4v1Action,
         const auto *actionType = visitor->state.getP4Action(tableAction);
         CHECK_NULL(actionType);
         auto actionName = actionType->controlPlaneName();
-        if (actionName != p4v1Action->action_name())
+        if (actionName.string() != p4v1Action->action_name())
             continue;
 
         // action found
@@ -537,7 +537,7 @@ bool TableVisitor::verifyMatch(::p4::v1::FieldMatch *p4v1Match,
         if (nameAnnot == nullptr)
             continue;
 
-        if (nameAnnot->getName() == p4v1Match->field_name()) {
+        if (nameAnnot->getName().string() == p4v1Match->field_name()) {
             key = keyElem;
             p4v1Match->set_field_id(i + 1);     // change field_id
             break;
@@ -557,7 +557,7 @@ bool TableVisitor::verifyMatch(::p4::v1::FieldMatch *p4v1Match,
     // TODO
     const auto maxVal = IR::getMaxBvVal(keyWidth);
     if (p4v1Match->has_range()) {
-        if (keyMatchType != "range")        // XXX: BMv2 Match
+        if (keyMatchType != "range"_cs)        // XXX: BMv2 Match
             return false;
 
         const auto& matchRange = p4v1Match->range();
@@ -596,7 +596,7 @@ bool TableVisitor::verifyMatch(::p4::v1::FieldMatch *p4v1Match,
             return false;
 
     } else if (p4v1Match->has_optional()) {
-        if (keyMatchType != "optional")     // XXX: BMv2 Optional
+        if (keyMatchType != "optional"_cs)     // XXX: BMv2 Optional
             return false;
 
     } else {
@@ -619,7 +619,7 @@ void TableVisitor::verifyTableControlEntries(
             continue;
 
         auto *entry = entity.mutable_table_entry();
-        if (entry->table_name() != tableName)
+        if (entry->table_name() != tableName.string())
             continue;
 
         // Action & Parameter check first
@@ -657,10 +657,14 @@ void TableVisitor::verifyTableControlEntries(
             }
         }
 
-        if (found)
+        if (found) {
             entry->set_is_valid_entry(1);
-        else
+            LOG_FEATURE("small_visit", 4, "Set table entry as valid: "
+                << entry->table_name() << ", "
+                << entry->priority());
+        } else {
             entry->set_is_valid_entry(0);
+        }
     }
 }
 
@@ -767,7 +771,7 @@ void TableVisitor::genTableControlEntries(
             continue;
         }
 
-        if (entry->table_name() != properties.tableName) {
+        if (entry->table_name() != properties.tableName.string()) {
             continue;
         }
 
@@ -866,7 +870,7 @@ void TableVisitor::genTableControlEntries(
                 CHECK_NULL(actionType);
                 cstring actionName = actionType->controlPlaneName();
 
-                if (actionName != p4v1Action->action_name())
+                if (actionName.string() != p4v1Action->action_name())
                     continue;
 
                 actionFound = true;
@@ -979,7 +983,7 @@ void TableVisitor::evalTableControlEntries(
             continue;
         }
 
-        if (entry->table_name() != properties.tableName) {
+        if (entry->table_name() != properties.tableName.string()) {
             continue;
         }
 
@@ -1030,7 +1034,7 @@ void TableVisitor::evalTableControlEntries(
                     CHECK_NULL(actionType);
                     cstring actionName = actionType->controlPlaneName();
 
-                    if (actionName != p4v1Action->action_name())
+                    if (actionName.string() != p4v1Action->action_name())
                         continue;
 
                     // FOUND!

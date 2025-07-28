@@ -117,7 +117,7 @@ void Bmv2V1ModelTableVisitor::genTableActionProfile(
         if (!entry->is_valid_entry())
             continue;
 
-        if (entry->table_name() != properties.tableName)
+        if (entry->table_name() != properties.tableName.string())
             continue;
 
         auto &nextState = state->clone();
@@ -140,7 +140,7 @@ void Bmv2V1ModelTableVisitor::genTableActionProfile(
                 actionType = state->getP4Action(tableAction);
                 cstring actionName = actionType->controlPlaneName();
 
-                if (actionName != p4v1Action.action_name()) {
+                if (actionName.string() != p4v1Action.action_name()) {
                     continue;
                 }
 
@@ -228,7 +228,7 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
             continue;
         }
 
-        if (entry->table_name() != properties.tableName) {
+        if (entry->table_name() != properties.tableName.string()) {
             LOG_FEATURE("small_visit", 4, "Different table name: "
                 << entry->table_name() << " (testCase) vs. "
                 << properties.tableName << " (table)");
@@ -258,7 +258,7 @@ void Bmv2V1ModelTableVisitor::evalTableActionProfile(
                     actionType = state->getP4Action(tableAction);
                     cstring actionName = actionType->controlPlaneName();
 
-                    if (actionName != p4v1Action.action_name()) {
+                    if (actionName.string() != p4v1Action.action_name()) {
                         continue;
                     }
 
