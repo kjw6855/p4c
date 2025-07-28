@@ -26,7 +26,7 @@ class CompilerTarget : public Target {
     static std::vector<const char *> *initCompiler(std::string_view toolName, int argc,
                                                    char **argv);
 
-    static std::optional<const IR::P4Program *> loadProgram(std::string_view toolName, cstring irJsonFile);
+    static CompilerResultOrError loadProgram(std::string_view toolName, cstring irJsonFile);
 
     /// Runs the P4 compiler to produce an IR and various other kinds of information on the input
     /// program.

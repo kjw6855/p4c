@@ -6,7 +6,7 @@
 
 #include "backends/p4tools/common/p4ctool.h"
 
-#include "backends/p4tools/common/core/solver.h"
+#include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/modules/testgen/lib/test_framework.h"
 #include "backends/p4tools/modules/testgen/options.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
@@ -33,11 +33,6 @@ class Testgen : public AbstractP4cTool<TestgenOptions> {
  public:
     //virtual ~Testgen() = default;
     ~Testgen();
-
- private:
-    std::unique_ptr<ServerCompletionQueue> cq_;
-    P4FuzzGuide::AsyncService service_;
-    std::unique_ptr<Server> server_;
 
     /// Invokes P4Testgen and returns a list of abstract tests which are generated based on the
     /// input TestgenOptions. The abstract tests can be further specialized depending on the select
@@ -67,6 +62,11 @@ class Testgen : public AbstractP4cTool<TestgenOptions> {
     /// P4Testgen will directly parse the input program.
     static int writeTests(std::string_view program, const CompilerOptions &options,
                           const TestgenOptions &testgenOptions);
+
+ private:
+    std::unique_ptr<ServerCompletionQueue> cq_;
+    P4FuzzGuide::AsyncService service_;
+    std::unique_ptr<Server> server_;
 
 };
 

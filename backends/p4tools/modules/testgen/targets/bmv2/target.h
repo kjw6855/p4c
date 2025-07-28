@@ -46,7 +46,7 @@ class Bmv2V1ModelTestgenTarget : public TestgenTarget {
  private:
     Bmv2V1ModelTestgenTarget();
 
-    [[nodiscard]] MidEnd mkMidEnd(const CompilerOptions &options) const override;
+    [[nodiscard]] MidEnd mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const override;
 
     CompilerResultOrError runCompilerImpl(const IR::P4Program *program) const override;
 };

@@ -54,10 +54,14 @@ macro(p4c_obtain_protobuf)
     set(protobuf_BUILD_PROTOC_BINARIES ON CACHE BOOL "Build libprotoc and protoc compiler.")
     # Only ever build the static library. It is not safe to link with a local dynamic version.
     set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "Build Shared Libraries")
+    set(protobuf_LOCAL_INSTALL_DIR "${protobuf_BINARY_DIR}/protobuf_local_install" CACHE PATH "Local installation path for Protobuf")
+    file(MAKE_DIRECTORY "${protobuf_LOCAL_INSTALL_DIR}")
+    set(CMAKE_INSTALL_PREFIX ${protobuf_LOCAL_INSTALL_DIR} CACHE PATH "Install path")
+
     # Exclude Protobuf from the main make install step. We only want to use it locally.
-    set(protobuf_INSTALL OFF CACHE BOOL "Install Protobuf")
+    set(protobuf_INSTALL ON CACHE BOOL "Install Protobuf")
     set(protobuf_ABSL_PROVIDER "package" CACHE STRING "Use system-provided abseil")
-    set(protobuf_BUILD_EXPORT OFF)
+    set(protobuf_BUILD_EXPORT ON)
     set(utf8_range_ENABLE_INSTALL OFF)
 
     fetchcontent_declare(
@@ -66,8 +70,22 @@ macro(p4c_obtain_protobuf)
       URL_HASH SHA256=d19643d265b978383352b3143f04c0641eea75a75235c111cc01a1350173180e
       USES_TERMINAL_DOWNLOAD TRUE
       GIT_PROGRESS TRUE
+      CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${protobuf_LOCAL_INSTALL_DIR}
+        -Dprotobuf_BUILD_TESTS=OFF
+        -Dprotobuf_BUILD_PROTOC_BINARIES=ON
+        -Dprotobuf_BUILD_SHARED_LIBS=OFF # If you want static, ensure this is OFF
+        -Dprotobuf_ABSL_PROVIDER=package
+        -Dprotobuf_INSTALL=ON # Explicitly ensure install is ON for the fetched content
     )
     fetchcontent_makeavailable(protobuf)
+
+    # Build and install Protobuf to generate ProtobufConfig.cmake
+    add_custom_target(protobuf_install ALL
+      COMMAND ${CMAKE_COMMAND} --build . --target install
+      WORKING_DIRECTORY ${protobuf_BINARY_DIR}
+      COMMENT "Installing Protobuf to ${protobuf_LOCAL_INSTALL_DIR}"
+    )
 
     # Protobuf and protoc source code may trigger warnings which we ignore.
     set_target_properties(libprotobuf-lite PROPERTIES COMPILE_FLAGS "-Wno-error -w")
@@ -80,6 +98,7 @@ macro(p4c_obtain_protobuf)
     # text-based test scripts. The reason is that protoc is only evaluated at build time, not during
     # generation of the test scripts. TODO: Maybe we can improve these scripts somehow?
     set(Protobuf_PROTOC_EXECUTABLE ${protobuf_BINARY_DIR}/protoc)
+    set(Protobuf_DIR "${protobuf_LOCAL_INSTALL_DIR}/lib/cmake/protobuf" CACHE PATH "Path to ProtobufConfig.cmake")
     include(${protobuf_SOURCE_DIR}/cmake/protobuf-generate.cmake)
     # Protobuf does not seem to set Protobuf_INCLUDE_DIRS correctly when used as a module, but we
     # need this variable for generating code.

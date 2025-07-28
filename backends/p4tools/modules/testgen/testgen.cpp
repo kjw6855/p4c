@@ -169,69 +169,6 @@ int generateAndWriteAbstractTests(const TestgenOptions &testgenOptions,
     TestBackendConfiguration testBackendConfiguration{
         cstring(testPath.c_str()), testgenOptions.maxTests, testPath, testgenOptions.seed};
 
-    auto &options = P4CContext::get().options();
-    GraphMidEnd midEnd(options);
-    midEnd.addDebugHook(options.getDebugHook());
-    const IR::ToplevelBlock *top = nullptr;
-    try {
-        top = midEnd.process(program);
-    } catch (const std::exception &bug) {
-        std::cerr << bug.what() << std::endl;
-        return 1;
-    }
-
-    if (testgenOptions.interactive) {
-        // Get Tables and Actions
-        auto tableCollector = TableCollector();
-        programInfo->program->apply(tableCollector);
-        tableCollector.findP4Actions();
-
-        auto p4Tables = tableCollector.getP4Tables();
-        auto p4TableActions = tableCollector.getActionNodes();
-        LOG_FEATURE("small_visit", 4, "Table/Action size: " << p4Tables.size() << "/" << p4TableActions.size());
-
-        for (const auto *table : tableCollector.getP4TableSet()) {
-            LOG_FEATURE("small_visit", 4, "  [T] " << table->controlPlaneName());
-        }
-
-        LOG_FEATURE("small_visit", 4, "============================================");
-        for (auto *action : p4TableActions) {
-            const auto &srcInfo = action->getSourceInfo();
-            auto sourceLine = srcInfo.toPosition().sourceLine;
-            LOG_FEATURE("small_visit", 4, "  [A] " << srcInfo.getSourceFile() <<
-                    "\\" << sourceLine << ": " << *action);
-        }
-
-        runServer(programInfo, tableCollector, top,
-                &midEnd.refMap, &midEnd.typeMap, testgenOptions.grpcPort);
-        return EXIT_SUCCESS;
-    }
-
-    if (testgenOptions.pathSelectionPolicy == PathSelectionPolicy::TestCase) {
-        auto tableCollector = TableCollector();
-        programInfo->program->apply(tableCollector);
-        auto *concExec = new ConcolicExecutor(*programInfo, tableCollector, top,
-                &midEnd.refMap, &midEnd.typeMap);
-        TestCase *testCase = new TestCase();
-        concExec->setGenRuleMode(false);
-        int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
-
-        if (fd < 0) {
-            std::cerr << " Error opening the file " << std::endl;
-        }
-
-        google::protobuf::io::FileInputStream fileInput(fd);
-        fileInput.SetCloseOnDelete( true );
-
-        if (!google::protobuf::TextFormat::Parse(&fileInput, testCase)) {
-            std::cerr << std::endl << "Failed to parse file!" << std::endl;
-        } else {
-            std::cerr << "Read Input File" << std::endl;
-        }
-        concExec->run(*testCase);
-        return EXIT_SUCCESS;
-    }
-
     // Need to declare the solver here to ensure its lifetime.
     Z3Solver solver;
     auto *symbolicExecutor = pickExecutionEngine(testgenOptions, programInfo, solver);
@@ -314,7 +251,7 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
     //P4FuzzGuide::AsyncService service_;
     std::map<std::string, ConcolicExecutor*> coverageMap;
     P4FuzzGuideImpl service = P4FuzzGuideImpl(coverageMap,
-            programInfo, tableCollector, top, refMap, typeMap);
+            *programInfo, tableCollector, top, refMap, typeMap);
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -327,11 +264,6 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
     server->Wait();
 }
 
-void Testgen::registerTarget() {
-    // Register all available compiler targets.
-    // These are discovered by CMAKE, which fills out the register.h.in file.
-    registerCompilerTargets();
-}
 void Testgen::registerTarget() {
     // Register all available P4Testgen targets.
     // These are discovered by CMAKE, which fills out the register.h.in file.
@@ -347,7 +279,85 @@ int Testgen::mainImpl(const CompilerResult &compilerResult) {
         ::error("P4Testgen encountered errors during preprocessing.");
         return EXIT_FAILURE;
     }
-    return generateAndWriteAbstractTests(TestgenOptions::get(), *programInfo);
+    const auto &testgenOptions = TestgenOptions::get();
+
+    if (testgenOptions.interactive) {
+        auto &options = P4CContext::get().options();
+        GraphMidEnd midEnd(options);
+        midEnd.addDebugHook(options.getDebugHook());
+        const IR::ToplevelBlock *top = nullptr;
+        const auto *program = &programInfo->getP4Program();
+        try {
+            top = midEnd.process(program);
+        } catch (const std::exception &bug) {
+            std::cerr << bug.what() << std::endl;
+            return 1;
+        }
+
+        // Get Tables and Actions
+        auto tableCollector = TableCollector();
+        program->apply(tableCollector);
+        tableCollector.findP4Actions();
+
+        auto p4Tables = tableCollector.getP4Tables();
+        auto p4TableActions = tableCollector.getActionNodes();
+        LOG_FEATURE("small_visit", 4, "Table/Action size: " << p4Tables.size() << "/" << p4TableActions.size());
+
+        for (const auto *table : tableCollector.getP4TableSet()) {
+            LOG_FEATURE("small_visit", 4, "  [T] " << table->controlPlaneName());
+        }
+
+        LOG_FEATURE("small_visit", 4, "============================================");
+        for (auto *action : p4TableActions) {
+            const auto &srcInfo = action->getSourceInfo();
+            auto sourceLine = srcInfo.toPosition().sourceLine;
+            LOG_FEATURE("small_visit", 4, "  [A] " << srcInfo.getSourceFile() <<
+                    "\\" << sourceLine << ": " << *action);
+        }
+
+        runServer(programInfo, tableCollector, top,
+                &midEnd.refMap, &midEnd.typeMap, testgenOptions.grpcPort);
+        return EXIT_SUCCESS;
+    }
+
+    if (testgenOptions.pathSelectionPolicy == PathSelectionPolicy::TestCase) {
+        auto &options = P4CContext::get().options();
+        GraphMidEnd midEnd(options);
+        midEnd.addDebugHook(options.getDebugHook());
+        const IR::ToplevelBlock *top = nullptr;
+        const auto *program = &programInfo->getP4Program();
+        try {
+            top = midEnd.process(program);
+        } catch (const std::exception &bug) {
+            std::cerr << bug.what() << std::endl;
+            return 1;
+        }
+
+        auto tableCollector = TableCollector();
+        program->apply(tableCollector);
+        auto *concExec = new ConcolicExecutor(*programInfo, tableCollector, top,
+                &midEnd.refMap, &midEnd.typeMap);
+        TestCase *testCase = new TestCase();
+        concExec->setGenRuleMode(false);
+        int fd = open("/home/jwkim/Workspace-remote/p4testgen_out/latest/basic2/basic._4.proto", O_RDONLY);
+
+        if (fd < 0) {
+            std::cerr << " Error opening the file " << std::endl;
+        }
+
+        google::protobuf::io::FileInputStream fileInput(fd);
+        fileInput.SetCloseOnDelete( true );
+
+        if (!google::protobuf::TextFormat::Parse(&fileInput, testCase)) {
+            std::cerr << std::endl << "Failed to parse file!" << std::endl;
+        } else {
+            std::cerr << "Read Input File" << std::endl;
+        }
+        concExec->run(*testCase);
+        return EXIT_SUCCESS;
+    }
+
+    return generateAndWriteAbstractTests(testgenOptions, *programInfo);
 }
 
 std::optional<AbstractTestList> Testgen::generateTests(std::string_view program,

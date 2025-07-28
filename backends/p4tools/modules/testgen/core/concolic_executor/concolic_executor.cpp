@@ -93,13 +93,13 @@ std::size_t ConcolicExecutor::get_rule_key(TestCase &testCase) {
 }
 
 void ConcolicExecutor::run(TestCase& testCase) {
-    executionState = ExecutionState::create(programInfo.program);
+    executionState = ExecutionState::create(&programInfo.getP4Program());
 
     Continuation::Body body(tableCollector.getP4Tables());
     const auto actionNodes = tableCollector.getActionNodes();
-    body.push(programInfo.program);
+    body.push(&programInfo.getP4Program());
 
-    tableState = ExecutionState::create(programInfo.program, body);
+    tableState = ExecutionState::create(&programInfo.getP4Program(), body);
 
     tableEvaluator.violatedGuardConditions = 0;
     evaluator.violatedGuardConditions = 0;
@@ -146,7 +146,7 @@ void ConcolicExecutor::run(TestCase& testCase) {
     if (pgg == nullptr) {
         LOG_FEATURE("small_visit", 4, "Generating parser graphs");
         pgg = new ParserGraphs(refMap);
-        programInfo.program->apply(*pgg);
+        programInfo.getP4Program().apply(*pgg);
         pgg->calc_ball_larus_on_graphs();
     }
     executionState.get().setParserGraphs(pgg);
@@ -189,9 +189,9 @@ void ConcolicExecutor::run(TestCase& testCase) {
     if (checkGenTableEval) {
         Continuation::Body body(tableCollector.getP4Tables());
         const auto actionNodes = tableCollector.getActionNodes();
-        body.push(programInfo.program);
+        body.push(&programInfo.getP4Program());
 
-        tableState = ExecutionState::create(programInfo.program, body);
+        tableState = ExecutionState::create(&programInfo.getP4Program(), body);
 
         genTableEvaluator.violatedGuardConditions = 0;
         evaluator.violatedGuardConditions = 0;
@@ -246,14 +246,14 @@ void ConcolicExecutor::setGenRuleMode(bool genRuleMode) {
     checkGenTableEval = genRuleMode;
 }
 
-ConcolicExecutor::ConcolicExecutor(const ProgramInfo& programInfo, TableCollector &tableCollector, const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
+ConcolicExecutor::ConcolicExecutor(const ProgramInfo &programInfo, TableCollector &tableCollector, const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
     : programInfo(programInfo),
       tableCollector(tableCollector),
       top(top),
       refMap(refMap),
       typeMap(typeMap),
-      executionState(ExecutionState::create(programInfo.program)),
-      tableState(ExecutionState::create(programInfo.program)),
+      executionState(ExecutionState::create(&programInfo.getP4Program())),
+      tableState(ExecutionState::create(&programInfo.getP4Program())),
       allStatements(programInfo.getCoverableNodes()),
       statementBitmapSize(allStatements.size()),
       cgenCache(new lru_cache(16)),
@@ -365,7 +365,7 @@ const P4::Coverage::CoverageSet& ConcolicExecutor::getVisitedStatements() {
 }
 
 boost::optional<Packet> ConcolicExecutor::getOutputPacket() {
-    if (executionState.get().getProperty<bool>("drop"))
+    if (executionState.get().getProperty<bool>("drop"_cs))
         return boost::none;
 
     BUG_CHECK(finalState, "Un-initialized");

@@ -56,7 +56,7 @@ CompilerResultOrError Bmv2V1ModelTestgenTarget::runCompilerImpl(
         return std::nullopt;
     }
 
-    program = runMidEnd(program);
+    program = runMidEnd(program, false);
     if (program == nullptr) {
         return std::nullopt;
     }
@@ -106,7 +106,7 @@ CompilerResultOrError Bmv2V1ModelTestgenTarget::runCompilerImpl(
         p4runtimeApi, directExternMapper.getDirectExternMap(), p4ConstraintsRestrictions}};
 }
 
-MidEnd Bmv2V1ModelTestgenTarget::mkMidEnd(const CompilerOptions &options) const {
+MidEnd Bmv2V1ModelTestgenTarget::mkMidEnd(const CompilerOptions &options, bool loadIRFromJson) const {
     MidEnd midEnd(options);
     auto *refMap = midEnd.getRefMap();
     auto *typeMap = midEnd.getTypeMap();
@@ -116,7 +116,7 @@ MidEnd Bmv2V1ModelTestgenTarget::mkMidEnd(const CompilerOptions &options) const 
         new P4::TypeChecking(refMap, typeMap, true),
         new PropagateP4RuntimeTranslation(*typeMap),
     });
-    midEnd.addDefaultPasses();
+    midEnd.addDefaultPasses(loadIRFromJson);
 
     return midEnd;
 }

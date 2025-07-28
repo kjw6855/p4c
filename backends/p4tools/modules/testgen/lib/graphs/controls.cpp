@@ -42,11 +42,11 @@ Graph *ControlGraphs::ControlStack::pushBack(Graph &currentSubgraph, const cstri
     auto &newSubgraph = currentSubgraph.create_subgraph();
     auto fullName = getName(name);
     boost::get_property(newSubgraph, boost::graph_name) = "cluster" + fullName;
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["label"] =
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["label"_cs] =
         boost::get_property(currentSubgraph, boost::graph_name) +
         (fullName != "" ? "." + fullName : fullName);
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["fontsize"] = "22pt";
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["style"] = "bold";
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["fontsize"_cs] = "22pt"_cs;
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["style"_cs] = "bold"_cs;
     names.push_back(name);
     subgraphs.push_back(&newSubgraph);
     return getSubgraph();
@@ -90,11 +90,11 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             Graph *g_ = new Graph();
             g = g_;
             instanceName = std::nullopt;
-            boost::get_property(*g_, boost::graph_name) = name;
+            boost::get_property(*g_, boost::graph_name) = name.string();
             BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
-            g = controlStack.pushBack(*g_, "");
-            start_v = add_vertex("__START__", nullptr, VertexType::OTHER);
-            exit_v = add_vertex("__EXIT__", nullptr, VertexType::OTHER);
+            g = controlStack.pushBack(*g_, cstring::empty);
+            start_v = add_vertex("__START__"_cs, nullptr, VertexType::OTHER);
+            exit_v = add_vertex("__EXIT__"_cs, nullptr, VertexType::OTHER);
             parents = {{start_v, new EdgeUnconditional()}};
             visit(it.second->getNode());
 

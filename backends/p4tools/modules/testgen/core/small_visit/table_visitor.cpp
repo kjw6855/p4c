@@ -42,6 +42,8 @@
 
 namespace P4Tools::P4Testgen {
 
+using namespace P4::literals;
+
 std::string formatBytes(const big_int& value, int width, bool pad) {
     std::vector<char> bytes;
 
@@ -131,21 +133,23 @@ const IR::StateVariable &TableVisitor::getTableStateVariable(const IR::Type *typ
 
 const IR::StateVariable &TableVisitor::getTableActionVar(const IR::P4Table *table) {
     auto numActions = table->getActionList()->size();
-    const auto *type = IR::getBitTypeToFit(numActions);
-    return getTableStateVariable(type, table, "*action");
+    size_t max = 255;
+    BUG_CHECK(numActions < max, "Number of actions in the table (%1%) exceeds the maximum of %2%.",
+              numActions, max);
+    return getTableStateVariable(IR::Type_Bits::get(8), table, "*action"_cs);
 }
 
 const IR::StateVariable &TableVisitor::getTableHitVar(const IR::P4Table *table) {
-    return getTableStateVariable(IR::Type::Boolean::get(), table, "*hit");
+    return getTableStateVariable(IR::Type::Boolean::get(), table, "*hit"_cs);
 }
 
 const IR::StateVariable &TableVisitor::getTableKeyReadVar(const IR::P4Table *table, int keyIdx) {
     const auto *key = table->getKey()->keyElements.at(keyIdx);
-    return getTableStateVariable(key->expression->type, table, "*keyRead", keyIdx);
+    return getTableStateVariable(key->expression->type, table, "*keyRead"_cs, keyIdx);
 }
 
 const IR::StateVariable &TableVisitor::getTableReachedVar(const IR::P4Table *table) {
-    return getTableStateVariable(IR::Type::Boolean::get(), table, "*reached");
+    return getTableStateVariable(IR::Type::Boolean::get(), table, "*reached"_cs);
 }
 
 const IR::Expression *TableVisitor::computeTargetMatchType(
@@ -166,7 +170,7 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
         const IR::Expression *ternaryMask = nullptr;
         // We can recover from taint by inserting a ternary match that is 0.
         if (keyProperties.isTainted) {
-            ternaryMask = IR::getConstant(keyExpr->type, 0);
+            ternaryMask = IR::Constant::get(keyExpr->type, 0);
             keyExpr = ternaryMask;
         } else {
             ternaryMask = ToolsVariables::getSymbolicVariable(keyExpr->type, maskName);
@@ -185,22 +189,22 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
         // The maxReturn is the maximum vale for the given bit width. This value is shifted by
         // the mask variable to create a mask (and with that, a prefix).
         auto maxReturn = IR::getMaxBvVal(keyWidth);
-        auto *prefix = new IR::Sub(IR::getConstant(keyType, keyWidth), maskVar);
+        auto *prefix = new IR::Sub(IR::Constant::get(keyType, keyWidth), maskVar);
         const IR::Expression *lpmMask = nullptr;
         // We can recover from taint by inserting a ternary match that is 0.
         if (keyProperties.isTainted) {
-            lpmMask = IR::getConstant(keyExpr->type, 0);
+            lpmMask = IR::Constant::get(keyExpr->type, 0);
             maskVar = lpmMask;
             keyExpr = lpmMask;
         } else {
-            lpmMask = new IR::Shl(IR::getConstant(keyType, maxReturn), prefix);
+            lpmMask = new IR::Shl(IR::Constant::get(keyType, maxReturn), prefix);
         }
         matches->emplace(keyProperties.name, new LPM(keyProperties.key, ctrlPlaneKey, maskVar));
         return new IR::LAnd(
             hitCondition,
             new IR::LAnd(
                 // This is the actual LPM match under the shifted mask (the prefix).
-                new IR::Leq(maskVar, IR::getConstant(keyType, keyWidth)),
+                new IR::Leq(maskVar, IR::Constant::get(keyType, keyWidth)),
                 // The mask variable shift should not be larger than the key width.
                 new IR::Equ(new IR::BAnd(keyExpr, lpmMask), new IR::BAnd(ctrlPlaneKey, lpmMask))));
     }
@@ -209,7 +213,7 @@ const IR::Expression *TableVisitor::computeTargetMatchType(
 }
 
 const IR::Expression *TableVisitor::computeHit(TableMatchMap *matches) {
-    const IR::Expression *hitCondition = IR::getBoolLiteral(!properties.resolvedKeys.empty());
+    const IR::Expression *hitCondition = IR::BoolLiteral::get(!properties.resolvedKeys.empty());
     for (auto keyProperties : properties.resolvedKeys) {
         hitCondition = computeTargetMatchType(keyProperties, matches, hitCondition);
     }
@@ -218,7 +222,7 @@ const IR::Expression *TableVisitor::computeHit(TableMatchMap *matches) {
 
 const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::TableEntry& entry) {
     const auto* keys = table->getKey();
-    const IR::Expression* hitCondition = IR::getBoolLiteral(true);
+    const IR::Expression* hitCondition = IR::BoolLiteral::get(true);
 
     for (const auto& match : entry.match()) {
         size_t idx = (size_t)(match.field_id() - 1);
@@ -228,7 +232,7 @@ const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::Table
                 idx, keys->keyElements.size());
         const auto* key = keys->keyElements.at(idx);
 
-        const auto *nameAnnot = key->getAnnotation("name");
+        const auto *nameAnnot = key->getAnnotation("name"_cs);
         if (nameAnnot != nullptr) {
             if (nameAnnot->getName() != match.field_name()) {
                 LOG_FEATURE("small_visit", 4, "** Different match name: "
@@ -265,9 +269,9 @@ const IR::Expression* TableVisitor::computeHitFromTestCase(const ::p4::v1::Table
             auto maxReturn = IR::getMaxBvVal(matchLpm.prefix_len());
 
             // maskExpr = (maxReturn) (Shl; <<) (prefix_len:32)
-            auto* maskExpr = new IR::Shl(IR::getConstant(keyType, maxReturn),
-                    new IR::Sub(IR::getConstant(keyType, keyWidth),
-                        IR::getConstant(keyType, matchLpm.prefix_len())));
+            auto* maskExpr = new IR::Shl(IR::Constant::get(keyType, maxReturn),
+                    new IR::Sub(IR::Constant::get(keyType, keyWidth),
+                        IR::Constant::get(keyType, matchLpm.prefix_len())));
 
             hitCondition = new IR::LAnd(
                     hitCondition, new IR::Equ(new IR::BAnd(keyExpr, maskExpr),
@@ -312,11 +316,11 @@ void TableVisitor::setTableAction(ExecutionState &nextState,
               table);
     // Store the selected action.
     const auto &tableActionVar = getTableActionVar(table);
-    nextState.set(tableActionVar, IR::getConstant(tableActionVar.type, actionIdx));
+    nextState.set(tableActionVar, IR::Constant::get(tableActionVar.type, actionIdx));
 }
 
 const IR::Expression *TableVisitor::evalTableConstEntries() {
-    const IR::Expression *tableMissCondition = IR::getBoolLiteral(true);
+    const IR::Expression *tableMissCondition = IR::BoolLiteral::get(true);
 
     const auto *key = table->getKey();
     BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
@@ -356,8 +360,8 @@ const IR::Expression *TableVisitor::evalTableConstEntries() {
         // Update all the tracking variables for tables.
         std::vector<Continuation::Command> replacements;
         replacements.emplace_back(new IR::MethodCallStatement(Util::SourceInfo(), tableAction));
-        nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-        nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+        nextState.set(getTableHitVar(table), IR::BoolLiteral::get(true));
+        nextState.set(getTableReachedVar(table), IR::BoolLiteral::get(true));
         // Some path selection strategies depend on looking ahead and collecting potential
         // statements. If that is the case, apply the CoverableNodesScanner visitor.
         P4::Coverage::CoverageSet coveredNodes;
@@ -445,8 +449,8 @@ void TableVisitor::setTableDefaultEntries(
         // Finally, add all the new rules to the execution visitor->state.
         auto *tableConfig = new TableConfig(table, {});
         // Add the action selector to the table. This signifies a slightly different implementation.
-        tableConfig->addTableProperty("overriden_default_action", ctrlPlaneActionCall);
-        nextState.addTestObject("tableconfigs", properties.tableName, tableConfig);
+        tableConfig->addTableProperty("overriden_default_action"_cs, ctrlPlaneActionCall);
+        nextState.addTestObject("tableconfigs"_cs, properties.tableName, tableConfig);
 
         // Update all the tracking variables for tables.
         std::vector<Continuation::Command> replacements;
@@ -459,8 +463,8 @@ void TableVisitor::setTableDefaultEntries(
             auto collector = CoverableNodesScanner(visitor->state);
             collector.updateNodeCoverage(actionType, coveredNodes);
         }
-        nextState.set(getTableHitVar(table), IR::getBoolLiteral(false));
-        nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+        nextState.set(getTableHitVar(table), IR::BoolLiteral::get(false));
+        nextState.set(getTableReachedVar(table), IR::BoolLiteral::get(true));
         std::stringstream tableStream;
         tableStream << "Table Branch: " << properties.tableName;
         tableStream << "| Overriding default action: " << actionName;
@@ -529,7 +533,7 @@ bool TableVisitor::verifyMatch(::p4::v1::FieldMatch *p4v1Match,
     const IR::KeyElement *key = nullptr;
     for (size_t i = 0; i < keys->keyElements.size(); i++) {
         const auto *keyElem = keys->keyElements.at(i);
-        const auto *nameAnnot = keyElem->getAnnotation("name");
+        const auto *nameAnnot = keyElem->getAnnotation("name"_cs);
         if (nameAnnot == nullptr)
             continue;
 
@@ -694,7 +698,7 @@ void TableVisitor::verifyTableControlEntries(
         }
 
         auto* newMatch = newTableEntry->add_match();
-        const auto *nameAnnot = key->getAnnotation("name");
+        const auto *nameAnnot = key->getAnnotation("name"_cs);
         newMatch->set_field_id(i + 1);
         newMatch->set_field_name(nameAnnot->getName());
 
@@ -880,7 +884,7 @@ void TableVisitor::genTableControlEntries(
 
                     // change to constant value
                     const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
-                    const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                    const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData"_cs, idx, argIdx);
                     //cstring paramName =
                     //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
                     //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
@@ -912,8 +916,8 @@ void TableVisitor::genTableControlEntries(
             replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
 
             // ??
-            nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-            nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+            nextState.set(getTableHitVar(table), IR::BoolLiteral::get(true));
+            nextState.set(getTableReachedVar(table), IR::BoolLiteral::get(true));
             nextState.replaceTopBody(&replacements);
 
             if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
@@ -921,7 +925,7 @@ void TableVisitor::genTableControlEntries(
                 collector.updateNodeCoverage(actionType, coveredNodes);
             }
 
-            visitor->result->emplace_back(IR::getBoolLiteral(true), visitor->state, nextState, coveredNodes);
+            visitor->result->emplace_back(IR::BoolLiteral::get(true), visitor->state, nextState, coveredNodes);
             entry->set_matched_idx(nextState.getMatchedIdx());
             nextState.markAction(actionType);
             nextState.chooseEntryInGraph(entity->table_entry());
@@ -1045,7 +1049,7 @@ void TableVisitor::evalTableControlEntries(
 
                         // change to constant value
                         const auto& paramExpr = Utils::getValExpr(param.value(), paramWidth);
-                        const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData", idx, argIdx);
+                        const auto& actionDataVar =  getTableStateVariable(parameter->type, table, "*actionData"_cs, idx, argIdx);
                         //cstring paramName =
                         //    properties.tableName + "_arg_" + actionName + std::to_string(argIdx);
                         //const auto& actionArg = nextState->createZombieConst(parameter->type, paramName);
@@ -1069,8 +1073,8 @@ void TableVisitor::evalTableControlEntries(
             replacements.emplace_back(new IR::MethodCallStatement(synthesizedAction));
 
             // ??
-            nextState.set(getTableHitVar(table), IR::getBoolLiteral(true));
-            nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+            nextState.set(getTableHitVar(table), IR::BoolLiteral::get(true));
+            nextState.set(getTableReachedVar(table), IR::BoolLiteral::get(true));
             nextState.replaceTopBody(&replacements);
 
             if (requiresLookahead(TestgenOptions::get().pathSelectionPolicy)) {
@@ -1119,8 +1123,8 @@ void TableVisitor::evalTaintedTable() {
 
     // If the table is immutable, we execute all the constant entries in its list.
     // We get the current value of the inUndefinedState property.
-    auto currentTaint = visitor->state.getProperty<bool>("inUndefinedState");
-    replacements.emplace_back(Continuation::PropertyUpdate("inUndefinedState", true));
+    auto currentTaint = visitor->state.getProperty<bool>("inUndefinedState"_cs);
+    replacements.emplace_back(Continuation::PropertyUpdate("inUndefinedState"_cs, true));
 
     const auto *entries = table->getEntries();
     // Sometimes, there are no entries. Just return.
@@ -1144,7 +1148,7 @@ void TableVisitor::evalTaintedTable() {
     nextState.set(hitVar, visitor->programInfo.createTargetUninitialized(hitVar->type, true));
 
     // Reset the property to its previous visitor->state.
-    replacements.emplace_back(Continuation::PropertyUpdate("inUndefinedState", currentTaint));
+    replacements.emplace_back(Continuation::PropertyUpdate("inUndefinedState"_cs, currentTaint));
     nextState.replaceTopBody(&replacements);
     visitor->result->emplace_back(nextState);
 }
@@ -1196,7 +1200,7 @@ bool TableVisitor::resolveTableKeys() {
             return true;
         }
 
-        const auto *nameAnnot = keyElement->getAnnotation("name");
+        const auto *nameAnnot = keyElement->getAnnotation("name"_cs);
         // Some hidden tables do not have any key name annotations.
         BUG_CHECK(nameAnnot != nullptr || properties.tableIsImmutable,
                   "Non-constant table key without an annotation");
@@ -1241,8 +1245,8 @@ void TableVisitor::addDefaultAction(std::optional<const IR::Expression *> tableM
         auto collector = CoverableNodesScanner(visitor->state);
         collector.updateNodeCoverage(actionType, coveredNodes);
     }
-    nextState.set(getTableHitVar(table), IR::getBoolLiteral(false));
-    nextState.set(getTableReachedVar(table), IR::getBoolLiteral(true));
+    nextState.set(getTableHitVar(table), IR::BoolLiteral::get(false));
+    nextState.set(getTableReachedVar(table), IR::BoolLiteral::get(true));
     nextState.replaceTopBody(&replacements);
     visitor->result->emplace_back(tableMissCondition, visitor->state, nextState, coveredNodes);
 }

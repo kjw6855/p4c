@@ -54,7 +54,7 @@ class AbstractP4cTool {
         }
 
         // Run the compiler to get an IR and invoke the tool.
-        std::optional<const IR::P4Program *> compilerResult;
+        CompilerResultOrError compilerResult;
         if (Options::get().irJsonFile == nullptr) {
             compilerResult = P4Tools::CompilerTarget::runCompiler(toolName);
 

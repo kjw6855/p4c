@@ -92,6 +92,8 @@ class TestFramework {
                 apAsMap[actionProfile->getProfileDecl()->controlPlaneName()] =
                     actionSelector->getSelectorDecl()->controlPlaneName();
                 tblJson["has_as"] = true;
+                tblJson["action_selector_name"] =
+                    actionSelector->getSelectorDecl()->controlPlaneName();
             }
         }
     }

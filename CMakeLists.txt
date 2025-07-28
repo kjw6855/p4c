@@ -429,8 +429,8 @@ set(FETCHCONTENT_QUIET OFF)
 # Fetch and declare the P4Runtime library.
 FetchContent_Declare(
   p4runtime
-  GIT_REPOSITORY https://github.com/p4lang/p4runtime.git
-  GIT_TAG        62a9bd60599b87497a15feb6c7893b7ec8ba461f
+  GIT_REPOSITORY https://github.com/kjw6855/p4runtime.git
+  GIT_TAG        a6582892ea1d75eea02ed66b6feac56bf60fc25e
   GIT_PROGRESS TRUE
 )
 FetchContent_MakeAvailable(p4runtime)

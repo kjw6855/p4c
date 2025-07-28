@@ -278,7 +278,7 @@ cstring SourceInfo::toBriefSourceFragment() const {
 }
 
 cstring SourceInfo::toPositionString() const {
-    if (isLoaded) return SourceFileLine(filename, line).toString();
+    if (isLoaded) return SourceFileLine(filename.string_view(), line).toString();
     if (!isValid()) return ""_cs;
     SourceFileLine position = sources->getSourceLine(start.getLineNumber());
     return position.toString();
@@ -297,7 +297,7 @@ cstring SourceInfo::toSourcePositionData(unsigned *outLineNumber, unsigned *outC
 }
 
 SourceFileLine SourceInfo::toPosition() const {
-    if (isLoaded) return SourceFileLine(filename, line);
+    if (isLoaded) return SourceFileLine(filename.string_view(), line);
     return sources->getSourceLine(start.getLineNumber());
 }
 
@@ -308,7 +308,7 @@ cstring SourceInfo::getSourceFile() const {
 }
 
 cstring SourceInfo::getLineNum() const {
-    if (isLoaded) return toString(line);
+    if (isLoaded) return absl::StrFormat("%d", line);
     SourceFileLine sourceLine = sources->getSourceLine(start.getLineNumber());
     return Util::toString(sourceLine.sourceLine);
 }

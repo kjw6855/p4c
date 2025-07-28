@@ -18,7 +18,9 @@ bool TestFramework::isInFileMode() const {
 AbstractTestReferenceOrError TestFramework::produceTest(const TestSpec * /*spec*/,
                                                         cstring /*selectedBranches*/,
                                                         size_t /*testIdx*/,
-                                                        float /*currentCoverage*/) {
+                                                        float /*currentCoverage*/,
+                                                        unsigned char* /*testCoverage*/,
+                                                        int /*mapSize*/) {
     TESTGEN_UNIMPLEMENTED("produceTest() not implemented for this test framework.");
 }
 

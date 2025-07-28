@@ -341,7 +341,7 @@ bool Bmv2V1ModelTableStepper::checkForActionSelector() {
     // Treat action selectors like action profiles for now.
     // The behavioral model P4Runtime is unclear how to configure action selectors.
     const auto *testObject =
-        state->getTestObject("action_profile"_cs, selectorDecl->controlPlaneName(), false);
+        state->getTestObject("action_selector"_cs, selectorDecl->controlPlaneName(), false);
     if (testObject == nullptr) {
         // This means, for every possible control plane entry (and with that, new execution state)
         // add the generated action profile.

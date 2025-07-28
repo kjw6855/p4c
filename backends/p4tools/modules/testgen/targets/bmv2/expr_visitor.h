@@ -12,6 +12,7 @@
 #include "backends/p4tools/modules/testgen/core/small_visit/expr_visitor.h"
 #include "backends/p4tools/modules/testgen/core/small_visit/small_visit.h"
 #include "backends/p4tools/modules/testgen/lib/execution_state.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/concolic.h"
 
 namespace P4Tools::P4Testgen::Bmv2 {
 
@@ -25,22 +26,6 @@ class Bmv2V1ModelExprVisitor : public ExprVisitor {
 
     /// Chunk size is 8 bits, i.e., a byte.
     static constexpr int CHUNK_SIZE = 8;
-
-    /// We are not using an enum class because we directly compare integers. This is because error
-    /// types are converted into integers in our interpreter. If we use an enum class, we have to
-    /// cast every enum access to int.
-    struct Bmv2HashAlgorithm {
-        using Type = enum {
-            crc32,
-            crc32_custom,
-            crc16,
-            crc16_custom,
-            random,
-            identity,
-            csum16,
-            xor16
-        };
-    };
 
     // Helper function that checks whether the given structure filed has a 'field_list' annotation
     // and the recirculate index matches. @returns true if that is the case.
@@ -63,12 +48,12 @@ class Bmv2V1ModelExprVisitor : public ExprVisitor {
     /// Call into a behavioral model helper function to compute the appropriate checksum. The
     /// checksum is determined by @param algo.
     big_int computeChecksum(const std::vector<const IR::Expression *> &exprList,
-                                      int algo);
+                                      Bmv2HashAlgorithm algo);
 
     /// Converts a big integer input into a vector of bytes. This byte vector is fed into the
     /// hash function.
     /// This function mimics the conversion of data structures to bytes in the behavioral model.
-    static std::vector<char> convertBigIntToBytes(big_int &dataInt, int targetWidthBits);
+    static std::vector<uint8_t> convertBigIntToBytes(big_int &dataInt, int targetWidthBits, bool padLeft);
 
  public:
     Bmv2V1ModelExprVisitor(ExecutionState &state,

@@ -185,7 +185,7 @@ AbstractP4cToolOptions::AbstractP4cToolOptions(std::string_view toolName, std::s
     registerOption(
         "--fromJson", "FILE",
         [this](const char *arg) {
-            irJsonFile = arg;
+            irJsonFile = cstring(arg);
             return true;
         },
         "Fail on unimplemented features instead of trying the next branch.");

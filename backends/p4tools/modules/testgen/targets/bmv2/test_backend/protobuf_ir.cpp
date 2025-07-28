@@ -439,7 +439,7 @@ inja::json ProtobufIr::produceTestCase(const TestSpec *testSpec, cstring selecte
 }
 
 void ProtobufIr::writeTestToFile(const TestSpec *testSpec, cstring selectedBranches, size_t testId,
-                                 float currentCoverage) {
+                                 float currentCoverage, unsigned char* testCoverage, int mapSize) {
     inja::json dataJson = produceTestCase(testSpec, selectedBranches, testId, currentCoverage);
     LOG5("ProtobufIR test back end: emitting testcase:" << std::setw(4) << dataJson);
 
@@ -455,7 +455,7 @@ void ProtobufIr::writeTestToFile(const TestSpec *testSpec, cstring selectedBranc
 
 AbstractTestReferenceOrError ProtobufIr::produceTest(const TestSpec *testSpec,
                                                      cstring selectedBranches, size_t testId,
-                                                     float currentCoverage) {
+                                                     float currentCoverage, unsigned char* testCoverage, int mapSize) {
     inja::json dataJson = produceTestCase(testSpec, selectedBranches, testId, currentCoverage);
     LOG5("ProtobufIR test back end: generated testcase:" << std::setw(4) << dataJson);
 

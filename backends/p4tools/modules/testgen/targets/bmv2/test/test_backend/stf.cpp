@@ -67,6 +67,8 @@ TableConfig STFTest::getIPRouteTableConfig() {
 
 /// Create a test spec with an Exact match and print an stf test.
 TEST_F(STFTest, Stf01) {
+    unsigned char* dynamic_empty_string = new unsigned char[1]; // Allocate space for just the null terminator
+    dynamic_empty_string[0] = '\0';
     const auto *pld =
         IR::Constant::get(IR::Type_Bits::get(512),
                           big_int("0x22222222222200060708090a080045000056000100004006f94dc0a8"
@@ -86,11 +88,13 @@ TEST_F(STFTest, Stf01) {
 
     TestBackendConfiguration testBackendConfiguration{"test01"_cs, 1, "test01", 1};
     auto testWriter = STF(testBackendConfiguration);
-    testWriter.writeTestToFile(&testSpec, cstring::empty, 1, 0);
+    testWriter.writeTestToFile(&testSpec, cstring::empty, 1, 0, dynamic_empty_string, 0);
 }
 
 /// Create a test spec with two Exact matches and print an stf test.
 TEST_F(STFTest, Stf02) {
+    unsigned char* dynamic_empty_string = new unsigned char[1]; // Allocate space for just the null terminator
+    dynamic_empty_string[0] = '\0';
     /// TODO: If payload starts with leading 0s, they are truncated causing stf to fail with
     /// malformed packet, need to pad to account for leading zeros.
     const auto *pldIngress = IR::Constant::get(
@@ -117,7 +121,7 @@ TEST_F(STFTest, Stf02) {
 
     TestBackendConfiguration testBackendConfiguration{"test02"_cs, 1, "test02", 2};
     auto testWriter = STF(testBackendConfiguration);
-    testWriter.writeTestToFile(&testSpec, cstring::empty, 2, 0);
+    testWriter.writeTestToFile(&testSpec, cstring::empty, 2, 0, dynamic_empty_string, 0);
 }
 
 TableConfig STFTest::gettest1TableConfig() {
@@ -144,6 +148,8 @@ TableConfig STFTest::gettest1TableConfig() {
 
 /// Create a test spec with a Ternary match and print an stf test.
 TEST_F(STFTest, Stf03) {
+    unsigned char* dynamic_empty_string = new unsigned char[1]; // Allocate space for just the null terminator
+    dynamic_empty_string[0] = '\0';
     const auto *pldIngress =
         IR::Constant::get(IR::Type_Bits::get(112), big_int("0x0000010100000202030355667788"));
     const auto *pldIngIgnMask =
@@ -164,7 +170,7 @@ TEST_F(STFTest, Stf03) {
     TestBackendConfiguration testBackendConfiguration{"test03"_cs, 1, "test03", 3};
     auto testWriter = STF(testBackendConfiguration);
     try {
-        testWriter.writeTestToFile(&testSpec, cstring::empty, 3, 0);
+        testWriter.writeTestToFile(&testSpec, cstring::empty, 3, 0, dynamic_empty_string, 0);
     } catch (const Util::CompilerBug &e) {
         EXPECT_THAT(e.what(), HasSubstr("Unimplemented for Ternary FieldMatch"));
     }
@@ -213,6 +219,8 @@ TableConfig STFTest::gettest1TableConfig2() {
 
 /// Create a test spec with one Exact match and one Ternary match and print an stf test.
 TEST_F(STFTest, Stf04) {
+    unsigned char* dynamic_empty_string = new unsigned char[1]; // Allocate space for just the null terminator
+    dynamic_empty_string[0] = '\0';
     const auto *pldIngress =
         IR::Constant::get(IR::Type_Bits::get(112), big_int("0x0000010100000202030355667788"));
     const auto *pldIngIgnMask =
@@ -233,7 +241,7 @@ TEST_F(STFTest, Stf04) {
     TestBackendConfiguration testBackendConfiguration{"test04"_cs, 1, "test04", 4};
     auto testWriter = STF(testBackendConfiguration);
     try {
-        testWriter.writeTestToFile(&testSpec, cstring::empty, 4, 0);
+        testWriter.writeTestToFile(&testSpec, cstring::empty, 4, 0, dynamic_empty_string, 0);
     } catch (const Util::CompilerBug &e) {
         EXPECT_THAT(e.what(), HasSubstr("Unimplemented for Ternary FieldMatch"));
     }

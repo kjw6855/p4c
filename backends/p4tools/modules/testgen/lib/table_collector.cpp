@@ -55,7 +55,7 @@ bool TableCollector::preorder(const IR::P4Table *p4table) {
     const auto tableActionList = TableUtils::buildTableActionList(*p4table);
     const auto tableName = p4table->controlPlaneName();
 
-    const auto *impl = p4table->properties->getProperty("implementation");
+    const auto *impl = p4table->properties->getProperty("implementation"_cs);
     if (impl != nullptr) {
         hasProfileMap.insert(std::pair<cstring, bool>(tableName, true));
     } else {

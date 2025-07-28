@@ -66,6 +66,11 @@ class ExprVisitor : public AbstractVisitor {
     /// values for hit, miss and action_run after that.
     void handleHitMissActionRun(const IR::Member *member);
 
+    /// Resolve all arguments to the method call by stepping into each argument that is not yet
+    /// symbolic or a pure reference (represented as Out direction).
+    /// @returns false when an argument needs to be resolved, true otherwise.
+    bool resolveMethodCallArguments(const IR::MethodCallExpression *call);
+
     /// Evaluates a call to an extern method. Upon return, the given result will be augmented with
     /// the successor states resulting from evaluating the call.
     ///
@@ -116,7 +121,7 @@ class ExprVisitor : public AbstractVisitor {
 
     /// Takes a step to reflect a "select" expression failing to match. The default implementation
     /// raises Continuation::Exception::NoMatch.
-    virtual void stepNoMatch();
+    virtual void stepNoMatch(std::string traceLog, const IR::Expression *condition = nullptr);
 
  public:
     ExprVisitor(const ExprVisitor &) = default;
@@ -145,7 +150,7 @@ class ExprVisitor : public AbstractVisitor {
     bool preorder(const IR::Operation_Binary *binary) override;
     bool preorder(const IR::Operation_Unary *unary) override;
     bool preorder(const IR::SelectExpression *selectExpression) override;
-    bool preorder(const IR::ListExpression *listExpression) override;
+    bool preorder(const IR::BaseListExpression *listExpression) override;
     bool preorder(const IR::StructExpression *structExpression) override;
     bool preorder(const IR::Slice *slice) override;
     bool preorder(const IR::P4Table *table) override;

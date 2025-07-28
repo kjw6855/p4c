@@ -27,6 +27,7 @@
 #include "lib/exceptions.h"
 #include "lib/log.h"
 #include "lib/ordered_map.h"
+#include "lib/nethash.h"
 
 #include "backends/p4tools/modules/testgen/core/externs.h"
 #include "backends/p4tools/modules/testgen/core/program_info.h"
@@ -39,20 +40,22 @@
 #include "backends/p4tools/modules/testgen/lib/packet_vars.h"
 #include "backends/p4tools/modules/testgen/lib/test_spec.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/constants.h"
+#include "backends/p4tools/modules/testgen/targets/bmv2/concolic.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/program_info.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/table_visitor.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/target.h"
 #include "backends/p4tools/modules/testgen/targets/bmv2/test_spec.h"
-#include "backends/p4tools/modules/testgen/targets/bmv2/contrib/bmv2_hash/calculations.h"
 
 namespace P4Tools::P4Testgen::Bmv2 {
+
+using namespace P4::literals;
 
 std::string Bmv2V1ModelExprVisitor::getClassName() { return "Bmv2V1ModelExprVisitor"; }
 
 bool Bmv2V1ModelExprVisitor::isPartOfFieldList(const IR::StructField *field,
                                                uint64_t recirculateIndex) {
     // Check whether the field has a "field_list" annotation associated with it.
-    const auto *annotation = field->getAnnotation("field_list");
+    const auto *annotation = field->getAnnotation("field_list"_cs);
     if (annotation != nullptr) {
         // Grab the index of the annotation.
         auto annoExprs = annotation->expr;
@@ -89,16 +92,16 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
                                           SmallStepEvaluator::Result &result) {
     const auto *progInfo = getProgramInfo().checkedTo<Bmv2V1ModelProgramInfo>();
     // Pick a clone port var. It must adhere to the constraints of the target.
-    const auto *cloneInfo = state.getTestObject<Bmv2V1ModelCloneInfo>("clone_infos", "clone_info");
+    const auto *cloneInfo = state.getTestObject<Bmv2V1ModelCloneInfo>("clone_infos"_cs, "clone_info"_cs);
     const auto *sessionIdExpr = cloneInfo->getSessionId();
     const auto &preserveIndex = cloneInfo->getPreserveIndex();
     const auto &egressPortVar = programInfo.getTargetOutputPortVar();
     const auto &clonePortVar =
-        ToolsVariables::getSymbolicVariable(egressPortVar->type, "clone_port_var");
+        ToolsVariables::getSymbolicVariable(egressPortVar->type, "clone_port_var"_cs);
 
     uint64_t recirculateCount = 0;
-    if (state.hasProperty("recirculate_count")) {
-        recirculateCount = state.getProperty<uint64_t>("recirculate_count");
+    if (state.hasProperty("recirculate_count"_cs)) {
+        recirculateCount = state.getProperty<uint64_t>("recirculate_count"_cs);
     }
 
     // Pick a clone port var. It must adhere to the constraints of the target.
@@ -113,23 +116,23 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
     if (TestgenOptions::get().testBackend == "PTF") {
         cond = new IR::LAnd(
             new IR::LAnd(
-                new IR::Leq(sessionIdExpr, IR::getConstant(sessionIdExpr->type,
+                new IR::Leq(sessionIdExpr, IR::Constant::get(sessionIdExpr->type,
                                                            BMv2Constants::CLONE_SESSION_ID_MAX)),
-                new IR::Geq(sessionIdExpr, IR::getConstant(sessionIdExpr->type,
+                new IR::Geq(sessionIdExpr, IR::Constant::get(sessionIdExpr->type,
                                                            BMv2Constants::CLONE_SESSION_ID_MIN))),
-            new IR::LAnd(cond, new IR::Lss(clonePortVar, IR::getConstant(clonePortVar->type, 8))));
+            new IR::LAnd(cond, new IR::Lss(clonePortVar, IR::Constant::get(clonePortVar->type, 8))));
     }
     // clone methods have a default state where the packet continues as is.
     {
         auto &defaultState = state.clone();
         // Delete the stale clone info to free up some space and reset the clone_active flag.
-        defaultState.deleteTestObjectCategory("clone_infos");
-        defaultState.setProperty("clone_active", false);
+        defaultState.deleteTestObjectCategory("clone_infos"_cs);
+        defaultState.setProperty("clone_active"_cs, false);
         // Increment the recirculation count.
-        defaultState.setProperty("recirculate_count", ++recirculateCount);
+        defaultState.setProperty("recirculate_count"_cs, ++recirculateCount);
         // Attach the clone specification for test generation.
         const auto *defaultCloneInfo = new Bmv2V1ModelCloneSpec(sessionIdExpr, clonePortVar, false);
-        defaultState.addTestObject("clone_specs", "clone_spec", defaultCloneInfo);
+        defaultState.addTestObject("clone_specs"_cs, "clone_spec"_cs, defaultCloneInfo);
         defaultState.popBody();
         result->emplace_back(cond, state, defaultState);
     }
@@ -139,7 +142,7 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
     std::vector<Continuation::Command> cmds;
 
     // We need to set the instance type once we recirculate.
-    const auto *instanceBitType = IR::getBitType(32);
+    const auto *instanceBitType = IR::Type_Bits::get(32);
     const auto *instanceTypeVar = new IR::Member(
         instanceBitType, new IR::PathExpression("*standard_metadata"), "instance_type");
 
@@ -152,7 +155,7 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
         // exit statement.
         cloneState->set(
             instanceTypeVar,
-            IR::getConstant(instanceBitType, BMv2Constants::PKT_INSTANCE_TYPE_INGRESS_CLONE));
+            IR::Constant::get(instanceBitType, BMv2Constants::PKT_INSTANCE_TYPE_INGRESS_CLONE));
         const auto *progInfo = getProgramInfo().checkedTo<Bmv2V1ModelProgramInfo>();
         // Reset the packet buffer, which corresponds to the output packet.
         // We need to reset everything to the state before the ingress call. We use a
@@ -160,12 +163,11 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
         // information for that, including the exact parameter names of the ingress
         // block we are in. Just grab the ingress from the programmable blocks.
         const auto *programmableBlocks = progInfo->getProgrammableBlocks();
-        const auto *typeDecl = programmableBlocks->at("Ingress");
+        const auto *typeDecl = programmableBlocks->at("Ingress"_cs);
         const auto *applyBlock = typeDecl->checkedTo<IR::P4Control>();
         const auto *params = applyBlock->getApplyParameters();
         auto blockIndex = 2;
-        const auto *archSpec = TestgenTarget::getArchSpec();
-        const auto *archMember = archSpec->getArchMember(blockIndex);
+        const auto *archMember = progInfo->getArchSpec().getArchMember(blockIndex);
         for (size_t paramIdx = 0; paramIdx < params->size(); ++paramIdx) {
             const auto *param = params->getParameter(paramIdx);
             const auto &archRef = archMember->blockParams.at(paramIdx);
@@ -194,13 +196,13 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
         // Set the metadata instance type.
         cloneState->set(
             instanceTypeVar,
-            IR::getConstant(instanceBitType, BMv2Constants::PKT_INSTANCE_TYPE_EGRESS_CLONE));
+            IR::Constant::get(instanceBitType, BMv2Constants::PKT_INSTANCE_TYPE_EGRESS_CLONE));
         if (preserveIndex.has_value()) {
             // This program segment resets the user metadata of the v1model program to
             // 0. However, fields in the user metadata that have the field_list
             // annotation and the appropriate index will not be reset. The user
             // metadata is the third parameter of the parser control.
-            const auto *paramPath = progInfo->getBlockParam("Parser", 2);
+            const auto *paramPath = progInfo->getBlockParam("Parser"_cs, 2);
             resetPreservingFieldList(*cloneState, paramPath, preserveIndex.value());
         }
 
@@ -224,13 +226,13 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
         TESTGEN_UNIMPLEMENTED("Unsupported clone type %1%.", cloneType);
     }
     // Attach the clone specification for test generation.
-    cloneState->addTestObject("clone_specs", "clone_spec",
+    cloneState->addTestObject("clone_specs"_cs, "clone_spec"_cs,
                               new Bmv2V1ModelCloneSpec(sessionIdExpr, clonePortVar, true));
     // Delete the stale clone info to free up some space and reset the clone_active flag.
-    cloneState->setProperty("clone_active", false);
-    cloneState->deleteTestObjectCategory("clone_infos");
+    cloneState->setProperty("clone_active"_cs, false);
+    cloneState->deleteTestObjectCategory("clone_infos"_cs);
     // Increment the recirculation count.
-    cloneState->setProperty("recirculate_count", ++recirculateCount);
+    cloneState->setProperty("recirculate_count"_cs, ++recirculateCount);
     /// Reset the packet buffer for recirculation.
     cloneState->resetPacketBuffer();
     cloneState->replaceTopBody(&cmds);
@@ -239,13 +241,13 @@ void Bmv2V1ModelExprVisitor::processClone(const ExecutionState &state,
 
 void Bmv2V1ModelExprVisitor::processRecirculate(const ExecutionState &state,
                                                 SmallStepEvaluator::Result &result) {
-    auto instanceType = state.getProperty<uint64_t>("recirculate_instance_type");
+    auto instanceType = state.getProperty<uint64_t>("recirculate_instance_type"_cs);
     const auto *progInfo = getProgramInfo().checkedTo<Bmv2V1ModelProgramInfo>();
     auto &recState = state.clone();
 
     // Check whether the packet needs to be reset.
     // If that is the case, reset the packet buffer to the calculated input packet.
-    auto recirculateReset = state.hasProperty("recirculate_reset_pkt");
+    auto recirculateReset = state.hasProperty("recirculate_reset_pkt"_cs);
     if (recirculateReset) {
         // Reset the packet buffer, which corresponds to the output packet.
         recState.resetPacketBuffer();
@@ -259,29 +261,29 @@ void Bmv2V1ModelExprVisitor::processRecirculate(const ExecutionState &state,
         new IR::Member(&PacketVars::PACKET_SIZE_VAR_TYPE,
                        new IR::PathExpression("*standard_metadata"), "packet_length");
     const auto *packetSizeConst =
-        IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, recState.getPacketBufferSize() / 8);
+        IR::Constant::get(&PacketVars::PACKET_SIZE_VAR_TYPE, recState.getPacketBufferSize() / 8);
     recState.set(packetSizeVar, packetSizeConst);
 
-    if (recState.hasProperty("recirculate_index")) {
+    if (recState.hasProperty("recirculate_index"_cs)) {
         // Get the index set by the recirculate/resubmit function. Will fail if no index is
         // set.
-        auto recirculateIndex = recState.getProperty<uint64_t>("recirculate_index");
+        auto recirculateIndex = recState.getProperty<uint64_t>("recirculate_index"_cs);
         // This program segment resets the user metadata of the v1model program to 0.
         // However, fields in the user metadata that have the field_list annotation and the
         // appropriate index will not be reset.
         // The user metadata is the third parameter of the parser control.
-        const auto *paramPath = progInfo->getBlockParam("Parser", 2);
+        const auto *paramPath = progInfo->getBlockParam("Parser"_cs, 2);
         resetPreservingFieldList(recState, paramPath, recirculateIndex);
     }
 
     // Update the metadata variable to the correct instance type as provided by recirculation.
-    const auto *bitType = IR::getBitType(32);
+    const auto *bitType = IR::Type_Bits::get(32);
     const auto *instanceTypeVar =
         new IR::Member(bitType, new IR::PathExpression("*standard_metadata"), "instance_type");
-    recState.set(instanceTypeVar, IR::getConstant(bitType, instanceType));
+    recState.set(instanceTypeVar, IR::Constant::get(bitType, instanceType));
 
     // Set recirculate to false to avoid infinite loops.
-    recState.setProperty("recirculate_active", false);
+    recState.setProperty("recirculate_active"_cs, false);
 
     // "Recirculate" by attaching the sequence again.
     // Does NOT initialize state or adds new conditions.
@@ -290,48 +292,43 @@ void Bmv2V1ModelExprVisitor::processRecirculate(const ExecutionState &state,
     result->emplace_back(recState);
 }
 
-std::vector<char> Bmv2V1ModelExprVisitor::convertBigIntToBytes(big_int &dataInt, int targetWidthBits) {
-    std::vector<char> bytes;
+std::vector<uint8_t> Bmv2V1ModelExprVisitor::convertBigIntToBytes(big_int &dataInt, int targetWidthBits,
+                                                                  bool padLeft) {
+    /// Chunk size is 8 bits, i.e., a byte.
+    constexpr uint8_t chunkSize = 8U;
+
+    std::vector<uint8_t> bytes;
     // Convert the input bit width to bytes and round up.
-    size_t targetWidthBytes = (targetWidthBits + CHUNK_SIZE - 1) / CHUNK_SIZE;
-    boost::multiprecision::export_bits(dataInt, std::back_inserter(bytes), CHUNK_SIZE);
+    size_t targetWidthBytes = (targetWidthBits + chunkSize - 1) / chunkSize;
+    boost::multiprecision::export_bits(dataInt, std::back_inserter(bytes), chunkSize);
     // If the number of bytes produced by the export is lower than the desired width pad the byte
     // array with zeroes.
     auto diff = targetWidthBytes - bytes.size();
     if (targetWidthBytes > bytes.size() && diff > 0UL) {
         for (size_t i = 0; i < diff; ++i) {
-            bytes.insert(bytes.begin(), 0);
+            if (padLeft) {
+                bytes.insert(bytes.begin(), 0);
+            } else {
+                bytes.push_back(0);
+            }
         }
     }
-
     return bytes;
 }
 
-big_int Bmv2V1ModelExprVisitor::computeChecksum(const std::vector<const IR::Expression *> &exprList,
-                                      int algo) {
+static big_int checksum(Bmv2HashAlgorithm algo, const uint8_t *buf, size_t len) {
     // Pick a checksum according to the algorithm value.
-    ChecksumFunction checksumFun = nullptr;
     switch (algo) {
-        case Bmv2HashAlgorithm::csum16: {
-            checksumFun = BMv2Hash::csum16;
-            break;
-        }
-        case Bmv2HashAlgorithm::crc32: {
-            checksumFun = BMv2Hash::crc32;
-            break;
-        }
-        case Bmv2HashAlgorithm::crc16: {
-            checksumFun = BMv2Hash::crc16;
-            break;
-        }
-        case Bmv2HashAlgorithm::identity: {
-            checksumFun = BMv2Hash::identity;
-            break;
-        }
-        case Bmv2HashAlgorithm::xor16: {
-            checksumFun = BMv2Hash::xor16;
-            break;
-        }
+        case Bmv2HashAlgorithm::csum16:
+            return NetHash::csum16(buf, len);
+        case Bmv2HashAlgorithm::crc32:
+            return NetHash::crc32(buf, len);
+        case Bmv2HashAlgorithm::crc16:
+            return NetHash::crc16(buf, len);
+        case Bmv2HashAlgorithm::identity:
+            return NetHash::identity(buf, len);
+        case Bmv2HashAlgorithm::xor16:
+            return NetHash::xor16(buf, len);
         case Bmv2HashAlgorithm::random: {
             BUG("Random should not be encountered here");
         }
@@ -340,14 +337,17 @@ big_int Bmv2V1ModelExprVisitor::computeChecksum(const std::vector<const IR::Expr
         default:
             TESTGEN_UNIMPLEMENTED("Algorithm %1% not implemented for hash.", algo);
     }
+}
 
-    std::vector<char> bytes;
+big_int Bmv2V1ModelExprVisitor::computeChecksum(const std::vector<const IR::Expression *> &exprList,
+                                      Bmv2HashAlgorithm algo) {
+    std::vector<uint8_t> bytes;
     if (!exprList.empty()) {
         const auto *concatExpr = exprList.at(0);
         for (size_t idx = 1; idx < exprList.size(); idx++) {
             const auto *expr = exprList.at(idx);
             const auto *newWidth =
-                IR::getBitType(concatExpr->type->width_bits() + expr->type->width_bits());
+                IR::Type_Bits::get(concatExpr->type->width_bits() + expr->type->width_bits());
             concatExpr = new IR::Concat(newWidth, concatExpr, expr);
         }
 
@@ -358,17 +358,17 @@ big_int Bmv2V1ModelExprVisitor::computeChecksum(const std::vector<const IR::Expr
         if (remainder != 0) {
             auto fillWidth = CHUNK_SIZE - remainder;
             concatWidth += fillWidth;
-            const auto *remainderExpr = IR::getConstant(IR::getBitType(fillWidth), 0);
-            concatExpr = new IR::Concat(IR::getBitType(concatWidth), concatExpr, remainderExpr);
+            const auto *remainderExpr = IR::Constant::get(IR::Type_Bits::get(fillWidth), 0);
+            concatExpr = new IR::Concat(IR::Type_Bits::get(concatWidth), concatExpr, remainderExpr);
         }
 
         const auto *expr = P4::optimizeExpression(concatExpr);
         BUG_CHECK(expr->is<IR::Constant>(), "Expression is not constant: %1%", expr);
         auto dataInt = IR::getBigIntFromLiteral(expr->checkedTo<IR::Constant>());
-        bytes = convertBigIntToBytes(dataInt, concatWidth);
+        bytes = convertBigIntToBytes(dataInt, concatWidth, true);
     }
 
-    return checksumFun(bytes.data(), bytes.size());
+    return checksum(algo, bytes.data(), bytes.size());
 }
 
 Bmv2V1ModelExprVisitor::Bmv2V1ModelExprVisitor(ExecutionState &state,
@@ -434,23 +434,19 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          * ======================================================================================
          */
         // TODO: Implement extern path expression calls.
-        {"*method.mark_to_drop",
-         {"standard_metadata"},
+        {"*method.mark_to_drop"_cs,
+         {"standard_metadata"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
              auto &nextState = state.clone();
-             const auto *nineBitType = IR::getBitType(BMv2Constants::PORT_BIT_WIDTH);
-             const auto *metadataLabel = args->at(0)->expression;
-             if (!(metadataLabel->is<IR::Member>() || metadataLabel->is<IR::PathExpression>())) {
-                 TESTGEN_UNIMPLEMENTED("Drop input %1% of type %2% not supported", metadataLabel,
-                                       metadataLabel->type);
-             }
+             const auto *nineBitType = IR::Type_Bits::get(BMv2Constants::PORT_BIT_WIDTH);
+             const auto *metadataLabel = args->at(0)->expression->checkedTo<IR::InOutReference>();
              // Use an assignment to set egress_spec to true.
              // This variable will be processed in the deparser.
-             const auto *portVar = new IR::Member(nineBitType, metadataLabel, "egress_spec");
-             nextState.set(portVar, IR::getConstant(nineBitType, BMv2Constants::DROP_PORT));
-             nextState.add(*new TraceEvents::Generic("mark_to_drop executed."));
+             const auto *portVar = new IR::Member(nineBitType, metadataLabel->ref, "egress_spec");
+             nextState.set(portVar, IR::Constant::get(nineBitType, BMv2Constants::DROP_PORT));
+             nextState.add(*new TraceEvents::Generic("mark_to_drop executed."_cs));
              nextState.popBody();
              result->emplace_back(nextState);
          }},
@@ -460,8 +456,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  it to the result parameter.
          * ======================================================================================
          */
-        {"*method.random",
-         {"result", "lo", "hi"},
+        {"*method.random"_cs,
+         {"result"_cs, "lo"_cs, "hi"_cs},
          [this](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -523,7 +519,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  is likely that your assumption was wrong, and should be reexamined.
          * ======================================================================================
          */
-        {"*method.assume", {"check"}, assertAssumeExecute},
+        {"*method.assume"_cs, {"check"_cs}, assertAssumeExecute},
         /* ======================================================================================
          *  assert
          *  Calling assert when the argument is true has no effect, except any
@@ -547,7 +543,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  same way when assert statements are removed.
          * ======================================================================================
          */
-        {"*method.assert", {"check"}, assertAssumeExecute},
+        {"*method.assert"_cs, {"check"_cs}, assertAssumeExecute},
         /* ======================================================================================
          *  log_msg
          *  Log user defined messages
@@ -555,36 +551,29 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  or log_msg("Value1 = {}, Value2 = {}",{value1, value2});
          * ======================================================================================
          */
-        {"*method.log_msg",
-         {"msg", "args"},
+        {"*method.log_msg"_cs,
+         {"msg"_cs, "args"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
              auto msg = args->at(0)->expression->checkedTo<IR::StringLiteral>()->value;
-             std::stringstream totalStream;
-             if (const auto *structExpr = args->at(1)->expression->to<IR::StructExpression>()) {
-                 int exprNumber = 0;
-                 for (size_t i = 0; i < msg.size(); i++) {
-                     if (i + 1 < msg.size() && msg.get(i) == '{' && msg.get(i + 1) == '}') {
-                         structExpr->components.at(exprNumber)->expression->dbprint(totalStream);
-                         exprNumber += 1;
-                         i += 1;
-                     } else {
-                         totalStream << msg.get(i);
-                     }
-                 }
-             } else {
-                 msg = msg.replace("{}", args->at(1)->toString());
-                 totalStream << msg;
-             }
+             auto value = args->at(1)->expression;
+             std::stringstream assignStream;
+             assignStream << msg << ": ";
+
+             // Strip any newlines in the value we want to record.
+             value->dbprint(assignStream);
+             auto assignString = assignStream.str();
+             assignString.erase(std::remove(assignString.begin(), assignString.end(), '\n'),
+                                assignString.cend());
 
              auto &nextState = state.clone();
-             nextState.add(*new TraceEvents::Generic(totalStream.str()));
+             nextState.add(*new TraceEvents::Generic(assignString));
              nextState.popBody();
              result->emplace_back(nextState);
          }},
-        {"*method.log_msg",
-         {"msg"},
+        {"*method.log_msg"_cs,
+         {"msg"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -610,8 +599,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  @param M          Must be a type bit<W>
          * ======================================================================================
          */
-        {"*method.hash",
-         {"result", "algo", "base", "data", "max"},
+        {"*method.hash"_cs,
+         {"result"_cs, "algo"_cs, "base"_cs, "data"_cs, "max"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression *receiver, IR::ID &name,
                 const IR::Vector<IR::Argument> *args, const ExecutionState &state,
                 SmallStepEvaluator::Result &result) {
@@ -684,8 +673,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *
          * ======================================================================================
          */
-        {"register.read",
-         {"result", "index"},
+        {"register.read"_cs,
+         {"result"_cs, "index"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression *receiver,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -720,7 +709,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // cast the object to the correct class and retrieve the current value according to the
              // index. If the register has not been added had, create a new register object.
              const auto *registerState =
-                 state.getTestObject("registervalues", externInstance->controlPlaneName(), false);
+                 state.getTestObject("registervalues"_cs, externInstance->controlPlaneName(), false);
              const Bmv2V1ModelRegisterValue *registerValue = nullptr;
              if (registerState != nullptr) {
                  registerValue = registerState->checkedTo<Bmv2V1ModelRegisterValue>();
@@ -728,7 +717,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  const auto *inputValue =
                      programInfo.createTargetUninitialized(readOutput->type, false);
                  registerValue = new Bmv2V1ModelRegisterValue(inputValue);
-                 nextState.addTestObject("registervalues", externInstance->controlPlaneName(),
+                 nextState.addTestObject("registervalues"_cs, externInstance->controlPlaneName(),
                                          registerValue);
              }
              const IR::Expression *baseExpr = registerValue->getValueAtIndex(index);
@@ -779,8 +768,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *
          * ======================================================================================
          */
-        {"register.write",
-         {"index", "value"},
+        {"register.write"_cs,
+         {"index"_cs, "value"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression *receiver,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -826,7 +815,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // "Write" to the register by update the internal test object state. If the register
              // did not exist previously, update it with the value to write as initial value.
              const auto *registerState = nextState.getTestObject(
-                 "registervalues", externInstance->controlPlaneName(), false);
+                 "registervalues"_cs, externInstance->controlPlaneName(), false);
              Bmv2V1ModelRegisterValue *registerValue = nullptr;
              if (registerState != nullptr) {
                  registerValue = new Bmv2V1ModelRegisterValue(
@@ -838,7 +827,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  registerValue = new Bmv2V1ModelRegisterValue(writeValue);
                  registerValue->writeToIndex(index, inputValue);
              }
-             nextState.addTestObject("registervalues", externInstance->controlPlaneName(),
+             nextState.addTestObject("registervalues"_cs, externInstance->controlPlaneName(),
                                      registerValue);
              nextState.popBody();
              result->emplace_back(nextState);
@@ -871,8 +860,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          * ======================================================================================
          */
         // TODO: Count currently has no effect in the symbolic interpreter.
-        {"counter.count",
-         {"index"},
+        {"counter.count"_cs,
+         {"index"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> * /*args*/,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -908,7 +897,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          * ======================================================================================
          */
         // TODO: Count currently has no effect in the symbolic interpreter.
-        {"direct_counter.count",
+        {"direct_counter.count"_cs,
          {},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> * /*args*/,
@@ -948,8 +937,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *               range, the final value of result is not specified,
          *  and should be ignored by the caller.
          * ====================================================================================== */
-        {"meter.execute_meter",
-         {"index", "result"},
+        {"meter.execute_meter"_cs,
+         {"index"_cs, "result"_cs},
          [](const IR::MethodCallExpression *call, const IR::Expression *receiver,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -961,8 +950,10 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                      "meter.execute_meter not implemented for %1%. Choosing default value (GREEN).",
                      testBackend);
                  auto &nextState = state.clone();
-                 nextState.set(meterResult, IR::getConstant(meterResult->type,
-                                                            BMv2Constants::METER_COLOR::GREEN));
+                 nextState.set(
+                     meterResult,
+                     IR::Constant::get(meterResult->type,
+                                       static_cast<big_int>(BMv2Constants::METER_COLOR::GREEN)));
                  nextState.popBody();
                  result->emplace_back(nextState);
                  return;
@@ -993,12 +984,12 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // cast the object to the correct class and retrieve the current value according to the
              // index. If the meter has not been added had, create a new meter object.
              const auto *meterState =
-                 state.getTestObject("meter_values", externInstance->controlPlaneName(), false);
+                 state.getTestObject("meter_values"_cs, externInstance->controlPlaneName(), false);
              Bmv2V1ModelMeterValue *meterValue = nullptr;
              const auto &inputValue = ToolsVariables::getSymbolicVariable(
                  meterResult->type, "meter_value" + std::to_string(call->clone_id));
              // Make sure we do not accidentally get "3" as enum assignment...
-             auto *cond = new IR::Lss(inputValue, IR::getConstant(meterResult->type, 3));
+             auto *cond = new IR::Lss(inputValue, IR::Constant::get(meterResult->type, 3));
              if (meterState != nullptr) {
                  meterValue =
                      new Bmv2V1ModelMeterValue(*meterState->checkedTo<Bmv2V1ModelMeterValue>());
@@ -1006,7 +997,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  meterValue = new Bmv2V1ModelMeterValue(inputValue, false);
              }
              meterValue->writeToIndex(index, inputValue);
-             nextState.addTestObject("meter_values", externInstance->controlPlaneName(),
+             nextState.addTestObject("meter_values"_cs, externInstance->controlPlaneName(),
                                      meterValue);
 
              if (meterResult->type->is<IR::Type_Bits>()) {
@@ -1058,8 +1049,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *               color YELLOW, and 2 for color RED (see RFC 2697
          *               and RFC 2698 for the meaning of these colors).
          * ====================================================================================== */
-        {"direct_meter.read",
-         {"result"},
+        {"direct_meter.read"_cs,
+         {"result"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression *receiver,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1069,7 +1060,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *externInstance = state.findDecl(receiverPath);
              const auto *table = progInfo->getTableofDirectExtern(externInstance);
              const auto *tableEntry =
-                 state.getTestObject("tableconfigs", table->controlPlaneName(), false);
+                 state.getTestObject("tableconfigs"_cs, table->controlPlaneName(), false);
 
              auto &nextState = state.clone();
              std::vector<Continuation::Command> replacements;
@@ -1083,8 +1074,10 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                      "direct_meter.read configuration not possible for %1%. Choosing default value "
                      "(GREEN).",
                      testBackend);
-                 nextState.set(meterResult, IR::getConstant(meterResult->type,
-                                                            BMv2Constants::METER_COLOR::GREEN));
+                 nextState.set(
+                     meterResult,
+                     IR::Constant::get(meterResult->type,
+                                       static_cast<big_int>(BMv2Constants::METER_COLOR::GREEN)));
                  nextState.popBody();
                  result->emplace_back(nextState);
                  return;
@@ -1094,20 +1087,20 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // cast the object to the correct class and retrieve the current value according to the
              // index. If the meter has not been added had, create a new meter object.
              const auto *meterState =
-                 state.getTestObject("meter_values", externInstance->controlPlaneName(), false);
+                 state.getTestObject("meter_values"_cs, externInstance->controlPlaneName(), false);
              Bmv2V1ModelMeterValue *meterValue = nullptr;
              const auto &inputValue = ToolsVariables::getSymbolicVariable(
                  meterResult->type, "meter_value" + std::to_string(call->clone_id));
              // Make sure we do not accidentally get "3" as enum assignment...
-             auto *cond = new IR::Lss(inputValue, IR::getConstant(meterResult->type, 3));
+             auto *cond = new IR::Lss(inputValue, IR::Constant::get(meterResult->type, 3));
              if (meterState != nullptr) {
                  meterValue =
                      new Bmv2V1ModelMeterValue(*meterState->checkedTo<Bmv2V1ModelMeterValue>());
              } else {
                  meterValue = new Bmv2V1ModelMeterValue(inputValue, true);
              }
-             meterValue->writeToIndex(IR::getConstant(IR::getBitType(1), 0), inputValue);
-             nextState.addTestObject("meter_values", externInstance->controlPlaneName(),
+             meterValue->writeToIndex(IR::Constant::get(IR::Type_Bits::get(1), 0), inputValue);
+             nextState.addTestObject("meter_values"_cs, externInstance->controlPlaneName(),
                                      meterValue);
 
              if (meterResult->type->is<IR::Type_Bits>()) {
@@ -1128,7 +1121,6 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              result->emplace_back(cond, state, nextState);
              return;
          }},
-
         /* ======================================================================================
          *  digest
          *  Calling digest causes a message containing the values specified in
@@ -1154,8 +1146,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  value of the receiver parameter.
          * ======================================================================================
          */
-        {"*method.digest",
-         {"receiver", "data"},
+        {"*method.digest"_cs,
+         {"receiver"_cs, "data"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> * /*args*/,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1200,16 +1192,16 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  v1model architecture documentation (Note 1) for more details.
          * ======================================================================================
          */
-        {"*method.clone_preserving_field_list",
-         {"type", "session", "data"},
+        {"*method.clone_preserving_field_list"_cs,
+         {"type"_cs, "session"_cs, "data"_cs},
          [](const IR::MethodCallExpression *call, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
              // Grab the recirculate count. Stop after more than 1 circulation loop to avoid
              // infinite recirculation loops.
              // TODO: Determine the exact count.
-             if (state.hasProperty("recirculate_count")) {
-                 if (state.getProperty<uint64_t>("recirculate_count") > 0) {
+             if (state.hasProperty("recirculate_count"_cs)) {
+                 if (state.getProperty<uint64_t>("recirculate_count"_cs) > 0) {
                      auto &nextState = state.clone();
                      ::warning("Only single recirculation supported for now. Dropping packet.");
                      auto *dropStmt = new IR::MethodCallStatement(
@@ -1261,9 +1253,9 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  sessionIdExpr, static_cast<BMv2Constants::CloneType>(cloneType), state.clone(),
                  preserveIndex);
              auto &nextState = state.clone();
-             nextState.addTestObject("clone_infos", "clone_info", cloneInfo);
+             nextState.addTestObject("clone_infos"_cs, "clone_info"_cs, cloneInfo);
              // Also set clone as active, which will trigger "processClone" in the deparser.
-             nextState.setProperty("clone_active", true);
+             nextState.setProperty("clone_active"_cs, true);
              nextState.popBody();
              result->emplace_back(nextState);
          }},
@@ -1303,8 +1295,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  resubmit_preserving_field_list(2) will only preserve field y.
          * ======================================================================================
          */
-        {"*method.resubmit_preserving_field_list",
-         {"data"},
+        {"*method.resubmit_preserving_field_list"_cs,
+         {"data"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1313,8 +1305,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // Grab the recirculate count. Stop after more than 1 circulation loop to avoid
              // infinite recirculation loops.
              // TODO: Determine the exact count.
-             if (state.hasProperty("recirculate_count")) {
-                 recirculateCount = state.getProperty<uint64_t>("recirculate_count");
+             if (state.hasProperty("recirculate_count"_cs)) {
+                 recirculateCount = state.getProperty<uint64_t>("recirculate_count"_cs);
                  if (recirculateCount > 0) {
                      ::warning("Only single resubmit supported for now. Dropping packet.");
                      auto *dropStmt = new IR::MethodCallStatement(
@@ -1325,19 +1317,19 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  }
              }
              // Increment the recirculation count.
-             nextState.setProperty("recirculate_count", ++recirculateCount);
+             nextState.setProperty("recirculate_count"_cs, ++recirculateCount);
              // Recirculate is now active and "processRecirculate" will be triggered in the
              // deparser.
-             nextState.setProperty("recirculate_active", true);
+             nextState.setProperty("recirculate_active"_cs, true);
              // Grab the index and save it to the execution state.
              auto index = args->at(0)->expression->checkedTo<IR::Constant>()->asUint64();
-             nextState.setProperty("recirculate_index", index);
+             nextState.setProperty("recirculate_index"_cs, index);
              // Resubmit actually uses the original input packet, not the deparsed packet.
              // We have to reset the packet content to the input packet in "processRecirculate".
-             nextState.setProperty("recirculate_reset_pkt", true);
+             nextState.setProperty("recirculate_reset_pkt"_cs, true);
              // Set the appropriate instance type, which will be processed by
              // "processRecirculate".
-             nextState.setProperty("recirculate_instance_type",
+             nextState.setProperty("recirculate_instance_type"_cs,
                                    BMv2Constants::PKT_INSTANCE_TYPE_RESUBMIT);
              nextState.popBody();
              result->emplace_back(nextState);
@@ -1364,8 +1356,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          * for more details.
          * ======================================================================================
          */
-        {"*method.recirculate_preserving_field_list",
-         {"index"},
+        {"*method.recirculate_preserving_field_list"_cs,
+         {"index"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1374,8 +1366,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // Grab the recirculate count. Stop after more than 1 circulation loop to avoid
              // infinite recirculation loops.
              // TODO: Determine the exact count.
-             if (state.hasProperty("recirculate_count")) {
-                 recirculateCount = state.getProperty<uint64_t>("recirculate_count");
+             if (state.hasProperty("recirculate_count"_cs)) {
+                 recirculateCount = state.getProperty<uint64_t>("recirculate_count"_cs);
                  if (recirculateCount > 0) {
                      ::warning("Only single recirculation supported for now. Dropping packet.");
                      auto *dropStmt = new IR::MethodCallStatement(
@@ -1387,16 +1379,16 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  }
              }
              // Increment the recirculation count.
-             nextState.setProperty("recirculate_count", ++recirculateCount);
+             nextState.setProperty("recirculate_count"_cs, ++recirculateCount);
              // Recirculate is now active and "processRecirculate" will be triggered in the
              // deparser.
-             nextState.setProperty("recirculate_active", true);
+             nextState.setProperty("recirculate_active"_cs, true);
              // Grab the index and save it to the execution state.
              auto index = args->at(0)->expression->checkedTo<IR::Constant>()->asUint64();
-             nextState.setProperty("recirculate_index", index);
+             nextState.setProperty("recirculate_index"_cs, index);
              // Set the appropriate instance type, which will be processed by
              // "processRecirculate".
-             nextState.setProperty("recirculate_instance_type",
+             nextState.setProperty("recirculate_instance_type"_cs,
                                    BMv2Constants::PKT_INSTANCE_TYPE_RECIRC);
              nextState.popBody();
              result->emplace_back(nextState);
@@ -1410,16 +1402,16 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  type and session parameter values, with empty data.
          * ======================================================================================
          */
-        {"*method.clone",
-         {"type", "session"},
+        {"*method.clone"_cs,
+         {"type"_cs, "session"_cs},
          [](const IR::MethodCallExpression *call, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
             const ExecutionState &state, SmallStepEvaluator::Result &result) {
              // Grab the recirculate count. Stop after more than 1 circulation loop to avoid
              // infinite recirculation loops.
              // TODO: Determine the exact count.
-             if (state.hasProperty("recirculate_count")) {
-                 if (state.getProperty<uint64_t>("recirculate_count") > 0) {
+             if (state.hasProperty("recirculate_count"_cs)) {
+                 if (state.getProperty<uint64_t>("recirculate_count"_cs) > 0) {
                      auto &nextState = state.clone();
                      ::warning("Only single recirculation supported for now. Dropping packet.");
                      auto *dropStmt = new IR::MethodCallStatement(
@@ -1470,9 +1462,9 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              auto *cloneInfo = new Bmv2V1ModelCloneInfo(
                  sessionIdExpr, static_cast<BMv2Constants::CloneType>(cloneType), state.clone(),
                  std::nullopt);
-             nextState.addTestObject("clone_infos", "clone_info", cloneInfo);
+             nextState.addTestObject("clone_infos"_cs, "clone_info"_cs, cloneInfo);
              // Also set clone as active, which will trigger "processClone" in the deparser.
-             nextState.setProperty("clone_active", true);
+             nextState.setProperty("clone_active"_cs, true);
              nextState.popBody();
              result->emplace_back(nextState);
          }},
@@ -1482,21 +1474,22 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          */
         /// Helper extern that processes the parameters set by the recirculate, clone and resubmit
         /// externs. This extern assume the TM is executed at the end of the deparser.
-        {"*.invoke_traffic_manager",
+        {"*.invoke_traffic_manager"_cs,
          {},
          [this](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> * /*args*/,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
              // Check whether the clone variant is  active.
              // Clone triggers a branch and slightly different processing.
-             if (state.hasProperty("clone_active") && state.getProperty<bool>("clone_active")) {
+             if (state.hasProperty("clone_active"_cs) &&
+                 state.getProperty<bool>("clone_active"_cs)) {
                  processClone(state, result);
                  return;
              }
 
              // Check whether recirculate is active.
-             if (state.hasProperty("recirculate_active") &&
-                 state.getProperty<bool>("recirculate_active")) {
+             if (state.hasProperty("recirculate_active"_cs) &&
+                 state.getProperty<bool>("recirculate_active"_cs)) {
                  processRecirculate(state, result);
                  return;
              }
@@ -1509,8 +1502,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          * Checksum16.get
          * ======================================================================================
          */
-        {"Checksum16.get",
-         {"data"},
+        {"Checksum16.get"_cs,
+         {"data"_cs},
          [](const IR::MethodCallExpression * /*call*/, const IR::Expression * /*receiver*/,
             IR::ID & /*methodName*/, const IR::Vector<IR::Argument> * /*args*/,
             const ExecutionState & /*state*/, SmallStepEvaluator::Result & /*result*/) {
@@ -1540,8 +1533,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *                    constant.
          * ======================================================================================
          */
-        {"*method.verify_checksum",
-         {"condition", "data", "checksum", "algo"},
+        {"*method.verify_checksum"_cs,
+         {"condition"_cs, "data"_cs, "checksum"_cs, "algo"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression * /*receiver*/,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1573,8 +1566,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *data = args->at(1)->expression;
              const auto *checksumValue = args->at(2)->expression;
              const auto *checksumValueType = checksumValue->type;
-             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
-             const auto *oneBitType = IR::getBitType(1);
+             auto algo = Bmv2HashAlgorithm(args->at(3)->expression->checkedTo<IR::Constant>()->asInt());
+             const auto *oneBitType = IR::Type_Bits::get(1);
 
              // In some cases the condition is false already. No need to do complex processing then.
              if (const auto *boolVal = verifyCond->to<IR::BoolLiteral>()) {
@@ -1607,7 +1600,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  const auto *expr = exprList.at(idx);
                  if (!expr->is<IR::Constant>()) {
                      auto &rejectState = state.clone();
-                     rejectState.add(*new TraceEvents::Generic("verify: Packet too short"));
+                     rejectState.add(*new TraceEvents::Generic("verify: Packet too short"_cs));
                      rejectState.replaceTopBody(Continuation::Exception::Drop);
                      result->emplace_back(rejectState);
                      return;
@@ -1618,7 +1611,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              big_int computedResult = 0;
              computedResult = computeChecksum(exprList, algo);
              computedResult = std::min(computedResult, maxHashInt);
-             auto *computedValue = IR::getConstant(checksumValueType, computedResult);
+             auto *computedValue = IR::Constant::get(checksumValueType, computedResult);
 
              // The condition is true and the checksum matches.
              {
@@ -1641,7 +1634,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  const auto *checksumErr = new IR::Member(
                      oneBitType, new IR::PathExpression("*standard_metadata"), "checksum_error");
                  const auto *assign =
-                     new IR::AssignmentStatement(checksumErr, IR::getConstant(oneBitType, 1));
+                     new IR::AssignmentStatement(checksumErr, IR::Constant::get(oneBitType, 1));
                  auto *errorCond = new IR::LAnd(verifyCond, checksumMatchCond);
                  replacements.emplace_back(assign);
                  nextState.replaceTopBody(&replacements);
@@ -1675,8 +1668,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *                    constant.
          * ======================================================================================
          */
-        {"*method.update_checksum",
-         {"condition", "data", "checksum", "algo"},
+        {"*method.update_checksum"_cs,
+         {"condition"_cs, "data"_cs, "checksum"_cs, "algo"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression * /*receiver*/,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1704,11 +1697,12 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  argsAreTainted = argsAreTainted || Taint::hasTaint(arg->expression);
              }
 
-             const auto &checksumVar = ToolsVariables::convertReference(args->at(2)->expression);
+             const auto &checksumVar =
+                 args->at(2)->expression->checkedTo<IR::InOutReference>()->ref;
              const auto *updateCond = args->at(0)->expression;
              const auto *checksumVarType = checksumVar->type;
              const auto *data = args->at(1)->expression;
-             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
+             auto algo = Bmv2HashAlgorithm(args->at(3)->expression->checkedTo<IR::Constant>()->asInt());
 
              // In some cases the condition is false already. No need to do complex processing then.
              if (const auto *boolVal = updateCond->to<IR::BoolLiteral>()) {
@@ -1749,7 +1743,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  big_int computedResult = 0;
                  computedResult = computeChecksum(exprList, algo);
                  computedResult = std::min(computedResult, maxHashInt);
-                 auto *computedValue = IR::getConstant(checksumVarType, computedResult);
+                 auto *computedValue = IR::Constant::get(checksumVarType, computedResult);
 
                  auto &nextState = state.clone();
                  nextState.set(checksumVar, computedValue);
@@ -1774,8 +1768,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  ComputeChecksum control.
          * ======================================================================================
          */
-        {"*method.update_checksum_with_payload",
-         {"condition", "data", "checksum", "algo"},
+        {"*method.update_checksum_with_payload"_cs,
+         {"condition"_cs, "data"_cs, "checksum"_cs, "algo"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression * /*receiver*/,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1807,7 +1801,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *updateCond = args->at(0)->expression;
              const auto *checksumVarType = checksumVar->type;
              const auto *data = args->at(1)->expression;
-             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
+             auto algo = Bmv2HashAlgorithm(args->at(3)->expression->checkedTo<IR::Constant>()->asInt());
              // If the condition is tainted or the input data is tainted.
              // The checksum will also be tainted.
              if (argsAreTainted) {
@@ -1822,13 +1816,13 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              // Handle the case where the condition is true.
              {
                  auto exprList = IR::flattenStructExpression(data->checkedTo<IR::StructExpression>());
-             // TODO: Calculate payload
 #if 0
-             // If the payload is present, we need to add it to our checksum calculation.
-             const auto *payloadExpr = finalModel.get(&PacketVars::PAYLOAD_SYMBOL, false);
-             if (payloadExpr != nullptr) {
-                 exprList.push_back(payloadExpr);
-             }
+                 // TODO: Calculate payload
+                 // If the payload is present, we need to add it to our checksum calculation.
+                 const auto *payloadExpr = finalModel.get(&PacketVars::PAYLOAD_SYMBOL, false);
+                 if (payloadExpr != nullptr) {
+                     exprList.push_back(payloadExpr);
+                 }
 #endif
                  for (size_t idx = 0; idx < exprList.size(); ++idx) {
                      const auto *expr = exprList.at(idx);
@@ -1836,7 +1830,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                          // If packet is too short in verify_checksum
                          // simply drop packet
                          auto &rejectState = state.clone();
-                         rejectState.add(*new TraceEvents::Generic("verify: Packet too short"));
+                         rejectState.add(*new TraceEvents::Generic("verify: Packet too short"_cs));
                          rejectState.replaceTopBody(Continuation::Exception::Drop);
                          result->emplace_back(rejectState);
                          return;
@@ -1849,7 +1843,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  computedResult = std::min(computedResult, maxHashInt);
 
                  auto &nextState = state.clone();
-                 nextState.set(checksumVar, IR::getConstant(checksumVarType, computedResult));
+                 nextState.set(checksumVar, IR::Constant::get(checksumVarType, computedResult));
                  nextState.popBody();
                  result->emplace_back(updateCond, state, nextState);
              }
@@ -1871,8 +1865,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
          *  VerifyChecksum control.
          * ======================================================================================
          */
-        {"*method.verify_checksum_with_payload",
-         {"condition", "data", "checksum", "algo"},
+        {"*method.verify_checksum_with_payload"_cs,
+         {"condition"_cs, "data"_cs, "checksum"_cs, "algo"_cs},
          [this](const IR::MethodCallExpression *call, const IR::Expression * /*receiver*/,
                 IR::ID & /*methodName*/, const IR::Vector<IR::Argument> *args,
                 const ExecutionState &state, SmallStepEvaluator::Result &result) {
@@ -1904,8 +1898,8 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              const auto *data = args->at(1)->expression;
              const auto *checksumValue = args->at(2)->expression;
              const auto *checksumValueType = checksumValue->type;
-             auto algo = args->at(3)->expression->checkedTo<IR::Constant>()->asInt();
-             const auto *oneBitType = IR::getBitType(1);
+             auto algo = Bmv2HashAlgorithm(args->at(3)->expression->checkedTo<IR::Constant>()->asInt());
+             const auto *oneBitType = IR::Type_Bits::get(1);
              // If the condition is tainted or the input data is tainted, the checksum error
              // will not be reliable.
              if (argsAreTainted) {
@@ -1934,7 +1928,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                      // If packet is too short in verify_checksum
                      // simply drop packet
                      auto &rejectState = state.clone();
-                     rejectState.add(*new TraceEvents::Generic("verify: Packet too short"));
+                     rejectState.add(*new TraceEvents::Generic("verify: Packet too short"_cs));
                      rejectState.replaceTopBody(Continuation::Exception::Drop);
                      result->emplace_back(rejectState);
                      return;
@@ -1945,7 +1939,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
              big_int computedResult = 0;
              computedResult = computeChecksum(exprList, algo);
              computedResult = std::min(computedResult, maxHashInt);
-             auto *computedValue = IR::getConstant(checksumValueType, computedResult);
+             auto *computedValue = IR::Constant::get(checksumValueType, computedResult);
 
              // The condition is true and the checksum matches.
              {
@@ -1967,7 +1961,7 @@ void Bmv2V1ModelExprVisitor::evalExternMethodCall(const IR::MethodCallExpression
                  const auto *checksumErr = new IR::Member(
                      oneBitType, new IR::PathExpression("*standard_metadata"), "checksum_error");
                  const auto *assign =
-                     new IR::AssignmentStatement(checksumErr, IR::getConstant(oneBitType, 1));
+                     new IR::AssignmentStatement(checksumErr, IR::Constant::get(oneBitType, 1));
                  auto *errorCond = new IR::LAnd(verifyCond, checksumMatchCond);
                  replacements.emplace_back(assign);
                  nextState.replaceTopBody(&replacements);

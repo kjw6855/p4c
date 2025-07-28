@@ -60,36 +60,19 @@ bool CmdVisitor::preorder(const IR::AssignmentStatement *assign) {
 
     state.markVisited(assign);
     const auto &left = ToolsVariables::convertReference(assign->left);
-    const auto *leftType = left->type;
 
     // Resolve the type of the left-and assignment, if it is a type name.
-    leftType = state.resolveType(leftType);
-    // Although we typically expand structure assignments into individual member assignments using
-    // the copyHeaders pass, some extern functions may return a list or struct expression. We can
-    // not always expand these return values as we do with the expandLookahead pass.
-    // Correspondingly, we need to retrieve the fields and set each member individually. This
-    // assumes that all headers and structures have been flattened and no nesting is left.
-    if (const auto *structType = leftType->to<IR::Type_StructLike>()) {
-        const auto *listExpr = assign->right->checkedTo<IR::ListExpression>();
-
-        std::vector<IR::StateVariable> flatRefValids;
-        auto flatRefFields = state.getFlatFields(left, structType, &flatRefValids);
-        // First, complete the assignments for the data structure.
-        for (size_t idx = 0; idx < flatRefFields.size(); ++idx) {
-            const auto &leftFieldRef = flatRefFields[idx];
-            state.set(leftFieldRef, listExpr->components[idx]);
-        }
-        // In case of a header, we also need to set the validity bits to true.
-        for (const auto &headerValid : flatRefValids) {
-            state.set(headerValid, IR::getBoolLiteral(true));
-        }
-    } else if (leftType->is<IR::Type_Base>()) {
+    const auto *assignType = state.resolveType(left->type);
+    if (assign->right->is<IR::StructExpression>() ||
+        assign->right->to<IR::HeaderStackExpression>()) {
+        state.assignStructLike(left, assign->right);
+    } else if (assignType->is<IR::Type_Base>()) {
         state.set(left, assign->right);
     } else {
-        TESTGEN_UNIMPLEMENTED("Unsupported assign type %1% node: %2%", leftType,
-                              leftType->node_type_name());
+        TESTGEN_UNIMPLEMENTED("Unsupported assignment %1% of type %2%", assign,
+                              assignType->node_type_name());
     }
-
+    state.add(*new TraceEvents::AssignmentStatement(*assign));
     state.popBody();
     result->emplace_back(state);
     return false;
@@ -123,7 +106,7 @@ bool CmdVisitor::preorder(const IR::P4Parser *p4parser) {
     nextState.pushCurrentContinuation(handlers);
 
     // Set the start state as the new body.
-    const auto *startState = p4parser->states.getDeclaration<IR::ParserState>("start");
+    const auto *startState = p4parser->states.getDeclaration<IR::ParserState>("start"_cs);
     std::vector<Continuation::Command> cmds;
 
     // Initialize parser-local declarations.
@@ -224,14 +207,14 @@ bool CmdVisitor::preorder(const IR::IfStatement *ifStatement) {
         P4::Coverage::CoverageSet coveredNodes;
         if (evalResult == std::nullopt) {
 
-            auto currentTaint = state.getProperty<bool>("inUndefinedState");
+            auto currentTaint = state.getProperty<bool>("inUndefinedState"_cs);
             nextState.add(*new TraceEvents::IfStatementCondition(ifStatement->condition));
-            cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", true));
+            cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState"_cs, true));
             cmds.emplace_back(ifStatement->ifTrue);
             if (ifStatement->ifFalse != nullptr) {
                 cmds.emplace_back(ifStatement->ifFalse);
             }
-            cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", currentTaint));
+            cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState"_cs, currentTaint));
 
         } else if (evalResult.value()) {
             cmds.emplace_back(ifStatement->ifTrue);
@@ -331,7 +314,7 @@ bool CmdVisitor::preorder(const IR::P4Program * /*program*/) {
     if (pktSize != 0) {
         const auto *fixedSizeEqu =
             new IR::Equ(ExecutionState::getInputPacketSizeVar(),
-                        IR::getConstant(&PacketVars::PACKET_SIZE_VAR_TYPE, pktSize));
+                        IR::Constant::get(&PacketVars::PACKET_SIZE_VAR_TYPE, pktSize));
         if (cond == std::nullopt) {
             cond = fixedSizeEqu;
         } else {
@@ -406,7 +389,7 @@ bool CmdVisitor::preorder(const IR::ParserState *parserState) {
     if (select->is<IR::SelectExpression>()) {
         // Push a new continuation that will take the next state as an argument and execute the
         // state as a command. Create a parameter for the continuation we're about to build.
-        const auto *v = Continuation::genParameter(IR::Type_State::get(), "nextState",
+        const auto *v = Continuation::genParameter(IR::Type_State::get(), "nextState"_cs,
                                                    state.getNamespaceContext());
 
         // Create the continuation itself.
@@ -462,7 +445,7 @@ bool CmdVisitor::preorder(const IR::ExitStatement *e) {
     logStep(e);
     auto &nextState = state.clone();
     nextState.markVisited(e);
-    nextState.add(*new TraceEvents::Generic("Exit"));
+    nextState.add(*new TraceEvents::Generic("Exit"_cs));
     nextState.replaceTopBody(Continuation::Exception::Exit);
     result->emplace_back(nextState);
     return false;
@@ -476,7 +459,7 @@ const Constraint *CmdVisitor::startParser(const IR::P4Parser *parser, ExecutionS
     const auto *boolType = IR::Type::Boolean::get();
     const Constraint *result =
         new IR::Leq(boolType, ExecutionState::getInputPacketSizeVar(),
-                    IR::getConstant(parserCursorVarType, ExecutionState::getMaxPacketLength()));
+                    IR::Constant::get(parserCursorVarType, ExecutionState::getMaxPacketLength()));
 
     // Constrain the input packet size to be a multiple of 8 bits. Do this by constraining the
     // lowest three bits of the packet size to 0.
@@ -485,9 +468,9 @@ const Constraint *CmdVisitor::startParser(const IR::P4Parser *parser, ExecutionS
         boolType, result,
         new IR::Equ(boolType,
                     new IR::Slice(threeBitType, ExecutionState::getInputPacketSizeVar(),
-                                  IR::getConstant(parserCursorVarType, 2),
-                                  IR::getConstant(parserCursorVarType, 0)),
-                    IR::getConstant(threeBitType, 0)));
+                                  IR::Constant::get(parserCursorVarType, 2),
+                                  IR::Constant::get(parserCursorVarType, 0)),
+                    IR::Constant::get(threeBitType, 0)));
 
     // Call the implementation for the specific target.
     // If we get a constraint back, add it to the result.
@@ -520,7 +503,7 @@ IR::SwitchStatement *CmdVisitor::replaceSwitchLabels(const IR::SwitchStatement *
         // Do not replace default expression labels.
         if (!newSwitchCase->label->is<IR::DefaultExpression>()) {
             newSwitchCase->label =
-                IR::getConstant(actionVar->type, actionsIds[switchCase->label->toString()]);
+                IR::Constant::get(actionVar->type, actionsIds[switchCase->label->toString()]);
         }
         newCases.push_back(newSwitchCase);
     }
@@ -554,14 +537,14 @@ bool CmdVisitor::preorder(const IR::SwitchStatement *switchStatement) {
     // the program counter and execute all of the statements.
     P4::Coverage::CoverageSet coveredNodes;
     if (Taint::hasTaint(switchStatement->expression)) {
-        auto currentTaint = state.getProperty<bool>("inUndefinedState");
-        cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", true));
+        auto currentTaint = state.getProperty<bool>("inUndefinedState"_cs);
+        cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState"_cs, true));
         for (const auto *switchCase : switchStatement->cases) {
             if (switchCase->statement != nullptr) {
                 cmds.emplace_back(switchCase->statement);
             }
         }
-        cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState", currentTaint));
+        cmds.emplace_back(Continuation::PropertyUpdate("inUndefinedState"_cs, currentTaint));
     } else {
         // Otherwise, we pick the switch statement case in a normal fashion.
         bool hasMatched = false;

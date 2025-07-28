@@ -182,8 +182,8 @@ const IR::MethodCallExpression *Utils::generateInternalMethodCall(
 }
 
 const IR::Expression *Utils::getValExpr(const std::string& strVal, size_t bitWidth) {
-    const auto* baseVar = P4::optimizeExpression(IR::getConstant(IR::getBitType(0), 0));
-    const auto* baseVarType = IR::getBitType(bitWidth);
+    const auto* baseVar = P4::optimizeExpression(IR::Constant::get(IR::Type_Bits::get(0), 0));
+    const auto* baseVarType = IR::Type_Bits::get(bitWidth);
 
     int baseLen = (bitWidth - 1) / 8 + 1;
     int valLen = std::min(baseLen, (int)strVal.length());
@@ -205,7 +205,7 @@ const IR::Expression *Utils::getValExpr(const std::string& strVal, size_t bitWid
         }
 
         const auto* concat = new IR::Concat(baseVarType, baseVar,
-                IR::getConstant(IR::getBitType(subBitWidth), (unsigned int)num));
+                IR::Constant::get(IR::Type_Bits::get(subBitWidth), (unsigned int)num));
 
         baseVar = P4::optimizeExpression(concat);
     }
@@ -246,7 +246,7 @@ const IR::Expression *Utils::removeUnknownVar(const IR::Expression *expr) {
                 auto bitWidth = leftExpr->type->width_bits() +
                     rightExpr->type->width_bits();
 
-                const auto *newExpr = new IR::Concat(IR::getBitType(bitWidth), leftExpr, rightExpr);
+                const auto *newExpr = new IR::Concat(IR::Type_Bits::get(bitWidth), leftExpr, rightExpr);
 
                 return P4::optimizeExpression(newExpr);
 
@@ -267,9 +267,9 @@ const IR::Constant *Utils::getZeroCksum(const IR::Expression *expr, int zeroLen,
     if (const auto *symVar = expr->to<IR::SymbolicVariable>()) {
         if (symVar->label.startsWith("*method_checksum")) {
             if (init)
-                return IR::getConstant(IR::getBitType(8), 0);
+                return IR::Constant::get(IR::Type_Bits::get(8), 0);
             else if (zeroLen < 64)
-                return IR::getConstant(IR::getBitType(16), 0);
+                return IR::Constant::get(IR::Type_Bits::get(16), 0);
         }
 
         return nullptr;
@@ -278,7 +278,7 @@ const IR::Constant *Utils::getZeroCksum(const IR::Expression *expr, int zeroLen,
     if (const auto *constVal = expr->to<IR::Constant>()) {
         if (constVal->value == 0) {
             auto bitWidth = constVal->type->width_bits() + zeroLen;
-            return IR::getConstant(IR::getBitType(bitWidth), 1);
+            return IR::Constant::get(IR::Type_Bits::get(bitWidth), 1);
         }
 
         return nullptr;
@@ -327,10 +327,9 @@ std::vector<const IR::Type_Declaration *> argumentsToTypeDeclarations(
             // declaration instance.
             const auto *declInstance =
                 findProgramDecl(ns, pathExpr->path)->checkedTo<IR::Declaration_Instance>();
-            if (const auto *pipe = declInstance->type->to<IR::Type_Specialized>()) {
+            if (declInstance->type->is<IR::Type_Specialized>()) {
                 const auto *pipeDecl = declInstance->to<IR::Declaration_Instance>();
-                argumentsToTypeDeclarations(ns, pipeDecl->arguments, resultDecls);
-                return;
+                return argumentsToTypeDeclarations(ns, pipeDecl->arguments);
 
             } else {
                 declType = declInstance->type->checkedTo<IR::Type_Declaration>();

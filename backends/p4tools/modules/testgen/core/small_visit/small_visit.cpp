@@ -31,11 +31,11 @@ namespace P4Tools::P4Testgen {
 
 #if 0
 SmallStepEvaluator::Branch::Branch(ExecutionState &nextState)
-    : constraint(IR::getBoolLiteral(true)), nextState(nextState) {}
+    : constraint(IR::BoolLiteral::get(true)), nextState(nextState) {}
 
 SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
                                    const ExecutionState &prevState, ExecutionState &nextState)
-    : constraint(IR::getBoolLiteral(true)), nextState(nextState) {
+    : constraint(IR::BoolLiteral::get(true)), nextState(nextState) {
     if (c) {
         // Evaluate the branch constraint in the current state of symbolic environment.
         // Substitutes all variables to their symbolic value (expression on the program's initial
@@ -51,7 +51,7 @@ SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
 SmallStepEvaluator::Branch::Branch(std::optional<const Constraint *> c,
                                    const ExecutionState &prevState, ExecutionState &nextState,
                                    P4::Coverage::CoverageSet potentialStatements)
-    : constraint(IR::getBoolLiteral(true)),
+    : constraint(IR::BoolLiteral::get(true)),
       nextState(nextState),
       potentialStatements(std::move(potentialStatements)) {
     if (c) {
@@ -71,7 +71,7 @@ SmallVisitEvaluator::SmallVisitEvaluator(const ProgramInfo &programInfo)
     : programInfo(programInfo) {
     if (!TestgenOptions::get().pattern.empty()) {
         reachabilityEngine =
-            new ReachabilityEngine(*programInfo.dcg, TestgenOptions::get().pattern, true);
+            new ReachabilityEngine(programInfo.getCallGraph(), TestgenOptions::get().pattern, true);
     }
 }
 
@@ -237,7 +237,7 @@ class CommandVisitor {
                 " Incrementing number of guard violations.",
                 condStream.str().c_str());
             self.get().violatedGuardConditions++;
-            return new std::vector<Branch>({{IR::getBoolLiteral(false), state, nextState}});
+            return new std::vector<Branch>({{IR::BoolLiteral::get(false), state, nextState}});
         }
         // Otherwise, we proceed as usual.
         return new std::vector<Branch>({{cond, state, nextState}});

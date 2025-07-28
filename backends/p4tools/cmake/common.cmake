@@ -23,7 +23,9 @@ function(add_p4tools_library target)
   )
 endfunction(add_p4tools_library)
 
-find_program(_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin)
+find_program(_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+#set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 macro(p4tools_obtain_z3)
   option(TOOLS_USE_PREINSTALLED_Z3 "Look for a preinstalled version of Z3 instead of installing a prebuilt binary using FetchContent." OFF)

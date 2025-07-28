@@ -63,7 +63,6 @@ void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextStat
     // bit<3> priority;
 
     auto programInfo = getProgramInfo();
-    const auto *archSpec = TestgenTarget::getArchSpec();
     const auto &target = TestgenTarget::get();
     const auto *programmableBlocks = programInfo.getProgrammableBlocks();
 
@@ -72,35 +71,35 @@ void Bmv2V1ModelCmdVisitor::initializeTargetEnvironment(ExecutionState &nextStat
     size_t blockIdx = 0;
     for (const auto &blockTuple : *programmableBlocks) {
         const auto *typeDecl = blockTuple.second;
-        const auto *archMember = archSpec->getArchMember(blockIdx);
+        const auto *archMember = programInfo.getArchSpec().getArchMember(blockIdx);
         nextState.initializeBlockParams(target, typeDecl, &archMember->blockParams);
         blockIdx++;
     }
 
-    const auto *nineBitType = IR::getBitType(9);
-    const auto *oneBitType = IR::getBitType(1);
+    const auto *nineBitType = IR::Type_Bits::get(9);
+    const auto *oneBitType = IR::Type_Bits::get(1);
     nextState.set(programInfo.getTargetInputPortVar(),
-            IR::getConstant(nineBitType, testCase.input_packet().port()));
+            IR::Constant::get(nineBitType, testCase.input_packet().port()));
 
     const auto &inputPacket = testCase.input_packet().packet();
 
     // BMv2 implicitly sets the output port to 0.
-    nextState.set(programInfo.getTargetOutputPortVar(), IR::getConstant(nineBitType, 0));
+    nextState.set(programInfo.getTargetOutputPortVar(), IR::Constant::get(nineBitType, 0));
     // Initialize parser_err with no error.
     const auto *parserErrVar =
         new IR::Member(programInfo.getParserErrorType(),
                        new IR::PathExpression("*standard_metadata"), "parser_error");
-    nextState.set(parserErrVar, IR::getConstant(parserErrVar->type, 0));
+    nextState.set(parserErrVar, IR::Constant::get(parserErrVar->type, 0));
     // Initialize checksum_error with no error.
     const auto *checksumErrVar =
         new IR::Member(oneBitType, new IR::PathExpression("*standard_metadata"), "checksum_error");
-    nextState.set(checksumErrVar, IR::getConstant(checksumErrVar->type, 0));
+    nextState.set(checksumErrVar, IR::Constant::get(checksumErrVar->type, 0));
     // The packet size meta data is the testgen packet length variable divided by 8.
     const auto *pktSizeType = &PacketVars::PACKET_SIZE_VAR_TYPE;
     const auto *packetSizeVar =
         new IR::Member(pktSizeType, new IR::PathExpression("*standard_metadata"), "packet_length");
 
-    nextState.set(packetSizeVar, IR::getConstant(pktSizeType, inputPacket.length()));
+    nextState.set(packetSizeVar, IR::Constant::get(pktSizeType, inputPacket.length()));
     nextState.setInputPacketSize(inputPacket.length() * 8);
     nextState.appendToPacketBuffer(Utils::getValExpr(inputPacket, inputPacket.length() * 8));
 }
@@ -109,7 +108,7 @@ std::optional<const Constraint *> Bmv2V1ModelCmdVisitor::startParserImpl(
     const IR::P4Parser *parser, ExecutionState &nextState) const {
     // We need to explicitly map the parser error
     const auto *errVar = Bmv2V1ModelProgramInfo::getParserParamVar(
-        parser, programInfo.getParserErrorType(), 3, "parser_error");
+        parser, programInfo.getParserErrorType(), 3, "parser_error"_cs);
     nextState.setParserErrorLabel(errVar);
 
     /// Set the restriction on the input port for PTF tests.
@@ -129,7 +128,7 @@ std::map<Continuation::Exception, Continuation> Bmv2V1ModelCmdVisitor::getExcept
     auto gress = programInfo.getGress(parser);
 
     const auto *errVar = Bmv2V1ModelProgramInfo::getParserParamVar(
-        parser, programInfo.getParserErrorType(), 3, "parser_error");
+        parser, programInfo.getParserErrorType(), 3, "parser_error"_cs);
 
     switch (gress) {
         case BMV2_INGRESS:
@@ -145,7 +144,7 @@ std::map<Continuation::Exception, Continuation> Bmv2V1ModelCmdVisitor::getExcept
                 Continuation::Exception::PacketTooShort,
                 Continuation::Body({new IR::AssignmentStatement(
                     errVar,
-                    IR::getConstant(errVar->type, P4Constants::PARSER_ERROR_PACKET_TOO_SHORT))}));
+                    IR::Constant::get(errVar->type, P4Constants::PARSER_ERROR_PACKET_TOO_SHORT))}));
             // NoMatch will transition to the next block.
             result.emplace(Continuation::Exception::NoMatch, Continuation::Body({}));
             break;

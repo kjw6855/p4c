@@ -38,7 +38,7 @@ CompilerResultOrError CompilerTarget::runCompiler(std::string_view toolName) {
     return runCompiler(toolName, program);
 }
 
-std::optional<const IR::P4Program *> CompilerTarget::loadProgram(std::string_view toolName,
+CompilerResultOrError CompilerTarget::loadProgram(std::string_view toolName,
                                                                  cstring irJsonFile) {
     std::filebuf fb;
     auto &options = P4CContext::get().options();
@@ -57,7 +57,7 @@ std::optional<const IR::P4Program *> CompilerTarget::loadProgram(std::string_vie
     fb.close();
 
     auto &compilerOptions = dynamic_cast<CompilerOptions &>(options);
-    P4::serializeP4RuntimeIfRequired(program, compilerOptions);
+    // P4::serializeP4RuntimeIfRequired(program, compilerOptions);
     if (::errorCount() > 0) return std::nullopt;
 
     const auto &self = get(toolName);
@@ -66,9 +66,9 @@ std::optional<const IR::P4Program *> CompilerTarget::loadProgram(std::string_vie
         return std::nullopt;
     }
 
-    program = program->apply(HSIndexToMember());
+    // program = program->apply(HSIndexToMember());
 
-    return program;
+    return *new CompilerResult(*program);
 }
 
 CompilerResultOrError CompilerTarget::runCompiler(std::string_view toolName,

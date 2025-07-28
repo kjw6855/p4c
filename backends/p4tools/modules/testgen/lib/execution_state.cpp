@@ -103,12 +103,12 @@ ExecutionState::ExecutionState(const IR::P4Program *program, Continuation::Body 
       body(std::move(body)),
       stack(*(new std::stack<std::reference_wrapper<const StackFrame>>())) {
     //allocatedSymbolicVariables.insert(getInputPacketSizeVar());
-    env.set(&PacketVars::INPUT_PACKET_LABEL, IR::getConstant(IR::getBitType(0), 0));
-    env.set(&PacketVars::PACKET_BUFFER_LABEL, IR::getConstant(IR::getBitType(0), 0));
+    env.set(&PacketVars::INPUT_PACKET_LABEL, IR::Constant::get(IR::Type_Bits::get(0), 0));
+    env.set(&PacketVars::PACKET_BUFFER_LABEL, IR::Constant::get(IR::Type_Bits::get(0), 0));
     // We also add the taint property and set it to false.
-    setProperty("inUndefinedState", false);
+    setProperty("inUndefinedState"_cs, false);
     // Drop is initialized to false, too.
-    setProperty("drop", false);
+    setProperty("drop"_cs, false);
 }
 
 ExecutionState &ExecutionState::create(const IR::P4Program *program) {
@@ -566,15 +566,15 @@ const IR::Expression *ExecutionState::slicePacket(int amount) {
     }
 
     auto diff = amount - bufferSize;
-    const auto *amountType = IR::getBitType(amount);
+    const auto *amountType = IR::Type_Bits::get(amount);
     if (diff > 0) {
         // The input packet is fixed. While exceeding the buffer, create temp pktVar.
-        const IR::Expression *newVar = createPacketVariable(IR::getBitType(diff));
+        const IR::Expression *newVar = createPacketVariable(IR::Type_Bits::get(diff));
         //appendToPacketBuffer(newVar);
 
         if (bufferSize > 0) {
             auto *slice = new IR::Slice(buffer, bufferSize - 1, 0);
-            slice->type = IR::getBitType(amount);
+            slice->type = IR::Type_Bits::get(amount);
             newVar = new IR::Concat(amountType, slice, newVar);
             resetPacketBuffer();
         }
@@ -589,7 +589,7 @@ const IR::Expression *ExecutionState::slicePacket(int amount) {
     // If the buffer is larger, update the buffer with its remainder.
     if (diff < 0) {
         auto *remainder = new IR::Slice(buffer, bufferSize - amount - 1, 0);
-        remainder->type = IR::getBitType(bufferSize - amount);
+        remainder->type = IR::Type_Bits::get(bufferSize - amount);
         env.set(&PacketVars::PACKET_BUFFER_LABEL, remainder);
     }
 

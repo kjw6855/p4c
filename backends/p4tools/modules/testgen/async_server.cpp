@@ -12,7 +12,6 @@
 #include "lib/gc.h"
 
 #include "backends/p4tools/common/lib/util.h"
-#include "backends/p4tools/common/core/solver.h"
 #include "backends/p4tools/common/core/z3_solver.h"
 #include "backends/p4tools/modules/testgen/core/target.h"
 #include "backends/p4tools/modules/testgen/core/symbolic_executor/depth_first.h"
@@ -20,6 +19,8 @@
 #include "backends/p4tools/modules/testgen/lib/test_backend.h"
 
 namespace P4Tools::P4Testgen {
+
+using namespace P4::literals;
 
 static std::string hexToByteString(const std::string &hex) {
     int byteLen = (hex.length() + 1) / 2;
@@ -42,7 +43,7 @@ static std::string hexToByteString(const std::string &hex) {
  */
 
 P4FuzzGuideImpl::P4FuzzGuideImpl(std::map<std::string, ConcolicExecutor*> &coverageMap,
-        const ProgramInfo *programInfo, TableCollector &tableCollector,
+        const ProgramInfo &programInfo, TableCollector &tableCollector,
         const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
     : coverageMap(coverageMap),
       programInfo(programInfo),
@@ -78,7 +79,7 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
                         for (const auto *key : table->getKey()->keyElements) {
                             const IR::Expression* keyExpr = key->expression;
                             const auto* keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
-                            rep->add_name(key->getAnnotation("name")->getName());
+                            rep->add_name(key->getAnnotation("name"_cs)->getName());
                             rep->add_type(key->matchType->toString());
                             rep->add_bit_len(keyType->width_bits());
                         }
@@ -132,7 +133,7 @@ Status P4FuzzGuideImpl::GetP4Statement(ServerContext* context,
         const P4StatementRequest* req,
         P4StatementReply* rep) {
 
-    auto &allNodes = programInfo->getCoverableNodes();
+    auto &allNodes = programInfo.getCoverableNodes();
 
     int i = 1, idx = req->idx();
     for (const auto *node : allNodes) {
@@ -156,7 +157,7 @@ Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
 
     auto devId = req->device_id();
 
-    auto allNodes = programInfo->getCoverableNodes();
+    auto allNodes = programInfo.getCoverableNodes();
     std::cout << "Get P4 Coverage of device: " << devId << std::endl;
 
     auto* newTestCase = new TestCase(req->test_case());
@@ -205,7 +206,7 @@ Status P4FuzzGuideImpl::GenRuleP4Testgen(ServerContext* context,
 
     if (coverageMap.count(devId) == 0) {
         coverageMap.insert(std::make_pair(devId,
-                    new ConcolicExecutor(*programInfo, tableCollector, top, refMap, typeMap)));
+                    new ConcolicExecutor(programInfo, tableCollector, top, refMap, typeMap)));
     }
 
     auto *stateMgr = coverageMap.at(devId);
@@ -250,8 +251,8 @@ Status P4FuzzGuideImpl::GenRuleP4Testgen(ServerContext* context,
             const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
 
             output->set_port(outputPacket.getPort());
-            output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
-            output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+            output->set_packet(hexToByteString(formatHexExpr(payload, {false, true, false})));
+            output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, {false, true, false})));
         }
     }
 
@@ -278,10 +279,10 @@ Status P4FuzzGuideImpl::GenRuleP4Testgen(ServerContext* context,
 
         pathCov->set_path_val(hexToByteString(
                     formatHex(stateMgr->visitedPaths[blockName], width,
-                        false, true, false)));
+                        {false, true, false})));
         pathCov->set_path_size(hexToByteString(
                     formatHex(stateMgr->totalPaths[blockName], width,
-                        false, true, false)));
+                        {false, true, false})));
 
         visitedPath.insert(blockName);
     }
@@ -310,7 +311,7 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
 
     if (coverageMap.count(devId) == 0) {
         coverageMap.insert(std::make_pair(devId,
-                    new ConcolicExecutor(*programInfo, tableCollector, top, refMap, typeMap)));
+                    new ConcolicExecutor(programInfo, tableCollector, top, refMap, typeMap)));
     }
 
     auto *stateMgr = coverageMap.at(devId);
@@ -355,8 +356,8 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
             const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
 
             output->set_port(outputPacket.getPort());
-            output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
-            output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+            output->set_packet(hexToByteString(formatHexExpr(payload, {false, true, false})));
+            output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, {false, true, false})));
         }
     }
 
@@ -383,10 +384,10 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
 
         pathCov->set_path_val(hexToByteString(
                     formatHex(stateMgr->visitedPaths[blockName], width,
-                        false, true, false)));
+                        {false, true, false})));
         pathCov->set_path_size(hexToByteString(
                     formatHex(stateMgr->totalPaths[blockName], width,
-                        false, true, false)));
+                        {false, true, false})));
 
         visitedPath.insert(blockName);
     }
@@ -426,7 +427,7 @@ CallData::CallStatus GetP4StatementData::Proceed(std::map<std::string, ConcolicE
         {
             new GetP4StatementData(service_, cq_, programInfo_, tableCollector_);
 
-            auto &allNodes = programInfo_->getCoverableNodes();
+            auto &allNodes = programInfo_.getCoverableNodes();
 
             int i = 1, idx = request_.idx();
             for (const auto *node : allNodes) {
@@ -462,7 +463,7 @@ CallData::CallStatus GetP4CoverageData::Proceed(std::map<std::string, ConcolicEx
             new GetP4CoverageData(service_, cq_, programInfo_, tableCollector_);
 
             auto devId = request_.device_id();
-            auto allNodes = programInfo_->getCoverableNodes();
+            auto allNodes = programInfo_.getCoverableNodes();
 
             std::cout << "Get P4 Coverage of device: " << devId << std::endl;
 
@@ -555,8 +556,8 @@ CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, Concolic
                 const auto* payloadMask = outputPacket.getEvaluatedPayloadMask();
 
                 output->set_port(outputPacket.getPort());
-                output->set_packet(hexToByteString(formatHexExpr(payload, false, true, false)));
-                output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, false, true, false)));
+                output->set_packet(hexToByteString(formatHexExpr(payload, {false, true, false})));
+                output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, {false, true, false})));
             }
 
 
@@ -571,10 +572,10 @@ CallData::CallStatus RecordP4TestgenData::Proceed(std::map<std::string, Concolic
 
                 pathCov->set_path_val(hexToByteString(
                             formatHex(stateMgr->visitedPaths[blockName], width,
-                                false, true, false)));
+                                {false, true, false})));
                 pathCov->set_path_size(hexToByteString(
                             formatHex(stateMgr->totalPaths[blockName], width,
-                                false, true, false)));
+                                {false, true, false})));
             }
 
             reply_.set_allocated_test_case(newTestCase);

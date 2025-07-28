@@ -43,9 +43,9 @@ static cstring toString(const IR::Expression *expression) {
 Graph *ParserGraphs::CreateSubGraph(Graph &currentSubgraph, const cstring &name) {
     auto &newSubgraph = currentSubgraph.create_subgraph();
     boost::get_property(newSubgraph, boost::graph_name) = "cluster" + name;
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["label"] = name;
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["fontsize"] = "22pt";
-    boost::get_property(newSubgraph, boost::graph_graph_attribute)["style"] = "bold";
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["label"_cs] = name;
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["fontsize"_cs] = "22pt"_cs;
+    boost::get_property(newSubgraph, boost::graph_graph_attribute)["style"_cs] = "bold"_cs;
     return &newSubgraph;
 }
 
@@ -57,7 +57,7 @@ ParserGraphs::ParserGraphs(P4::ReferenceMap *refMap)
 void ParserGraphs::postorder(const IR::P4Parser *parser) {
     Graph *g_ = new Graph();
     g = CreateSubGraph(*g_, parser->name);
-    boost::get_property(*g_, boost::graph_name) = parser->name;
+    boost::get_property(*g_, boost::graph_name) = parser->name.string();
 
     std::map<const char *, unsigned int> nodes;
     unsigned int iter = 0;
@@ -97,7 +97,7 @@ void ParserGraphs::postorder(const IR::PathExpression *expression) {
             auto sc = findContext<IR::SelectCase>();
             cstring label;
             if (sc == nullptr) {
-                label = "always";
+                label = "always"_cs;
             } else {
                 label = toString(sc->keyset);
             }
@@ -122,7 +122,7 @@ void ParserGraphs::postorder(const IR::SelectExpression *expression) {
     auto reject = parser->getDeclByName(IR::ParserState::reject);
     CHECK_NULL(reject);
     transitions[parser].push_back(
-        new TransitionEdge(state, reject->to<IR::ParserState>(), "fallthrough"));
+        new TransitionEdge(state, reject->to<IR::ParserState>(), "fallthrough"_cs));
 }
 
 }  // namespace P4Tools::P4Testgen

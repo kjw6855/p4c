@@ -10,7 +10,7 @@ set(P4TESTGEN_DRIVER "${CMAKE_CURRENT_BINARY_DIR}/p4testgen")
 
 get_filename_component(p4testgen_proto_path "./targets/bmv2/proto" ABSOLUTE)
 set(p4testgen_proto "${p4testgen_proto_path}/p4testgen.proto")
-set(p4runtime_proto_path "${P4C_SOURCE_DIR}/control-plane/p4runtime/proto")
+set(p4runtime_proto_path "${P4C_SOURCE_DIR}/.git/modules/control-plane/p4runtime/proto")
 set(p4runtime_cp_path "${P4C_SOURCE_DIR}/control-plane")
 
 set(p4testgen_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4testgen.grpc.pb.cc")
@@ -26,17 +26,20 @@ add_custom_target(link_target ALL
 
 add_custom_command(
       OUTPUT "${p4testgen_proto_srcs}" "${p4testgen_proto_hdrs}" "${p4testgen_grpc_srcs}" "${p4testgen_grpc_hdrs}"
-      COMMAND "${PROTOBUF_PROTOC_EXECUTABLE}"
+      COMMAND "${Protobuf_PROTOC_EXECUTABLE}"
       ARGS --grpc_out "${CMAKE_CURRENT_BINARY_DIR}"
         --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
         -I "${p4testgen_proto_path}"
-        -I "${p4runtime_proto_path}"
+        -I "${P4RUNTIME_STD_DIR}"
+        -I "${Protobuf_INCLUDE_DIRS}"
         -I "${p4runtime_cp_path}"
         --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
         "${p4testgen_proto}"
-      DEPENDS "${p4testgen_proto}")
+      DEPENDS
+        ${p4testgen_proto}
+        ${p4runtime_SOURCE_DIR}/proto/p4/v1/p4runtime.proto
+      COMMENT "Generating proto files at ${CMAKE_CURRENT_BINARY_DIR} by using ${Protobuf_PROTOC_EXECUTABLE} and importing ${p4runtime_SOURCE_DIR}")
 
-# Source files for p4testgen.
 set(
   TESTGEN_SOURCES
   async_server.cpp
@@ -123,8 +126,8 @@ set(
   PRIVATE p4tools-control-plane
   # Make sure the testgen library and anything that links to it see both the Inja includes.
   PUBLIC inja
-  PUBLIC grpc
-  PUBLIC grpc++
+  PUBLIC gRPC::grpc++
+  PUBLIC gRPC::gpr
   PUBLIC ${PROTOBUF_LIBRARY}
 )
 set(TESTGEN_INCLUDES)
@@ -166,6 +169,9 @@ target_link_libraries(testgen
 if (TESTGEN_INCLUDES)
   target_include_directories(testgen ${TESTGEN_INCLUDES})
 endif()
+
+target_include_directories(testgen PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
 
 # The executable.
 add_p4tools_executable(p4testgen main.cpp)
