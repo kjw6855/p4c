@@ -38,7 +38,7 @@ add_custom_command(
       DEPENDS
         ${p4testgen_proto}
         ${p4runtime_SOURCE_DIR}/proto/p4/v1/p4runtime.proto
-      COMMENT "Generating proto files at ${CMAKE_CURRENT_BINARY_DIR} by using ${Protobuf_PROTOC_EXECUTABLE} and importing ${p4runtime_SOURCE_DIR}")
+      COMMENT "Generating proto files at ${CMAKE_CURRENT_BINARY_DIR} by using ${Protobuf_PROTOC_EXECUTABLE}, depending ${p4runtime_SOURCE_DIR}, and importing ${p4testgen_proto_path}, ${P4RUNTIME_STD_DIR}, ${Protobuf_INCLUDE_DIRS}, and ${p4runtime_cp_path}")
 
 set(
   TESTGEN_SOURCES

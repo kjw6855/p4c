@@ -316,29 +316,6 @@ std::vector<uint8_t> Bmv2V1ModelExprVisitor::convertBigIntToBytes(big_int &dataI
     return bytes;
 }
 
-static big_int checksum(Bmv2HashAlgorithm algo, const uint8_t *buf, size_t len) {
-    // Pick a checksum according to the algorithm value.
-    switch (algo) {
-        case Bmv2HashAlgorithm::csum16:
-            return NetHash::csum16(buf, len);
-        case Bmv2HashAlgorithm::crc32:
-            return NetHash::crc32(buf, len);
-        case Bmv2HashAlgorithm::crc16:
-            return NetHash::crc16(buf, len);
-        case Bmv2HashAlgorithm::identity:
-            return NetHash::identity(buf, len);
-        case Bmv2HashAlgorithm::xor16:
-            return NetHash::xor16(buf, len);
-        case Bmv2HashAlgorithm::random: {
-            BUG("Random should not be encountered here");
-        }
-        case Bmv2HashAlgorithm::crc32_custom:
-        case Bmv2HashAlgorithm::crc16_custom:
-        default:
-            TESTGEN_UNIMPLEMENTED("Algorithm %1% not implemented for hash.", algo);
-    }
-}
-
 big_int Bmv2V1ModelExprVisitor::computeChecksum(const std::vector<const IR::Expression *> &exprList,
                                       Bmv2HashAlgorithm algo) {
     std::vector<uint8_t> bytes;

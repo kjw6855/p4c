@@ -62,7 +62,7 @@ macro(p4c_obtain_protobuf)
     set(protobuf_INSTALL ON CACHE BOOL "Install Protobuf")
     set(protobuf_ABSL_PROVIDER "package" CACHE STRING "Use system-provided abseil")
     set(protobuf_BUILD_EXPORT ON)
-    set(utf8_range_ENABLE_INSTALL OFF)
+    set(utf8_range_ENABLE_INSTALL ON)
 
     fetchcontent_declare(
       protobuf
@@ -91,6 +91,8 @@ macro(p4c_obtain_protobuf)
     set_target_properties(libprotobuf-lite PROPERTIES COMPILE_FLAGS "-Wno-error -w")
     set_target_properties(libprotobuf PROPERTIES COMPILE_FLAGS "-Wno-error -w")
     set_target_properties(libprotoc PROPERTIES COMPILE_FLAGS "-Wno-error -w")
+
+    find_package(utf8_range)
 
     # Set some Protobuf variables manually until we are able to call FindPackage directly. This
     # should be possible with CMake 3.24. Protobuf sets the protoc binary to a generator expression

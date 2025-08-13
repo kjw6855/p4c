@@ -36,6 +36,8 @@ P4C_DIR=$(readlink -f ${THIS_DIR}/..)
 # Whether to build the P4Tools back end and platform.
 : "${ENABLE_TEST_TOOLS:=OFF}"
 : "${CMAKE_EXPORT_COMPILE_COMMANDS=OFF}"
+: "${P4C_USE_PREINSTALLED_PROTOBUF:=OFF}"
+: "${P4C_USE_PREINSTALLED_ABSEIL:=OFF}"
 # Whether to treat warnings as errors.
 : "${ENABLE_WERROR:=ON}"
 # Compile with Clang compiler
@@ -101,6 +103,7 @@ sudo apt-get install -y --no-install-recommends ${P4C_DEPS}
 # TODO: Consider using a system-provided package here.
 sudo apt-get install -y python3-venv curl
 curl -LsSf https://astral.sh/uv/0.6.12/install.sh | sh
+source $HOME/.local/bin/env
 uv sync
 uv tool update-shell
 
@@ -262,6 +265,9 @@ CMAKE_FLAGS+="-DENABLE_WERROR=${ENABLE_WERROR} "
 CMAKE_FLAGS+="-DENABLE_SANITIZERS=${ENABLE_SANITIZERS} "
 # Enable auto var initialization with pattern.
 CMAKE_FLAGS+="-DBUILD_AUTO_VAR_INIT_PATTERN=${BUILD_AUTO_VAR_INIT_PATTERN} "
+CMAKE_FLAGS+="-DCMAKE_EXPORT_COMPILE_COMMANDS=${CMAKE_EXPORT_COMPILE_COMMANDS} "
+CMAKE_FLAGS+="-DP4C_USE_PREINSTALLED_PROTOBUF=${P4C_USE_PREINSTALLED_PROTOBUF} "
+CMAKE_FLAGS+="-DP4C_USE_PREINSTALLED_ABSEIL=${P4C_USE_PREINSTALLED_ABSEIL} "
 
 if [ "$ENABLE_SANITIZERS" == "ON" ]; then
   CMAKE_FLAGS+="-DENABLE_GC=OFF"
@@ -270,7 +276,7 @@ fi
 
 # Run CMake in the build folder.
 mkdir -p ${P4C_DIR}/build
-uv run cmake -B ${P4C_DIR}/build ${CMAKE_FLAGS} -G "${BUILD_GENERATOR}" .
+uv run cmake -B ${P4C_DIR}/build ${CMAKE_FLAGS} -G "${BUILD_GENERATOR}" -DCMAKE_PREFIX_PATH="/usr/local" .
 
 # If CMAKE_ONLY is active, only run CMake. Do not build.
 if [ "$CMAKE_ONLY" == "OFF" ]; then
