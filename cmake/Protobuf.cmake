@@ -1,5 +1,4 @@
 macro(p4c_obtain_protobuf)
-  set(P4C_PROTOBUF_VERSION 25.3)
   option(
     P4C_USE_PREINSTALLED_PROTOBUF
     "Look for a preinstalled version of Protobuf in the system instead of installing a prebuilt binary using FetchContent."
@@ -8,6 +7,7 @@ macro(p4c_obtain_protobuf)
 
   # If P4C_USE_PREINSTALLED_PROTOBUF is ON just try to find a preinstalled version of Protobuf.
   if(P4C_USE_PREINSTALLED_PROTOBUF)
+    set(P4C_PROTOBUF_VERSION 25.3.0)
     if(ENABLE_PROTOBUF_STATIC)
       set(SAVED_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
       set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
@@ -38,6 +38,7 @@ macro(p4c_obtain_protobuf)
       set(CMAKE_FIND_LIBRARY_SUFFIXES ${SAVED_CMAKE_FIND_LIBRARY_SUFFIXES})
     endif()
   else()
+    set(P4C_PROTOBUF_VERSION 25.3)
     message(STATUS "Fetching Protobuf version ${P4C_PROTOBUF_VERSION} for P4C...")
 
     # Unity builds do not work for Protobuf...

@@ -31,14 +31,13 @@ add_custom_command(
         --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
         -I "${p4testgen_proto_path}"
         -I "${P4RUNTIME_STD_DIR}"
-        -I "${Protobuf_INCLUDE_DIRS}"
         -I "${p4runtime_cp_path}"
         --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
         "${p4testgen_proto}"
       DEPENDS
         ${p4testgen_proto}
         ${p4runtime_SOURCE_DIR}/proto/p4/v1/p4runtime.proto
-      COMMENT "Generating proto files at ${CMAKE_CURRENT_BINARY_DIR} by using ${Protobuf_PROTOC_EXECUTABLE}, depending ${p4runtime_SOURCE_DIR}, and importing ${p4testgen_proto_path}, ${P4RUNTIME_STD_DIR}, ${Protobuf_INCLUDE_DIRS}, and ${p4runtime_cp_path}")
+      COMMENT "Generating proto files at ${CMAKE_CURRENT_BINARY_DIR} by using ${Protobuf_PROTOC_EXECUTABLE}, depending ${p4runtime_SOURCE_DIR}, and importing ${p4testgen_proto_path}, ${P4RUNTIME_STD_DIR}, and ${p4runtime_cp_path}")
 
 set(
   TESTGEN_SOURCES
