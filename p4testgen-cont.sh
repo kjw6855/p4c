@@ -2,6 +2,7 @@
 set -m
 BASEDIR=$(dirname $0)
 AGENT_DIR="/tmp/p4testgen"
+P4PROG_PATH="$AGENT_DIR/target.p4"
 CUR_PID=0
 p4testgen_param_list=("$@")
 p4c_params=""
@@ -89,7 +90,8 @@ case "$1" in
     ;;
   # The main P4 file argument
   *.p4)
-    p4c_params+=" $1"
+    p4c_orig_program="$1"
+    p4c_params+=" $P4PROG_PATH"
     shift
     ;;
   *)
@@ -102,9 +104,23 @@ if [[ ! -d $AGENT_DIR ]]; then
     mkdir $AGENT_DIR
 fi
 
-LOG_FILE="/tmp/p4testgen/p4testgen$ID.log"
-PIPE_READ_FILE="/tmp/p4testgen/p4fuzzer_to_agent$ID"
-PIPE_WRITE_FILE="/tmp/p4testgen/p4agent_to_fuzzer$ID"
+# Copy the program to target.p4
+cp $p4c_orig_program $P4PROG_PATH
+
+# Iterate through the array to find and replace the argument.
+for i in "${!p4testgen_param_list[@]}"; do
+  # Check if the current argument ends with ".p4".
+  # The pattern ".*.p4" matches any string ending with ".p4".
+  if [[ "${p4testgen_param_list[$i]}" =~ .*\.p4$ ]]; then
+    # Replace the argument with "tmp.p4".
+    p4testgen_param_list[$i]=$P4PROG_PATH
+    break # We found the file, so we can exit the loop.
+  fi
+done
+
+LOG_FILE="$AGENT_DIR/p4testgen$ID.log"
+PIPE_READ_FILE="$AGENT_DIR/p4fuzzer_to_agent$ID"
+PIPE_WRITE_FILE="$AGENT_DIR/p4agent_to_fuzzer$ID"
 # Create the named pipe if it doesn't exist
 if [[ ! -p "$PIPE_READ_FILE" ]]; then
     mkfifo "$PIPE_READ_FILE"
@@ -158,6 +174,10 @@ do
                     status_code=$?
                     MUTATED=1
                 done
+                p4testgen_shutdown
+                break
+            elif [[ "$message" == "update" ]]; then
+                echo "Update P4 agent"
                 p4testgen_shutdown
                 break
             fi
