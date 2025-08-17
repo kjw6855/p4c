@@ -9,12 +9,37 @@ p4c_params=""
 trap p4testgen_shutdown SIGUSR1
 trap all_shutdown SIGINT SIGTERM EXIT
 
+is_alive() {
+    local pid=$1
+    # Check if the process exists and is not a zombie
+    if kill -0 "$pid" 2>/dev/null; then
+        # Now, check if it's a zombie. A zombie process is technically 'alive'
+        # to 'kill -0', so we need this additional check.
+        if ps -p "$pid" -o stat= | grep -q 'Z'; then
+            return 1 # False: It's a zombie process
+        else
+            return 0 # True: It's alive and not a zombie
+        fi
+    else
+        return 1 # False: Process does not exist
+    fi
+}
+
+wait_p4testgen()
+{
+    # Start a background process to monitor the log and send a signal
+    tail -f "$LOG_FILE" | grep -E -m 1 "Server listening on .*5005$ID" & TAIL_PID=$!
+
+    # Clean up the background tail process and the FIFO
+    wait "$TAIL_PID"
+}
+
 p4testgen_shutdown()
 {
     if [[ $CUR_PID -ne 0 ]]; then
         echo "terminate p4testgen"
         kill -9 $CUR_PID
-        while kill -0 $CUR_PID 2>/dev/null; do :; done
+        while is_alive "$CUR_PID"; do :; done
     fi
 }
 
@@ -76,39 +101,53 @@ done
 if [[ ! -d $AGENT_DIR ]]; then
     mkdir $AGENT_DIR
 fi
-echo $$ > $AGENT_DIR/$ID
 
-PIPE_FILE="/tmp/p4testgen/p4agent_pipe"
+LOG_FILE="/tmp/p4testgen/p4testgen$ID.log"
+PIPE_READ_FILE="/tmp/p4testgen/p4fuzzer_to_agent$ID"
+PIPE_WRITE_FILE="/tmp/p4testgen/p4agent_to_fuzzer$ID"
 # Create the named pipe if it doesn't exist
-if [[ ! -p "$PIPE_FILE" ]]; then
-    mkfifo "$PIPE_FILE"
+if [[ ! -p "$PIPE_READ_FILE" ]]; then
+    mkfifo "$PIPE_READ_FILE"
 fi
+if [[ ! -p "$PIPE_WRITE_FILE" ]]; then
+    mkfifo "$PIPE_WRITE_FILE"
+fi
+
+INIT=1
+MUTATED=0
 
 while [ True ];
 do
-#    $BASEDIR/p4testgen $@ &
-#    CUR_PID=$!
-#    echo "p4testgen starts (PID:$CUR_PID)"
-#    wait $CUR_PID
-#    echo "p4testgen has stopped ..."
-#    CUR_PID=0
-#    sleep 1
-#    echo "Restart p4testgen"
-
-    echo "Compiling seed P4 program"
-    compile_p4_program
+    if [ $INIT -eq 1 ]; then
+        echo "Initalize seed P4 program compilation"
+        compile_p4_program
+        INIT=0
+    fi
 
     echo "Launching p4testgen..."
-    $BASEDIR/p4testgen "${p4testgen_param_list[@]}" &
-    CUR_PID=$!
+    $BASEDIR/p4testgen "${p4testgen_param_list[@]}" > "$LOG_FILE" 2>&1 & CUR_PID=$!
+    wait_p4testgen
+    echo $CUR_PID > $AGENT_DIR/$ID
+
+    if [ $MUTATED -eq 1 ]; then
+        echo "done" > $PIPE_WRITE_FILE
+        MUTATED=0
+    fi
     echo "p4testgen starts (PID: $CUR_PID)"
 
     # Wait for the process to exit using a non-blocking check
     # The 'wait' command inside a subshell will not block the main loop
-    while kill -0 $CUR_PID 2>/dev/null; do
+    while is_alive "$CUR_PID"; do
         # Use 'read' with a 1-second timeout
-        if read -t 1 -r message < "$PIPE_FILE"; then
+        message=`timeout 1 head -n 1 $PIPE_READ_FILE`
+        TIMEOUT_STATUS=$?
+
+        if [ $TIMEOUT_STATUS -eq 124 ]; then
+            continue
+
+        elif [ $TIMEOUT_STATUS -eq 0 ]; then
             # This block runs only if a message was received
+
             echo "Received message: $message"
             if [[ "$message" == "mutate" ]]; then
                 status_code=1
@@ -117,10 +156,14 @@ do
                     mutate_p4_program
                     compile_p4_program
                     status_code=$?
+                    MUTATED=1
                 done
                 p4testgen_shutdown
                 break
             fi
+        else
+            echo "An error occurred."
+            break
         fi
     done
 
