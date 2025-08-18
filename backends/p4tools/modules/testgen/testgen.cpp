@@ -236,10 +236,8 @@ std::optional<AbstractTestList> generateTestsImpl(std::optional<std::string_view
 }  // namespace
 
 Testgen::~Testgen() {
-    if (server_ != nullptr)
-        server_->Shutdown();
-    if (cq_ != nullptr)
-        cq_->Shutdown();
+    if (server != nullptr)
+        server->Shutdown();
 }
 
 void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCollector,
@@ -248,7 +246,6 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
     std::string server_address("0.0.0.0:");
     server_address += std::to_string(grpcPort);
 
-    //P4FuzzGuide::AsyncService service_;
     std::map<std::string, ConcolicExecutor*> coverageMap;
     P4FuzzGuideImpl service = P4FuzzGuideImpl(coverageMap,
             *programInfo, tableCollector, top, refMap, typeMap);
@@ -256,10 +253,8 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
-    //cq_ = builder.AddCompletionQueue();
-    //server_ = builder.BuildAndStart();
 
-    std::unique_ptr<Server> server(builder.BuildAndStart());
+    server = builder.BuildAndStart();
     std::cout << "Server listening on " << server_address << std::endl;
     server->Wait();
 }

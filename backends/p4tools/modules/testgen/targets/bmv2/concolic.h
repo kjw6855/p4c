@@ -48,6 +48,8 @@ class Bmv2Concolic : public Concolic {
         const Model &finalModel, ConcolicVariableMap *resolvedConcolicVariables, int payloadSize);
 
  public:
+    static big_int checksum(Bmv2HashAlgorithm algo, const uint8_t *buf, size_t len);
+
     /// @returns the concolic  functions that are implemented for this particular target.
     static const ConcolicMethodImpls::ImplList *getBmv2ConcolicMethodImpls();
 };

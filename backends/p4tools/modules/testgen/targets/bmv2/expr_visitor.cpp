@@ -345,7 +345,7 @@ big_int Bmv2V1ModelExprVisitor::computeChecksum(const std::vector<const IR::Expr
         bytes = convertBigIntToBytes(dataInt, concatWidth, true);
     }
 
-    return checksum(algo, bytes.data(), bytes.size());
+    return Bmv2Concolic::checksum(algo, bytes.data(), bytes.size());
 }
 
 Bmv2V1ModelExprVisitor::Bmv2V1ModelExprVisitor(ExecutionState &state,

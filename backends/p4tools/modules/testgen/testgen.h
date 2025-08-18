@@ -64,9 +64,7 @@ class Testgen : public AbstractP4cTool<TestgenOptions> {
                           const TestgenOptions &testgenOptions);
 
  private:
-    std::unique_ptr<ServerCompletionQueue> cq_;
-    P4FuzzGuide::AsyncService service_;
-    std::unique_ptr<Server> server_;
+    std::unique_ptr<Server> server;
 
 };
 

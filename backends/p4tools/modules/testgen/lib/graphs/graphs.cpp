@@ -56,8 +56,7 @@ void Graphs::calc_ball_larus() {
 Graphs::vertex_t Graphs::add_vertex(const cstring &name, const IR::Node *node, VertexType type) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);
-    if (node != nullptr)
-        boost::put(&Vertex::node, *g, v, node);
+    boost::put(&Vertex::node, *g, v, node); // regardless of nullptr
     boost::put(&Vertex::type, *g, v, type);
     return g->local_to_global(v);
 }
