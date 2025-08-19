@@ -10,6 +10,8 @@
 #include <string>
 #include <utility>
 #include <memory>
+#include <thread>
+#include <chrono>
 
 #include <grpcpp/grpcpp.h>
 #include <grpc/support/log.h>
@@ -236,19 +238,21 @@ std::optional<AbstractTestList> generateTestsImpl(std::optional<std::string_view
 }  // namespace
 
 Testgen::~Testgen() {
-    if (server != nullptr)
-        server->Shutdown();
+    if (server != nullptr) {
+        std::cout << "Shutdown server gracefully" << std::endl;
+    }
 }
 
 void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCollector,
         const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
         int grpcPort) {
     std::string server_address("0.0.0.0:");
+    ServerState state;
     server_address += std::to_string(grpcPort);
 
     std::map<std::string, ConcolicExecutor*> coverageMap;
     P4FuzzGuideImpl service = P4FuzzGuideImpl(coverageMap,
-            *programInfo, tableCollector, top, refMap, typeMap);
+            *programInfo, tableCollector, top, refMap, typeMap, &state);
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -256,7 +260,23 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
 
     server = builder.BuildAndStart();
     std::cout << "Server listening on " << server_address << std::endl;
+
+    // Main thread loop to check the shutdown flag
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(state.shutdown_mu);
+            if (state.shutdown_requested)
+                break;
+        }
+        // Sleep or perform other tasks, you can adjust this sleep duration
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    std::cout << "Shutdown server gracefully" << std::endl;
+
+    server->Shutdown();
     server->Wait();
+    std::cout << "Done" << std::endl;
 }
 
 void Testgen::registerTarget() {
