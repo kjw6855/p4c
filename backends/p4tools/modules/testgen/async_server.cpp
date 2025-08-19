@@ -44,13 +44,22 @@ static std::string hexToByteString(const std::string &hex) {
 
 P4FuzzGuideImpl::P4FuzzGuideImpl(std::map<std::string, ConcolicExecutor*> &coverageMap,
         const ProgramInfo &programInfo, TableCollector &tableCollector,
-        const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
+        const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+        ServerState *state)
     : coverageMap(coverageMap),
       programInfo(programInfo),
       tableCollector(tableCollector),
       top(top),
       refMap(refMap),
-      typeMap(typeMap) {}
+      typeMap(typeMap),
+      state(state) {}
+
+void P4FuzzGuideImpl::requestShutdown() {
+    // Lock the mutex to ensure thread-safe access
+    std::lock_guard<std::mutex> lock(state->shutdown_mu);
+    // Set the shutdown flag
+    state->shutdown_requested = true;
+}
 
 Status P4FuzzGuideImpl::Hello(ServerContext* context,
         const HealthCheckRequest* req,
@@ -217,19 +226,23 @@ Status P4FuzzGuideImpl::GenRuleP4Testgen(ServerContext* context,
     } catch (const Util::CompilerBug &e) {
         std::cerr << "Internal compiler error: " << e.what() << std::endl;
         std::cerr << "Please submit a bug report with your code." << std::endl;
+        requestShutdown();
         return Status::CANCELLED;
 
     } catch (const Util::CompilationError &e) {
         std::cerr << "Compilation error: " << e.what() << std::endl;
+        requestShutdown();
         return Status::CANCELLED;
 
     } catch (TestgenUnimplemented &e) {
         std::cerr << "Unimplemented error: " << e.what() << std::endl;
+        requestShutdown();
         return Status(StatusCode::UNIMPLEMENTED, "unimplemented");
 
     } catch (const std::exception &e) {
         std::cerr << "Internal error: " << e.what() << std::endl;
         std::cerr << "Please submit a bug report with your code." << std::endl;
+        requestShutdown();
         return Status::CANCELLED;
     }
 
@@ -322,19 +335,23 @@ Status P4FuzzGuideImpl::RecordP4Testgen(ServerContext* context,
     } catch (const Util::CompilerBug &e) {
         std::cerr << "Internal compiler error: " << e.what() << std::endl;
         std::cerr << "Please submit a bug report with your code." << std::endl;
+        requestShutdown();
         return Status::CANCELLED;
 
     } catch (const Util::CompilationError &e) {
         std::cerr << "Compilation error: " << e.what() << std::endl;
+        requestShutdown();
         return Status::CANCELLED;
 
     } catch (TestgenUnimplemented &e) {
         std::cerr << "Unimplemented error: " << e.what() << std::endl;
+        requestShutdown();
         return Status(StatusCode::UNIMPLEMENTED, "unimplemented");
 
     } catch (const std::exception &e) {
         std::cerr << "Internal error: " << e.what() << std::endl;
         std::cerr << "Please submit a bug report with your code." << std::endl;
+        requestShutdown();
         return Status::CANCELLED;
     }
 

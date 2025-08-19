@@ -2,6 +2,7 @@
 #define BACKENDS_P4TOOLS_MODULES_TESTGEN_ASYNC_SERVER_H_
 
 //#include <grpc/grpc.h>
+#include <mutex>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/server_credentials.h>
 #include <grpcpp/server.h>
@@ -33,11 +34,18 @@ using p4testgen::P4StatementRequest;
 using p4testgen::P4StatementReply;
 using p4testgen::TestCase;
 
+// Define a shared state struct for communication
+struct ServerState {
+    std::mutex shutdown_mu;
+    bool shutdown_requested = false;
+};
+
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
  public:
     P4FuzzGuideImpl(std::map<std::string, ConcolicExecutor*> &coverageMap,
             const ProgramInfo &programInfo, TableCollector &tableCollector,
-            const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap);
+            const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            ServerState *state);
 
     Status Hello(ServerContext* context,
             const HealthCheckRequest* req,
@@ -63,6 +71,8 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
             const P4CoverageRequest* req,
             P4CoverageReply* rep) override;
 
+    void requestShutdown();
+
  private:
     std::map<std::string, ConcolicExecutor*> &coverageMap;
     const ProgramInfo &programInfo;
@@ -70,6 +80,7 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
     const IR::ToplevelBlock *top;
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
+    ServerState *state;
 
     //std::string hexToByteString(const std::string &hex);
 };
