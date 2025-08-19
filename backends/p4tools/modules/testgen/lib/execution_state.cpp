@@ -694,7 +694,7 @@ bool ExecutionState::setParserGraph(cstring parserName) {
     if (curGraph == nullptr)
         return false;
 
-    setStartNode(curGraph);
+    setStartNode(curGraph, "start"_cs);
     stepPathInGraph();
     return true;
 }
@@ -717,12 +717,12 @@ bool ExecutionState::setControlGraph(cstring controlName) {
     if (curGraph == nullptr)
         return false;
 
-    setStartNode(curGraph);
+    setStartNode(curGraph, "__START__"_cs);
     stepPathInGraph();
     return true;
 }
 
-void ExecutionState::setStartNode(Graph *g) {
+void ExecutionState::setStartNode(Graph *g, cstring startName) {
     if (g == nullptr)
         return;
 
@@ -731,7 +731,7 @@ void ExecutionState::setStartNode(Graph *g) {
     VertexIterator vti, vend;
     for (boost::tie(vti, vend) = boost::vertices(*g); vti != vend; ++vti) {
         auto nodeName = boost::get(&Vertex::name, *g, *vti);
-        if (nodeName == "__START__") {
+        if (nodeName == startName) {
             curNode = *vti;
             pathVal = 0;
             hasStart = true;

@@ -452,7 +452,7 @@ class ExecutionState : public AbstractExecutionState {
     void setParserGraphs(ParserGraphs *pggArg);
     bool setParserGraph(cstring parserName);
     bool setControlGraph(cstring controlName);
-    void setStartNode(Graph *g);
+    void setStartNode(Graph *g, cstring startName);
     void stepPathInGraph();
     void choosePathInGraph(const IR::Node *node);
     void chooseEntryInGraph(const ::p4::v1::TableEntry &entry);
