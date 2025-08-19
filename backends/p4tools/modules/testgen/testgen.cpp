@@ -237,12 +237,6 @@ std::optional<AbstractTestList> generateTestsImpl(std::optional<std::string_view
 
 }  // namespace
 
-Testgen::~Testgen() {
-    if (server != nullptr) {
-        std::cout << "Shutdown server gracefully" << std::endl;
-    }
-}
-
 void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCollector,
         const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
         int grpcPort) {
@@ -272,11 +266,9 @@ void Testgen::runServer(const ProgramInfo *programInfo, TableCollector &tableCol
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    std::cout << "Shutdown server gracefully" << std::endl;
-
     server->Shutdown();
     server->Wait();
-    std::cout << "Done" << std::endl;
+    std::cout << "Shutdown server gracefully" << std::endl;
 }
 
 void Testgen::registerTarget() {

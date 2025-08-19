@@ -31,8 +31,7 @@ class Testgen : public AbstractP4cTool<TestgenOptions> {
             int grpcPort);
 
  public:
-    //virtual ~Testgen() = default;
-    ~Testgen();
+    virtual ~Testgen() = default;
 
     /// Invokes P4Testgen and returns a list of abstract tests which are generated based on the
     /// input TestgenOptions. The abstract tests can be further specialized depending on the select
