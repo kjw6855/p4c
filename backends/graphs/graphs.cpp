@@ -25,10 +25,11 @@ limitations under the License.
 
 namespace P4::graphs {
 
-Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type) {
+Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type, bool isStateful) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);
     boost::put(&Vertex::type, *g, v, type);
+    boost::put(&Vertex::isStateful, *g, v, isStateful);
     return g->local_to_global(v);
 }
 
@@ -79,16 +80,17 @@ std::optional<Graphs::vertex_t> Graphs::merge_other_statements_into_vertex() {
         statementsStack.back()->dbprint(helper_sstream);
         limitStringSize(sstream, helper_sstream);
     }
-    auto v = add_vertex(cstring(sstream), VertexType::STATEMENTS);
+    auto v = add_vertex(cstring(sstream), VertexType::STATEMENTS, false);
     for (auto parent : parents) add_edge(parent.first, v, parent.second->label());
     parents = {{v, new EdgeUnconditional()}};
     statementsStack.clear();
     return v;
 }
 
-Graphs::vertex_t Graphs::add_and_connect_vertex(const cstring &name, VertexType type) {
+Graphs::vertex_t Graphs::add_and_connect_vertex(const cstring &name, VertexType type,
+                                                bool isStateful) {
     merge_other_statements_into_vertex();
-    auto v = add_vertex(name, type);
+    auto v = add_vertex(name, type, isStateful);
     for (auto parent : parents) add_edge(parent.first, v, parent.second->label());
     return v;
 }

@@ -87,8 +87,8 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             boost::get_property(*g_, boost::graph_name) = name.string();
             BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
             g = controlStack.pushBack(*g_, cstring::empty);
-            start_v = add_vertex("__START__"_cs, VertexType::OTHER);
-            exit_v = add_vertex("__EXIT__"_cs, VertexType::OTHER);
+            start_v = add_vertex("__START__"_cs, VertexType::OTHER, false);
+            exit_v = add_vertex("__EXIT__"_cs, VertexType::OTHER, false);
             parents = {{start_v, new EdgeUnconditional()}};
             visit(it.second->getNode());
 
@@ -137,7 +137,7 @@ bool ControlGraphs::preorder(const IR::BlockStatement *statement) {
 bool ControlGraphs::preorder(const IR::IfStatement *statement) {
     std::stringstream sstream;
     statement->condition->dbprint(sstream);
-    auto v = add_and_connect_vertex(cstring(sstream), VertexType::CONDITION);
+    auto v = add_and_connect_vertex(cstring(sstream), VertexType::CONDITION, false);
 
     Parents new_parents;
     parents = {{v, new EdgeIf(EdgeIf::Branch::TRUE)}};
@@ -166,7 +166,7 @@ bool ControlGraphs::preorder(const IR::SwitchStatement *statement) {
         visit(tbl);
         sstream << "switch: action_run";
     }
-    v = add_and_connect_vertex(cstring(sstream), VertexType::SWITCH);
+    v = add_and_connect_vertex(cstring(sstream), VertexType::SWITCH, false);
 
     Parents new_parents;
     parents = {};
@@ -265,7 +265,7 @@ bool ControlGraphs::preorder(const IR::Key *key) {
         sstream << "\\n";
     }
 
-    auto v = add_and_connect_vertex(cstring(sstream), VertexType::KEY);
+    auto v = add_and_connect_vertex(cstring(sstream), VertexType::KEY, false);
 
     parents = {{v, new EdgeUnconditional()}};
 
@@ -280,7 +280,14 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
 bool ControlGraphs::preorder(const IR::P4Table *table) {
     auto name = table->getName();
 
-    auto v = add_and_connect_vertex(name, VertexType::TABLE);
+    // Check if it's add-on-miss
+    bool isStateful = false;
+    auto boolProp = table->getBooleanProperty("add_on_miss"_cs);
+    if (boolProp != nullptr) {
+        isStateful = boolProp->value;
+    }
+
+    auto v = add_and_connect_vertex(name, VertexType::TABLE, isStateful);
 
     parents = {{v, new EdgeUnconditional()}};
 
@@ -298,7 +305,7 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
         for (auto action : actions) {
             parents = keyNode;
 
-            auto v = add_and_connect_vertex(action->getName(), VertexType::ACTION);
+            auto v = add_and_connect_vertex(action->getName(), VertexType::ACTION, false);
 
             parents = {{v, new EdgeUnconditional()}};
 

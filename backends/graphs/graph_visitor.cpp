@@ -142,7 +142,7 @@ void Graph_visitor::forLoopFullGraph(std::vector<Graph *> &graphsArray, fullGrap
 
         // No statements in graph, merge "__START__" and "__EXIT__" nodes
         if (g_->m_global_vertex.size() == 2) {
-            add_vertex(cstring("Empty body"), VertexType::EMPTY);
+            add_vertex(cstring("Empty body"), VertexType::EMPTY, false);
         } else {
             boost::copy_graph(*g_, subfg, boost::edge_copy(edge_name_copier(*g_, subfg)));
         }

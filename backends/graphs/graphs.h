@@ -111,6 +111,7 @@ class Graphs : public Inspector {
     struct Vertex {
         cstring name;
         VertexType type;
+        bool isStateful;
     };
 
     /// The boost graph support for graphviz subgraphs is not very intuitive. In
@@ -140,8 +141,8 @@ class Graphs : public Inspector {
     /// assignments) into a single vertex to reduce graph complexity
     std::optional<vertex_t> merge_other_statements_into_vertex();
 
-    vertex_t add_vertex(const cstring &name, VertexType type);
-    vertex_t add_and_connect_vertex(const cstring &name, VertexType type);
+    vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful);
+    vertex_t add_and_connect_vertex(const cstring &name, VertexType type, bool isStateful);
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name);
     /// Used to connect subgraphs
     ///
@@ -160,7 +161,7 @@ class Graphs : public Inspector {
                 const auto &vinfo = g[*vit];
                 auto attrs = boost::get(boost::vertex_attribute, g);
                 attrs[*vit]["label"_cs] = vinfo.name;
-                attrs[*vit]["style"_cs] = vertexTypeGetStyle(vinfo.type);
+                attrs[*vit]["style"_cs] = vertexTypeGetStyle(vinfo.type, vinfo.isStateful);
                 attrs[*vit]["shape"_cs] = vertexTypeGetShape(vinfo.type);
                 attrs[*vit]["margin"_cs] = vertexTypeGetMargin(vinfo.type);
             }
@@ -184,7 +185,7 @@ class Graphs : public Inspector {
             return cstring::empty;
         }
 
-        static cstring vertexTypeGetStyle(VertexType type) {
+        static cstring vertexTypeGetStyle(VertexType type, bool isStateful) {
             switch (type) {
                 case VertexType::CONTROL:
                     return "dashed"_cs;
@@ -195,7 +196,12 @@ class Graphs : public Inspector {
                 case VertexType::SWITCH:
                     return "rounded"_cs;
                 default:
-                    return "solid"_cs;
+                    {
+                        if (isStateful)
+                            return "filled"_cs;
+                        else
+                            return "solid"_cs;
+                    }
             }
             BUG("unreachable");
             return cstring::empty;

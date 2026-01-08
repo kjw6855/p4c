@@ -62,7 +62,7 @@ void ParserGraphs::postorder(const IR::P4Parser *parser) {
             state->selectExpression->is<IR::SelectExpression>()) {
             label += "\n" + toString(state->selectExpression->to<IR::SelectExpression>()->select);
         }
-        add_vertex(label, VertexType::STATE);
+        add_vertex(label, VertexType::STATE, false);
         nodes.emplace(std::make_pair(state->name.name.c_str(), iter++));
     }
 
