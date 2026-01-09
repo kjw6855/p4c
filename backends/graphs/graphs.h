@@ -106,6 +106,7 @@ class Graphs : public Inspector {
         CONTROL,
         OTHER,
         STATE,
+        DPSTATE,
         EMPTY
     };
     struct Vertex {
@@ -196,15 +197,13 @@ class Graphs : public Inspector {
                 case VertexType::SWITCH:
                     return "rounded"_cs;
                 default:
-                    {
-                        if (isStateful)
-                            return "filled"_cs;
-                        else
-                            return "solid"_cs;
-                    }
+                    break;
             }
-            BUG("unreachable");
-            return cstring::empty;
+
+            if (isStateful)
+                return "filled"_cs;
+
+            return "solid"_cs;
         }
 
         static cstring vertexTypeGetMargin(VertexType type) {

@@ -220,6 +220,26 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         } else {
             BUG("Unsupported apply method: %1%", instance);
         }
+    } else if (instance->is<P4::ExternMethod>()) {
+        std::stringstream sstream;
+        statement->dbprint(sstream);
+        auto vName = cstring(sstream);
+
+        // Check if externs are stateful or not.
+        bool isStateful = false;
+        auto em = instance->to<P4::ExternMethod>();
+        std::string statefulExternNames[3] = {"Counter", "Meter", "Register"};
+
+        for (const std::string &name : statefulExternNames) {
+            if (em->originalExternType->getName().name == name) {
+                isStateful = true;
+                break;
+            }
+        }
+
+        auto v = add_and_connect_vertex(vName, VertexType::DPSTATE, isStateful);
+        LOG2("has Externs:" << vName);
+        parents = {{v, new EdgeUnconditional()}};
     } else {
         statementsStack.push_back(statement);
     }
