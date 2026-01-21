@@ -192,6 +192,13 @@ int main(int argc, char *const argv[]) {
     LOG2("Generating control graphs");
     graphs::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap, options.graphsDir);
     top->getMain()->apply(cgen);
+    int num_stateful = 0;
+    int num_tables = 0;
+    for (auto g : cgen.controlGraphsArray) {
+        num_stateful += graphs::Graphs::GraphAttributeSetter::get_vertex_count_per_type(*g, graphs::Graphs::VertexType::EMPTY, true);
+        num_tables += graphs::Graphs::GraphAttributeSetter::get_vertex_count_per_type(*g, graphs::Graphs::VertexType::TABLE, false);
+    }
+    std::cout << "Number of Stateful: " << num_stateful << ", and Table: " << num_tables << std::endl;
     LOG2("Generating parser graphs");
     graphs::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
     program->apply(pgg);

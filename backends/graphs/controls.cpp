@@ -87,8 +87,8 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             boost::get_property(*g_, boost::graph_name) = name.string();
             BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
             g = controlStack.pushBack(*g_, cstring::empty);
-            start_v = add_vertex("__START__"_cs, VertexType::OTHER, false);
-            exit_v = add_vertex("__EXIT__"_cs, VertexType::OTHER, false);
+            start_v = add_vertex("__START__"_cs, VertexType::OTHER, false, nullptr);
+            exit_v = add_vertex("__EXIT__"_cs, VertexType::OTHER, false, nullptr);
             parents = {{start_v, new EdgeUnconditional()}};
             visit(it.second->getNode());
 
@@ -149,7 +149,7 @@ bool ControlGraphs::preorder(const IR::IfStatement *statement) {
         statement->condition->dbprint(sstream);
     }
 
-    auto v = add_and_connect_vertex(cstring(sstream), VertexType::CONDITION, false);
+    auto v = add_and_connect_vertex(cstring(sstream), VertexType::CONDITION, false, statement);
 
     Parents new_parents;
     parents = {{v, new EdgeIf(EdgeIf::Branch::TRUE)}};
@@ -178,7 +178,7 @@ bool ControlGraphs::preorder(const IR::SwitchStatement *statement) {
         visit(tbl);
         sstream << "switch: action_run";
     }
-    v = add_and_connect_vertex(cstring(sstream), VertexType::SWITCH, false);
+    v = add_and_connect_vertex(cstring(sstream), VertexType::SWITCH, false, statement);
 
     Parents new_parents;
     parents = {};
@@ -249,7 +249,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
             }
         }
 
-        auto v = add_and_connect_vertex(vName, VertexType::DPSTATE, isStateful);
+        auto v = add_and_connect_vertex(vName, VertexType::DPSTATE, isStateful, statement);
         LOG2("has Externs:" << vName);
         parents = {{v, new EdgeUnconditional()}};
     } else {
@@ -297,7 +297,7 @@ bool ControlGraphs::preorder(const IR::Key *key) {
         sstream << "\\n";
     }
 
-    auto v = add_and_connect_vertex(cstring(sstream), VertexType::KEY, false);
+    auto v = add_and_connect_vertex(cstring(sstream), VertexType::KEY, false, key);
 
     parents = {{v, new EdgeUnconditional()}};
 
@@ -319,7 +319,7 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
         isStateful = boolProp->value;
     }
 
-    auto v = add_and_connect_vertex(name, VertexType::TABLE, isStateful);
+    auto v = add_and_connect_vertex(name, VertexType::TABLE, isStateful, table);
 
     parents = {{v, new EdgeUnconditional()}};
 
@@ -337,7 +337,7 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
         for (auto action : actions) {
             parents = keyNode;
 
-            auto v = add_and_connect_vertex(action->getName(), VertexType::ACTION, false);
+            auto v = add_and_connect_vertex(action->getName(), VertexType::ACTION, false, action);
 
             parents = {{v, new EdgeUnconditional()}};
 

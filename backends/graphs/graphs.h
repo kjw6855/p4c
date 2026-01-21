@@ -113,6 +113,7 @@ class Graphs : public Inspector {
         cstring name;
         VertexType type;
         bool isStateful;
+        std::vector<const IR::Node *>nodes;
     };
 
     /// The boost graph support for graphviz subgraphs is not very intuitive. In
@@ -142,8 +143,9 @@ class Graphs : public Inspector {
     /// assignments) into a single vertex to reduce graph complexity
     std::optional<vertex_t> merge_other_statements_into_vertex();
 
-    vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful);
-    vertex_t add_and_connect_vertex(const cstring &name, VertexType type, bool isStateful);
+    vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
+    vertex_t add_vertex_nodes(const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes);
+    vertex_t add_and_connect_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name);
     /// Used to connect subgraphs
     ///
@@ -171,6 +173,20 @@ class Graphs : public Inspector {
                 auto attrs = boost::get(boost::edge_attribute, g);
                 attrs[*eit]["label"_cs] = boost::get(boost::edge_name, g, *eit);
             }
+        }
+
+        static int get_vertex_count_per_type(Graph &g, VertexType type, bool isStateful) {
+            int num_types = 0;
+            auto vertices = boost::vertices(g);
+            for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+                const auto &vinfo = g[*vit];
+                if (vinfo.isStateful == isStateful) {
+                    if (type == VertexType::EMPTY || vinfo.type == type) {
+                        num_types ++;
+                    }
+                }
+            }
+            return num_types;
         }
 
      private:

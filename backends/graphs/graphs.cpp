@@ -25,11 +25,28 @@ limitations under the License.
 
 namespace P4::graphs {
 
-Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type, bool isStateful) {
+Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);
     boost::put(&Vertex::type, *g, v, type);
     boost::put(&Vertex::isStateful, *g, v, isStateful);
+    if (node != nullptr) {
+        auto &g_ref = *g;
+        auto &v_nodes = g_ref[v].nodes;
+        v_nodes.push_back(node);
+    }
+    return g->local_to_global(v);
+}
+
+Graphs::vertex_t Graphs::add_vertex_nodes(const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes) {
+    auto v = boost::add_vertex(*g);
+    boost::put(&Vertex::name, *g, v, name);
+    boost::put(&Vertex::type, *g, v, type);
+    boost::put(&Vertex::isStateful, *g, v, isStateful);
+
+    auto &g_ref = *g;
+    auto &v_nodes = g_ref[v].nodes;
+    v_nodes.insert(v_nodes.end(), nodes.begin(), nodes.end());
     return g->local_to_global(v);
 }
 
@@ -80,7 +97,8 @@ std::optional<Graphs::vertex_t> Graphs::merge_other_statements_into_vertex() {
         statementsStack.back()->dbprint(helper_sstream);
         limitStringSize(sstream, helper_sstream);
     }
-    auto v = add_vertex(cstring(sstream), VertexType::STATEMENTS, false);
+    std::vector<const IR::Node*> nodes(statementsStack.begin(), statementsStack.end());
+    auto v = add_vertex_nodes(cstring(sstream), VertexType::STATEMENTS, false, nodes);
     for (auto parent : parents) add_edge(parent.first, v, parent.second->label());
     parents = {{v, new EdgeUnconditional()}};
     statementsStack.clear();
@@ -88,9 +106,9 @@ std::optional<Graphs::vertex_t> Graphs::merge_other_statements_into_vertex() {
 }
 
 Graphs::vertex_t Graphs::add_and_connect_vertex(const cstring &name, VertexType type,
-                                                bool isStateful) {
+                                                bool isStateful, const IR::Node *node) {
     merge_other_statements_into_vertex();
-    auto v = add_vertex(name, type, isStateful);
+    auto v = add_vertex(name, type, isStateful, node);
     for (auto parent : parents) add_edge(parent.first, v, parent.second->label());
     return v;
 }
