@@ -136,7 +136,19 @@ bool ControlGraphs::preorder(const IR::BlockStatement *statement) {
 
 bool ControlGraphs::preorder(const IR::IfStatement *statement) {
     std::stringstream sstream;
-    statement->condition->dbprint(sstream);
+    // If condition is either hit or miss
+    auto hitTbl = P4::TableApplySolver::isHit(statement->condition, refMap, typeMap);
+    auto missTbl = P4::TableApplySolver::isMiss(statement->condition, refMap, typeMap);
+    if (hitTbl != nullptr) {
+        visit(hitTbl);
+        sstream << "hit";
+    } else if (missTbl != nullptr) {
+        visit(missTbl);
+        sstream << "miss";
+    } else {
+        statement->condition->dbprint(sstream);
+    }
+
     auto v = add_and_connect_vertex(cstring(sstream), VertexType::CONDITION, false);
 
     Parents new_parents;
