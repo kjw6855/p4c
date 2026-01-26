@@ -132,7 +132,7 @@ class Graphs : public Inspector {
             boost::graph_graph_attribute_t, GraphvizAttributes,
             boost::property<boost::graph_vertex_attribute_t, GraphvizAttributes,
                             boost::property<boost::graph_edge_attribute_t, GraphvizAttributes>>>>;
-    using Graph_ = boost::adjacency_list<boost::vecS, boost::vecS, boost::directedS,
+    using Graph_ = boost::adjacency_list<boost::vecS, boost::vecS, boost::bidirectionalS,
                                          vertexProperties, edgeProperties, graphProperties>;
     using Graph = boost::subgraph<Graph_>;
     using vertex_t = boost::graph_traits<Graph>::vertex_descriptor;
@@ -173,20 +173,6 @@ class Graphs : public Inspector {
                 auto attrs = boost::get(boost::edge_attribute, g);
                 attrs[*eit]["label"_cs] = boost::get(boost::edge_name, g, *eit);
             }
-        }
-
-        static int get_vertex_count_per_type(Graph &g, VertexType type, bool isStateful) {
-            int num_types = 0;
-            auto vertices = boost::vertices(g);
-            for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-                const auto &vinfo = g[*vit];
-                if (vinfo.isStateful == isStateful) {
-                    if (type == VertexType::EMPTY || vinfo.type == type) {
-                        num_types ++;
-                    }
-                }
-            }
-            return num_types;
         }
 
      private:

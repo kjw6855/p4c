@@ -19,6 +19,7 @@ set (GRAPHS_SRCS
   graphs.cpp
   controls.cpp
   parsers.cpp
+  graph_dependency.cpp
   graph_visitor.cpp
 )
 
@@ -26,6 +27,7 @@ set (GRAPHS_HDRS
   graphs.h
   controls.h
   parsers.h
+  graph_dependency.h
   graph_visitor.h
 )
 
