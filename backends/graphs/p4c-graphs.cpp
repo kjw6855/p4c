@@ -197,7 +197,7 @@ int main(int argc, char *const argv[]) {
     graphs::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
     program->apply(pgg);
 
-    graphs::GraphDependency gd{};
+    graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap);
     gd.process(cgen.controlGraphsArray);
 
     graphs::Graph_visitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut,

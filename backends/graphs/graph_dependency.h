@@ -23,12 +23,20 @@ class GraphDependency : public Graphs {
         std::vector<const IR::Node *> output_var;
     };
 
-    GraphDependency() {}
+    GraphDependency(P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
+        : refMap(refMap), typeMap(typeMap) {}
+
     std::vector<Graphs::vertex_t> get_vertices_per_type(Graph *g, VertexType type, bool isStateful);
 
     std::vector<Graphs::vertex_t> find_path_from_vertices(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv);
 
     void process(std::vector<Graph *> &controlGraphsArray);
+
+ private:
+    bool is_stateful(const IR::Node *node);
+
+    P4::ReferenceMap *refMap;
+    P4::TypeMap *typeMap;
 };
 }  // namespace P4::graphs
 #endif /* BACKENDS_GRAPHS_GRAPH_DEPENDENCY_H_ */

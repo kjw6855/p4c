@@ -240,7 +240,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         // Check if externs are stateful or not.
         bool isStateful = false;
         auto em = instance->to<P4::ExternMethod>();
-        std::string statefulExternNames[3] = {"Counter", "Meter", "Register"};
+        std::string statefulExternNames[4] = {"Counter", "Meter", "Register", "RegisterAction"};
 
         for (const std::string &name : statefulExternNames) {
             if (em->originalExternType->getName().name == name) {

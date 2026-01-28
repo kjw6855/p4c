@@ -3,8 +3,34 @@
  */
 
 #include "graph_dependency.h"
+#include "frontends/p4/methodInstance.h"
 
 namespace P4::graphs {
+
+bool GraphDependency::is_stateful(const IR::Node *node) {
+    if (node->is<IR::BaseAssignmentStatement>()) {
+        auto stmt = node->to<IR::BaseAssignmentStatement>();
+        // Check right expression
+        auto rs = stmt->right;
+        if (rs->is<IR::MethodCallExpression>()) {
+            auto rmce = rs->to<IR::MethodCallExpression>();
+            auto inst = P4::MethodInstance::resolve(rmce, refMap, typeMap);
+
+            if (inst->is<P4::ExternMethod>()) {
+                auto em = inst->to<P4::ExternMethod>();
+                std::string statefulExternNames[4] = {"Counter", "Meter", "Register", "RegisterAction"};
+                for (const std::string &name : statefulExternNames) {
+                    if (em->originalExternType->getName().name == name) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 std::vector<Graphs::vertex_t> GraphDependency::get_vertices_per_type(Graph *g, VertexType type, bool isStateful) {
     auto vertices = boost::vertices(*g);
     std::vector<Graphs::vertex_t> found_vertices;
@@ -13,6 +39,14 @@ std::vector<Graphs::vertex_t> GraphDependency::get_vertices_per_type(Graph *g, V
         if (vinfo.isStateful == isStateful) {
             if (type == VertexType::EMPTY || vinfo.type == type) {
                 found_vertices.push_back(*vit);
+            }
+        } else if (isStateful) {
+            /* Additionally check nodes of vertex */
+            for (auto node : vinfo.nodes) {
+                if (is_stateful(node)) {
+                    found_vertices.push_back(*vit);
+                    break;
+                }
             }
         }
     }
