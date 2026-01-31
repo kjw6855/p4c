@@ -25,6 +25,29 @@ limitations under the License.
 
 namespace P4::graphs {
 
+std::optional<Graphs::vertex_t> Graphs::find_node_by_name(Graph *g, const cstring &name) {
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        if (vinfo.name == name)
+            return *vit;
+    }
+
+    return {};
+}
+
+std::optional<Graphs::vertex_t> Graphs::find_node_by_ptr(Graph *g, const IR::Node *ptr) {
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        for (auto node : vinfo.nodes)
+            if (node == ptr)
+                return *vit;
+    }
+
+    return {};
+}
+
 Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);

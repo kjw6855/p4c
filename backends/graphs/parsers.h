@@ -27,7 +27,7 @@
 
 namespace P4::graphs {
 
-class ParserGraphs : public Graphs {
+class ParserGraphs : public Graphs, public Inspector {
  protected:
     struct TransitionEdge {
         const IR::ParserState *sourceState;

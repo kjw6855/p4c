@@ -73,7 +73,6 @@ std::vector<Graphs::vertex_t> GraphDependency::find_path_from_vertices(Graph *g,
     // Run BFS
     std::vector<bool> visited(n, false);
     std::queue<Graphs::vertex_t> q;
-    std::map<Graphs::vertex_t, PathVariables> path_vars;
 
     visited[index[dv]] = true;
     q.push(dv);
@@ -106,7 +105,33 @@ std::vector<Graphs::vertex_t> GraphDependency::find_path_from_vertices(Graph *g,
     return path;
 }
 
-void GraphDependency::process(std::vector<Graph *> &controlGraphsArray) {
+void GraphDependency::draw_def_use() {
+    std::vector<std::string> defs;
+    std::vector<std::string> uses;
+
+    std::stringstream defuse_ss;
+    defuse_ss << *defUse;
+
+    std::vector<std::string> *target = &defs;
+    std::string line;
+    while (std::getline(defuse_ss, line)) {
+        if (line == "defs:") {
+            target = &defs;
+        } else if (line == "uses:") {
+            target = &uses;
+        } else {
+            target->push_back(line);
+        }
+    }
+
+    // Debug output
+    std::cout << "defs:" << std::endl;
+    for (auto &line : defs) std::cout << line << std::endl;
+    std::cout << "uses:" << std::endl;
+    for (auto &line : uses) std::cout << line << std::endl;
+}
+
+void GraphDependency::process() {
     for (auto g : controlGraphsArray) {
         auto stateful_vertices = get_vertices_per_type(g, VertexType::EMPTY, true);
         auto table_vertices = get_vertices_per_type(g, VertexType::TABLE, false);
@@ -123,6 +148,36 @@ void GraphDependency::process(std::vector<Graph *> &controlGraphsArray) {
         std::cout << "Number of Stateful: " << stateful_vertices.size()
             << ", and Table: " << table_vertices.size()
             << " Paths: " << num_paths << std::endl;
+
+        process_subgraph(g);
     }
 }
+
+void GraphDependency::process_subgraph(Graph *g) {
+    auto vertices = boost::vertices(*g);
+    std::cout << "uses:" << std::endl;
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        std::cout << vinfo.name << std::endl; // print name
+        // START or EXIT
+        if (vinfo.nodes.size() == 0) {
+            auto varit = vinfo.vars.find(nullptr);
+            if (varit != vinfo.vars.end()) {
+                auto varSet = varit->second;
+                std::cout <<  "  " << vinfo.name << ": " << varSet.size() << std::endl;
+            }
+        }
+
+        // Normal IR nodes
+        for (const auto *n : vinfo.nodes) {
+            auto varit = vinfo.vars.find(n);
+            if (varit != vinfo.vars.end()) {
+                auto varSet = varit->second;
+                std::cout <<  "  " << vinfo.name << ": " << varSet.size() << std::endl;
+            }
+        }
+        std::cout << std::endl;
+    }
+}
+
 }  // namespace P4::graphs

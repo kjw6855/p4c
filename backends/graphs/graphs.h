@@ -38,6 +38,8 @@ limitations under the License.
 #include "frontends/p4/parserCallGraph.h"
 #include "ir/ir.h"
 #include "ir/visitor.h"
+#include "lib/hvec_map.h"
+#include "lib/hvec_set.h"
 
 namespace P4 {
 
@@ -94,8 +96,9 @@ class EdgeSwitch : public EdgeTypeIface {
     const IR::Expression *labelExpr;
 };
 
-class Graphs : public Inspector {
+class Graphs {
  public:
+    typedef hvec_set<const IR::Node *> varset_t;
     enum class VertexType {
         TABLE,
         KEY,
@@ -113,7 +116,8 @@ class Graphs : public Inspector {
         cstring name;
         VertexType type;
         bool isStateful;
-        std::vector<const IR::Node *>nodes;
+        std::vector<const IR::Node *> nodes;
+        hvec_map<const IR::Node *, varset_t> vars;
     };
 
     /// The boost graph support for graphviz subgraphs is not very intuitive. In
@@ -142,6 +146,11 @@ class Graphs : public Inspector {
     /// merge misc control statements (action calls, extern method calls,
     /// assignments) into a single vertex to reduce graph complexity
     std::optional<vertex_t> merge_other_statements_into_vertex();
+
+    // TODO: optimize finding vertices (e.g., following next edges)
+    //       instead of boost::vertices, map with Graph *g does not work
+    std::optional<vertex_t> find_node_by_name(Graph *g, const cstring &name);
+    std::optional<vertex_t> find_node_by_ptr(Graph *g, const IR::Node *ptr);
 
     vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
     vertex_t add_vertex_nodes(const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes);

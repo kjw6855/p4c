@@ -24,6 +24,7 @@ limitations under the License.
 #include "graph_dependency.h"
 #include "graph_visitor.h"
 #include "graphs.h"
+#include "def_use.h"
 #include "ir/ir.h"
 #include "ir/json_loader.h"
 #include "lib/crash.h"
@@ -58,6 +59,7 @@ MidEnd::MidEnd(CompilerOptions &options) {
     addPasses({
         evaluator,
         [this, evaluator]() { toplevel = evaluator->getToplevelBlock(); },
+         new P4::TypeChecking(&refMap, &typeMap, true),  // update types before ComputeDefUse
     });
 }
 
@@ -189,6 +191,7 @@ int main(int argc, char *const argv[]) {
     }
     if (::P4::errorCount() > 0) return 1;
 
+
     LOG2("Generating graphs under " << options.graphsDir);
     LOG2("Generating control graphs");
     graphs::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap, options.graphsDir);
@@ -197,8 +200,13 @@ int main(int argc, char *const argv[]) {
     graphs::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
     program->apply(pgg);
 
-    graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap);
-    gd.process(cgen.controlGraphsArray);
+    // Generate DefUse based on CFG
+    graphs::ComputeDefUse *defUse = new graphs::ComputeDefUse(cgen.controlGraphsArray);
+    program->apply(*defUse);
+
+    graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap, defUse, cgen.controlGraphsArray);
+    gd.process();
+    gd.draw_def_use();
 
     graphs::Graph_visitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut,
                               options.file);

@@ -21,7 +21,7 @@ limitations under the License.
 
 namespace P4::graphs {
 
-class ControlGraphs : public Graphs {
+class ControlGraphs : public Graphs, public Inspector {
  public:
     class ControlStack {
      public:

@@ -16,6 +16,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/version.h" @ONLY)
 
 set (GRAPHS_SRCS
+  def_use.cpp
   graphs.cpp
   controls.cpp
   parsers.cpp
@@ -24,6 +25,7 @@ set (GRAPHS_SRCS
 )
 
 set (GRAPHS_HDRS
+  def_use.h
   graphs.h
   controls.h
   parsers.h

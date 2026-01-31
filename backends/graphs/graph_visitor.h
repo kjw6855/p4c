@@ -29,7 +29,7 @@ namespace P4::graphs {
 
 /// "process" function of class is dependent on previous aplication of visitor
 /// classes Controls and Parsers onto IR, and can only be run after them.
-class Graph_visitor : public Graphs {
+class Graph_visitor : public Graphs, public Inspector {
  private:
     /// Enum used to create correct connection between subgraphs.
     enum class PrevType { Control, Parser };
