@@ -186,6 +186,8 @@ class ComputeDefUse : public Inspector,
     void applySetupJoinPoints(const IR::Node *root) override;
     bool filter_join_point(const IR::Node *) override;
 
+    void add_var_in_cfg(const loc_t *);
+
  protected:
     Graph *curG{nullptr};
     const IR::Node *curNode{nullptr};

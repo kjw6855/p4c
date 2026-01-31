@@ -158,22 +158,37 @@ void GraphDependency::process_subgraph(Graph *g) {
     std::cout << "uses:" << std::endl;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
-        std::cout << vinfo.name << std::endl; // print name
         // START or EXIT
         if (vinfo.nodes.size() == 0) {
             auto varit = vinfo.vars.find(nullptr);
             if (varit != vinfo.vars.end()) {
                 auto varSet = varit->second;
-                std::cout <<  "  " << vinfo.name << ": " << varSet.size() << std::endl;
+                std::stringstream sstream;
+                sstream << vinfo.name << " (" << varSet.size() << "):";
+                for (const auto *v : varSet) {
+                    sstream << " ";
+                    v->dbprint(sstream);
+                }
+                std::cout << cstring(sstream) << std::endl;
             }
-        }
+        } else {
+            std::cout << vinfo.name << std::endl; // print name
+            // Normal IR nodes
+            for (const auto *n : vinfo.nodes) {
+                auto varit = vinfo.vars.find(n);
+                if (varit == vinfo.vars.end())
+                    continue;
 
-        // Normal IR nodes
-        for (const auto *n : vinfo.nodes) {
-            auto varit = vinfo.vars.find(n);
-            if (varit != vinfo.vars.end()) {
                 auto varSet = varit->second;
-                std::cout <<  "  " << vinfo.name << ": " << varSet.size() << std::endl;
+                std::stringstream sstream;
+                sstream << "  ";
+                n->dbprint(sstream);
+                sstream << " (" << varSet.size() << "):";
+                for (const auto *v : varSet) {
+                    sstream << " ";
+                    v->dbprint(sstream);
+                }
+                std::cout << cstring(sstream) << std::endl;
             }
         }
         std::cout << std::endl;

@@ -59,6 +59,20 @@ void ComputeDefUse::clear() {
     defuse.uses.clear();
 }
 
+void ComputeDefUse::add_var_in_cfg(const loc_t *loc) {
+    if (curG == nullptr) return;
+
+    auto *l = loc;
+    while (l != nullptr) {
+        auto vit = find_node_by_ptr(curG, l->node);
+        if (vit.has_value()) {
+            auto &vinfo = (*curG)[vit.value()];
+            vinfo.vars[curNode].insert(loc->node);
+        }
+        l = l->parent;
+    }
+}
+
 void ComputeDefUse::flow_merge(Visitor &a_) {
     ComputeDefUse &a = dynamic_cast<ComputeDefUse &>(a_);
     LOG8("ComputeDefUse::flow_merge(" << a.uid << ") -> " << uid);
@@ -417,12 +431,7 @@ bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
 bool ComputeDefUse::preorder(const IR::P4Action *act) {
     if (state == SKIPPING) return false;
 
-    auto vit = find_node_by_ptr(curG, curNode);
     for (auto *p : *act->parameters) {
-        if (vit.has_value()) {
-            auto &vinfo = (*curG)[vit.value()];
-            vinfo.vars[curNode].insert(p);
-        }
         def_info[p].defs.insert(getLoc(p));
     }
     IndentCtl::TempIndent indent;
@@ -436,12 +445,7 @@ bool ComputeDefUse::preorder(const IR::Function *fn) {
     LOG5("ComputeDefUse" << uid << "(Function " << fn->name << ")" << indent);
     auto oldstate = state;
     if (state == SKIPPING) state = NORMAL;
-    auto vit = find_node_by_ptr(curG, curNode);
     for (auto *p : *fn->type->parameters) {
-        if (vit.has_value()) {
-            auto &vinfo = (*curG)[vit.value()];
-            vinfo.vars[curNode].insert(p);
-        }
         def_info[p].defs.insert(getLoc(p));
     }
     visit(fn->body, "body");
@@ -493,21 +497,13 @@ bool ComputeDefUse::preorder(const IR::BaseAssignmentStatement *as) {
 // Add all definitions in the given def_info_t (whole and partial) as defs that reach
 // a use at the specified location
 void ComputeDefUse::add_uses(const loc_t *loc, def_info_t &di) {
+    add_var_in_cfg(loc);
     for (auto *l : di.defs) {
         defuse.uses[l->node].insert(loc);
         defuse.defs[loc->node].insert(l);
     }
     for (auto &f : Values(di.fields)) add_uses(loc, f);
     for (auto &sl : Values(di.slices)) add_uses(loc, sl);
-    /*
-    if (curG != nullptr && curNode != nullptr) {
-        auto vit = find_node_by_ptr(curG, curNode);
-        if (vit.has_value()) {
-            auto &vinfo = (*curG)[vit.value()];
-            vinfo.vars[curNode].insert(loc->node);
-        }
-    }
-    */
 }
 
 void ComputeDefUse::set_live_from_type(def_info_t &di, const IR::Type *type) {
@@ -555,6 +551,7 @@ const IR::Expression *ComputeDefUse::do_read(def_info_t &di, const IR::Expressio
     } else if (auto *m = ctxt->node->to<IR::Member>()) {
         if (auto *t = isValid(m, ctxt->parent)) {
             auto loc = getLoc(t);
+            add_var_in_cfg(loc);
             for (auto *l : di.valid_bit_defs) {
                 defuse.uses[l->node].insert(loc);
                 defuse.defs[loc->node].insert(l);
@@ -607,6 +604,7 @@ const IR::Expression *ComputeDefUse::do_read(def_info_t &di, const IR::Expressio
         }
     }
     auto loc = getLoc(e);
+    add_var_in_cfg(loc);
     for (auto *l : di.defs) {
         defuse.uses[l->node].insert(loc);
         defuse.defs[loc->node].insert(l);
