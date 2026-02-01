@@ -165,6 +165,8 @@ class Graphs {
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
                   unsigned cluster_id);
 
+    void add_def_use_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name);
+
     class GraphAttributeSetter {
      public:
         void operator()(Graph &g) const {

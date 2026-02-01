@@ -89,6 +89,16 @@ void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &n
     attrs[ep.first]["lhead"_cs] = "cluster"_cs + Util::toString(cluster_id - 1);
 }
 
+void Graphs::add_def_use_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name) {
+    auto ep = boost::add_edge(from, to, g->root());
+    boost::put(boost::edge_name, g->root(), ep.first, name);
+
+    auto attrs = boost::get(boost::edge_attribute, g->root());
+
+    attrs[ep.first]["style"_cs] = "dashed"_cs;
+    attrs[ep.first]["color"_cs] = "grey"_cs;
+}
+
 void Graphs::limitStringSize(std::stringstream &sstream, std::stringstream &helper_sstream) {
     if (helper_sstream.str().size() > 25) {
         sstream << helper_sstream.str().substr(0, 25) << "...";

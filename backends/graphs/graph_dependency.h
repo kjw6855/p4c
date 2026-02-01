@@ -39,6 +39,7 @@ class GraphDependency : public Graphs {
     void draw_def_use();
 
     void process_subgraph(Graph *g);
+    void dump_vars_in_graph(Graph *g);
 
     void process();
 

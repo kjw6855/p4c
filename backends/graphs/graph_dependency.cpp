@@ -150,10 +150,60 @@ void GraphDependency::process() {
             << " Paths: " << num_paths << std::endl;
 
         process_subgraph(g);
+        //dump_vars_in_graph(g);
     }
 }
 
 void GraphDependency::process_subgraph(Graph *g) {
+    // every vertex
+    auto vertices = boost::vertices(*g);
+    hvec_map<const IR::Node *, Graphs::vertex_t> varToVertexMap;
+    hvec_map<Graphs::vertex_t, varset_t> varMap;
+
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        varset_t allVarSet;
+        // every nodes
+        if (vinfo.nodes.size() == 0) {
+            auto varit = vinfo.vars.find(nullptr);
+            if (varit == vinfo.vars.end())
+                continue;
+
+            auto varSet = varit->second;
+            for (const auto *var : varSet) {
+                allVarSet.insert(var);
+                varToVertexMap[var] = *vit;
+            }
+        }
+        for (const auto *n : vinfo.nodes) {
+            // every vars;
+            auto varit = vinfo.vars.find(n);
+            if (varit == vinfo.vars.end())
+                continue;
+
+            auto varSet = varit->second;
+            for (const auto *var : varSet) {
+                allVarSet.insert(var);
+                varToVertexMap[var] = *vit;
+            }
+        }
+        varMap[*vit] = allVarSet;
+    }
+
+    // every vertex (s), every vars, find uses, varToVertexMap (d)
+    vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        for (auto src : varMap[*vit]) {
+            std::stringstream sstream;
+            src->dbprint(sstream);
+            for (const auto *sink : defUse->getUses(src)) {
+                add_def_use_edge(g, *vit, varToVertexMap[sink->node], cstring(sstream));
+            }
+        }
+    }
+}
+
+void GraphDependency::dump_vars_in_graph(Graph *g) {
     auto vertices = boost::vertices(*g);
     std::cout << "uses:" << std::endl;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
@@ -187,6 +237,7 @@ void GraphDependency::process_subgraph(Graph *g) {
                 for (const auto *v : varSet) {
                     sstream << " ";
                     v->dbprint(sstream);
+                    sstream << " (" << static_cast<const void*>(v) << ")";
                 }
                 std::cout << cstring(sstream) << std::endl;
             }
