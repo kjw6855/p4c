@@ -99,6 +99,7 @@ class EdgeSwitch : public EdgeTypeIface {
 class Graphs {
  public:
     typedef hvec_set<const IR::Node *> varset_t;
+    static const varset_t emptyVarSet;
     enum class VertexType {
         TABLE,
         KEY,
@@ -117,7 +118,8 @@ class Graphs {
         VertexType type;
         bool isStateful;
         std::vector<const IR::Node *> nodes;
-        hvec_map<const IR::Node *, varset_t> vars;
+        hvec_map<const IR::Node *, varset_t> defs;  // defined vars
+        hvec_map<const IR::Node *, varset_t> uses;  // used vars
     };
 
     /// The boost graph support for graphviz subgraphs is not very intuitive. In
@@ -176,6 +178,7 @@ class Graphs {
                 auto attrs = boost::get(boost::vertex_attribute, g);
                 attrs[*vit]["label"_cs] = vinfo.name;
                 attrs[*vit]["style"_cs] = vertexTypeGetStyle(vinfo.type, vinfo.isStateful);
+                attrs[*vit]["fillcolor"_cs] = vertexTypeGetColor(vinfo.type, vinfo.isStateful);
                 attrs[*vit]["shape"_cs] = vertexTypeGetShape(vinfo.type);
                 attrs[*vit]["margin"_cs] = vertexTypeGetMargin(vinfo.type);
             }
@@ -209,6 +212,8 @@ class Graphs {
                 case VertexType::CONDITION:
                 case VertexType::SWITCH:
                     return "rounded"_cs;
+                case VertexType::TABLE:
+                    return "filled"_cs;
                 default:
                     break;
             }
@@ -217,6 +222,15 @@ class Graphs {
                 return "filled"_cs;
 
             return "solid"_cs;
+        }
+
+        static cstring vertexTypeGetColor(VertexType type, bool isStateful) {
+            cstring colorName = cstring::empty;
+            if (type == VertexType::TABLE)
+                colorName = "lightsalmon"_cs;
+            if (isStateful)
+                colorName = "lightgreen"_cs;
+            return colorName;
         }
 
         static cstring vertexTypeGetMargin(VertexType type) {

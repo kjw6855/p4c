@@ -186,8 +186,6 @@ class ComputeDefUse : public Inspector,
     void applySetupJoinPoints(const IR::Node *root) override;
     bool filter_join_point(const IR::Node *) override;
 
-    void add_var_in_cfg(const loc_t *);
-
  protected:
     Graph *curG{nullptr};
     const IR::Node *curNode{nullptr};
@@ -204,6 +202,10 @@ class ComputeDefUse : public Inspector,
     const locset_t &getUses(const IR::Node *n) const {
         auto it = defuse.uses.find(n);
         return it == defuse.uses.end() ? empty : it->second;
+    }
+
+    const defuse_t &getAllDefUse() const {
+        return defuse;
     }
 
     // for debugging

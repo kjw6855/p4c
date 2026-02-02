@@ -38,13 +38,16 @@ class GraphDependency : public Graphs {
 
     void draw_def_use();
 
-    void process_subgraph(Graph *g);
-    void dump_vars_in_graph(Graph *g);
-
     void process();
 
  private:
     bool is_stateful(const IR::Node *node);
+
+    std::optional<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
+    void dump_vars_in_graph(Graph *g);
+    cstring join_var_names(const varset_t &vars, bool hasId);
+
+    void process_subgraph(Graph *g);
 
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;

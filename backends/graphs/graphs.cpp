@@ -90,6 +90,9 @@ void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &n
 }
 
 void Graphs::add_def_use_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name) {
+    // TODO: split vertex into two, if from == to for different statements
+    if (from == to) return;
+
     auto ep = boost::add_edge(from, to, g->root());
     boost::put(boost::edge_name, g->root(), ep.first, name);
 

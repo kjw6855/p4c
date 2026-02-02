@@ -6,6 +6,7 @@
 #include "frontends/p4/methodInstance.h"
 
 namespace P4::graphs {
+const Graphs::varset_t Graphs::emptyVarSet;
 
 bool GraphDependency::is_stateful(const IR::Node *node) {
     if (node->is<IR::BaseAssignmentStatement>()) {
@@ -154,92 +155,178 @@ void GraphDependency::process() {
     }
 }
 
+std::optional<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef) {
+    auto *l = loc;
+    while (l != nullptr) {
+        auto *v = l->node;
+        auto vit = find_node_by_ptr(g, v);
+        if (vit.has_value()) {
+            auto &vinfo = (*g)[vit.value()];
+            if (isDef) {
+                vinfo.defs[v].insert(loc->node);
+            } else {
+                vinfo.uses[v].insert(loc->node);
+            }
+            return vit.value();
+        }
+        l = l->parent;
+    }
+    return {};
+}
+
+cstring GraphDependency::join_var_names(const varset_t &vars, bool hasId) {
+    std::stringstream sstream;
+    bool first = true;
+    for (auto *v : vars) {
+        if (!first) sstream << ", ";
+        first = false;
+        v->dbprint(sstream);
+        if (hasId) sstream << '<' << v->id << '>';
+    }
+    return cstring(sstream);
+}
+
 void GraphDependency::process_subgraph(Graph *g) {
-    // every vertex
-    auto vertices = boost::vertices(*g);
-    hvec_map<const IR::Node *, Graphs::vertex_t> varToVertexMap;
-    hvec_map<Graphs::vertex_t, varset_t> varMap;
+    // 1. Map def-use variables to CFG vertices by using loc_t
+    hvec_map<const IR::Node *, Graphs::vertex_t> defToVertexMap;
+    hvec_map<const IR::Node *, Graphs::vertex_t> useToVertexMap;
+    hvec_map<Graphs::vertex_t, varset_t> defMap;
+    hvec_map<Graphs::vertex_t, varset_t> useMap;
 
-    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        const auto &vinfo = (*g)[*vit];
-        varset_t allVarSet;
-        // every nodes
-        if (vinfo.nodes.size() == 0) {
-            auto varit = vinfo.vars.find(nullptr);
-            if (varit == vinfo.vars.end())
-                continue;
-
-            auto varSet = varit->second;
-            for (const auto *var : varSet) {
-                allVarSet.insert(var);
-                varToVertexMap[var] = *vit;
+    auto defuse = defUse->getAllDefUse();
+    // 1-1) collect all uses (used variables)
+    for (auto &p : defuse.uses) {
+        for (auto *loc : p.second) {
+            auto vit = add_var_in_cfg(g, loc, false);
+            if (vit.has_value()) {
+                useMap[vit.value()].insert(loc->node);
+                useToVertexMap[loc->node] = vit.value();
             }
         }
-        for (const auto *n : vinfo.nodes) {
-            // every vars;
-            auto varit = vinfo.vars.find(n);
-            if (varit == vinfo.vars.end())
-                continue;
-
-            auto varSet = varit->second;
-            for (const auto *var : varSet) {
-                allVarSet.insert(var);
-                varToVertexMap[var] = *vit;
-            }
-        }
-        varMap[*vit] = allVarSet;
     }
 
-    // every vertex (s), every vars, find uses, varToVertexMap (d)
-    vertices = boost::vertices(*g);
-    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        for (auto src : varMap[*vit]) {
-            std::stringstream sstream;
-            src->dbprint(sstream);
-            for (const auto *sink : defUse->getUses(src)) {
-                add_def_use_edge(g, *vit, varToVertexMap[sink->node], cstring(sstream));
+    // 1-2) collect all defs (defined variables)
+    for (auto &p : defuse.defs) {
+        for (auto *loc : p.second) {
+            auto vit = add_var_in_cfg(g, loc, true);
+            if (vit.has_value()) {
+                defMap[vit.value()].insert(loc->node);
+                defToVertexMap[loc->node] = vit.value();
             }
         }
+    }
+
+    // 1-3) collect defs in special node (e.g., START, EXIT)
+    auto vertices = boost::vertices(*g);
+    std::optional<Graphs::vertex_t> startVit, exitVit;
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        // Covered by defuse
+        if (vinfo.nodes.size() > 0)
+            continue;
+
+        // __START__
+        auto defIt = vinfo.defs.find(nullptr);
+        if (defIt != vinfo.defs.end()) {
+            startVit = *vit;
+            auto defSet = defIt->second;
+            for (const auto *def : defSet) {
+                defMap[*vit].insert(def);
+                defToVertexMap[def]= *vit;
+            }
+        }
+        // __EXIT__
+        auto useIt = vinfo.uses.find(nullptr);
+        if (useIt != vinfo.uses.end()) {
+            exitVit = *vit;
+            auto useSet = useIt->second;
+            for (const auto *use : useSet) {
+                useMap[*vit].insert(use);
+                useToVertexMap[use]= *vit;
+            }
+        }
+    }
+
+    // 2. Collect Def-Use edges
+    vertices = boost::vertices(*g);
+    hvec_map<std::pair<Graphs::vertex_t, Graphs::vertex_t>, varset_t> defUseEdgeMap;
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        // 2-1) From defined vars (src), get all usages (sink)
+        for (auto v : defMap[*vit]) {
+            for (const auto *sinkLoc : defUse->getUses(v)) {
+                // Find use defined by v
+                auto sinkVit = useToVertexMap.find(sinkLoc->node);
+                if (sinkVit == useToVertexMap.end())
+                    continue;
+                auto sink = sinkVit->second;
+                defUseEdgeMap[{*vit, sink}].insert(v);
+            }
+        }
+        // 2-2) From used vars (sink), get all definitions (src)
+        for (auto v : useMap[*vit]) {
+            for (const auto *srcLoc : defUse->getDefs(v)) {
+                // Find def used by v
+                auto srcVit = defToVertexMap.find(srcLoc->node);
+                if (srcVit == defToVertexMap.end())
+                    continue;
+                auto src = srcVit->second;
+                defUseEdgeMap[{src, *vit}].insert(v);
+            }
+        }
+    }
+
+    // 3. Draw DDG edges
+    for (auto &p : defUseEdgeMap) {
+        auto src = p.first.first;
+        auto sink = p.first.second;
+        // Skip inout parameters
+        if (src == startVit && sink == exitVit)
+            continue;
+
+        auto &edgeVars = p.second;
+        add_def_use_edge(g, src, sink, join_var_names(edgeVars, false));
+    }
+
+    // 4. clear
+    defUseEdgeMap.clear();
+    vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        defMap[*vit].clear();
+        useMap[*vit].clear();
     }
 }
 
 void GraphDependency::dump_vars_in_graph(Graph *g) {
     auto vertices = boost::vertices(*g);
-    std::cout << "uses:" << std::endl;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
-        // START or EXIT
+        // START
         if (vinfo.nodes.size() == 0) {
-            auto varit = vinfo.vars.find(nullptr);
-            if (varit != vinfo.vars.end()) {
-                auto varSet = varit->second;
-                std::stringstream sstream;
-                sstream << vinfo.name << " (" << varSet.size() << "):";
-                for (const auto *v : varSet) {
-                    sstream << " ";
-                    v->dbprint(sstream);
-                }
-                std::cout << cstring(sstream) << std::endl;
+            auto defIt = vinfo.defs.find(nullptr);
+            if (defIt != vinfo.defs.end()) {
+                auto defSet = defIt->second;
+                std::cout << vinfo.name << "(" << defSet.size() << "): "
+                          << join_var_names(defSet, false) << std::endl;
             }
         } else {
             std::cout << vinfo.name << std::endl; // print name
             // Normal IR nodes
             for (const auto *n : vinfo.nodes) {
-                auto varit = vinfo.vars.find(n);
-                if (varit == vinfo.vars.end())
-                    continue;
+                auto defIt = vinfo.defs.find(n);
+                const varset_t defSet = defIt == vinfo.defs.end() ?
+                                        emptyVarSet : defIt->second;
+                auto useIt = vinfo.uses.find(n);
+                const varset_t useSet = useIt == vinfo.uses.end() ?
+                                        emptyVarSet : useIt->second;
 
-                auto varSet = varit->second;
                 std::stringstream sstream;
-                sstream << "  ";
                 n->dbprint(sstream);
-                sstream << " (" << varSet.size() << "):";
-                for (const auto *v : varSet) {
-                    sstream << " ";
-                    v->dbprint(sstream);
-                    sstream << " (" << static_cast<const void*>(v) << ")";
-                }
-                std::cout << cstring(sstream) << std::endl;
+
+                std::cout << "  " << cstring(sstream) << std::endl
+                          << "  - def(" << defSet.size() << "): "
+                          << join_var_names(defSet, true) << std::endl
+                          << "  - use(" << useSet.size() << "): "
+                          << join_var_names(useSet, true) << std::endl;
             }
         }
         std::cout << std::endl;
