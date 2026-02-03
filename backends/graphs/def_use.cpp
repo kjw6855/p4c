@@ -387,26 +387,87 @@ bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
     if (state == SKIPPING) return false;
     IndentCtl::TempIndent indent;
     LOG5("ComputeDefUse" << uid << "(P4Table " << tbl->name << ")" << indent);
+    auto boolProp = tbl->getBooleanProperty("add_on_miss"_cs);
+    bool isAddOnMiss = false;
+    if (boolProp != nullptr)
+        isAddOnMiss = boolProp->value;
+
     if (auto key = tbl->getKey()) {
-        curNode = key;
         visit(key, "key");
     }
     if (auto actions = tbl->getActionList()) {
         //parallel_visit(actions->actionList, "actions");
         std::vector<ControlFlowVisitor *> actionVisitors;
+        hvec_map<cstring, ComputeDefUse *> hitVisitors;
+        hvec_map<cstring, ComputeDefUse *> missVisitors;
+
         for (auto action : actions->actionList) {
             // We need different path and node
             ComputeDefUse *v = clone();
             v->flow_copy(*this);
             actionVisitors.push_back(v);
-            v->curNode = action;
+
+            // find @tableonly annotation
+            if (isAddOnMiss) {
+                LOG5(action->getName());
+                if (action->getAnnotation("tableonly"_cs) != nullptr) {
+                    hitVisitors[action->getName()] = v;
+                }
+                if (action->getAnnotation("defaultonly"_cs) != nullptr) {
+                    missVisitors[action->getName()] = v;
+                }
+            }
             v->visit(action, "actions");
+        }
+
+        // missVisitor's add_entry() uses hitVisitor's
+        std::vector<std::pair<const loc_t *, const loc_t *>> hitMissList;
+        for (auto mvIt : missVisitors) {
+            auto mv = mvIt.second;
+            for (auto p : mv->hit_entry_params) {
+                auto &hitParam = p.first;
+                auto pos = hitParam.size() - std::strlen(hitParam.find(':'));
+                cstring hitActionName = hitParam.substr(0, pos);
+                cstring hitParamName = hitParam.substr(pos + 1);
+                auto hvIt = hitVisitors.find(hitActionName);
+                if (hvIt == hitVisitors.end())
+                    continue;
+
+                for (auto &di : hvIt->second->def_info) {
+                    // skip previous definitions
+                    auto dIt = def_info.find(di.first);
+                    if (dIt != def_info.end())
+                        continue;
+
+                    // find hitVisitor var
+                    bool foundParam = false;
+                    for (auto *l : di.second.defs) {
+                        if (auto *pm = l->node->to<IR::Parameter>()) {
+                            if (pm->getAnnotation("name"_cs)->getName() ==
+                                    hitParamName) {
+                                hitMissList.push_back({p.second, l});
+                                foundParam = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (foundParam)
+                        break;
+                }
+            }
         }
 
         for (auto v : actionVisitors) {
             flow_merge(*v);
         }
+
         actionVisitors.clear();
+
+        for (auto p : hitMissList) {
+            defuse.uses[p.first->node].insert(p.second);
+            defuse.defs[p.second->node].insert(p.first);
+            LOG5(p.first->node << " -> " << p.second->node);
+        }
 
     } else {
         BUG("No actions in %s", tbl);
@@ -474,7 +535,6 @@ bool ComputeDefUse::preorder(const IR::KeyElement *ke) {
 
 bool ComputeDefUse::preorder(const IR::BaseAssignmentStatement *as) {
     // visit RHS of assignment before LHS
-    curNode = as;
     visit(as->right, "right", 1);
     visit(as->left, "left", 0);
     return false;
@@ -755,6 +815,28 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
             BUG("unknown BuiltInMethod: %s", mc);
         }
         visit(mc->method, "method");
+    } else if (auto *ec = mi->to<P4::ExternCall>()) {
+        std::stringstream sstream;
+        ec->expr->dbprint(sstream);
+        LOG5("Extern: " << cstring(sstream));
+
+        // check add_entry
+        if (ec->method->name.name == "add_entry") {
+            //auto *d = resolveUnique(ec->method->name, P4::ResolutionType::Any);
+            auto *ece = ec->expr->to<IR::MethodCallExpression>();
+            // action_name
+            auto *arg0 = ece->arguments->at(0)->expression->to<IR::StringLiteral>();
+            // action_params
+            auto *arg1 = ece->arguments->at(1)->expression->to<IR::StructExpression>();
+            // TODO: check expiration time
+
+            /* ec (arg1:right) -> arg0 (arg1:left) */
+            for (auto *c : arg1->components) {
+                LOG5(c->name << " -> " << arg0 << ":" << c->expression);
+                cstring hitParam = arg0->value + ":" + c->name;
+                hit_entry_params[hitParam] = getLoc(c->expression);
+            }
+        }
     } else {
         if (mi->object) {
             auto obj = mi->object->getNode();  // FIXME -- should be able to visit an INode

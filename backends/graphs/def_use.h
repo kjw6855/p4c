@@ -142,6 +142,9 @@ class ComputeDefUse : public Inspector,
     hvec_map<const IR::IDeclaration *, def_info_t> def_info;
     void add_uses(const loc_t *, def_info_t &);
     void set_live_from_type(def_info_t &di, const IR::Type *type);
+    // special map from miss to hit
+    // key: [hitActionName]:[hitParamName]
+    hvec_map<cstring, const loc_t *> hit_entry_params;
 
     // computed defuse info for all uses and defs in the program
     struct defuse_t {
@@ -188,7 +191,6 @@ class ComputeDefUse : public Inspector,
 
  protected:
     Graph *curG{nullptr};
-    const IR::Node *curNode{nullptr};
     std::vector<Graph *> &controlGraphsArray;
 
  public:
