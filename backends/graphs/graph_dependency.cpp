@@ -84,6 +84,9 @@ std::vector<Graphs::vertex_t> GraphDependency::find_path_from_vertices(Graph *g,
 
         auto [ei, ei_end] = boost::in_edges(u, *g);
         for (; ei != ei_end; ++ei) {
+            auto edge = (*g)[*ei];
+            if (edge.type != EdgeType::CONTROL)
+                continue;
             Graphs::vertex_t v = boost::source(*ei, *g);
             auto vid = index[v];
             if (!visited[vid]) {
@@ -215,12 +218,12 @@ void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
             // move parent's in edges to u
             for (; ei != ei_end; ++ei) {
                 auto p = boost::source(*ei, *g);
-                auto edgeName = boost::get(boost::edge_name, g->root(), *ei);
-                add_edge(g, p, u, edgeName);
+                auto ep = (*g)[*ei];
+                add_edge(g, p, u, ep.name, ep.type);
                 to_remove.push_back(*ei);
             }
             for (auto &e : to_remove) remove_edge(e, *g);
-            add_edge(g, u, v, cstring::empty);
+            add_edge(g, u, v, cstring::empty, EdgeType::CONTROL);
 
             curNodes.clear();
             curNodes.push_back(node);
@@ -267,6 +270,7 @@ void GraphDependency::process_subgraph(Graph *g) {
         nodeToVarMap[v.value()] = loc;
     }
 
+    // split should be called before connecting DDG edges
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit)
         split_cfg_vertex(g, *vit, nodeToVarMap);
@@ -368,7 +372,7 @@ void GraphDependency::process_subgraph(Graph *g) {
 
         auto &edgeVars = p.second;
         BUG_CHECK(src != sink, "src and sink should be different");
-        add_def_use_edge(g, src, sink, join_var_names(edgeVars, false));
+        add_edge(g, src, sink, join_var_names(edgeVars, false), EdgeType::DEFUSE);
     }
 
     // 5. clear

@@ -122,6 +122,15 @@ class Graphs {
         hvec_map<const IR::Node *, varset_t> uses;  // used vars
     };
 
+    enum class EdgeType {
+        CONTROL,
+        DEFUSE,
+    };
+    struct Edge {
+        cstring name;
+        EdgeType type;
+    };
+
     /// The boost graph support for graphviz subgraphs is not very intuitive. In
     /// particular the write_graphviz code assumes the existence of a lot of
     /// properties. See
@@ -129,9 +138,10 @@ class Graphs {
     /// for more information.
     using GraphvizAttributes = std::map<cstring, cstring>;
     using vertexProperties = boost::property<boost::vertex_attribute_t, GraphvizAttributes, Vertex>;
-    using edgeProperties = boost::property<
-        boost::edge_attribute_t, GraphvizAttributes,
-        boost::property<boost::edge_name_t, cstring, boost::property<boost::edge_index_t, int>>>;
+    using edgeProperties =
+        boost::property<boost::edge_name_t, cstring,
+        boost::property<boost::edge_index_t, int,
+        boost::property<boost::edge_attribute_t, GraphvizAttributes, Edge>>>;
     using graphProperties = boost::property<
         boost::graph_name_t, std::string,
         boost::property<
@@ -159,8 +169,10 @@ class Graphs {
     vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
     vertex_t add_vertex_nodes(Graph *g, const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes);
     vertex_t add_and_connect_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
-    void add_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name);
-    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name);
+    void add_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name,
+                  EdgeType type);
+    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                  EdgeType type);
     /// Used to connect subgraphs
     ///
     /// @param from Node from which edge will start
@@ -168,9 +180,7 @@ class Graphs {
     /// @param name Used as edge label
     /// @param cluster_id ID of cluster, that will be connected to the previous cluster.
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                  unsigned cluster_id);
-
-    void add_def_use_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name);
+                  EdgeType type, unsigned cluster_id);
 
     class GraphAttributeSetter {
      public:
@@ -188,7 +198,10 @@ class Graphs {
             auto edges = boost::edges(g);
             for (auto &eit = edges.first; eit != edges.second; ++eit) {
                 auto attrs = boost::get(boost::edge_attribute, g);
-                attrs[*eit]["label"_cs] = boost::get(boost::edge_name, g, *eit);
+                auto ep = g[*eit];
+                attrs[*eit]["label"_cs] = ep.name;
+                attrs[*eit]["style"_cs] = edgeTypeGetStyle(ep.type);
+                attrs[*eit]["color"_cs] = edgeTypeGetColor(ep.type);
             }
         }
 
@@ -241,6 +254,26 @@ class Graphs {
                 default:
                     return cstring::empty;
             }
+        }
+
+        static cstring edgeTypeGetStyle(EdgeType type) {
+            switch (type) {
+                case EdgeType::DEFUSE:
+                    return "dashed"_cs;
+                default:
+                    break;
+            }
+            return cstring::empty;
+        }
+
+        static cstring edgeTypeGetColor(EdgeType type) {
+            switch (type) {
+                case EdgeType::DEFUSE:
+                    return "grey"_cs;
+                default:
+                    break;
+            }
+            return cstring::empty;
         }
     };  // end class GraphAttributeSetter
 

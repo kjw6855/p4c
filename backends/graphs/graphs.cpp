@@ -73,38 +73,28 @@ Graphs::vertex_t Graphs::add_vertex_nodes(Graph *g, const cstring &name, VertexT
     return g->local_to_global(v);
 }
 
-void Graphs::add_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name) {
+void Graphs::add_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name, EdgeType type) {
     auto ep = boost::add_edge(from, to, g->root());
-    boost::put(boost::edge_name, g->root(), ep.first, name);
+    boost::put(&Edge::name, g->root(), ep.first, name);
+    boost::put(&Edge::type, g->root(), ep.first, type);
 }
 
-void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name) {
+void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name, EdgeType type) {
     auto ep = boost::add_edge(from, to, g->root());
-    boost::put(boost::edge_name, g->root(), ep.first, name);
+    boost::put(&Edge::name, g->root(), ep.first, name);
+    boost::put(&Edge::type, g->root(), ep.first, type);
 }
 
 void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                      unsigned cluster_id) {
+                      EdgeType type, unsigned cluster_id) {
     auto ep = boost::add_edge(from, to, g->root());
-    boost::put(boost::edge_name, g->root(), ep.first, name);
+    boost::put(&Edge::name, g->root(), ep.first, name);
+    boost::put(&Edge::type, g->root(), ep.first, type);
 
     auto attrs = boost::get(boost::edge_attribute, g->root());
 
     attrs[ep.first]["ltail"_cs] = "cluster"_cs + Util::toString(cluster_id - 2);
     attrs[ep.first]["lhead"_cs] = "cluster"_cs + Util::toString(cluster_id - 1);
-}
-
-void Graphs::add_def_use_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name) {
-    // TODO: split vertex into two, if from == to for different statements
-    //if (from == to) return;
-
-    auto ep = boost::add_edge(from, to, g->root());
-    boost::put(boost::edge_name, g->root(), ep.first, name);
-
-    auto attrs = boost::get(boost::edge_attribute, g->root());
-
-    attrs[ep.first]["style"_cs] = "dashed"_cs;
-    attrs[ep.first]["color"_cs] = "grey"_cs;
 }
 
 void Graphs::limitStringSize(std::stringstream &sstream, std::stringstream &helper_sstream) {
@@ -164,7 +154,7 @@ std::optional<Graphs::vertex_t> Graphs::merge_other_statements_into_vertex() {
     }
     std::vector<const IR::Node*> nodes(statementsStack.begin(), statementsStack.end());
     auto v = add_vertex_nodes(g, cstring(sstream), VertexType::STATEMENTS, false, nodes);
-    for (auto parent : parents) add_edge(parent.first, v, parent.second->label());
+    for (auto parent : parents) add_edge(parent.first, v, parent.second->label(), EdgeType::CONTROL);
     parents = {{v, new EdgeUnconditional()}};
     statementsStack.clear();
     return v;
@@ -174,7 +164,7 @@ Graphs::vertex_t Graphs::add_and_connect_vertex(const cstring &name, VertexType 
                                                 bool isStateful, const IR::Node *node) {
     merge_other_statements_into_vertex();
     auto v = add_vertex(name, type, isStateful, node);
-    for (auto parent : parents) add_edge(parent.first, v, parent.second->label());
+    for (auto parent : parents) add_edge(parent.first, v, parent.second->label(), EdgeType::CONTROL);
     return v;
 }
 

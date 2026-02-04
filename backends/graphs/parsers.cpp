@@ -69,7 +69,7 @@ void ParserGraphs::postorder(const IR::P4Parser *parser) {
     for (auto edge : transitions[parser]) {
         auto from = nodes[edge->sourceState->name.name.c_str()];
         auto to = nodes[edge->destState->name.name.c_str()];
-        add_edge((vertex_t)from, (vertex_t)to, edge->label);
+        add_edge((vertex_t)from, (vertex_t)to, edge->label, EdgeType::CONTROL);
     }
 
     parserGraphsArray.push_back(g_);

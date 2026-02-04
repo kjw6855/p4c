@@ -150,10 +150,12 @@ void Graph_visitor::forLoopFullGraph(std::vector<Graph *> &graphsArray, fullGrap
         // Connect subgraphs
         if (opts->cluster_i > 1) {
             if (prev_type == PrevType::Parser) {
-                add_edge(opts->node_i - 2, opts->node_i, cstring::empty, opts->cluster_i);
+                add_edge(opts->node_i - 2, opts->node_i, cstring::empty,
+                         EdgeType::CONTROL, opts->cluster_i);
                 prev_type = PrevType::Control;
             } else {
-                add_edge(t_prev_adder, opts->node_i, cstring::empty, opts->cluster_i);
+                add_edge(t_prev_adder, opts->node_i, cstring::empty,
+                         EdgeType::CONTROL, opts->cluster_i);
             }
         }
 

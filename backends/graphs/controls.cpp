@@ -93,7 +93,7 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             visit(it.second->getNode());
 
             for (auto parent : parents) {
-                add_edge(parent.first, exit_v, parent.second->label());
+                add_edge(parent.first, exit_v, parent.second->label(), EdgeType::CONTROL);
             }
             BUG_CHECK((*g_).is_root(), "Invalid graph");
             controlStack.popBack();
@@ -274,7 +274,7 @@ bool ControlGraphs::preorder(const IR::ReturnStatement *) {
 bool ControlGraphs::preorder(const IR::ExitStatement *) {
     merge_other_statements_into_vertex();
 
-    for (auto parent : parents) add_edge(parent.first, exit_v, parent.second->label());
+    for (auto parent : parents) add_edge(parent.first, exit_v, parent.second->label(), EdgeType::CONTROL);
     parents.clear();
     return false;
 }
