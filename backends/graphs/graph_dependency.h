@@ -36,9 +36,9 @@ class GraphDependency : public Graphs {
 
     std::vector<Graphs::vertex_t> find_path_from_vertices(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv);
 
-    void draw_def_use();
-
     void process();
+    void analyze();
+    void dump_def_use();
 
  private:
     bool is_stateful(const IR::Node *node);
@@ -46,6 +46,9 @@ class GraphDependency : public Graphs {
     std::optional<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
     void dump_vars_in_graph(Graph *g);
     cstring join_var_names(const varset_t &vars, bool hasId);
+    void split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
+                          hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap);
+    std::optional<const IR::Node *> find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc);
 
     void process_subgraph(Graph *g);
 

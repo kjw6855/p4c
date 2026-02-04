@@ -205,8 +205,9 @@ int main(int argc, char *const argv[]) {
     program->apply(*defUse);
 
     graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap, defUse, cgen.controlGraphsArray);
-    gd.process();
-    gd.draw_def_use();
+    gd.process();           // create PDG (CFG + DDG)
+    gd.analyze();           // TODO: find dependency
+    gd.dump_def_use();      // dump defs and uses
 
     graphs::Graph_visitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut,
                               options.file);

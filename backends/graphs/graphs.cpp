@@ -61,7 +61,7 @@ Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type, bool i
     return g->local_to_global(v);
 }
 
-Graphs::vertex_t Graphs::add_vertex_nodes(const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes) {
+Graphs::vertex_t Graphs::add_vertex_nodes(Graph *g, const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);
     boost::put(&Vertex::type, *g, v, type);
@@ -71,6 +71,11 @@ Graphs::vertex_t Graphs::add_vertex_nodes(const cstring &name, VertexType type, 
     auto &v_nodes = g_ref[v].nodes;
     v_nodes.insert(v_nodes.end(), nodes.begin(), nodes.end());
     return g->local_to_global(v);
+}
+
+void Graphs::add_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name) {
+    auto ep = boost::add_edge(from, to, g->root());
+    boost::put(boost::edge_name, g->root(), ep.first, name);
 }
 
 void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name) {
@@ -91,7 +96,7 @@ void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &n
 
 void Graphs::add_def_use_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name) {
     // TODO: split vertex into two, if from == to for different statements
-    if (from == to) return;
+    //if (from == to) return;
 
     auto ep = boost::add_edge(from, to, g->root());
     boost::put(boost::edge_name, g->root(), ep.first, name);
@@ -110,6 +115,30 @@ void Graphs::limitStringSize(std::stringstream &sstream, std::stringstream &help
     }
     helper_sstream.str("");
     helper_sstream.clear();
+}
+
+cstring Graphs::get_vertex_name(std::vector<const IR::Node *> nodes) {
+    std::stringstream sstream;
+    std::stringstream helper_sstream;  // to limit line width
+
+    if (nodes.size() == 1) {
+        nodes[0]->dbprint(helper_sstream);
+        limitStringSize(sstream, helper_sstream);
+    } else if (nodes.size() == 2) {
+        nodes[0]->dbprint(helper_sstream);
+        limitStringSize(sstream, helper_sstream);
+        sstream << "\\n";
+        nodes[1]->dbprint(helper_sstream);
+        limitStringSize(sstream, helper_sstream);
+    } else {
+        nodes[0]->dbprint(helper_sstream);
+        limitStringSize(sstream, helper_sstream);
+        sstream << "\\n...\\n";
+        nodes.back()->dbprint(helper_sstream);
+        limitStringSize(sstream, helper_sstream);
+    }
+
+    return cstring(sstream);
 }
 
 std::optional<Graphs::vertex_t> Graphs::merge_other_statements_into_vertex() {
@@ -134,7 +163,7 @@ std::optional<Graphs::vertex_t> Graphs::merge_other_statements_into_vertex() {
         limitStringSize(sstream, helper_sstream);
     }
     std::vector<const IR::Node*> nodes(statementsStack.begin(), statementsStack.end());
-    auto v = add_vertex_nodes(cstring(sstream), VertexType::STATEMENTS, false, nodes);
+    auto v = add_vertex_nodes(g, cstring(sstream), VertexType::STATEMENTS, false, nodes);
     for (auto parent : parents) add_edge(parent.first, v, parent.second->label());
     parents = {{v, new EdgeUnconditional()}};
     statementsStack.clear();

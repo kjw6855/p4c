@@ -141,6 +141,7 @@ class Graphs {
     using Graph_ = boost::adjacency_list<boost::vecS, boost::vecS, boost::bidirectionalS,
                                          vertexProperties, edgeProperties, graphProperties>;
     using Graph = boost::subgraph<Graph_>;
+    using edge_t = boost::graph_traits<Graph>::edge_descriptor;
     using vertex_t = boost::graph_traits<Graph>::vertex_descriptor;
 
     using Parents = std::vector<std::pair<vertex_t, EdgeTypeIface *>>;
@@ -154,9 +155,11 @@ class Graphs {
     std::optional<vertex_t> find_node_by_name(Graph *g, const cstring &name);
     std::optional<vertex_t> find_node_by_ptr(Graph *g, const IR::Node *ptr);
 
+    cstring get_vertex_name(std::vector<const IR::Node *> nodes);
     vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
-    vertex_t add_vertex_nodes(const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes);
+    vertex_t add_vertex_nodes(Graph *g, const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes);
     vertex_t add_and_connect_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
+    void add_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name);
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name);
     /// Used to connect subgraphs
     ///

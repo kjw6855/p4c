@@ -106,7 +106,7 @@ std::vector<Graphs::vertex_t> GraphDependency::find_path_from_vertices(Graph *g,
     return path;
 }
 
-void GraphDependency::draw_def_use() {
+void GraphDependency::dump_def_use() {
     std::vector<std::string> defs;
     std::vector<std::string> uses;
 
@@ -134,6 +134,13 @@ void GraphDependency::draw_def_use() {
 
 void GraphDependency::process() {
     for (auto g : controlGraphsArray) {
+        process_subgraph(g);
+        //dump_vars_in_graph(g);
+    }
+}
+
+void GraphDependency::analyze() {
+    for (auto g : controlGraphsArray) {
         auto stateful_vertices = get_vertices_per_type(g, VertexType::EMPTY, true);
         auto table_vertices = get_vertices_per_type(g, VertexType::TABLE, false);
 
@@ -149,9 +156,6 @@ void GraphDependency::process() {
         std::cout << "Number of Stateful: " << stateful_vertices.size()
             << ", and Table: " << table_vertices.size()
             << " Paths: " << num_paths << std::endl;
-
-        process_subgraph(g);
-        //dump_vars_in_graph(g);
     }
 }
 
@@ -186,15 +190,94 @@ cstring GraphDependency::join_var_names(const varset_t &vars, bool hasId) {
     return cstring(sstream);
 }
 
+void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
+        hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap) {
+    auto &vinfo = (*g)[v];
+    if (vinfo.nodes.size() <= 1)
+        return;
+
+    std::vector<const IR::Node *> curNodes;
+    bool hasVar = false;
+    bool updateLast = false;
+    for (auto node : vinfo.nodes) {
+        bool isVarNode = nodeToVarMap.find(node) != nodeToVarMap.end();
+        if (!isVarNode) {
+            curNodes.push_back(node);
+
+        } else if (!hasVar) {
+            curNodes.push_back(node);
+            hasVar = true;
+
+        } else {
+            auto u = add_vertex_nodes(g, get_vertex_name(curNodes), vinfo.type, vinfo.isStateful, curNodes);
+            std::vector<Graphs::edge_t> to_remove;
+            auto [ei, ei_end] = boost::in_edges(v, *g);
+            // move parent's in edges to u
+            for (; ei != ei_end; ++ei) {
+                auto p = boost::source(*ei, *g);
+                auto edgeName = boost::get(boost::edge_name, g->root(), *ei);
+                add_edge(g, p, u, edgeName);
+                to_remove.push_back(*ei);
+            }
+            for (auto &e : to_remove) remove_edge(e, *g);
+            add_edge(g, u, v, cstring::empty);
+
+            curNodes.clear();
+            curNodes.push_back(node);
+            hasVar = true;
+            updateLast = true;
+        }
+    }
+
+    if (updateLast) {
+        vinfo.name = get_vertex_name(curNodes);
+        vinfo.nodes.clear();
+        vinfo.nodes.insert(vinfo.nodes.end(), curNodes.begin(), curNodes.end());
+    }
+}
+
+std::optional<const IR::Node *> GraphDependency::find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc) {
+    auto *l = loc;
+    while (l != nullptr) {
+        auto *v = l->node;
+        auto vit = find_node_by_ptr(g, v);
+        if (vit.has_value())
+            return v;
+        l = l->parent;
+    }
+    return {};
+}
+
 void GraphDependency::process_subgraph(Graph *g) {
-    // 1. Map def-use variables to CFG vertices by using loc_t
+    // 1. Split cfg graphs
+    auto defuse = defUse->getAllDefUse();
+    ComputeDefUse::locset_t locset;
+    for (auto &p : defuse.uses)
+        for (auto *loc : p.second)
+            locset.insert(loc);
+    for (auto &p : defuse.defs)
+        for (auto *loc : p.second)
+            locset.insert(loc);
+
+    hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> nodeToVarMap;
+    for (auto *loc : locset) {
+        auto v = find_node_by_loc(g, loc);
+        if (!v.has_value())
+            continue;
+        nodeToVarMap[v.value()] = loc;
+    }
+
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit)
+        split_cfg_vertex(g, *vit, nodeToVarMap);
+
+    // 2. Map def-use variables to CFG vertices by using loc_t
     hvec_map<const IR::Node *, Graphs::vertex_t> defToVertexMap;
     hvec_map<const IR::Node *, Graphs::vertex_t> useToVertexMap;
     hvec_map<Graphs::vertex_t, varset_t> defMap;
     hvec_map<Graphs::vertex_t, varset_t> useMap;
 
-    auto defuse = defUse->getAllDefUse();
-    // 1-1) collect all uses (used variables)
+    // 2-1) collect all uses (used variables)
     for (auto &p : defuse.uses) {
         for (auto *loc : p.second) {
             auto vit = add_var_in_cfg(g, loc, false);
@@ -205,7 +288,7 @@ void GraphDependency::process_subgraph(Graph *g) {
         }
     }
 
-    // 1-2) collect all defs (defined variables)
+    // 2-2) collect all defs (defined variables)
     for (auto &p : defuse.defs) {
         for (auto *loc : p.second) {
             auto vit = add_var_in_cfg(g, loc, true);
@@ -216,8 +299,8 @@ void GraphDependency::process_subgraph(Graph *g) {
         }
     }
 
-    // 1-3) collect defs in special node (e.g., START, EXIT)
-    auto vertices = boost::vertices(*g);
+    // 2-3) collect defs in special node (e.g., START, EXIT)
+    vertices = boost::vertices(*g);
     std::optional<Graphs::vertex_t> startVit, exitVit;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
@@ -247,11 +330,11 @@ void GraphDependency::process_subgraph(Graph *g) {
         }
     }
 
-    // 2. Collect Def-Use edges
+    // 3. Collect Def-Use edges
     vertices = boost::vertices(*g);
     hvec_map<std::pair<Graphs::vertex_t, Graphs::vertex_t>, varset_t> defUseEdgeMap;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        // 2-1) From defined vars (src), get all usages (sink)
+        // 3-1) From defined vars (src), get all usages (sink)
         for (auto v : defMap[*vit]) {
             for (const auto *sinkLoc : defUse->getUses(v)) {
                 // Find use defined by v
@@ -262,7 +345,7 @@ void GraphDependency::process_subgraph(Graph *g) {
                 defUseEdgeMap[{*vit, sink}].insert(v);
             }
         }
-        // 2-2) From used vars (sink), get all definitions (src)
+        // 3-2) From used vars (sink), get all definitions (src)
         for (auto v : useMap[*vit]) {
             for (const auto *srcLoc : defUse->getDefs(v)) {
                 // Find def used by v
@@ -275,7 +358,7 @@ void GraphDependency::process_subgraph(Graph *g) {
         }
     }
 
-    // 3. Draw DDG edges
+    // 4. Draw DDG edges
     for (auto &p : defUseEdgeMap) {
         auto src = p.first.first;
         auto sink = p.first.second;
@@ -284,10 +367,11 @@ void GraphDependency::process_subgraph(Graph *g) {
             continue;
 
         auto &edgeVars = p.second;
+        BUG_CHECK(src != sink, "src and sink should be different");
         add_def_use_edge(g, src, sink, join_var_names(edgeVars, false));
     }
 
-    // 4. clear
+    // 5. clear
     defUseEdgeMap.clear();
     vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
