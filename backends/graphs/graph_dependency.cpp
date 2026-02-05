@@ -55,7 +55,8 @@ std::vector<Graphs::vertex_t> GraphDependency::get_vertices_per_type(Graph *g, V
 }
 
 // find path from tv to sv
-std::vector<Graphs::vertex_t> GraphDependency::find_path_from_vertices(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv) {
+std::vector<Graphs::vertex_t> GraphDependency::find_path_from_vertices(Graph *g,
+        Graphs::vertex_t &sv, Graphs::vertex_t &dv) {
     if (sv == dv)
         return {sv};
 
@@ -142,23 +143,183 @@ void GraphDependency::process() {
     }
 }
 
-void GraphDependency::analyze() {
-    for (auto g : controlGraphsArray) {
-        auto stateful_vertices = get_vertices_per_type(g, VertexType::EMPTY, true);
-        auto table_vertices = get_vertices_per_type(g, VertexType::TABLE, false);
+void GraphDependency::dfs_all_paths(Graph *g, Graphs::vertex_t &cur, Graphs::vertex_t &dst,
+        std::vector<Graphs::vertex_t> &path,
+        std::vector<std::vector<Graphs::vertex_t>> &allPaths) {
 
-        int num_paths = 0;
-        for (auto sv : stateful_vertices) {
-            for (auto tv : table_vertices) {
-                auto path = find_path_from_vertices(g, tv, sv);
-                if (path.size() == 0) continue;
-                num_paths ++;
-                std::cout << (*g)[tv].name << "->" << (*g)[sv].name << " (" << path.size() << ")" << std::endl;
+    path.push_back(cur);
+
+    if (cur == dst) {
+        allPaths.push_back(path);
+    } else {
+        auto [ei, ei_end] = boost::out_edges(cur, *g);
+        for (; ei != ei_end; ++ei) {
+            auto edge = (*g)[*ei];
+            if (edge.type != EdgeType::CONTROL)
+                continue;
+            auto next = boost::target(*ei, *g);
+            dfs_all_paths(g, next, dst, path, allPaths);
+        }
+    }
+
+    path.pop_back();
+}
+
+std::optional<Graphs::vertex_t> GraphDependency::get_defuse_action(Graph *g, Graphs::vertex_t &vit,
+        std::vector<Graphs::vertex_t> &pathToDst) {
+    Graphs::vertex_t v = vit;
+    while (true) {
+        // 1. find all uses and next child
+        std::vector<Graphs::vertex_t> uses;
+        auto [ei, ei_end] = boost::out_edges(v, *g);
+        int numChild = 0;
+        for (; ei != ei_end; ++ei) {
+            auto u = boost::target(*ei, *g);
+            auto edge = (*g)[*ei];
+            if (edge.type == EdgeType::CONTROL) {
+                numChild ++;
+                if (numChild == 1) {
+                    pathToDst.push_back(v);
+                    v = u;
+                }
+            } else if (edge.type == EdgeType::DEFUSE) {
+                uses.push_back(u);
             }
         }
-        std::cout << "Number of Stateful: " << stateful_vertices.size()
-            << ", and Table: " << table_vertices.size()
-            << " Paths: " << num_paths << std::endl;
+        // 2. Finish if not one child
+        if (numChild != 1)
+            return {};
+
+        // 3. check if one of uses is action
+        for (auto u : uses) {
+            auto uInfo = (*g)[u];
+            if (uInfo.type == VertexType::ACTION)
+                return u;
+        }
+    }
+    return {};
+}
+
+bool GraphDependency::add_on_miss_defuse_path(Graph *g, Graphs::vertex_t &vit,
+        std::vector<Graphs::vertex_t> &postPaths) {
+    // 1. add vertices after add-on-miss table until it finds action
+    std::queue<Graphs::vertex_t> q;
+    q.push(vit);
+    std::vector<Graphs::vertex_t> actions;
+    while (!q.empty()) {
+        Graphs::vertex_t u = q.front();
+        q.pop();
+
+        auto [ei, ei_end] = boost::out_edges(u, *g);
+        for (; ei != ei_end; ++ei) {
+            auto edge = (*g)[*ei];
+            if (edge.type != EdgeType::CONTROL)
+                continue;
+            auto v = boost::target(*ei, *g);
+            auto vinfo = (*g)[v];
+            if (vinfo.type == VertexType::ACTION) {
+                actions.push_back(v);
+            } else {
+                postPaths.push_back(v);
+                q.push(v);
+            }
+        }
+    }
+
+    // 2. find miss-to-hit defuse
+    for (auto sit : actions) {
+        std::vector<Graphs::vertex_t> pathToDst;
+        auto dit = get_defuse_action(g, sit, pathToDst);
+        if (dit.has_value()) {
+            postPaths.insert(postPaths.end(), pathToDst.begin(), pathToDst.end());
+            postPaths.push_back(dit.value());
+            return true;
+        }
+        pathToDst.clear();
+    }
+    postPaths.clear();
+    return false;
+}
+
+int GraphDependency::find_all_paths(Graph *g,
+        Graphs::vertex_t &sv, Graphs::vertex_t &dv) {
+    std::vector<Graphs::vertex_t> pathMd;
+    std::vector<std::vector<Graphs::vertex_t>> allPaths;
+
+    dfs_all_paths(g, sv, dv, pathMd, allPaths);
+
+    if (allPaths.size() == 0) {
+        LOG4("No paths found");
+        return false;
+    }
+
+    auto src = (*g)[sv];
+    auto dst = (*g)[dv];
+
+    std::vector<Graphs::vertex_t> postPaths;
+    if (dst.type == VertexType::TABLE) {
+        // add-on-miss
+        add_on_miss_defuse_path(g, dv, postPaths);
+    }
+
+    int numPath = 0;
+    for (auto path : allPaths) {
+        std::cout << ++numPath << ":";
+        path.insert(path.end(), postPaths.begin(), postPaths.end());
+        for (auto v : path) {
+            auto vinfo = (*g)[v];
+            std::cout << "-> " << vinfo.name;
+        }
+        std::cout << std::endl;
+    }
+
+    return allPaths.size();
+}
+
+void GraphDependency::analyze_subgraph(Graph *g) {
+    // 1. Get table / stateful vertices
+    auto tableVertices = get_vertices_per_type(g, VertexType::TABLE, false);
+    auto statefulVertices = get_vertices_per_type(g, VertexType::EMPTY, true);
+
+    if (tableVertices.size() == 0 || statefulVertices.size() == 0)
+        return;
+
+    // 2. While tracking topological order, check table-to-stateful case
+    std::vector<Graphs::vertex_t> order;
+    boost::topological_sort(*g, std::back_inserter(order));
+    int numCases = 0;
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+        // Find tableVertex
+        if (std::find(tableVertices.begin(), tableVertices.end(), *it)
+                == tableVertices.end())
+            continue;
+
+        for (auto jt = it + 1; jt != order.rend(); ++jt) {
+            // Find statefulVertex
+            if (std::find(statefulVertices.begin(), statefulVertices.end(), *jt)
+                    == statefulVertices.end())
+                continue;
+
+            auto tv = (*g)[*it];
+            auto sv = (*g)[*jt];
+            auto numPaths = find_all_paths(g, *it, *jt);
+
+            if (numPaths > 0)
+                numCases ++;
+            std::cout << tv.name << "->" << sv.name <<
+                " (" << numPaths << ")" << std::endl;
+        }
+    }
+    std::cout << std::endl;
+
+    std::cout << "#Stateful: " << statefulVertices.size()
+        << ", #Table: " << tableVertices.size()
+        << ", #Cases: " << numCases << std::endl;
+}
+
+void GraphDependency::analyze() {
+    for (auto g : controlGraphsArray) {
+        analyze_subgraph(g);
     }
 }
 

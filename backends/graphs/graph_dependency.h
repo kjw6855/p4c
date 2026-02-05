@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <boost/graph/breadth_first_search.hpp>
+#include <boost/graph/topological_sort.hpp>
 #include <boost/graph/visitors.hpp>
 
 #include "graphs.h"
@@ -41,16 +42,52 @@ class GraphDependency : public Graphs {
     void dump_def_use();
 
  private:
-    bool is_stateful(const IR::Node *node);
+    /** PDG Generators **/
+    // Generate PDG for each subgraph
+    void process_subgraph(Graph *g);
 
-    std::optional<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
-    void dump_vars_in_graph(Graph *g);
-    cstring join_var_names(const varset_t &vars, bool hasId);
-    void split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
-                          hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap);
+    // Find CFG vertex from defuse var loc
     std::optional<const IR::Node *> find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc);
 
-    void process_subgraph(Graph *g);
+    // Split CFG vertex based on defuse variables
+    void split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
+                          hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap);
+
+    // Add uses/defs in every vertex
+    std::optional<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
+
+    // Get edge name from variable set
+    cstring join_var_names(const varset_t &vars, bool hasId);
+
+
+    /** Security Analysis **/
+    // Analyze dependencies for each subgraph
+    void analyze_subgraph(Graph *g);
+
+    // Collect all CFG paths with DFS
+    void dfs_all_paths(Graph *g, Graphs::vertex_t &cur, Graphs::vertex_t &dst,
+                       std::vector<Graphs::vertex_t> &path,
+                       std::vector<std::vector<Graphs::vertex_t>> &all_paths);
+
+    // Get path from MissAction to HitAction
+    bool add_on_miss_defuse_path(Graph *g, Graphs::vertex_t &vit,
+        std::vector<Graphs::vertex_t> &postPaths);
+
+    // Find HitAction used by MissAction
+    std::optional<Graphs::vertex_t> get_defuse_action(Graph *g, Graphs::vertex_t &vit,
+        std::vector<Graphs::vertex_t> &pathToDst);
+
+    // Find all paths from sv to dv
+    // Append Miss-to-Hit path if dv is add-on-miss table
+    int find_all_paths(Graph *g, Graphs::vertex_t &sv,
+                       Graphs::vertex_t &dv);
+
+    /** Misc **/
+    // Check if the node is stateful
+    bool is_stateful(const IR::Node *node);
+
+    // Dump defuse variables
+    void dump_vars_in_graph(Graph *g);
 
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
