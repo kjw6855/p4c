@@ -212,7 +212,7 @@ bool GraphDependency::add_on_miss_defuse_path(Graph *g, Graphs::vertex_t &vit,
 
         auto [ei, ei_end] = boost::out_edges(u, *g);
         for (; ei != ei_end; ++ei) {
-            auto edge = (*g)[*ei];
+            auto edge = g->root()[*ei];
             if (edge.type != EdgeType::CONTROL)
                 continue;
             auto v = boost::target(*ei, *g);
@@ -241,29 +241,28 @@ bool GraphDependency::add_on_miss_defuse_path(Graph *g, Graphs::vertex_t &vit,
     return false;
 }
 
-int GraphDependency::find_all_paths(Graph *g,
-        Graphs::vertex_t &sv, Graphs::vertex_t &dv) {
+int GraphDependency::find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv,
+                                    std::vector<std::vector<Graphs::vertex_t>> &allPaths) {
     std::vector<Graphs::vertex_t> pathMd;
-    std::vector<std::vector<Graphs::vertex_t>> allPaths;
 
     dfs_all_paths(g, sv, dv, pathMd, allPaths);
 
     if (allPaths.size() == 0) {
         LOG4("No paths found");
-        return false;
+        return 0;
     }
 
     auto src = (*g)[sv];
     auto dst = (*g)[dv];
 
     std::vector<Graphs::vertex_t> postPaths;
-    if (dst.type == VertexType::TABLE) {
+    if (dst.type == VertexType::TABLE && dst.isStateful) {
         // add-on-miss
         add_on_miss_defuse_path(g, dv, postPaths);
     }
 
     int numPath = 0;
-    for (auto path : allPaths) {
+    for (auto &path : allPaths) {
         std::cout << ++numPath << ":";
         path.insert(path.end(), postPaths.begin(), postPaths.end());
         for (auto v : path) {
@@ -273,7 +272,50 @@ int GraphDependency::find_all_paths(Graph *g,
         std::cout << std::endl;
     }
 
-    return allPaths.size();
+    return numPath;
+}
+
+void GraphDependency::check_cache_coherence(Graph *g, std::vector<Graphs::vertex_t> &path) {
+    hvec_set<Graphs::vertex_t> depSet;
+    auto defuse = defUse->getAllDefUse();
+    bool init = true, addNext = false;
+    for (auto v : path) {
+        auto vinfo = (*g)[v];
+        // 1. Find initial action
+        if (init) {
+            if (addNext) {
+                init = false;
+                depSet.insert(v);
+            } else if (vinfo.type == VertexType::ACTION) {
+                addNext = true;     // include next vertex
+                depSet.insert(v);
+            }
+            if (init)
+                continue;
+        }
+
+        // Skip non-dependent vertices
+        if (depSet.find(v) == depSet.end())
+            continue;
+
+        LOG5("  check " << vinfo.name);
+        auto [ei, ei_end] = boost::out_edges(v, g->root());
+        for (; ei != ei_end; ++ei) {
+            // Choose defuse edges connected to vertex of given path
+            auto edge = g->root()[*ei];
+            if (edge.type != EdgeType::DEFUSE)
+                continue;
+            auto u = boost::target(*ei, g->root());
+            if (std::find(path.begin(), path.end(), u) == path.end())
+                continue;
+
+            depSet.insert(u);
+        }
+    }
+
+    if (depSet.find(path.back()) != depSet.end()) {
+        std::cout << "SUCCESS" << std::endl;
+    }
 }
 
 void GraphDependency::analyze_subgraph(Graph *g) {
@@ -302,12 +344,16 @@ void GraphDependency::analyze_subgraph(Graph *g) {
 
             auto tv = (*g)[*it];
             auto sv = (*g)[*jt];
-            auto numPaths = find_all_paths(g, *it, *jt);
+            std::vector<std::vector<Graphs::vertex_t>> allPaths;
+            int numPaths = find_all_paths(g, *it, *jt, allPaths);
+            std::cout << tv.name << "->" << sv.name <<" (" << numPaths << ")" << std::endl;
 
             if (numPaths > 0)
                 numCases ++;
-            std::cout << tv.name << "->" << sv.name <<
-                " (" << numPaths << ")" << std::endl;
+
+            for (auto path : allPaths) {
+                check_cache_coherence(g, path);
+            }
         }
     }
     std::cout << std::endl;
@@ -340,18 +386,6 @@ std::optional<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const 
         l = l->parent;
     }
     return {};
-}
-
-cstring GraphDependency::join_var_names(const varset_t &vars, bool hasId) {
-    std::stringstream sstream;
-    bool first = true;
-    for (auto *v : vars) {
-        if (!first) sstream << ", ";
-        first = false;
-        v->dbprint(sstream);
-        if (hasId) sstream << '<' << v->id << '>';
-    }
-    return cstring(sstream);
 }
 
 void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
@@ -415,6 +449,7 @@ std::optional<const IR::Node *> GraphDependency::find_node_by_loc(Graph *g, cons
 void GraphDependency::process_subgraph(Graph *g) {
     // 1. Split cfg graphs
     auto defuse = defUse->getAllDefUse();
+    /*
     ComputeDefUse::locset_t locset;
     for (auto &p : defuse.uses)
         for (auto *loc : p.second)
@@ -435,6 +470,7 @@ void GraphDependency::process_subgraph(Graph *g) {
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit)
         split_cfg_vertex(g, *vit, nodeToVarMap);
+    */
 
     // 2. Map def-use variables to CFG vertices by using loc_t
     hvec_map<const IR::Node *, Graphs::vertex_t> defToVertexMap;
@@ -465,7 +501,7 @@ void GraphDependency::process_subgraph(Graph *g) {
     }
 
     // 2-3) collect defs in special node (e.g., START, EXIT)
-    vertices = boost::vertices(*g);
+    auto vertices = boost::vertices(*g);
     std::optional<Graphs::vertex_t> startVit, exitVit;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
@@ -532,8 +568,10 @@ void GraphDependency::process_subgraph(Graph *g) {
             continue;
 
         auto &edgeVars = p.second;
-        BUG_CHECK(src != sink, "src and sink should be different");
-        add_edge(g, src, sink, join_var_names(edgeVars, false), EdgeType::DEFUSE);
+        if (src == sink)
+            continue;
+        //BUG_CHECK(src != sink, "src and sink should be different");
+        add_defuse_edge(g, src, sink, edgeVars);
     }
 
     // 5. clear

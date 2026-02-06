@@ -25,6 +25,18 @@ limitations under the License.
 
 namespace P4::graphs {
 
+cstring Graphs::join_var_names(const varset_t &vars, bool hasId) {
+    std::stringstream sstream;
+    bool first = true;
+    for (auto *v : vars) {
+        if (!first) sstream << ", ";
+        first = false;
+        v->dbprint(sstream);
+        if (hasId) sstream << '<' << v->id << '>';
+    }
+    return cstring(sstream);
+}
+
 std::optional<Graphs::vertex_t> Graphs::find_node_by_name(Graph *g, const cstring &name) {
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
@@ -95,6 +107,15 @@ void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &n
 
     attrs[ep.first]["ltail"_cs] = "cluster"_cs + Util::toString(cluster_id - 2);
     attrs[ep.first]["lhead"_cs] = "cluster"_cs + Util::toString(cluster_id - 1);
+}
+
+void Graphs::add_defuse_edge(Graph *g, const vertex_t &from, const vertex_t &to, varset_t &vars) {
+    auto ep = boost::add_edge(from, to, g->root());
+    boost::put(&Edge::name, g->root(), ep.first, join_var_names(vars, false));
+    boost::put(&Edge::type, g->root(), ep.first, EdgeType::DEFUSE);
+
+    auto &edge = g->root()[ep.first];
+    edge.vars.insert(vars.begin(), vars.end());
 }
 
 void Graphs::limitStringSize(std::stringstream &sstream, std::stringstream &helper_sstream) {

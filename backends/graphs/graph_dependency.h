@@ -56,9 +56,6 @@ class GraphDependency : public Graphs {
     // Add uses/defs in every vertex
     std::optional<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
 
-    // Get edge name from variable set
-    cstring join_var_names(const varset_t &vars, bool hasId);
-
 
     /** Security Analysis **/
     // Analyze dependencies for each subgraph
@@ -71,16 +68,18 @@ class GraphDependency : public Graphs {
 
     // Get path from MissAction to HitAction
     bool add_on_miss_defuse_path(Graph *g, Graphs::vertex_t &vit,
-        std::vector<Graphs::vertex_t> &postPaths);
+                                 std::vector<Graphs::vertex_t> &postPaths);
 
     // Find HitAction used by MissAction
     std::optional<Graphs::vertex_t> get_defuse_action(Graph *g, Graphs::vertex_t &vit,
-        std::vector<Graphs::vertex_t> &pathToDst);
+                                                      std::vector<Graphs::vertex_t> &pathToDst);
 
     // Find all paths from sv to dv
     // Append Miss-to-Hit path if dv is add-on-miss table
-    int find_all_paths(Graph *g, Graphs::vertex_t &sv,
-                       Graphs::vertex_t &dv);
+    int find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv,
+                       std::vector<std::vector<Graphs::vertex_t>> &allPaths);
+
+    void check_cache_coherence(Graph *g, std::vector<Graphs::vertex_t> &path);
 
     /** Misc **/
     // Check if the node is stateful

@@ -129,6 +129,7 @@ class Graphs {
     struct Edge {
         cstring name;
         EdgeType type;
+        varset_t vars;
     };
 
     /// The boost graph support for graphviz subgraphs is not very intuitive. In
@@ -165,6 +166,8 @@ class Graphs {
     std::optional<vertex_t> find_node_by_name(Graph *g, const cstring &name);
     std::optional<vertex_t> find_node_by_ptr(Graph *g, const IR::Node *ptr);
 
+    // Get edge name from variable set
+    cstring join_var_names(const varset_t &vars, bool hasId);
     cstring get_vertex_name(std::vector<const IR::Node *> nodes);
     vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
     vertex_t add_vertex_nodes(Graph *g, const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes);
@@ -182,6 +185,7 @@ class Graphs {
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
                   EdgeType type, unsigned cluster_id);
 
+    void add_defuse_edge(Graph *g, const vertex_t &from, const vertex_t &to, varset_t &vars);
     class GraphAttributeSetter {
      public:
         void operator()(Graph &g) const {
