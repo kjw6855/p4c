@@ -201,7 +201,7 @@ int main(int argc, char *const argv[]) {
     program->apply(pgg);
 
     // Generate DefUse based on CFG
-    graphs::ComputeDefUse *defUse = new graphs::ComputeDefUse(cgen.controlGraphsArray);
+    graphs::ComputeDefUse *defUse = new graphs::ComputeDefUse(&midEnd.typeMap, cgen.controlGraphsArray);
     program->apply(*defUse);
 
     graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap, defUse, cgen.controlGraphsArray);

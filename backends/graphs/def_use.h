@@ -191,10 +191,11 @@ class ComputeDefUse : public Inspector,
 
  protected:
     Graph *curG{nullptr};
+    P4::TypeMap *typeMap;
     std::vector<Graph *> &controlGraphsArray;
 
  public:
-    ComputeDefUse(std::vector<Graph *> &cga);
+    ComputeDefUse(P4::TypeMap *typeMap, std::vector<Graph *> &cga);
     void clear();
 
     const locset_t &getDefs(const IR::Node *n) const {

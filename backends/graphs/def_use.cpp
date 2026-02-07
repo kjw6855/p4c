@@ -43,10 +43,11 @@ using namespace literals;
 int ComputeDefUse::uid_ctr = 0;
 const hvec_set<const ComputeDefUse::loc_t *> ComputeDefUse::empty;
 
-ComputeDefUse::ComputeDefUse(std::vector<Graph *> &cga)
+ComputeDefUse::ComputeDefUse(P4::TypeMap *typeMap, std::vector<Graph *> &cga)
     : ResolutionContext(true),
       cached_locs(*new std::unordered_set<loc_t>),
       defuse(*new defuse_t),
+      typeMap(typeMap),
       controlGraphsArray(cga) {
     joinFlows = true;
     visitDagOnce = false;
@@ -760,6 +761,9 @@ const IR::Expression *ComputeDefUse::do_write(def_info_t &di, const IR::Expressi
         di.live.setrange(0, 1);
     } else if (auto *se = e->type->to<IR::Type_SerEnum>()) {
         di.live.setrange(0, se->type->width_bits());
+    } else if (auto *ne = e->type->to<IR::Type_Newtype>()) {
+        auto neType = typeMap->getTypeType(ne->type, true);
+        di.live.setrange(0, neType->width_bits());
     } else {
         BUG("Unexpected type %s in ComputeDefUse::do_write", e->type);
     }
