@@ -70,6 +70,9 @@ class Options : public CompilerOptions {
     bool graphs = true;           // default behavior
     bool fullGraph = false;
     bool jsonOut = false;
+    bool ddg = false;
+    bool doAnalysis = false;
+    bool splitVertex = false;
     Options() {
         registerOption(
             "--graphs-dir", "dir",
@@ -115,6 +118,29 @@ class Options : public CompilerOptions {
                 return true;
             },
             "Use to generate json output of fullGraph.");
+        registerOption(
+            "--add-ddg", nullptr,
+            [this](const char *) {
+                ddg = true;
+                return true;
+            },
+            "Include DDG in the output graph");
+        registerOption(
+            "--split-vertex", nullptr,
+            [this](const char*) {
+                splitVertex = true;
+                ddg = true;
+                return true;
+            },
+            "Specifies whether to split CFG vertex based on DDG");
+        registerOption(
+            "--analyze", nullptr,
+            [this](const char*) {
+                doAnalysis = true;
+                ddg = true;
+                return true;
+            },
+            "Analyze based on generated graph");
     }
 
  private:
@@ -200,14 +226,21 @@ int main(int argc, char *const argv[]) {
     graphs::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
     program->apply(pgg);
 
-    // Generate DefUse based on CFG
-    graphs::ComputeDefUse *defUse = new graphs::ComputeDefUse(&midEnd.typeMap, cgen.controlGraphsArray);
-    program->apply(*defUse);
+    if (options.ddg) {
+        // Generate DefUse based on CFG
+        graphs::ComputeDefUse *defUse = new graphs::ComputeDefUse(&midEnd.typeMap, cgen.controlGraphsArray);
+        program->apply(*defUse);
 
-    graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap, defUse, cgen.controlGraphsArray);
-    gd.process();           // create PDG (CFG + DDG)
-    gd.analyze();           // TODO: find dependency
-    gd.dump_def_use();      // dump defs and uses
+        graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap, defUse,
+                                   cgen.controlGraphsArray, options.splitVertex);
+        // create PDG (CFG + DDG)
+        gd.process();
+        // find dependency
+        if (options.doAnalysis)
+            gd.analyze();
+        // dump defs and uses
+        gd.dump_def_use();
+    }
 
     graphs::Graph_visitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut,
                               options.file);

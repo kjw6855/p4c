@@ -27,11 +27,13 @@ class GraphDependency : public Graphs {
 
     GraphDependency(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
                     ComputeDefUse *defUse,
-                    std::vector<Graph *> &controlGraphsArray)
+                    std::vector<Graph *> &controlGraphsArray,
+                    bool splitVertex)
         : refMap(refMap),
           typeMap(typeMap),
           defUse(defUse),
-          controlGraphsArray(controlGraphsArray) {}
+          controlGraphsArray(controlGraphsArray),
+          splitVertex(splitVertex) {}
 
     std::vector<Graphs::vertex_t> get_vertices_per_type(Graph *g, VertexType type, bool isStateful);
 
@@ -50,6 +52,7 @@ class GraphDependency : public Graphs {
     std::optional<const IR::Node *> find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc);
 
     // Split CFG vertex based on defuse variables
+    void split_cfg_vertices(Graph *g);
     void split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
                           hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap);
 
@@ -92,6 +95,7 @@ class GraphDependency : public Graphs {
     P4::TypeMap *typeMap;
     ComputeDefUse *defUse;
     std::vector<Graph *> &controlGraphsArray;
+    bool splitVertex;
 };
 }  // namespace P4::graphs
 #endif /* BACKENDS_GRAPHS_GRAPH_DEPENDENCY_H_ */

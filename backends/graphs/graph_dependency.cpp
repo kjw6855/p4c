@@ -446,10 +446,8 @@ std::optional<const IR::Node *> GraphDependency::find_node_by_loc(Graph *g, cons
     return {};
 }
 
-void GraphDependency::process_subgraph(Graph *g) {
-    // 1. Split cfg graphs
+void GraphDependency::split_cfg_vertices(Graph *g) {
     auto defuse = defUse->getAllDefUse();
-    /*
     ComputeDefUse::locset_t locset;
     for (auto &p : defuse.uses)
         for (auto *loc : p.second)
@@ -466,11 +464,17 @@ void GraphDependency::process_subgraph(Graph *g) {
         nodeToVarMap[v.value()] = loc;
     }
 
-    // split should be called before connecting DDG edges
     auto vertices = boost::vertices(*g);
+    // split should be called before connecting DDG edges
     for (auto &vit = vertices.first; vit != vertices.second; ++vit)
         split_cfg_vertex(g, *vit, nodeToVarMap);
-    */
+}
+
+void GraphDependency::process_subgraph(Graph *g) {
+    // 1. Split cfg graphs
+    auto defuse = defUse->getAllDefUse();
+    if (splitVertex)
+        split_cfg_vertices(g);
 
     // 2. Map def-use variables to CFG vertices by using loc_t
     hvec_map<const IR::Node *, Graphs::vertex_t> defToVertexMap;
