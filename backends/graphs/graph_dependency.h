@@ -84,6 +84,13 @@ class GraphDependency : public Graphs {
 
     void check_cache_coherence(Graph *g, std::vector<Graphs::vertex_t> &path);
 
+    bool is_cyclic(Graph *g);
+    std::size_t dfs_find_cycle(Graph *g, Graphs::vertex_t u,
+        Graphs::IndexMap &index,
+        std::vector<bool> &visited, std::vector<bool> &recStack,
+        std::vector<Graphs::vertex_t> &found_vertices,
+        std::vector<cstring> &found_edges);
+
     /** Misc **/
     // Check if the node is stateful
     bool is_stateful(const IR::Node *node);

@@ -33,6 +33,7 @@ limitations under the License.
 
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graph_traits.hpp>
+#include <boost/graph/properties.hpp>
 #include <boost/graph/graphviz.hpp>
 
 #include "frontends/p4/parserCallGraph.h"
@@ -157,6 +158,8 @@ class Graphs {
 
     using Parents = std::vector<std::pair<vertex_t, EdgeTypeIface *>>;
 
+    using IndexMap = boost::property_map<Graph, boost::vertex_index_t>::type;
+
     /// merge misc control statements (action calls, extern method calls,
     /// assignments) into a single vertex to reduce graph complexity
     std::optional<vertex_t> merge_other_statements_into_vertex();
@@ -186,6 +189,18 @@ class Graphs {
                   EdgeType type, unsigned cluster_id);
 
     void add_defuse_edge(Graph *g, const vertex_t &from, const vertex_t &to, varset_t &vars);
+
+    cstring get_edge_type(EdgeType type) {
+        switch (type) {
+            case EdgeType::CONTROL:
+                return "control"_cs;
+            case EdgeType::DEFUSE:
+                return "defuse"_cs;
+            default:
+                return cstring::empty;
+        }
+    }
+
     class GraphAttributeSetter {
      public:
         void operator()(Graph &g) const {

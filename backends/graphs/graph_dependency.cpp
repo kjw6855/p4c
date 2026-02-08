@@ -363,8 +363,84 @@ void GraphDependency::analyze_subgraph(Graph *g) {
         << ", #Cases: " << numCases << std::endl;
 }
 
+std::size_t GraphDependency::dfs_find_cycle(Graph *g, Graphs::vertex_t u,
+        Graphs::IndexMap &index,
+        std::vector<bool> &visited, std::vector<bool> &recStack,
+        std::vector<Graphs::vertex_t> &found_vertices,
+        std::vector<cstring> &found_edges) {
+    std::size_t uid = index[u];
+    if (recStack[uid]) {
+        found_vertices.push_back(u);
+        std::cout << "Detected: " << uid << std::endl;
+        return uid;
+    }
+
+    if (visited[uid]) return (std::size_t)-1;
+
+    recStack[uid] = true;
+    visited[uid] = true;
+    found_vertices.push_back(u);
+
+    auto [ei, ei_end] = boost::out_edges(u, *g);
+    for (; ei != ei_end; ++ei) {
+        Graphs::vertex_t v = boost::target(*ei, *g);
+
+        auto edge = (*g)[*ei];
+        found_edges.push_back(get_edge_type(edge.type) + ":"_cs + edge.name);
+        auto detectedId = dfs_find_cycle(g, v, index, visited, recStack, found_vertices, found_edges);
+        if (detectedId != (std::size_t)-1)
+            return detectedId;
+        found_edges.pop_back();
+    }
+
+    found_vertices.pop_back();
+    recStack[uid] = false;
+    return (std::size_t)-1;
+}
+
+bool GraphDependency::is_cyclic(Graph *g) {
+    std::size_t n = num_vertices(*g);
+    std::vector<bool> visited(n, false);
+    std::vector<bool> recStack(n, false);
+    std::vector<Graphs::vertex_t> found_vertices;
+    std::vector<cstring> found_edges;
+
+    auto index = boost::get(boost::vertex_index, *g);
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        if (visited[index[*vit]])
+            continue;
+
+        auto detectedId = dfs_find_cycle(g, *vit, index, visited, recStack,
+                found_vertices, found_edges);
+
+        if (detectedId != (std::size_t)-1) {
+            // FOUND
+            std::cout << "Cycle found:" << std::endl;
+            bool doPrint = false;
+            for (std::size_t i = 0; i < found_vertices.size(); i++) {
+                auto c = found_vertices[i];
+                if (!doPrint) {
+                    if (index[c] != detectedId)
+                        continue;
+                    // Start printing
+                    doPrint = true;
+                } else if (i > 0) {
+                    std::cout << "--" << found_edges[i - 1] << "-> ";
+                }
+                auto cinfo = (*g)[c];
+                std::cout << cinfo.name << '(' << index[c] << ')' << std::endl;
+            }
+            std::cout << std::endl;
+            return true;
+        }
+    }
+    return false;
+}
+
 void GraphDependency::analyze() {
     for (auto g : controlGraphsArray) {
+        BUG_CHECK (!is_cyclic(g), "Graph has cycle");
         analyze_subgraph(g);
     }
 }
