@@ -52,9 +52,11 @@ std::optional<Graphs::vertex_t> Graphs::find_node_by_ptr(Graph *g, const IR::Nod
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
-        for (auto node : vinfo.nodes)
-            if (node == ptr)
+        for (auto node : vinfo.nodes) {
+            // Compare node and srcInfo instead of ptr value
+            if (node->equiv(*ptr) && node->srcInfo == ptr->srcInfo)
                 return *vit;
+        }
     }
 
     return {};
