@@ -445,23 +445,25 @@ void GraphDependency::analyze() {
     }
 }
 
-std::optional<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef) {
+std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef) {
+    std::vector<Graphs::vertex_t> foundVertices;
     auto *l = loc;
-    while (l != nullptr) {
+    bool found = false;
+    while (l != nullptr && !found) {
         auto *v = l->node;
-        auto vit = find_node_by_ptr(g, v);
-        if (vit.has_value()) {
-            auto &vinfo = (*g)[vit.value()];
+        for (auto vit : find_node_by_ptr(g, v)) {
+            auto &vinfo = (*g)[vit];
             if (isDef) {
                 vinfo.defs[v].insert(loc->node);
             } else {
                 vinfo.uses[v].insert(loc->node);
             }
-            return vit.value();
+            found = true;
+            foundVertices.push_back(vit);
         }
         l = l->parent;
     }
-    return {};
+    return foundVertices;
 }
 
 void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
@@ -514,8 +516,8 @@ std::optional<const IR::Node *> GraphDependency::find_node_by_loc(Graph *g, cons
     auto *l = loc;
     while (l != nullptr) {
         auto *v = l->node;
-        auto vit = find_node_by_ptr(g, v);
-        if (vit.has_value())
+        auto nodes = find_node_by_ptr(g, v);
+        if (nodes.size() > 0)
             return v;
         l = l->parent;
     }
@@ -561,10 +563,9 @@ void GraphDependency::process_subgraph(Graph *g) {
     // 2-1) collect all uses (used variables)
     for (auto &p : defuse.uses) {
         for (auto *loc : p.second) {
-            auto vit = add_var_in_cfg(g, loc, false);
-            if (vit.has_value()) {
-                useMap[vit.value()].insert(loc->node);
-                useToVertexMap[loc->node] = vit.value();
+            for (auto vit : add_var_in_cfg(g, loc, false)) {
+                useMap[vit].insert(loc->node);
+                useToVertexMap[loc->node] = vit;
             }
         }
     }
@@ -572,10 +573,9 @@ void GraphDependency::process_subgraph(Graph *g) {
     // 2-2) collect all defs (defined variables)
     for (auto &p : defuse.defs) {
         for (auto *loc : p.second) {
-            auto vit = add_var_in_cfg(g, loc, true);
-            if (vit.has_value()) {
-                defMap[vit.value()].insert(loc->node);
-                defToVertexMap[loc->node] = vit.value();
+            for (auto vit : add_var_in_cfg(g, loc, true)) {
+                defMap[vit].insert(loc->node);
+                defToVertexMap[loc->node] = vit;
             }
         }
     }

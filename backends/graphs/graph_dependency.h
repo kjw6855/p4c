@@ -57,7 +57,7 @@ class GraphDependency : public Graphs {
                           hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap);
 
     // Add uses/defs in every vertex
-    std::optional<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
+    std::vector<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
 
 
     /** Security Analysis **/
