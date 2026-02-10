@@ -56,8 +56,11 @@ std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> Graphs::find_node_by_
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
         for (auto node : vinfo.nodes) {
-            // Compare node and srcInfo instead of ptr value
-            if (node->equiv(*ptr) && node->srcInfo == ptr->srcInfo)
+            // Compare node and srcInfo instead of ptr valu
+            // TODO: check equivalence of Node in addition to srcInfo
+            //       e.g., node->equiv(*ptr)
+            //       corner case: CFG node doesn't resolve types, so it contains UnknownType
+            if (node->srcInfo == ptr->srcInfo)
                 foundVertices.push_back({*vit, node});
         }
     }

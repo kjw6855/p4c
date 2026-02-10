@@ -228,7 +228,8 @@ int main(int argc, char *const argv[]) {
 
     if (options.ddg) {
         // Generate DefUse based on CFG
-        graphs::ComputeDefUse *defUse = new graphs::ComputeDefUse(&midEnd.typeMap, cgen.controlGraphsArray);
+        graphs::ComputeDefUse *defUse = new graphs::ComputeDefUse(&midEnd.refMap,
+                &midEnd.typeMap, cgen.controlGraphsArray);
         program->apply(*defUse);
 
         graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap, defUse,

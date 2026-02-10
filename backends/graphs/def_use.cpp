@@ -43,10 +43,12 @@ using namespace literals;
 int ComputeDefUse::uid_ctr = 0;
 const hvec_set<const ComputeDefUse::loc_t *> ComputeDefUse::empty;
 
-ComputeDefUse::ComputeDefUse(P4::TypeMap *typeMap, std::vector<Graph *> &cga)
+ComputeDefUse::ComputeDefUse(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+                             std::vector<Graph *> &cga)
     : ResolutionContext(true),
       cached_locs(*new std::unordered_set<loc_t>),
       defuse(*new defuse_t),
+      refMap(refMap),
       typeMap(typeMap),
       controlGraphsArray(cga) {
     joinFlows = true;
@@ -795,6 +797,7 @@ void ComputeDefUse::loop_revisit(const IR::PathExpression *pe) {
 
 bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
     auto *mi = P4::MethodInstance::resolve(mc, this);
+    auto *instance = P4::MethodInstance::resolve(mc, refMap, typeMap);
     if (state == WRITE_ONLY) {
         BUG_CHECK(!isWrite(), "Method call in out or inout arg should have failed typechecking");
         return false;
@@ -802,9 +805,13 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
         if (!isRead()) return false;
     }
     auto saved_state = state;
-    state = READ_ONLY;
-    visit(mc->arguments, "arguments");
-    state = NORMAL;
+    bool skipArguments = instance->is<P4::ExternMethod>();
+    if (!skipArguments) {
+        state = READ_ONLY;
+        visit(mc->arguments, "arguments");
+        state = NORMAL;
+    }
+
     if (auto *ac = mi->to<P4::ActionCall>()) {
         visit(ac->action, "action");
     } else if (auto *bi = mi->to<P4::BuiltInMethod>()) {
@@ -819,15 +826,18 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
             BUG("unknown BuiltInMethod: %s", mc);
         }
         visit(mc->method, "method");
-    } else if (auto *ec = mi->to<P4::ExternCall>()) {
+    } else if (auto *em = instance->to<P4::ExternMethod>()) {
         std::stringstream sstream;
-        ec->expr->dbprint(sstream);
+        em->expr->dbprint(sstream);
         LOG5("Extern: " << cstring(sstream));
 
         // check add_entry
-        if (ec->method->name.name == "add_entry") {
-            //auto *d = resolveUnique(ec->method->name, P4::ResolutionType::Any);
-            auto *ece = ec->expr->to<IR::MethodCallExpression>();
+        if (em->method->name.name == "add_entry") {
+            state = READ_ONLY;
+            visit(mc->arguments, "arguments");
+            state = NORMAL;
+
+            auto *ece = em->expr->to<IR::MethodCallExpression>();
             // action_name
             auto *arg0 = ece->arguments->at(0)->expression->to<IR::StringLiteral>();
             // action_params
@@ -840,15 +850,50 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
                 cstring hitParam = arg0->value + ":" + c->name;
                 hit_entry_params[hitParam] = getLoc(c->expression);
             }
+            state = WRITE_ONLY;
+            visit(mc->arguments, "arguments");
+        } else if (em->originalExternType->getName().name == "register") {
+            if (em->method->name.name == "read") {
+                state = READ_ONLY;
+                visit(mc->arguments->at(1), "arguments");
+                const IR::Node *arg0 = mc->arguments->at(0)->expression;
+                while (true) {
+                    if (auto *pe = arg0->to<IR::PathExpression>()) {
+                        auto *d = resolveUnique(pe->path->name, P4::ResolutionType::Any);
+                        do_write(def_info[d], pe, getContext());
+                        break;
+                    } else if (auto *me = arg0->to<IR::Member>()) {
+                        arg0 = me->expr;
+
+                    } else {
+                        std::stringstream sstream;
+                        arg0->dbprint(sstream);
+                        BUG("Unexpected type in ComputeDefUse::preorder-> Extern: %s", cstring(sstream));
+                        break;
+                    }
+                }
+            } else if (em->method->name.name == "write") {
+                state = READ_ONLY;
+                visit(mc->arguments, "arguments");
+            }
+        } else {
+            state = READ_ONLY;
+            visit(mc->arguments, "arguments");
+            state = WRITE_ONLY;
+            visit(mc->arguments, "arguments");
         }
+
     } else {
         if (mi->object) {
             auto obj = mi->object->getNode();  // FIXME -- should be able to visit an INode
             if (!isInContext(obj)) visit(obj, "object");
         }
     }
-    state = WRITE_ONLY;
-    visit(mc->arguments, "arguments");
+
+    if (!skipArguments) {
+        state = WRITE_ONLY;
+        visit(mc->arguments, "arguments");
+    }
     state = saved_state;
     return false;
 }
