@@ -94,6 +94,8 @@ class GraphDependency : public Graphs {
                           std::vector<Graphs::vertex_t> &foundVertices,
                           bool storeNext);
 
+    std::vector<Graphs::vertex_t> find_all_action_vertices(Graph *g);
+
     bool is_cyclic(Graph *g);
     std::size_t dfs_find_cycle(Graph *g, Graphs::vertex_t u,
         Graphs::IndexMap &index,

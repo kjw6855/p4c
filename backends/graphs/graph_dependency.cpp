@@ -295,6 +295,32 @@ void GraphDependency::find_action_vertices(Graph *g, Graphs::vertex_t u,
     }
 }
 
+std::vector<Graphs::vertex_t> GraphDependency::find_all_action_vertices(Graph *g) {
+    auto vertices = boost::vertices(*g);
+    std::vector<Graphs::vertex_t> foundVertices;
+
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto vinfo = (*g)[*vit];
+        if (vinfo.type != VertexType::ACTION)
+            continue;
+
+        // ACTION has been found
+        auto [ei, ei_end] = boost::out_edges(*vit, *g);
+        for (; ei != ei_end; ++ei) {
+            auto edge = (*g)[*ei];
+            if (edge.type != EdgeType::CONTROL)
+                continue;
+
+            Graphs::vertex_t u = boost::target(*ei, *g);
+            auto uinfo = (*g)[u];
+            if (uinfo.type != VertexType::OTHER)
+                foundVertices.push_back(u);
+        }
+    }
+
+    return foundVertices;
+}
+
 bool GraphDependency::dfs_table_so_policy(Graph *g,
                                           Graphs::vertex_t u,
                                           std::vector<Graphs::vertex_t> &statefulVertices,
@@ -594,9 +620,15 @@ void GraphDependency::split_cfg_vertices(Graph *g) {
         }
     }
 
+    auto actionVertices = find_all_action_vertices(g);
     auto vertices = boost::vertices(*g);
     // split should be called before connecting DDG edges
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        // Skip if vertex is action statements
+        if (std::find(actionVertices.begin(), actionVertices.end(), *vit)
+                != actionVertices.end())
+            continue;
+
         split_cfg_vertex(g, *vit, nodeToVarMap);
     }
 }
