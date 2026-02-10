@@ -49,12 +49,12 @@ class GraphDependency : public Graphs {
     void process_subgraph(Graph *g);
 
     // Find CFG vertex from defuse var loc
-    std::optional<const IR::Node *> find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc);
+    std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc);
 
     // Split CFG vertex based on defuse variables
     void split_cfg_vertices(Graph *g);
     void split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
-                          hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap);
+                          hvec_map<const IR::Node *, ComputeDefUse::locset_t> &nodeToVarMap);
 
     // Add uses/defs in every vertex
     std::vector<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
@@ -82,7 +82,17 @@ class GraphDependency : public Graphs {
     int find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv,
                        std::vector<std::vector<Graphs::vertex_t>> &allPaths);
 
-    void check_cache_coherence(Graph *g, std::vector<Graphs::vertex_t> &path);
+    bool dfs_table_so_policy(Graph *g,
+                             Graphs::vertex_t src,
+                             std::vector<Graphs::vertex_t> &statefulVertices,
+                             varset_t &vars);
+
+    bool check_table_so_policy(Graph *g, Graphs::vertex_t src,
+                               std::vector<Graphs::vertex_t> &statefulVertices);
+
+    void find_action_vertices(Graph *g, Graphs::vertex_t u,
+                          std::vector<Graphs::vertex_t> &foundVertices,
+                          bool storeNext);
 
     bool is_cyclic(Graph *g);
     std::size_t dfs_find_cycle(Graph *g, Graphs::vertex_t u,

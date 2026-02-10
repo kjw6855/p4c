@@ -48,17 +48,17 @@ std::optional<Graphs::vertex_t> Graphs::find_node_by_name(Graph *g, const cstrin
     return {};
 }
 
-std::vector<Graphs::vertex_t> Graphs::find_node_by_ptr(Graph *g, const IR::Node *ptr) {
+std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> Graphs::find_node_by_ptr(Graph *g, const IR::Node *ptr) {
     auto vertices = boost::vertices(*g);
 
     // CFG can have duplicated vertices (e.g., TABLE)
-    std::vector<Graphs::vertex_t> foundVertices;
+    std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> foundVertices;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
         for (auto node : vinfo.nodes) {
             // Compare node and srcInfo instead of ptr value
             if (node->equiv(*ptr) && node->srcInfo == ptr->srcInfo)
-                foundVertices.push_back(*vit);
+                foundVertices.push_back({*vit, node});
         }
     }
 

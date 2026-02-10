@@ -275,47 +275,114 @@ int GraphDependency::find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vert
     return numPath;
 }
 
-void GraphDependency::check_cache_coherence(Graph *g, std::vector<Graphs::vertex_t> &path) {
-    hvec_set<Graphs::vertex_t> depSet;
-    auto defuse = defUse->getAllDefUse();
-    bool init = true, addNext = false;
-    for (auto v : path) {
+void GraphDependency::find_action_vertices(Graph *g, Graphs::vertex_t u,
+                          std::vector<Graphs::vertex_t> &foundVertices,
+                          bool storeNext) {
+    auto [ei, ei_end] = boost::out_edges(u, *g);
+    for (; ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::CONTROL)
+            continue;
+        Graphs::vertex_t v = boost::target(*ei, *g);
         auto vinfo = (*g)[v];
-        // 1. Find initial action
-        if (init) {
-            if (addNext) {
-                init = false;
-                depSet.insert(v);
-            } else if (vinfo.type == VertexType::ACTION) {
-                addNext = true;     // include next vertex
-                depSet.insert(v);
-            }
-            if (init)
-                continue;
+        if (!storeNext) {
+            find_action_vertices(g, v, foundVertices,
+                                 vinfo.type == VertexType::ACTION);
+        } else if (vinfo.type != VertexType::OTHER) {
+            // Find if action has body
+            foundVertices.push_back(v);
         }
+    }
+}
 
-        // Skip non-dependent vertices
-        if (depSet.find(v) == depSet.end())
+bool GraphDependency::dfs_table_so_policy(Graph *g,
+                                          Graphs::vertex_t u,
+                                          std::vector<Graphs::vertex_t> &statefulVertices,
+                                          varset_t &vars) {
+    auto uinfo = (*g)[u];
+    LOG5("   check " << uinfo.name);
+    auto [ei, ei_end] = boost::out_edges(u, *g);
+    for (; ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::DEFUSE)
             continue;
 
-        LOG5("  check " << vinfo.name);
-        auto [ei, ei_end] = boost::out_edges(v, g->root());
-        for (; ei != ei_end; ++ei) {
-            // Choose defuse edges connected to vertex of given path
-            auto edge = g->root()[*ei];
-            if (edge.type != EdgeType::DEFUSE)
-                continue;
-            auto u = boost::target(*ei, g->root());
-            if (std::find(path.begin(), path.end(), u) == path.end())
-                continue;
-
-            depSet.insert(u);
+        // 1. check edge.vars in vars
+        varset_t usedVars;
+        for (auto ev : edge.vars) {
+            if (vars.find(ev) != vars.end())
+                usedVars.insert(ev);
         }
+        if (usedVars.size() == 0)
+            continue;
+
+        // 2. Found if the vertex is one of stateful
+        Graphs::vertex_t v = boost::target(*ei, *g);
+        auto vinfo = (*g)[v];
+        if (std::find(statefulVertices.begin(), statefulVertices.end(), v)
+                != statefulVertices.end()) {
+            LOG5("   FOUND: " << vinfo.name);
+            return true;
+        }
+
+        // 3. collect new vars
+        // TODO: optimize data structure
+        // edge contains defs and uses, but currently it requires
+        // defUse->getUses() again
+        varset_t newVars;
+        for (auto node : vinfo.nodes) {
+            auto defIt = vinfo.defs.find(node);
+            if (defIt == vinfo.defs.end())
+                continue;
+
+            auto useIt = vinfo.uses.find(node);
+            if (useIt == vinfo.uses.end())
+                continue;
+
+            // If the node uses one of usedVars, store all defs
+            bool found = false;
+            for (auto uv : usedVars) {
+                for (auto ul : defUse->getUses(uv)) {
+                    if (useIt->second.find(ul->node) != useIt->second.end()) {
+                        newVars.insert(defIt->second.begin(), defIt->second.end());
+                        found = true;
+                        break;
+                    }
+                }
+                if (found)
+                    break;
+            }
+        }
+
+        if (dfs_table_so_policy(g, v, statefulVertices, newVars))
+            return true;
     }
 
-    if (depSet.find(path.back()) != depSet.end()) {
-        std::cout << "SUCCESS" << std::endl;
+    return false;
+}
+
+bool GraphDependency::check_table_so_policy(Graph *g, Graphs::vertex_t src,
+                                            std::vector<Graphs::vertex_t> &statefulVertices) {
+    // I. find Action blocks
+    std::vector<Graphs::vertex_t> actStmtVertices;
+    find_action_vertices(g, src, actStmtVertices, false);
+
+    std::cout << "actions:";
+    for (auto &v : actStmtVertices) std::cout << " " << v;
+    std::cout << std::endl;
+
+    for (auto &v : actStmtVertices) {
+        // 1. collect all new defs
+        varset_t vars;
+        auto vinfo = (*g)[v];
+        for (auto &defs : vinfo.defs)
+            vars.insert(defs.second.begin(), defs.second.end());
+
+        // 2. run DFS
+        if (dfs_table_so_policy(g, v, statefulVertices, vars))
+            std::cout << "SUCCESS" << std::endl;
     }
+    return false;
 }
 
 void GraphDependency::analyze_subgraph(Graph *g) {
@@ -326,41 +393,25 @@ void GraphDependency::analyze_subgraph(Graph *g) {
     if (tableVertices.size() == 0 || statefulVertices.size() == 0)
         return;
 
-    // 2. While tracking topological order, check table-to-stateful case
-    std::vector<Graphs::vertex_t> order;
-    boost::topological_sort(*g, std::back_inserter(order));
-    int numCases = 0;
-    for (auto it = order.rbegin(); it != order.rend(); ++it) {
-        // Find tableVertex
-        if (std::find(tableVertices.begin(), tableVertices.end(), *it)
-                == tableVertices.end())
-            continue;
-
-        for (auto jt = it + 1; jt != order.rend(); ++jt) {
-            // Find statefulVertex
-            if (std::find(statefulVertices.begin(), statefulVertices.end(), *jt)
-                    == statefulVertices.end())
-                continue;
-
-            auto tv = (*g)[*it];
-            auto sv = (*g)[*jt];
-            std::vector<std::vector<Graphs::vertex_t>> allPaths;
-            int numPaths = find_all_paths(g, *it, *jt, allPaths);
-            std::cout << tv.name << "->" << sv.name <<" (" << numPaths << ")" << std::endl;
-
-            if (numPaths > 0)
-                numCases ++;
-
-            for (auto path : allPaths) {
-                check_cache_coherence(g, path);
+    // 2. replace add-on-miss table to hit action
+    for (std::size_t i = 0; i < statefulVertices.size(); i++) {
+        auto sit = statefulVertices[i];
+        auto sInfo = (*g)[sit];
+        if (sInfo.type == VertexType::TABLE && sInfo.isStateful) {
+            std::vector<Graphs::vertex_t> postPaths;
+            add_on_miss_defuse_path(g, sit, postPaths);
+            if (postPaths.size() > 0) {
+                statefulVertices[i] = postPaths.back();
             }
         }
     }
-    std::cout << std::endl;
 
     std::cout << "#Stateful: " << statefulVertices.size()
-        << ", #Table: " << tableVertices.size()
-        << ", #Cases: " << numCases << std::endl;
+        << ", #Table: " << tableVertices.size() << std::endl;
+
+    for (auto v : tableVertices) {
+        check_table_so_policy(g, v, statefulVertices);
+    }
 }
 
 std::size_t GraphDependency::dfs_find_cycle(Graph *g, Graphs::vertex_t u,
@@ -452,14 +503,15 @@ std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const Co
     while (l != nullptr && !found) {
         auto *v = l->node;
         for (auto vit : find_node_by_ptr(g, v)) {
-            auto &vinfo = (*g)[vit];
+            // {vertex ID, node ptr}
+            auto &vinfo = (*g)[vit.first];
             if (isDef) {
-                vinfo.defs[v].insert(loc->node);
+                vinfo.defs[vit.second].insert(loc->node);
             } else {
-                vinfo.uses[v].insert(loc->node);
+                vinfo.uses[vit.second].insert(loc->node);
             }
             found = true;
-            foundVertices.push_back(vit);
+            foundVertices.push_back(vit.first);
         }
         l = l->parent;
     }
@@ -467,7 +519,7 @@ std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const Co
 }
 
 void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
-        hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> &nodeToVarMap) {
+        hvec_map<const IR::Node *, ComputeDefUse::locset_t> &nodeToVarMap) {
     auto &vinfo = (*g)[v];
     if (vinfo.nodes.size() <= 1)
         return;
@@ -512,13 +564,13 @@ void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
     }
 }
 
-std::optional<const IR::Node *> GraphDependency::find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc) {
+std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> GraphDependency::find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc) {
     auto *l = loc;
     while (l != nullptr) {
         auto *v = l->node;
         auto nodes = find_node_by_ptr(g, v);
         if (nodes.size() > 0)
-            return v;
+            return nodes;
         l = l->parent;
     }
     return {};
@@ -534,18 +586,19 @@ void GraphDependency::split_cfg_vertices(Graph *g) {
         for (auto *loc : p.second)
             locset.insert(loc);
 
-    hvec_map<const IR::Node *, const ComputeDefUse::loc_t *> nodeToVarMap;
+    hvec_map<const IR::Node *, ComputeDefUse::locset_t> nodeToVarMap;
     for (auto *loc : locset) {
-        auto v = find_node_by_loc(g, loc);
-        if (!v.has_value())
-            continue;
-        nodeToVarMap[v.value()] = loc;
+        for (auto vit : find_node_by_loc(g, loc)) {
+            // {vertex ID, node ptr}
+            nodeToVarMap[vit.second].insert(loc);
+        }
     }
 
     auto vertices = boost::vertices(*g);
     // split should be called before connecting DDG edges
-    for (auto &vit = vertices.first; vit != vertices.second; ++vit)
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         split_cfg_vertex(g, *vit, nodeToVarMap);
+    }
 }
 
 void GraphDependency::process_subgraph(Graph *g) {

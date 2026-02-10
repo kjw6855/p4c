@@ -240,7 +240,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         // Check if externs are stateful or not.
         bool isStateful = false;
         auto em = instance->to<P4::ExternMethod>();
-        std::string statefulExternNames[4] = {"Counter", "Meter", "Register", "RegisterAction"};
+        std::vector<std::string> statefulExternNames = {"Counter", "Meter", "Register", "RegisterAction", "register"};
 
         for (const std::string &name : statefulExternNames) {
             if (em->originalExternType->getName().name == name) {
@@ -305,6 +305,15 @@ bool ControlGraphs::preorder(const IR::Key *key) {
 }
 
 bool ControlGraphs::preorder(const IR::P4Action *action) {
+    // Create a dummy vertex for empty block
+    if (auto stmt = action->body->to<IR::BlockStatement>()) {
+        if (stmt->components.size() == 0) {
+            auto v = add_and_connect_vertex("__EMPTY__"_cs, VertexType::OTHER, false, nullptr);
+            parents = {{v, new EdgeUnconditional()}};
+            return false;
+        }
+    }
+
     visit(action->body);
     return false;
 }
