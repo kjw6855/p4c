@@ -831,28 +831,7 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
         em->expr->dbprint(sstream);
         LOG5("Extern: " << cstring(sstream));
 
-        // check add_entry
-        if (em->method->name.name == "add_entry") {
-            state = READ_ONLY;
-            visit(mc->arguments, "arguments");
-            state = NORMAL;
-
-            auto *ece = em->expr->to<IR::MethodCallExpression>();
-            // action_name
-            auto *arg0 = ece->arguments->at(0)->expression->to<IR::StringLiteral>();
-            // action_params
-            auto *arg1 = ece->arguments->at(1)->expression->to<IR::StructExpression>();
-            // TODO: check expiration time
-
-            /* ec (arg1:right) -> arg0 (arg1:left) */
-            for (auto *c : arg1->components) {
-                LOG5(c->name << " -> " << arg0 << ":" << c->expression);
-                cstring hitParam = arg0->value + ":" + c->name;
-                hit_entry_params[hitParam] = getLoc(c->expression);
-            }
-            state = WRITE_ONLY;
-            visit(mc->arguments, "arguments");
-        } else if (em->originalExternType->getName().name == "register") {
+        if (em->originalExternType->getName().name == "register") {
             if (em->method->name.name == "read") {
                 state = READ_ONLY;
                 visit(mc->arguments->at(1), "arguments");
@@ -883,6 +862,27 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
             visit(mc->arguments, "arguments");
         }
 
+    } else if (auto *ec = instance->to<P4::ExternCall>()) {
+        // check add_entry
+        if (ec->method->name.name == "add_entry") {
+            state = READ_ONLY;
+            visit(mc->arguments, "arguments");
+            state = NORMAL;
+
+            auto *ece = ec->expr->to<IR::MethodCallExpression>();
+            // action_name
+            auto *arg0 = ece->arguments->at(0)->expression->to<IR::StringLiteral>();
+            // action_params
+            auto *arg1 = ece->arguments->at(1)->expression->to<IR::StructExpression>();
+            // TODO: check expiration time
+
+            /* ec (arg1:right) -> arg0 (arg1:left) */
+            for (auto *c : arg1->components) {
+                LOG5(c->name << " -> " << arg0 << ":" << c->expression);
+                cstring hitParam = arg0->value + ":" + c->name;
+                hit_entry_params[hitParam] = getLoc(c->expression);
+            }
+        }
     } else {
         if (mi->object) {
             auto obj = mi->object->getNode();  // FIXME -- should be able to visit an INode
