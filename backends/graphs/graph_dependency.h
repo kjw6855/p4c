@@ -18,11 +18,20 @@
 
 namespace P4::graphs {
 
+class DfsSecResult {
+ public:
+    const Graphs::vertex_t *src = nullptr;
+    hvec_map<Graphs::vertex_t, cstring> srcMap;
+    hvec_map<Graphs::vertex_t, hvec_set<Graphs::vertex_t>> indexVertices;
+    hvec_map<Graphs::vertex_t, hvec_set<Graphs::vertex_t>> dataVertices;
+};
+
 class GraphDependency : public Graphs {
  public:
-    struct PathVariables {
-        std::vector<const IR::Node *> input_var;
-        std::vector<const IR::Node *> output_var;
+    enum class VariableType {
+        INDEX,
+        DATA,
+        NONE
     };
 
     GraphDependency(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
@@ -82,19 +91,28 @@ class GraphDependency : public Graphs {
     int find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv,
                        std::vector<std::vector<Graphs::vertex_t>> &allPaths);
 
-    bool dfs_table_so_policy(Graph *g,
-                             Graphs::vertex_t src,
+    void dfs_table_so_policy(Graph *g,
+                             Graphs::vertex_t u,
                              std::vector<Graphs::vertex_t> &statefulVertices,
-                             varset_t &vars);
+                             varset_t &vars,
+                             DfsSecResult &dsr);
 
-    bool check_table_so_policy(Graph *g, Graphs::vertex_t src,
-                               std::vector<Graphs::vertex_t> &statefulVertices);
+    void check_table_so_policy(Graph *g, Graphs::vertex_t src,
+                               std::vector<Graphs::vertex_t> &statefulVertices,
+                               DfsSecResult &dsr);
+
+    bool is_empty_action(Graph *g, Graphs::vertex_t u);
 
     void find_action_vertices(Graph *g, Graphs::vertex_t u,
-                          std::vector<Graphs::vertex_t> &foundVertices,
-                          bool storeNext);
+                          hvec_map<Graphs::vertex_t, cstring> &foundVertices,
+                          cstring actionName);
 
     std::vector<Graphs::vertex_t> find_all_action_vertices(Graph *g);
+
+    std::optional<Graphs::vertex_t> get_match_vertex(Graph *g, Graphs::vertex_t src);
+
+    bool has_non_exact_match(const IR::Node *node);
+    bool has_non_exact_match(Graph *g, Graphs::vertex_t v);
 
     bool is_cyclic(Graph *g);
     std::size_t dfs_find_cycle(Graph *g, Graphs::vertex_t u,
@@ -102,6 +120,8 @@ class GraphDependency : public Graphs {
         std::vector<bool> &visited, std::vector<bool> &recStack,
         std::vector<Graphs::vertex_t> &found_vertices,
         std::vector<cstring> &found_edges);
+
+    VariableType get_variable_type(const IR::Node *node, const IR::Node *var);
 
     /** Misc **/
     // Check if the node is stateful

@@ -275,9 +275,10 @@ int GraphDependency::find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vert
     return numPath;
 }
 
-void GraphDependency::find_action_vertices(Graph *g, Graphs::vertex_t u,
-                          std::vector<Graphs::vertex_t> &foundVertices,
-                          bool storeNext) {
+bool GraphDependency::is_empty_action(Graph *g, Graphs::vertex_t u) {
+    auto uinfo = (*g)[u];
+    if (uinfo.type != VertexType::ACTION) return false;
+
     auto [ei, ei_end] = boost::out_edges(u, *g);
     for (; ei != ei_end; ++ei) {
         auto edge = (*g)[*ei];
@@ -285,12 +286,32 @@ void GraphDependency::find_action_vertices(Graph *g, Graphs::vertex_t u,
             continue;
         Graphs::vertex_t v = boost::target(*ei, *g);
         auto vinfo = (*g)[v];
-        if (!storeNext) {
+        // True if found OTHER (__EMPTY__) after ACTION
+        if (vinfo.type == VertexType::OTHER) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void GraphDependency::find_action_vertices(Graph *g, Graphs::vertex_t u,
+                          hvec_map<Graphs::vertex_t, cstring> &foundVertices,
+                          cstring actionName) {
+    auto [ei, ei_end] = boost::out_edges(u, *g);
+    for (; ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::CONTROL)
+            continue;
+        Graphs::vertex_t v = boost::target(*ei, *g);
+        auto vinfo = (*g)[v];
+        if (actionName.size() == 0) {
             find_action_vertices(g, v, foundVertices,
-                                 vinfo.type == VertexType::ACTION);
+                                 vinfo.type == VertexType::ACTION ?
+                                 vinfo.name : ""_cs);
         } else if (vinfo.type != VertexType::OTHER) {
             // Find if action has body
-            foundVertices.push_back(v);
+            foundVertices[v] = actionName;
         }
     }
 }
@@ -321,10 +342,82 @@ std::vector<Graphs::vertex_t> GraphDependency::find_all_action_vertices(Graph *g
     return foundVertices;
 }
 
-bool GraphDependency::dfs_table_so_policy(Graph *g,
+std::optional<Graphs::vertex_t> GraphDependency::get_match_vertex(Graph *g, Graphs::vertex_t src) {
+    auto [ei, ei_end] = boost::out_edges(src, *g);
+    for (; ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::CONTROL)
+            continue;
+        Graphs::vertex_t v = boost::target(*ei, *g);
+        auto vinfo = (*g)[v];
+        if (vinfo.type == VertexType::KEY)
+            return v;
+    }
+    return {};
+}
+
+bool GraphDependency::has_non_exact_match(const IR::Node *node) {
+    if (!node->is<IR::Key>()) return false;
+
+    auto key = node->to<IR::Key>();
+    for (auto elVec : key->keyElements) {
+        if (elVec->matchType->path->name.name != "exact"_cs)
+            return true;
+    }
+
+    return false;
+}
+
+bool GraphDependency::has_non_exact_match(Graph *g, Graphs::vertex_t v) {
+    auto mv = get_match_vertex(g, v);
+    auto vinfo = (*g)[v];
+    bool hasNonExactMatch = false;
+    if (mv.has_value()) {
+        auto mvInfo = (*g)[mv.value()];
+        hasNonExactMatch = has_non_exact_match(mvInfo.nodes[0]);
+        auto logstr = (hasNonExactMatch ? "Has"_cs : "No"_cs) + " non-exact match: "_cs;
+        LOG5(logstr << vinfo.name);
+    }
+
+    return hasNonExactMatch;
+}
+
+GraphDependency::VariableType GraphDependency::get_variable_type(const IR::Node *node, const IR::Node *var) {
+    if (node->is<IR::ActionListElement>()) {
+        // Action param is DATA and match is index
+        return VariableType::DATA;
+
+    } else if (auto *mcs = node->to<IR::MethodCallStatement>()) {
+        auto instance = P4::MethodInstance::resolve(mcs->methodCall, refMap, typeMap);
+
+        if (auto *em = instance->to<P4::ExternMethod>()) {
+            if (em->originalExternType->getName().name == "register") {
+                // check arguments
+                if (em->method->name.name == "read") {
+                    const IR::Node *arg0 = em->expr->arguments->at(0)->expression;
+                    const IR::Node *arg1 = em->expr->arguments->at(1)->expression;
+                    if (arg0->srcInfo == var->srcInfo)
+                        return VariableType::DATA;
+                    else if (arg1->srcInfo == var->srcInfo)
+                        return VariableType::INDEX;
+
+                } else if (em->method->name.name == "write") {
+                    const IR::Node *arg1 = em->expr->arguments->at(0)->expression;
+                    if (arg1->srcInfo == var->srcInfo)
+                        return VariableType::INDEX;
+                }
+            }
+        }
+    }
+
+    return VariableType::NONE;
+}
+
+void GraphDependency::dfs_table_so_policy(Graph *g,
                                           Graphs::vertex_t u,
                                           std::vector<Graphs::vertex_t> &statefulVertices,
-                                          varset_t &vars) {
+                                          varset_t &vars,
+                                          DfsSecResult &dsr) {
     auto uinfo = (*g)[u];
     LOG5("   check " << uinfo.name);
     auto [ei, ei_end] = boost::out_edges(u, *g);
@@ -345,11 +438,11 @@ bool GraphDependency::dfs_table_so_policy(Graph *g,
         // 2. Found if the vertex is one of stateful
         Graphs::vertex_t v = boost::target(*ei, *g);
         auto vinfo = (*g)[v];
-        if (std::find(statefulVertices.begin(), statefulVertices.end(), v)
-                != statefulVertices.end()) {
+        bool isStateful = std::find(statefulVertices.begin(), statefulVertices.end(), v)
+                != statefulVertices.end();
+
+        if (isStateful)
             LOG5("   FOUND: " << vinfo.name);
-            return true;
-        }
 
         // 3. collect new vars
         // TODO: optimize data structure
@@ -357,58 +450,70 @@ bool GraphDependency::dfs_table_so_policy(Graph *g,
         // defUse->getUses() again
         varset_t newVars;
         for (auto node : vinfo.nodes) {
-            auto defIt = vinfo.defs.find(node);
-            if (defIt == vinfo.defs.end())
-                continue;
-
+            // 1) check if any used variables
             auto useIt = vinfo.uses.find(node);
             if (useIt == vinfo.uses.end())
                 continue;
 
-            // If the node uses one of usedVars, store all defs
+            auto defIt = vinfo.defs.find(node);
+            bool hasNewVar = (defIt != vinfo.defs.end());
+
             bool found = false;
             for (auto uv : usedVars) {
                 for (auto ul : defUse->getUses(uv)) {
-                    if (useIt->second.find(ul->node) != useIt->second.end()) {
+                    // Search next variable for this node
+                    if (useIt->second.find(ul->node) == useIt->second.end())
+                        continue;
+
+                    // If the node uses one of usedVars, store all defs
+                    if (hasNewVar && !found) {
                         newVars.insert(defIt->second.begin(), defIt->second.end());
                         found = true;
-                        break;
+                    }
+
+                    // Find if the variable is used as index or data
+                    if (isStateful) {
+                        switch (get_variable_type(node, ul->node)) {
+                            case VariableType::INDEX:
+                                dsr.indexVertices[*dsr.src].insert(v);
+                                break;
+                            case VariableType::DATA:
+                                dsr.dataVertices[*dsr.src].insert(v);
+                                break;
+                            default:
+                                break;
+                        }
                     }
                 }
-                if (found)
-                    break;
             }
         }
 
-        if (dfs_table_so_policy(g, v, statefulVertices, newVars))
-            return true;
+        dfs_table_so_policy(g, v, statefulVertices, newVars, dsr);
     }
-
-    return false;
 }
 
-bool GraphDependency::check_table_so_policy(Graph *g, Graphs::vertex_t src,
-                                            std::vector<Graphs::vertex_t> &statefulVertices) {
+void GraphDependency::check_table_so_policy(Graph *g, Graphs::vertex_t src,
+                                            std::vector<Graphs::vertex_t> &statefulVertices,
+                                            DfsSecResult &dsr) {
     // I. find Action blocks
-    std::vector<Graphs::vertex_t> actStmtVertices;
-    find_action_vertices(g, src, actStmtVertices, false);
+    //std::vector<std::pair<cstring, Graphs::vertex_t>> actStmtVertices;
+    find_action_vertices(g, src, dsr.srcMap, ""_cs);
 
     std::cout << "actions:";
-    for (auto &v : actStmtVertices) std::cout << " " << v;
+    for (auto &v : dsr.srcMap) std::cout << " " << v.first;
     std::cout << std::endl;
 
-    for (auto &v : actStmtVertices) {
+    for (auto &v : dsr.srcMap) {
         // 1. collect all new defs
         varset_t vars;
-        auto vinfo = (*g)[v];
+        auto vinfo = (*g)[v.first];
         for (auto &defs : vinfo.defs)
             vars.insert(defs.second.begin(), defs.second.end());
 
         // 2. run DFS
-        if (dfs_table_so_policy(g, v, statefulVertices, vars))
-            std::cout << "SUCCESS" << std::endl;
+        dsr.src = &v.first;
+        dfs_table_so_policy(g, v.first, statefulVertices, vars, dsr);
     }
-    return false;
 }
 
 void GraphDependency::analyze_subgraph(Graph *g) {
@@ -436,7 +541,30 @@ void GraphDependency::analyze_subgraph(Graph *g) {
         << ", #Table: " << tableVertices.size() << std::endl;
 
     for (auto v : tableVertices) {
-        check_table_so_policy(g, v, statefulVertices);
+        // 1) Run DFS to find all possible cases
+        DfsSecResult dsr;
+        check_table_so_policy(g, v, statefulVertices, dsr);
+
+        // 2) Print path of each case to mitigate
+        bool hasNonExactMatch = has_non_exact_match(g, v);
+        for (auto &p : dsr.indexVertices) {
+            if (hasNonExactMatch) {
+                std::cout << "FOUND (B1/3): " << dsr.srcMap[p.first] << std::endl;
+            } else {
+                std::cout << "FOUND (B3): " << dsr.srcMap[p.first] << std::endl;
+            }
+            for (auto &iv : p.second) {
+                auto ivinfo = (*g)[iv];
+                std::cout << "--> " << ivinfo.name << std::endl;
+            }
+        }
+        for (auto &p : dsr.dataVertices) {
+            std::cout << "FOUND (B2): " << dsr.srcMap[p.first] << std::endl;
+            for (auto &dv : p.second) {
+                auto dvinfo = (*g)[dv];
+                std::cout << "--> " << dvinfo.name << std::endl;
+            }
+        }
     }
 }
 
@@ -530,6 +658,12 @@ std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const Co
         auto *v = l->node;
         for (auto vit : find_node_by_ptr(g, v)) {
             // {vertex ID, node ptr}
+            if (is_empty_action(g, vit.first)) {
+                // FOUND but not used
+                found = true;
+                continue;
+            }
+
             auto &vinfo = (*g)[vit.first];
             if (isDef) {
                 vinfo.defs[vit.second].insert(loc->node);
