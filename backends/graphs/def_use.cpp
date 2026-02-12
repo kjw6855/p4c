@@ -481,6 +481,11 @@ bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
 bool ComputeDefUse::preorder(const IR::P4Action *act) {
     if (state == SKIPPING) return false;
 
+    // Skip if act is empty without adding params
+    if (auto stmt = act->body->to<IR::BlockStatement>()) {
+        if (stmt->components.size() == 0) return false;
+    }
+
     for (auto *p : *act->parameters) {
         def_info[p].defs.insert(getLoc(p));
     }
@@ -569,6 +574,9 @@ void ComputeDefUse::set_live_from_type(def_info_t &di, const IR::Type *type) {
         di.live.setrange(0, 1);
     } else if (auto *se = type->to<IR::Type_SerEnum>()) {
         di.live.setrange(0, se->type->width_bits());
+    } else if (auto *ne = type->to<IR::Type_Newtype>()) {
+        auto neType = typeMap->getTypeType(ne->type, true);
+        di.live.setrange(0, neType->width_bits());
     } else {
         BUG("Unexpected type %s in ComputeDefUse::set_live_from_type", type);
     }
