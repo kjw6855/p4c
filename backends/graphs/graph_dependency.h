@@ -58,7 +58,7 @@ class GraphDependency : public Graphs {
     void process_subgraph(Graph *g);
 
     // Find CFG vertex from defuse var loc
-    std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc);
+    std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc);
 
     // Split CFG vertex based on defuse variables
     void split_cfg_vertices(Graph *g);
@@ -125,7 +125,7 @@ class GraphDependency : public Graphs {
 
     /** Misc **/
     // Check if the node is stateful
-    bool is_stateful(const IR::Node *node);
+    bool is_stateful(const Graphs::NodeId &nid);
 
     // Dump defuse variables
     void dump_vars_in_graph(Graph *g);

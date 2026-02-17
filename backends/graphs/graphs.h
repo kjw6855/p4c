@@ -99,8 +99,39 @@ class EdgeSwitch : public EdgeTypeIface {
 
 class Graphs {
  public:
+    struct NodeId {
+        size_t callSiteId;
+        const IR::Node *node;
+        mutable size_t computedHash = 0;
+
+        bool operator<(const NodeId &a) const {
+            if (node != a.node) return node->id < a.node->id;
+            return callSiteId < a.callSiteId;
+        }
+        bool operator==(const NodeId &a) const {
+            return callSiteId == a.callSiteId && node == a.node;
+        }
+        std::size_t hash() const {
+            if (!computedHash)
+                computedHash = Util::Hash{}(callSiteId, node);
+            return computedHash;
+        }
+
+        NodeId() : callSiteId(0), node(nullptr) {}
+        NodeId(size_t callSiteId, const IR::Node *node)
+            : callSiteId(callSiteId), node(node) {}
+    };
+    struct NodeIdHash {
+        size_t operator()(const NodeId &nid) const noexcept {
+            return nid.hash();
+        }
+    };
+
     typedef hvec_set<const IR::Node *> varset_t;
+    using NodeVarMap = hvec_map<NodeId, varset_t, NodeIdHash>;
+
     static const varset_t emptyVarSet;
+    static const NodeId globalNodeId;
     enum class VertexType {
         TABLE,
         KEY,
@@ -118,9 +149,9 @@ class Graphs {
         cstring name;
         VertexType type;
         bool isStateful;
-        std::vector<const IR::Node *> nodes;
-        hvec_map<const IR::Node *, varset_t> defs;  // defined vars
-        hvec_map<const IR::Node *, varset_t> uses;  // used vars
+        std::vector<NodeId> nodes;
+        NodeVarMap defs;            // defined vars
+        NodeVarMap uses;            // used vars
     };
 
     enum class EdgeType {
@@ -167,13 +198,14 @@ class Graphs {
     // TODO: optimize finding vertices (e.g., following next edges)
     //       instead of boost::vertices, map with Graph *g does not work
     std::optional<vertex_t> find_node_by_name(Graph *g, const cstring &name);
-    std::vector<std::pair<vertex_t, const IR::Node *>> find_node_by_ptr(Graph *g, const IR::Node *ptr);
+    std::vector<std::pair<vertex_t, NodeId>> find_node_by_ptr(Graph *g, const IR::Node *ptr);
 
     // Get edge name from variable set
     cstring join_var_names(const varset_t &vars, bool hasId);
-    cstring get_vertex_name(std::vector<const IR::Node *> nodes);
+    cstring get_vertex_name(std::vector<NodeId> &nodes);
     vertex_t add_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
     vertex_t add_vertex_nodes(Graph *g, const cstring &name, VertexType type, bool isStateful, std::vector<const IR::Node *> &nodes);
+    vertex_t add_vertex_nodes(Graph *g, const cstring &name, VertexType type, bool isStateful, std::vector<NodeId> &nodes);
     vertex_t add_and_connect_vertex(const cstring &name, VertexType type, bool isStateful, const IR::Node *node);
     void add_edge(Graph *g, const vertex_t &from, const vertex_t &to, const cstring &name,
                   EdgeType type);
@@ -201,6 +233,20 @@ class Graphs {
         }
     }
 
+    size_t get_call_site_id(const IR::Node *n) {
+        auto cit = callSiteIdMap.find(n);
+        if (cit == callSiteIdMap.end())
+            return 0;
+        return cit->second;
+    }
+
+    size_t get_and_inc_call_site_id(const IR::Node *n) {
+        auto cit = callSiteIdMap.find(n);
+        size_t val = (cit == callSiteIdMap.end()) ? 0 : cit->second;
+        callSiteIdMap[n] = val + 1;
+        return val;
+    }
+
     class GraphAttributeSetter {
      public:
         void operator()(Graph &g) const {
@@ -208,7 +254,11 @@ class Graphs {
             for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
                 const auto &vinfo = g[*vit];
                 auto attrs = boost::get(boost::vertex_attribute, g);
-                attrs[*vit]["label"_cs] = vinfo.name;
+                cstring labelName = vinfo.name;
+                if (vinfo.nodes.size() == 1) {
+                    labelName += ":"_cs + std::to_string(vinfo.nodes[0].callSiteId);
+                }
+                attrs[*vit]["label"_cs] = labelName;
                 attrs[*vit]["style"_cs] = vertexTypeGetStyle(vinfo.type, vinfo.isStateful);
                 attrs[*vit]["fillcolor"_cs] = vertexTypeGetColor(vinfo.type, vinfo.isStateful);
                 attrs[*vit]["shape"_cs] = vertexTypeGetShape(vinfo.type);
@@ -302,6 +352,7 @@ class Graphs {
     vertex_t exit_v{};
     Parents parents{};
     std::vector<const IR::Statement *> statementsStack{};
+    hvec_map<const IR::Node *, size_t> callSiteIdMap{};
 
  private:
     /// Limits string size in helper_sstream and resets it

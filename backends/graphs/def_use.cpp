@@ -67,6 +67,11 @@ void ComputeDefUse::flow_merge(Visitor &a_) {
     LOG8("ComputeDefUse::flow_merge(" << a.uid << ") -> " << uid);
     unreachable &= a.unreachable;
     for (auto &di : a.def_info) def_info[di.first].flow_merge(di.second);
+    for (auto &ci : a.callSiteIdMap) {
+        auto valA = callSiteIdMap[ci.first];
+        auto valB = a.callSiteIdMap[ci.first];
+        callSiteIdMap[ci.first] = valA > valB ? valA : valB;
+    }
 }
 void ComputeDefUse::flow_copy(ControlFlowVisitor &a_) {
     ComputeDefUse &a = dynamic_cast<ComputeDefUse &>(a_);
@@ -74,6 +79,7 @@ void ComputeDefUse::flow_copy(ControlFlowVisitor &a_) {
     BUG_CHECK(state == a.state, "inconsistent state in ComputeDefUse::flow_copy");
     unreachable = a.unreachable;
     def_info = a.def_info;
+    curCallSiteId = a.curCallSiteId;
 }
 bool ComputeDefUse::operator==(const ControlFlowVisitor &a_) const {
     auto &a = dynamic_cast<const ComputeDefUse &>(a_);
@@ -234,7 +240,7 @@ bool ComputeDefUse::filter_join_point(const IR::Node *n) {
 
 const ComputeDefUse::loc_t *ComputeDefUse::getLoc(const Visitor::Context *ctxt) {
     if (!ctxt) return nullptr;
-    loc_t tmp{ctxt->node, getLoc(ctxt->parent)};
+    loc_t tmp{ctxt->node, getLoc(ctxt->parent), curCallSiteId};
     return &*cached_locs.insert(tmp).first;
 }
 
@@ -242,7 +248,7 @@ const ComputeDefUse::loc_t *ComputeDefUse::getLoc(const IR::Node *n, const Visit
     for (auto *p = ctxt; p; p = p->parent)
         if (p->node == n) return getLoc(p);
     auto rv = getLoc(ctxt);
-    loc_t tmp{n, rv};
+    loc_t tmp{n, rv, curCallSiteId};
     return &*cached_locs.insert(tmp).first;
 }
 
@@ -352,7 +358,7 @@ bool ComputeDefUse::preorder(const IR::P4Control *c) {
             auto vit = find_node_by_name(curG, "__START__"_cs);
             if (vit.has_value()) {
                 auto &vinfo = (*curG)[vit.value()];
-                vinfo.defs[nullptr].insert(p);
+                vinfo.defs[Graphs::globalNodeId].insert(p);
             }
 
             def_info[p].defs.insert(getLoc(p));
@@ -375,7 +381,7 @@ bool ComputeDefUse::preorder(const IR::P4Control *c) {
             auto vit = find_node_by_name(curG, "__EXIT__"_cs);
             if (vit.has_value()) {
                 auto &vinfo = (*curG)[vit.value()];
-                vinfo.uses[nullptr].insert(p);
+                vinfo.uses[Graphs::globalNodeId].insert(p);
             }
 
             add_uses(getLoc(p), def_info[p]);
@@ -387,7 +393,13 @@ bool ComputeDefUse::preorder(const IR::P4Control *c) {
 }
 
 bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
-    if (state == SKIPPING) return false;
+    if (state == SKIPPING) {
+        get_and_inc_call_site_id(tbl);
+        return false;
+    }
+    auto cachedCallSiteId = curCallSiteId;
+    curCallSiteId = get_call_site_id(tbl);
+
     IndentCtl::TempIndent indent;
     LOG5("ComputeDefUse" << uid << "(P4Table " << tbl->name << ")" << indent);
     auto boolProp = tbl->getBooleanProperty("add_on_miss"_cs);
@@ -398,6 +410,7 @@ bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
     if (auto key = tbl->getKey()) {
         visit(key, "key");
     }
+
     if (auto actions = tbl->getActionList()) {
         //parallel_visit(actions->actionList, "actions");
         std::vector<ControlFlowVisitor *> actionVisitors;
@@ -475,16 +488,27 @@ bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
     } else {
         BUG("No actions in %s", tbl);
     }
+    get_and_inc_call_site_id(tbl);
+    curCallSiteId = cachedCallSiteId;
     return false;
 }
 
 bool ComputeDefUse::preorder(const IR::P4Action *act) {
-    if (state == SKIPPING) return false;
+    if (state == SKIPPING) {
+        get_and_inc_call_site_id(act);
+        return false;
+    }
 
     // Skip if act is empty without adding params
     if (auto stmt = act->body->to<IR::BlockStatement>()) {
-        if (stmt->components.size() == 0) return false;
+        if (stmt->components.size() == 0) {
+            get_and_inc_call_site_id(act);
+            return false;
+        }
     }
+
+    auto cachedCallSiteId = curCallSiteId;
+    curCallSiteId = get_call_site_id(act);
 
     for (auto *p : *act->parameters) {
         def_info[p].defs.insert(getLoc(p));
@@ -492,6 +516,8 @@ bool ComputeDefUse::preorder(const IR::P4Action *act) {
     IndentCtl::TempIndent indent;
     LOG5("ComputeDefUse" << uid << "(P4Action " << act->name << ")" << indent);
     visit(act->body, "body");
+    get_and_inc_call_site_id(act);
+    curCallSiteId = cachedCallSiteId;
     return false;
 }
 
@@ -545,6 +571,22 @@ bool ComputeDefUse::preorder(const IR::BaseAssignmentStatement *as) {
     // visit RHS of assignment before LHS
     visit(as->right, "right", 1);
     visit(as->left, "left", 0);
+    return false;
+}
+
+bool ComputeDefUse::preorder(const IR::IfStatement *s) {
+    visit(s->condition, "condition");
+
+    ComputeDefUse *itv = clone();
+    itv->flow_copy(*this);
+    itv->visit(s->ifTrue, "ifTrue");
+
+    ComputeDefUse *ifv = clone();
+    ifv->flow_copy(*this);
+    ifv->callSiteIdMap = itv->callSiteIdMap;        // use callSiteIdMap
+    ifv->visit(s->ifFalse, "ifFalse");
+    flow_merge(*itv);
+    flow_merge(*ifv);
     return false;
 }
 
@@ -911,6 +953,8 @@ void ComputeDefUse::end_apply() { LOG5(defuse); }
 // Debugging
 std::ostream &operator<<(std::ostream &out, const ComputeDefUse::loc_t &loc) {
     out << '<' << loc.node->id << '>' << LogAbbrev(loc.node->srcInfo);
+    if (loc.callSiteId > 0)
+        out << "(" << loc.callSiteId << ")";
     return out;
 }
 

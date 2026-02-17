@@ -87,6 +87,7 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             boost::get_property(*g_, boost::graph_name) = name.string();
             BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
             g = controlStack.pushBack(*g_, cstring::empty);
+            callSiteIdMap.clear();
             start_v = add_vertex("__START__"_cs, VertexType::OTHER, false, nullptr);
             exit_v = add_vertex("__EXIT__"_cs, VertexType::OTHER, false, nullptr);
             parents = {{start_v, new EdgeUnconditional()}};
@@ -116,6 +117,7 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
     if (instanceName != std::nullopt) {
         g = controlStack.pushBack(*g, instanceName.value());
         doPop = true;
+        callSiteIdMap.clear();
     }
     return_parents.clear();
     visit(cont->body);
@@ -123,7 +125,10 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
 
     parents.insert(parents.end(), return_parents.begin(), return_parents.end());
     return_parents.clear();
-    if (doPop) g = controlStack.popBack();
+    if (doPop) {
+        g = controlStack.popBack();
+        callSiteIdMap.clear();
+    }
     return false;
 }
 

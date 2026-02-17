@@ -8,9 +8,9 @@
 namespace P4::graphs {
 const Graphs::varset_t Graphs::emptyVarSet;
 
-bool GraphDependency::is_stateful(const IR::Node *node) {
-    if (node->is<IR::BaseAssignmentStatement>()) {
-        auto stmt = node->to<IR::BaseAssignmentStatement>();
+bool GraphDependency::is_stateful(const Graphs::NodeId &nid) {
+    if (nid.node->is<IR::BaseAssignmentStatement>()) {
+        auto stmt = nid.node->to<IR::BaseAssignmentStatement>();
         // Check right expression
         auto rs = stmt->right;
         if (rs->is<IR::MethodCallExpression>()) {
@@ -43,8 +43,8 @@ std::vector<Graphs::vertex_t> GraphDependency::get_vertices_per_type(Graph *g, V
             }
         } else if (isStateful) {
             /* Additionally check nodes of vertex */
-            for (auto node : vinfo.nodes) {
-                if (is_stateful(node)) {
+            for (auto &nid : vinfo.nodes) {
+                if (is_stateful(nid)) {
                     found_vertices.push_back(*vit);
                     break;
                 }
@@ -374,7 +374,8 @@ bool GraphDependency::has_non_exact_match(Graph *g, Graphs::vertex_t v) {
     bool hasNonExactMatch = false;
     if (mv.has_value()) {
         auto mvInfo = (*g)[mv.value()];
-        hasNonExactMatch = has_non_exact_match(mvInfo.nodes[0]);
+        BUG_CHECK(mvInfo.nodes.size() == 1, "There should be one node for Key");
+        hasNonExactMatch = has_non_exact_match(mvInfo.nodes[0].node);
         auto logstr = (hasNonExactMatch ? "Has"_cs : "No"_cs) + " non-exact match: "_cs;
         LOG5(logstr << vinfo.name);
     }
@@ -449,13 +450,13 @@ void GraphDependency::dfs_table_so_policy(Graph *g,
         // edge contains defs and uses, but currently it requires
         // defUse->getUses() again
         varset_t newVars;
-        for (auto node : vinfo.nodes) {
+        for (auto &nid : vinfo.nodes) {
             // 1) check if any used variables
-            auto useIt = vinfo.uses.find(node);
+            auto useIt = vinfo.uses.find(nid);
             if (useIt == vinfo.uses.end())
                 continue;
 
-            auto defIt = vinfo.defs.find(node);
+            auto defIt = vinfo.defs.find(nid);
             bool hasNewVar = (defIt != vinfo.defs.end());
 
             bool found = false;
@@ -473,7 +474,7 @@ void GraphDependency::dfs_table_so_policy(Graph *g,
 
                     // Find if the variable is used as index or data
                     if (isStateful) {
-                        switch (get_variable_type(node, ul->node)) {
+                        switch (get_variable_type(nid.node, ul->node)) {
                             case VariableType::INDEX:
                                 dsr.indexVertices[*dsr.src].insert(v);
                                 break;
@@ -657,7 +658,7 @@ std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const Co
     while (l != nullptr && !found) {
         auto *v = l->node;
         for (auto vit : find_node_by_ptr(g, v)) {
-            // {vertex ID, node ptr}
+            // {vertex ID, Node ID}
             if (is_empty_action(g, vit.first)) {
                 // FOUND but not used
                 found = true;
@@ -684,16 +685,16 @@ void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
     if (vinfo.nodes.size() <= 1)
         return;
 
-    std::vector<const IR::Node *> curNodes;
+    std::vector<Graphs::NodeId> curNodes;
     bool hasVar = false;
     bool updateLast = false;
-    for (auto node : vinfo.nodes) {
-        bool isVarNode = nodeToVarMap.find(node) != nodeToVarMap.end();
+    for (auto &nid : vinfo.nodes) {
+        bool isVarNode = nodeToVarMap.find(nid.node) != nodeToVarMap.end();
         if (!isVarNode) {
-            curNodes.push_back(node);
+            curNodes.push_back(nid);
 
         } else if (!hasVar) {
-            curNodes.push_back(node);
+            curNodes.push_back(nid);
             hasVar = true;
 
         } else {
@@ -711,7 +712,7 @@ void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
             add_edge(g, u, v, cstring::empty, EdgeType::CONTROL);
 
             curNodes.clear();
-            curNodes.push_back(node);
+            curNodes.push_back(nid);
             hasVar = true;
             updateLast = true;
         }
@@ -724,7 +725,7 @@ void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
     }
 }
 
-std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> GraphDependency::find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc) {
+std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> GraphDependency::find_node_by_loc(Graph *g, const ComputeDefUse::loc_t *loc) {
     auto *l = loc;
     while (l != nullptr) {
         auto *v = l->node;
@@ -749,8 +750,8 @@ void GraphDependency::split_cfg_vertices(Graph *g) {
     hvec_map<const IR::Node *, ComputeDefUse::locset_t> nodeToVarMap;
     for (auto *loc : locset) {
         for (auto vit : find_node_by_loc(g, loc)) {
-            // {vertex ID, node ptr}
-            nodeToVarMap[vit.second].insert(loc);
+            // {vertex ID, Node ID}
+            nodeToVarMap[vit.second.node].insert(loc);
         }
     }
 
@@ -809,7 +810,7 @@ void GraphDependency::process_subgraph(Graph *g) {
             continue;
 
         // __START__
-        auto defIt = vinfo.defs.find(nullptr);
+        auto defIt = vinfo.defs.find(Graphs::globalNodeId);
         if (defIt != vinfo.defs.end()) {
             startVit = *vit;
             auto defSet = defIt->second;
@@ -819,7 +820,7 @@ void GraphDependency::process_subgraph(Graph *g) {
             }
         }
         // __EXIT__
-        auto useIt = vinfo.uses.find(nullptr);
+        auto useIt = vinfo.uses.find(Graphs::globalNodeId);
         if (useIt != vinfo.uses.end()) {
             exitVit = *vit;
             auto useSet = useIt->second;
@@ -888,7 +889,7 @@ void GraphDependency::dump_vars_in_graph(Graph *g) {
         const auto &vinfo = (*g)[*vit];
         // START
         if (vinfo.nodes.size() == 0) {
-            auto defIt = vinfo.defs.find(nullptr);
+            auto defIt = vinfo.defs.find(Graphs::globalNodeId);
             if (defIt != vinfo.defs.end()) {
                 auto defSet = defIt->second;
                 std::cout << vinfo.name << "(" << defSet.size() << "): "
@@ -897,16 +898,16 @@ void GraphDependency::dump_vars_in_graph(Graph *g) {
         } else {
             std::cout << vinfo.name << std::endl; // print name
             // Normal IR nodes
-            for (const auto *n : vinfo.nodes) {
-                auto defIt = vinfo.defs.find(n);
+            for (auto &nid : vinfo.nodes) {
+                auto defIt = vinfo.defs.find(nid);
                 const varset_t defSet = defIt == vinfo.defs.end() ?
                                         emptyVarSet : defIt->second;
-                auto useIt = vinfo.uses.find(n);
+                auto useIt = vinfo.uses.find(nid);
                 const varset_t useSet = useIt == vinfo.uses.end() ?
                                         emptyVarSet : useIt->second;
 
                 std::stringstream sstream;
-                n->dbprint(sstream);
+                nid.node->dbprint(sstream);
 
                 std::cout << "  " << cstring(sstream) << std::endl
                           << "  - def(" << defSet.size() << "): "

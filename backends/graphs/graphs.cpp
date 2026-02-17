@@ -25,6 +25,8 @@ limitations under the License.
 
 namespace P4::graphs {
 
+const Graphs::NodeId Graphs::globalNodeId{0, nullptr};
+
 cstring Graphs::join_var_names(const varset_t &vars, bool hasId) {
     std::stringstream sstream;
     bool first = true;
@@ -48,20 +50,21 @@ std::optional<Graphs::vertex_t> Graphs::find_node_by_name(Graph *g, const cstrin
     return {};
 }
 
-std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> Graphs::find_node_by_ptr(Graph *g, const IR::Node *ptr) {
+std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> Graphs::find_node_by_ptr(Graph *g, const IR::Node *ptr) {
     auto vertices = boost::vertices(*g);
 
     // CFG can have duplicated vertices (e.g., TABLE)
-    std::vector<std::pair<Graphs::vertex_t, const IR::Node *>> foundVertices;
+    std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> foundVertices;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
-        for (auto node : vinfo.nodes) {
+        for (auto &nid : vinfo.nodes) {
             // Compare node and srcInfo instead of ptr valu
             // TODO: check equivalence of Node in addition to srcInfo
             //       e.g., node->equiv(*ptr)
             //       corner case: CFG node doesn't resolve types, so it contains UnknownType
-            if (node->srcInfo == ptr->srcInfo)
-                foundVertices.push_back({*vit, node});
+            // TODO: check callSiteId
+            if (nid.node->srcInfo == ptr->srcInfo)
+                foundVertices.push_back({*vit, nid});
         }
     }
 
@@ -76,7 +79,9 @@ Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type, bool i
     if (node != nullptr) {
         auto &g_ref = *g;
         auto &v_nodes = g_ref[v].nodes;
-        v_nodes.push_back(node);
+        auto callSiteId = get_and_inc_call_site_id(node);
+        NodeId nid {callSiteId, node};
+        v_nodes.push_back(nid);
     }
     return g->local_to_global(v);
 }
@@ -89,7 +94,25 @@ Graphs::vertex_t Graphs::add_vertex_nodes(Graph *g, const cstring &name, VertexT
 
     auto &g_ref = *g;
     auto &v_nodes = g_ref[v].nodes;
-    v_nodes.insert(v_nodes.end(), nodes.begin(), nodes.end());
+    for (const IR::Node *n : nodes) {
+        auto callSiteId = get_and_inc_call_site_id(n);
+        NodeId nid {callSiteId, n};
+        v_nodes.push_back(nid);
+    }
+    return g->local_to_global(v);
+}
+
+Graphs::vertex_t Graphs::add_vertex_nodes(Graph *g, const cstring &name, VertexType type, bool isStateful, std::vector<Graphs::NodeId> &nodes) {
+    auto v = boost::add_vertex(*g);
+    boost::put(&Vertex::name, *g, v, name);
+    boost::put(&Vertex::type, *g, v, type);
+    boost::put(&Vertex::isStateful, *g, v, isStateful);
+
+    auto &g_ref = *g;
+    auto &v_nodes = g_ref[v].nodes;
+    for (auto &nid : nodes) {
+        v_nodes.push_back(nid);
+    }
     return g->local_to_global(v);
 }
 
@@ -136,24 +159,24 @@ void Graphs::limitStringSize(std::stringstream &sstream, std::stringstream &help
     helper_sstream.clear();
 }
 
-cstring Graphs::get_vertex_name(std::vector<const IR::Node *> nodes) {
+cstring Graphs::get_vertex_name(std::vector<Graphs::NodeId> &nodes) {
     std::stringstream sstream;
     std::stringstream helper_sstream;  // to limit line width
 
     if (nodes.size() == 1) {
-        nodes[0]->dbprint(helper_sstream);
+        nodes[0].node->dbprint(helper_sstream);
         limitStringSize(sstream, helper_sstream);
     } else if (nodes.size() == 2) {
-        nodes[0]->dbprint(helper_sstream);
+        nodes[0].node->dbprint(helper_sstream);
         limitStringSize(sstream, helper_sstream);
         sstream << "\\n";
-        nodes[1]->dbprint(helper_sstream);
+        nodes[1].node->dbprint(helper_sstream);
         limitStringSize(sstream, helper_sstream);
     } else {
-        nodes[0]->dbprint(helper_sstream);
+        nodes[0].node->dbprint(helper_sstream);
         limitStringSize(sstream, helper_sstream);
         sstream << "\\n...\\n";
-        nodes.back()->dbprint(helper_sstream);
+        nodes.back().node->dbprint(helper_sstream);
         limitStringSize(sstream, helper_sstream);
     }
 

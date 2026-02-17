@@ -55,6 +55,7 @@ class ComputeDefUse : public Inspector,
         auto *rv = new ComputeDefUse(*this);
         rv->uid = ++uid_ctr;
         LOG8("ComputeDefUse::clone " << rv->uid << " <- " << uid);
+        rv->callSiteIdMap = callSiteIdMap;
         return rv;
     }
     void flow_merge(Visitor &) override;
@@ -70,6 +71,7 @@ class ComputeDefUse : public Inspector,
     struct loc_t {
         const IR::Node *node;
         const loc_t *parent;
+        size_t callSiteId;
         mutable size_t computedHash = 0;
         bool operator<(const loc_t &a) const {
             if (node != a.node) return node->id < a.node->id;
@@ -109,6 +111,8 @@ class ComputeDefUse : public Inspector,
     const loc_t *getLoc() { return getLoc(getChildContext()); }
     const loc_t *getLoc(const IR::Node *, const Visitor::Context *);
     const loc_t *getLoc(const IR::Node *n) { return getLoc(n, getChildContext()); }
+
+    size_t curCallSiteId;
 
     // flow tracking info about defs live at the point we are currently visiting
     struct def_info_t {
@@ -178,6 +182,7 @@ class ComputeDefUse : public Inspector,
     bool preorder(const IR::Vector<IR::Annotation> *) override { return false; }
     bool preorder(const IR::KeyElement *) override;
     bool preorder(const IR::BaseAssignmentStatement *) override;
+    bool preorder(const IR::IfStatement *) override;
     const IR::Expression *do_read(def_info_t &, const IR::Expression *, const Context *);
     const IR::Expression *do_write(def_info_t &, const IR::Expression *, const Context *);
     bool preorder(const IR::PathExpression *) override;
