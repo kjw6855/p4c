@@ -103,6 +103,7 @@ class GraphDependency : public Graphs {
                                std::vector<Graphs::vertex_t> &statefulVertices,
                                DfsSecResult &dsr);
 
+    bool is_next_vertex(Graph *g, Graphs::vertex_t s, Graphs::vertex_t d);
     bool is_empty_action(Graph *g, Graphs::vertex_t u);
 
     void find_action_vertices(Graph *g, Graphs::vertex_t u,

@@ -275,6 +275,19 @@ int GraphDependency::find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vert
     return numPath;
 }
 
+bool GraphDependency::is_next_vertex(Graph *g, Graphs::vertex_t s, Graphs::vertex_t d) {
+    auto [ei, ei_end] = boost::out_edges(s, *g);
+    for (; ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::CONTROL)
+            continue;
+        Graphs::vertex_t v = boost::target(*ei, *g);
+        if (v == d)
+            return true;
+    }
+    return false;
+}
+
 bool GraphDependency::is_empty_action(Graph *g, Graphs::vertex_t u) {
     auto uinfo = (*g)[u];
     if (uinfo.type != VertexType::ACTION) return false;
@@ -839,6 +852,13 @@ void GraphDependency::process_subgraph(Graph *g) {
                 if (sinkVit == useToVertexMap.end())
                     continue;
                 auto sink = sinkVit->second;
+
+                auto sinfo = (*g)[*vit];
+                if (sinfo.type == VertexType::ACTION) {
+                    if (!is_next_vertex(g, *vit, sink))
+                        continue;
+                }
+
                 defUseEdgeMap[{*vit, sink}].insert(v);
             }
         }
@@ -850,6 +870,12 @@ void GraphDependency::process_subgraph(Graph *g) {
                 if (srcVit == defToVertexMap.end())
                     continue;
                 auto src = srcVit->second;
+                auto sinfo = (*g)[src];
+                if (sinfo.type == VertexType::ACTION) {
+                    if (!is_next_vertex(g, src, *vit))
+                        continue;
+                }
+
                 defUseEdgeMap[{src, *vit}].insert(v);
             }
         }
