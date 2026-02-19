@@ -358,7 +358,7 @@ bool ComputeDefUse::preorder(const IR::P4Control *c) {
             auto vit = find_node_by_name(curG, "__START__"_cs);
             if (vit.has_value()) {
                 auto &vinfo = (*curG)[vit.value()];
-                vinfo.defs[Graphs::globalNodeId].insert(p);
+                vinfo.definedVars[Graphs::globalNodeId].insert(p);
             }
 
             def_info[p].defs.insert(getLoc(p));
@@ -381,7 +381,7 @@ bool ComputeDefUse::preorder(const IR::P4Control *c) {
             auto vit = find_node_by_name(curG, "__EXIT__"_cs);
             if (vit.has_value()) {
                 auto &vinfo = (*curG)[vit.value()];
-                vinfo.uses[Graphs::globalNodeId].insert(p);
+                vinfo.usedVars[Graphs::globalNodeId].insert(p);
             }
 
             add_uses(getLoc(p), def_info[p]);
@@ -398,7 +398,7 @@ bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
         return false;
     }
     auto cachedCallSiteId = curCallSiteId;
-    curCallSiteId = get_call_site_id(tbl);
+    curCallSiteId = get_and_inc_call_site_id(tbl);
 
     IndentCtl::TempIndent indent;
     LOG5("ComputeDefUse" << uid << "(P4Table " << tbl->name << ")" << indent);
@@ -480,15 +480,14 @@ bool ComputeDefUse::preorder(const IR::P4Table *tbl) {
         actionVisitors.clear();
 
         for (auto p : hitMissList) {
-            defuse.uses[p.first->node].insert(p.second);
-            defuse.defs[p.second->node].insert(p.first);
+            defuse.uses[p.first].insert(p.second);
+            defuse.defs[p.second].insert(p.first);
             LOG5(p.first->node << " -> " << p.second->node);
         }
 
     } else {
         BUG("No actions in %s", tbl);
     }
-    get_and_inc_call_site_id(tbl);
     curCallSiteId = cachedCallSiteId;
     return false;
 }
@@ -508,7 +507,7 @@ bool ComputeDefUse::preorder(const IR::P4Action *act) {
     }
 
     auto cachedCallSiteId = curCallSiteId;
-    curCallSiteId = get_call_site_id(act);
+    curCallSiteId = get_and_inc_call_site_id(act);
 
     for (auto *p : *act->parameters) {
         def_info[p].defs.insert(getLoc(p));
@@ -516,7 +515,6 @@ bool ComputeDefUse::preorder(const IR::P4Action *act) {
     IndentCtl::TempIndent indent;
     LOG5("ComputeDefUse" << uid << "(P4Action " << act->name << ")" << indent);
     visit(act->body, "body");
-    get_and_inc_call_site_id(act);
     curCallSiteId = cachedCallSiteId;
     return false;
 }
@@ -594,8 +592,8 @@ bool ComputeDefUse::preorder(const IR::IfStatement *s) {
 // a use at the specified location
 void ComputeDefUse::add_uses(const loc_t *loc, def_info_t &di) {
     for (auto *l : di.defs) {
-        defuse.uses[l->node].insert(loc);
-        defuse.defs[loc->node].insert(l);
+        defuse.uses[l].insert(loc);
+        defuse.defs[loc].insert(l);
     }
     for (auto &f : Values(di.fields)) add_uses(loc, f);
     for (auto &sl : Values(di.slices)) add_uses(loc, sl);
@@ -650,8 +648,8 @@ const IR::Expression *ComputeDefUse::do_read(def_info_t &di, const IR::Expressio
         if (auto *t = isValid(m, ctxt->parent)) {
             auto loc = getLoc(t);
             for (auto *l : di.valid_bit_defs) {
-                defuse.uses[l->node].insert(loc);
-                defuse.defs[loc->node].insert(l);
+                defuse.uses[l].insert(loc);
+                defuse.defs[loc].insert(l);
             }
             return t;
         } else if (auto *str = m->expr->type->to<IR::Type_StructLike>()) {
@@ -702,10 +700,10 @@ const IR::Expression *ComputeDefUse::do_read(def_info_t &di, const IR::Expressio
     }
     auto loc = getLoc(e);
     for (auto *l : di.defs) {
-        defuse.uses[l->node].insert(loc);
-        defuse.defs[loc->node].insert(l);
+        defuse.uses[l].insert(loc);
+        defuse.defs[loc].insert(l);
     }
-    LOG8("  " << defuse.defs[loc->node]);
+    LOG8("  " << defuse.defs[loc]);
     return e;
 }
 
@@ -855,7 +853,7 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
         if (!isRead()) return false;
     }
     auto saved_state = state;
-    bool skipArguments = instance->is<P4::ExternMethod>();
+    bool skipArguments = instance->is<P4::ExternCall>();
     if (!skipArguments) {
         state = READ_ONLY;
         visit(mc->arguments, "arguments");
@@ -932,6 +930,14 @@ bool ComputeDefUse::preorder(const IR::MethodCallExpression *mc) {
                 cstring hitParam = arg0->value + ":" + c->name;
                 hit_entry_params[hitParam] = getLoc(c->expression);
             }
+        } else {
+            auto cachedCallSiteId = curCallSiteId;
+            curCallSiteId = get_and_inc_call_site_id(mc);
+            state = READ_ONLY;
+            visit(mc->arguments, "arguments");
+            state = WRITE_ONLY;
+            visit(mc->arguments, "arguments");
+            curCallSiteId = cachedCallSiteId;
         }
     } else {
         if (mi->object) {
@@ -971,16 +977,18 @@ std::ostream &operator<<(std::ostream &out, const hvec_set<const ComputeDefUse::
 
 std::ostream &operator<<(
     std::ostream &out,
-    const std::pair<const IR::Node *, const hvec_set<const ComputeDefUse::loc_t *>> &p) {
+    const std::pair<const ComputeDefUse::loc_t *, const hvec_set<const ComputeDefUse::loc_t *>> &p) {
     out << Log::endl;
     out << DBPrint::setprec(DBPrint::Prec_Low);
-    p.first->dbprint(out);
-    out << '<' << p.first->id << '>';
-    if (p.first->srcInfo) {
+    p.first->node->dbprint(out);
+    out << '<' << p.first->node->id << '>';
+    if (p.first->node->srcInfo) {
         unsigned line, col;
-        out << '(' << p.first->srcInfo.toSourcePositionData(&line, &col);
+        out << '(' << p.first->node->srcInfo.toSourcePositionData(&line, &col);
         out << ':' << line << ':' << (col + 1) << ')';
     }
+    if (p.first->callSiteId > 0)
+        out << "(" << p.first->callSiteId << ")";
     out << ": " << p.second;
     return out;
 }

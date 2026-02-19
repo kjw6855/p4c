@@ -50,20 +50,25 @@ std::optional<Graphs::vertex_t> Graphs::find_node_by_name(Graph *g, const cstrin
     return {};
 }
 
-std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> Graphs::find_node_by_ptr(Graph *g, const IR::Node *ptr) {
+std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> Graphs::find_node_by_ptr(Graph *g,
+        const IR::Node *ptr, std::optional<size_t> callSiteId) {
     auto vertices = boost::vertices(*g);
 
     // CFG can have duplicated vertices (e.g., TABLE)
     std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> foundVertices;
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = (*g)[*vit];
-        for (auto &nid : vinfo.nodes) {
-            // Compare node and srcInfo instead of ptr valu
-            // TODO: check equivalence of Node in addition to srcInfo
-            //       e.g., node->equiv(*ptr)
-            //       corner case: CFG node doesn't resolve types, so it contains UnknownType
-            // TODO: check callSiteId
-            if (nid.node->srcInfo == ptr->srcInfo)
+        for (auto nid : vinfo.nodes) {
+            // Compare node and srcInfo
+            if (!nid.node->equiv(*ptr))
+                continue;
+
+            if (nid.node->srcInfo != ptr->srcInfo)
+                continue;
+
+            // check callSiteId
+            if (!callSiteId.has_value() ||
+                    callSiteId.value() == nid.callSiteId)
                 foundVertices.push_back({*vit, nid});
         }
     }
@@ -110,7 +115,7 @@ Graphs::vertex_t Graphs::add_vertex_nodes(Graph *g, const cstring &name, VertexT
 
     auto &g_ref = *g;
     auto &v_nodes = g_ref[v].nodes;
-    for (auto &nid : nodes) {
+    for (auto nid : nodes) {
         v_nodes.push_back(nid);
     }
     return g->local_to_global(v);

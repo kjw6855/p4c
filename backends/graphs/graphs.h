@@ -150,8 +150,8 @@ class Graphs {
         VertexType type;
         bool isStateful;
         std::vector<NodeId> nodes;
-        NodeVarMap defs;            // defined vars
-        NodeVarMap uses;            // used vars
+        NodeVarMap definedVars;     // defined vars
+        NodeVarMap usedVars;        // used vars
     };
 
     enum class EdgeType {
@@ -198,7 +198,8 @@ class Graphs {
     // TODO: optimize finding vertices (e.g., following next edges)
     //       instead of boost::vertices, map with Graph *g does not work
     std::optional<vertex_t> find_node_by_name(Graph *g, const cstring &name);
-    std::vector<std::pair<vertex_t, NodeId>> find_node_by_ptr(Graph *g, const IR::Node *ptr);
+    std::vector<std::pair<vertex_t, NodeId>> find_node_by_ptr(Graph *g, const IR::Node *ptr,
+            std::optional<size_t> callSiteId = std::nullopt);
 
     // Get edge name from variable set
     cstring join_var_names(const varset_t &vars, bool hasId);

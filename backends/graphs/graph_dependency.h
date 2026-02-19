@@ -34,6 +34,8 @@ class GraphDependency : public Graphs {
         NONE
     };
 
+    using locset_t = ComputeDefUse::locset_t;
+
     GraphDependency(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
                     ComputeDefUse *defUse,
                     std::vector<Graph *> &controlGraphsArray,
@@ -63,7 +65,7 @@ class GraphDependency : public Graphs {
     // Split CFG vertex based on defuse variables
     void split_cfg_vertices(Graph *g);
     void split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
-                          hvec_map<const IR::Node *, ComputeDefUse::locset_t> &nodeToVarMap);
+                          hvec_map<const IR::Node *, locset_t> &nodeToVarMap);
 
     // Add uses/defs in every vertex
     std::vector<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);

@@ -155,8 +155,8 @@ class ComputeDefUse : public Inspector,
         // defs maps from all uses to their definitions
         // uses maps from all definitions to their uses
         // uses/defs are lvalue expressions, or param declarations.
-        hvec_map<const IR::Node *, locset_t> defs;
-        hvec_map<const IR::Node *, locset_t> uses;
+        hvec_map<const loc_t *, locset_t> defs;
+        hvec_map<const loc_t *, locset_t> uses;
     } & defuse;
     static const locset_t empty;
 
@@ -205,13 +205,27 @@ class ComputeDefUse : public Inspector,
                   std::vector<Graph *> &cga);
     void clear();
 
-    const locset_t &getDefs(const IR::Node *n) const {
-        auto it = defuse.defs.find(n);
+    const locset_t &getDefs(const loc_t *loc) const {
+        auto it = defuse.defs.find(loc);
         return it == defuse.defs.end() ? empty : it->second;
     }
-    const locset_t &getUses(const IR::Node *n) const {
-        auto it = defuse.uses.find(n);
+    const locset_t &getUses(const loc_t *loc) const {
+        auto it = defuse.uses.find(loc);
         return it == defuse.uses.end() ? empty : it->second;
+    }
+    const locset_t &getDefs(const IR::Node *n) const {
+        for (auto &p : defuse.defs) {
+            if (p.first->node == n)
+                return p.second;
+        }
+        return empty;
+    }
+    const locset_t &getUses(const IR::Node *n) const {
+        for (auto &p : defuse.uses) {
+            if (p.first->node == n)
+                return p.second;
+        }
+        return empty;
     }
 
     const defuse_t &getAllDefUse() const {

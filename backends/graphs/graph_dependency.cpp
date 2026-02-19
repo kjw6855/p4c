@@ -452,12 +452,12 @@ void GraphDependency::dfs_table_so_policy(Graph *g,
         varset_t newVars;
         for (auto &nid : vinfo.nodes) {
             // 1) check if any used variables
-            auto useIt = vinfo.uses.find(nid);
-            if (useIt == vinfo.uses.end())
+            auto useIt = vinfo.usedVars.find(nid);
+            if (useIt == vinfo.usedVars.end())
                 continue;
 
-            auto defIt = vinfo.defs.find(nid);
-            bool hasNewVar = (defIt != vinfo.defs.end());
+            auto defIt = vinfo.definedVars.find(nid);
+            bool hasNewVar = (defIt != vinfo.definedVars.end());
 
             bool found = false;
             for (auto uv : usedVars) {
@@ -466,7 +466,7 @@ void GraphDependency::dfs_table_so_policy(Graph *g,
                     if (useIt->second.find(ul->node) == useIt->second.end())
                         continue;
 
-                    // If the node uses one of usedVars, store all defs
+                    // If the node uses one of usedVars, store all definedVars
                     if (hasNewVar && !found) {
                         newVars.insert(defIt->second.begin(), defIt->second.end());
                         found = true;
@@ -505,11 +505,11 @@ void GraphDependency::check_table_so_policy(Graph *g, Graphs::vertex_t src,
     std::cout << std::endl;
 
     for (auto &v : dsr.srcMap) {
-        // 1. collect all new defs
+        // 1. collect all new definedVars
         varset_t vars;
         auto vinfo = (*g)[v.first];
-        for (auto &defs : vinfo.defs)
-            vars.insert(defs.second.begin(), defs.second.end());
+        for (auto &definedVars : vinfo.definedVars)
+            vars.insert(definedVars.second.begin(), definedVars.second.end());
 
         // 2. run DFS
         dsr.src = &v.first;
@@ -657,7 +657,7 @@ std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const Co
     bool found = false;
     while (l != nullptr && !found) {
         auto *v = l->node;
-        for (auto vit : find_node_by_ptr(g, v)) {
+        for (auto vit : find_node_by_ptr(g, v, loc->callSiteId)) {
             // {vertex ID, Node ID}
             if (is_empty_action(g, vit.first)) {
                 // FOUND but not used
@@ -667,9 +667,9 @@ std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const Co
 
             auto &vinfo = (*g)[vit.first];
             if (isDef) {
-                vinfo.defs[vit.second].insert(loc->node);
+                vinfo.definedVars[vit.second].insert(loc->node);
             } else {
-                vinfo.uses[vit.second].insert(loc->node);
+                vinfo.usedVars[vit.second].insert(loc->node);
             }
             found = true;
             foundVertices.push_back(vit.first);
@@ -680,7 +680,7 @@ std::vector<Graphs::vertex_t> GraphDependency::add_var_in_cfg(Graph *g, const Co
 }
 
 void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
-        hvec_map<const IR::Node *, ComputeDefUse::locset_t> &nodeToVarMap) {
+        hvec_map<const IR::Node *, locset_t> &nodeToVarMap) {
     auto &vinfo = (*g)[v];
     if (vinfo.nodes.size() <= 1)
         return;
@@ -688,7 +688,7 @@ void GraphDependency::split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
     std::vector<Graphs::NodeId> curNodes;
     bool hasVar = false;
     bool updateLast = false;
-    for (auto &nid : vinfo.nodes) {
+    for (auto nid : vinfo.nodes) {
         bool isVarNode = nodeToVarMap.find(nid.node) != nodeToVarMap.end();
         if (!isVarNode) {
             curNodes.push_back(nid);
@@ -729,7 +729,7 @@ std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> GraphDependency::find_n
     auto *l = loc;
     while (l != nullptr) {
         auto *v = l->node;
-        auto nodes = find_node_by_ptr(g, v);
+        auto nodes = find_node_by_ptr(g, v, loc->callSiteId);
         if (nodes.size() > 0)
             return nodes;
         l = l->parent;
@@ -739,15 +739,13 @@ std::vector<std::pair<Graphs::vertex_t, Graphs::NodeId>> GraphDependency::find_n
 
 void GraphDependency::split_cfg_vertices(Graph *g) {
     auto defuse = defUse->getAllDefUse();
-    ComputeDefUse::locset_t locset;
+    locset_t locset;
     for (auto &p : defuse.uses)
-        for (auto *loc : p.second)
-            locset.insert(loc);
+        locset.insert(p.first);
     for (auto &p : defuse.defs)
-        for (auto *loc : p.second)
-            locset.insert(loc);
+        locset.insert(p.first);
 
-    hvec_map<const IR::Node *, ComputeDefUse::locset_t> nodeToVarMap;
+    hvec_map<const IR::Node *, locset_t> nodeToVarMap;
     for (auto *loc : locset) {
         for (auto vit : find_node_by_loc(g, loc)) {
             // {vertex ID, Node ID}
@@ -780,23 +778,21 @@ void GraphDependency::process_subgraph(Graph *g) {
     hvec_map<Graphs::vertex_t, varset_t> defMap;
     hvec_map<Graphs::vertex_t, varset_t> useMap;
 
-    // 2-1) collect all uses (used variables)
+    // 2-1) collect keys of uses (defined variables)
     for (auto &p : defuse.uses) {
-        for (auto *loc : p.second) {
-            for (auto vit : add_var_in_cfg(g, loc, false)) {
-                useMap[vit].insert(loc->node);
-                useToVertexMap[loc->node] = vit;
-            }
+        auto *loc = p.first;
+        for (auto vit : add_var_in_cfg(g, loc, true)) {
+            defMap[vit].insert(loc->node);
+            defToVertexMap[loc->node] = vit;
         }
     }
 
-    // 2-2) collect all defs (defined variables)
+    // 2-2) collect keys of defs (used variables)
     for (auto &p : defuse.defs) {
-        for (auto *loc : p.second) {
-            for (auto vit : add_var_in_cfg(g, loc, true)) {
-                defMap[vit].insert(loc->node);
-                defToVertexMap[loc->node] = vit;
-            }
+        auto *loc = p.first;
+        for (auto vit : add_var_in_cfg(g, loc, false)) {
+            useMap[vit].insert(loc->node);
+            useToVertexMap[loc->node] = vit;
         }
     }
 
@@ -810,8 +806,8 @@ void GraphDependency::process_subgraph(Graph *g) {
             continue;
 
         // __START__
-        auto defIt = vinfo.defs.find(Graphs::globalNodeId);
-        if (defIt != vinfo.defs.end()) {
+        auto defIt = vinfo.definedVars.find(Graphs::globalNodeId);
+        if (defIt != vinfo.definedVars.end()) {
             startVit = *vit;
             auto defSet = defIt->second;
             for (const auto *def : defSet) {
@@ -820,8 +816,8 @@ void GraphDependency::process_subgraph(Graph *g) {
             }
         }
         // __EXIT__
-        auto useIt = vinfo.uses.find(Graphs::globalNodeId);
-        if (useIt != vinfo.uses.end()) {
+        auto useIt = vinfo.usedVars.find(Graphs::globalNodeId);
+        if (useIt != vinfo.usedVars.end()) {
             exitVit = *vit;
             auto useSet = useIt->second;
             for (const auto *use : useSet) {
@@ -870,7 +866,6 @@ void GraphDependency::process_subgraph(Graph *g) {
         auto &edgeVars = p.second;
         if (src == sink)
             continue;
-        //BUG_CHECK(src != sink, "src and sink should be different");
         add_defuse_edge(g, src, sink, edgeVars);
     }
 
@@ -889,8 +884,8 @@ void GraphDependency::dump_vars_in_graph(Graph *g) {
         const auto &vinfo = (*g)[*vit];
         // START
         if (vinfo.nodes.size() == 0) {
-            auto defIt = vinfo.defs.find(Graphs::globalNodeId);
-            if (defIt != vinfo.defs.end()) {
+            auto defIt = vinfo.definedVars.find(Graphs::globalNodeId);
+            if (defIt != vinfo.definedVars.end()) {
                 auto defSet = defIt->second;
                 std::cout << vinfo.name << "(" << defSet.size() << "): "
                           << join_var_names(defSet, false) << std::endl;
@@ -899,11 +894,11 @@ void GraphDependency::dump_vars_in_graph(Graph *g) {
             std::cout << vinfo.name << std::endl; // print name
             // Normal IR nodes
             for (auto &nid : vinfo.nodes) {
-                auto defIt = vinfo.defs.find(nid);
-                const varset_t defSet = defIt == vinfo.defs.end() ?
+                auto defIt = vinfo.definedVars.find(nid);
+                const varset_t defSet = defIt == vinfo.definedVars.end() ?
                                         emptyVarSet : defIt->second;
-                auto useIt = vinfo.uses.find(nid);
-                const varset_t useSet = useIt == vinfo.uses.end() ?
+                auto useIt = vinfo.usedVars.find(nid);
+                const varset_t useSet = useIt == vinfo.usedVars.end() ?
                                         emptyVarSet : useIt->second;
 
                 std::stringstream sstream;

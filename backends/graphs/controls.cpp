@@ -255,7 +255,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         }
 
         auto v = add_and_connect_vertex(vName, VertexType::DPSTATE, isStateful, statement);
-        LOG2("has Externs:" << vName);
+        LOG2("has ExternMethod:" << vName);
         parents = {{v, new EdgeUnconditional()}};
     } else {
         statementsStack.push_back(statement);

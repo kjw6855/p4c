@@ -57,9 +57,9 @@ MidEnd::MidEnd(CompilerOptions &options) {
     setName("MidEnd");
 
     addPasses({
+        new P4::TypeChecking(&refMap, &typeMap, true),  // update types before ComputeDefUse
         evaluator,
         [this, evaluator]() { toplevel = evaluator->getToplevelBlock(); },
-         new P4::TypeChecking(&refMap, &typeMap, true),  // update types before ComputeDefUse
     });
 }
 
