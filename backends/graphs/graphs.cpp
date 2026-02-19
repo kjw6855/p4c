@@ -81,6 +81,7 @@ Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexType type, bool i
     boost::put(&Vertex::name, *g, v, name);
     boost::put(&Vertex::type, *g, v, type);
     boost::put(&Vertex::isStateful, *g, v, isStateful);
+    boost::put(&Vertex::isActionStmt, *g, v, globalIsActionStmt);
     if (node != nullptr) {
         auto &g_ref = *g;
         auto &v_nodes = g_ref[v].nodes;
@@ -96,6 +97,7 @@ Graphs::vertex_t Graphs::add_vertex_nodes(Graph *g, const cstring &name, VertexT
     boost::put(&Vertex::name, *g, v, name);
     boost::put(&Vertex::type, *g, v, type);
     boost::put(&Vertex::isStateful, *g, v, isStateful);
+    boost::put(&Vertex::isActionStmt, *g, v, globalIsActionStmt);
 
     auto &g_ref = *g;
     auto &v_nodes = g_ref[v].nodes;
@@ -112,6 +114,7 @@ Graphs::vertex_t Graphs::add_vertex_nodes(Graph *g, const cstring &name, VertexT
     boost::put(&Vertex::name, *g, v, name);
     boost::put(&Vertex::type, *g, v, type);
     boost::put(&Vertex::isStateful, *g, v, isStateful);
+    boost::put(&Vertex::isActionStmt, *g, v, globalIsActionStmt);
 
     auto &g_ref = *g;
     auto &v_nodes = g_ref[v].nodes;

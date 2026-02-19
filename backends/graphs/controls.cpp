@@ -313,13 +313,17 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
     // Create a dummy vertex for empty block
     if (auto stmt = action->body->to<IR::BlockStatement>()) {
         if (stmt->components.size() == 0) {
+            globalIsActionStmt = true;
             auto v = add_and_connect_vertex("__EMPTY__"_cs, VertexType::OTHER, false, nullptr);
+            globalIsActionStmt = false;
             parents = {{v, new EdgeUnconditional()}};
             return false;
         }
     }
 
+    globalIsActionStmt = true;
     visit(action->body);
+    globalIsActionStmt = false;
     return false;
 }
 

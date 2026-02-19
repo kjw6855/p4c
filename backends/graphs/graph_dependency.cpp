@@ -275,16 +275,65 @@ int GraphDependency::find_all_paths(Graph *g, Graphs::vertex_t &sv, Graphs::vert
     return numPath;
 }
 
-bool GraphDependency::is_next_vertex(Graph *g, Graphs::vertex_t s, Graphs::vertex_t d) {
-    auto [ei, ei_end] = boost::out_edges(s, *g);
-    for (; ei != ei_end; ++ei) {
-        auto edge = (*g)[*ei];
-        if (edge.type != EdgeType::CONTROL)
-            continue;
-        Graphs::vertex_t v = boost::target(*ei, *g);
-        if (v == d)
-            return true;
+std::optional<Graphs::vertex_t> GraphDependency::get_table_vertex(Graph *g, Graphs::vertex_t v) {
+    auto u = v;
+    auto uinfo = (*g)[u];
+    if (uinfo.type == VertexType::TABLE) return v;
+
+    auto targetType = get_next_table_rev_order(uinfo);
+    while (targetType != VertexType::EMPTY) {
+        auto [ei, ei_end] = boost::in_edges(u, *g);
+        bool hasParent = false;
+        for (; ei != ei_end; ++ei) {
+            auto edge = (*g)[*ei];
+            if (edge.type != EdgeType::CONTROL)
+                continue;
+
+            hasParent = true;
+            auto s = boost::source(*ei, *g);
+            auto sinfo = (*g)[s];
+            if (sinfo.type == VertexType::TABLE) {
+                return s;
+            } else if (sinfo.type != targetType) {
+                return {};
+            } else {
+                targetType = get_next_table_rev_order(sinfo);
+                u = s;
+                break;
+            }
+        }
+
+        if (!hasParent)
+            break;
     }
+    return {};
+}
+
+bool GraphDependency::is_action_stmt_vertex(Graph *g, Graphs::vertex_t act, Graphs::vertex_t stmt) {
+    auto stmtInfo = (*g)[stmt];
+    if (!stmtInfo.isActionStmt) return false;
+
+    std::queue<Graphs::vertex_t> q;
+    q.push(act);
+    while (!q.empty()) {
+        auto u = q.front();
+        q.pop();
+        auto [ei, ei_end] = boost::out_edges(u, *g);
+        for (; ei != ei_end; ++ei) {
+            auto edge = (*g)[*ei];
+            if (edge.type != EdgeType::CONTROL)
+                continue;
+
+            Graphs::vertex_t v = boost::target(*ei, *g);
+            if (v == stmt)
+                return true;
+
+            auto vinfo = (*g)[v];
+            if (vinfo.isActionStmt)
+                q.push(v);
+        }
+    }
+
     return false;
 }
 
@@ -300,7 +349,7 @@ bool GraphDependency::is_empty_action(Graph *g, Graphs::vertex_t u) {
         Graphs::vertex_t v = boost::target(*ei, *g);
         auto vinfo = (*g)[v];
         // True if found OTHER (__EMPTY__) after ACTION
-        if (vinfo.type == VertexType::OTHER) {
+        if (vinfo.isActionStmt && vinfo.type == VertexType::OTHER) {
             return true;
         }
     }
@@ -329,27 +378,14 @@ void GraphDependency::find_action_vertices(Graph *g, Graphs::vertex_t u,
     }
 }
 
-std::vector<Graphs::vertex_t> GraphDependency::find_all_action_vertices(Graph *g) {
+std::vector<Graphs::vertex_t> GraphDependency::find_all_action_stmt_vertices(Graph *g) {
     auto vertices = boost::vertices(*g);
     std::vector<Graphs::vertex_t> foundVertices;
 
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto vinfo = (*g)[*vit];
-        if (vinfo.type != VertexType::ACTION)
-            continue;
-
-        // ACTION has been found
-        auto [ei, ei_end] = boost::out_edges(*vit, *g);
-        for (; ei != ei_end; ++ei) {
-            auto edge = (*g)[*ei];
-            if (edge.type != EdgeType::CONTROL)
-                continue;
-
-            Graphs::vertex_t u = boost::target(*ei, *g);
-            auto uinfo = (*g)[u];
-            if (uinfo.type != VertexType::OTHER)
-                foundVertices.push_back(u);
-        }
+        if (vinfo.isActionStmt)
+            foundVertices.push_back(*vit);
     }
 
     return foundVertices;
@@ -766,7 +802,7 @@ void GraphDependency::split_cfg_vertices(Graph *g) {
         }
     }
 
-    auto actionVertices = find_all_action_vertices(g);
+    auto actionVertices = find_all_action_stmt_vertices(g);
     auto vertices = boost::vertices(*g);
     // split should be called before connecting DDG edges
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
@@ -779,6 +815,58 @@ void GraphDependency::split_cfg_vertices(Graph *g) {
     }
 }
 
+void GraphDependency::assign_table_call_site_id(Graph *g) {
+    // Collect Def-Use edges by following topological order
+    std::vector<Graphs::vertex_t> order;
+    boost::topological_sort(*g, std::back_inserter(order));
+
+    // 1. Assign unique ID for each table calls
+    hvec_map<const IR::Node *, int> curCallId;
+    hvec_map<std::pair<const IR::Node *, Graphs::vertex_t>, int> tableCallId;
+    std::vector<const IR::Node *> tableNodes;
+    for (auto vit = order.rbegin(); vit != order.rend(); ++vit) {
+        auto &vinfo = (*g)[*vit];
+        if (vinfo.type == VertexType::TABLE) {
+            auto tableNode = vinfo.nodes[0].node;
+            vinfo.callSiteIdMap[tableNode].push_back(++curCallId[tableNode]);
+            tableNodes.push_back(tableNode);
+        }
+    }
+
+    // 2. Assign table IDs to each vertex
+    for (auto vit = order.rbegin(); vit != order.rend(); ++vit) {
+        auto &vinfo = (*g)[*vit];
+        auto [ei, ei_end] = boost::out_edges(*vit, *g);
+        for (; ei != ei_end; ++ei) {
+            auto edge = (*g)[*ei];
+            if (edge.type != EdgeType::CONTROL)
+                continue;
+            auto u = boost::target(*ei, *g);
+            auto &uinfo = (*g)[u];
+            const IR::Node *curTableNode = nullptr;
+            if (uinfo.type == VertexType::TABLE)
+                curTableNode = uinfo.nodes[0].node;
+
+            for (auto cit : curCallId) {
+                auto tableNode = cit.first;
+                // Keep assigned ID for the table vertex
+                if (tableNode == curTableNode)
+                    continue;
+
+                auto &src = vinfo.callSiteIdMap[tableNode];
+                auto &dst = uinfo.callSiteIdMap[tableNode];
+                dst.insert(dst.end(), src.begin(), src.end());
+
+                std::sort(dst.begin(), dst.end());
+                dst.erase(std::unique(dst.begin(), dst.end()), dst.end());
+            }
+        }
+    }
+}
+
+/*
+ * TODO: Shorten long-length function
+ */
 void GraphDependency::process_subgraph(Graph *g) {
     // 1. Split cfg graphs
     auto defuse = defUse->getAllDefUse();
@@ -840,11 +928,19 @@ void GraphDependency::process_subgraph(Graph *g) {
         }
     }
 
-    // 3. Collect Def-Use edges
-    vertices = boost::vertices(*g);
+    // 3. Assign table IDs for every vertex
+    assign_table_call_site_id(g);
+
+    // Dump table IDs for every vertex
+    dump_table_ids(g);
+
+    // 4. Collect defuse edges
     hvec_map<std::pair<Graphs::vertex_t, Graphs::vertex_t>, varset_t> defUseEdgeMap;
+    std::vector<std::pair<Graphs::vertex_t, Graphs::vertex_t>> toRemoveEdges;
+
+    vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        // 3-1) From defined vars (src), get all usages (sink)
+        // 4-1) From defined vars (src), get all usages (sink)
         for (auto v : defMap[*vit]) {
             for (const auto *sinkLoc : defUse->getUses(v)) {
                 // Find use defined by v
@@ -853,16 +949,50 @@ void GraphDependency::process_subgraph(Graph *g) {
                     continue;
                 auto sink = sinkVit->second;
 
-                auto sinfo = (*g)[*vit];
-                if (sinfo.type == VertexType::ACTION) {
-                    if (!is_next_vertex(g, *vit, sink))
+                auto src = (*g)[*vit];
+                if (src.type == VertexType::ACTION) {
+                    if (!is_action_stmt_vertex(g, *vit, sink))
                         continue;
+                }
+                auto sinkInfo = (*g)[sink];
+                auto srcTblIt = get_table_vertex(g, *vit);
+                auto sinkTblIt = get_table_vertex(g, sink);
+
+                // ** Only care about curNode -> Table
+                // Table ID (refCallId) should be greater than all curCallIds
+                if (!srcTblIt.has_value() && sinkTblIt.has_value()) {
+                    auto sinkTblInfo = (*g)[sinkTblIt.value()];
+                    auto sinkTbl = sinkTblInfo.nodes[0].node;
+                    auto curCallIds = src.callSiteIdMap[sinkTbl];
+                    auto refCallId = sinkTblInfo.callSiteIdMap[sinkTbl][0];
+
+                    if (curCallIds.size() > 0) {
+                        bool allowed = true;
+                        std::stringstream sstream;
+                        for (auto curCallId : curCallIds) {
+                            sstream << curCallId << " ";
+                            if (curCallId >= refCallId) {
+                                allowed = false;
+                                break;
+                            }
+                        }
+                        if (!allowed) {
+                            LOG2("Skip " << v << ": cur"
+                                    << *vit << "("
+                                    << cstring(sstream) << ")->tbl"
+                                    << sink << "("
+                                    << refCallId << "): "
+                                    << sinkTblInfo.name);
+                            toRemoveEdges.push_back({*vit, sink});
+                            continue;
+                        }
+                    }
                 }
 
                 defUseEdgeMap[{*vit, sink}].insert(v);
             }
         }
-        // 3-2) From used vars (sink), get all definitions (src)
+        // 4-2) From used vars (sink), get all definitions (src)
         for (auto v : useMap[*vit]) {
             for (const auto *srcLoc : defUse->getDefs(v)) {
                 // Find def used by v
@@ -872,8 +1002,41 @@ void GraphDependency::process_subgraph(Graph *g) {
                 auto src = srcVit->second;
                 auto sinfo = (*g)[src];
                 if (sinfo.type == VertexType::ACTION) {
-                    if (!is_next_vertex(g, src, *vit))
+                    if (!is_action_stmt_vertex(g, src, *vit))
                         continue;
+                }
+
+                auto sinkInfo = (*g)[*vit];
+                auto srcTblIt = get_table_vertex(g, src);
+                auto sinkTblIt = get_table_vertex(g, *vit);
+
+                // ** Only care about Table -> curNode
+                // Table ID (refCallId) should be less or equal than curCallId
+                if (srcTblIt.has_value() && !sinkTblIt.has_value()) {
+                    auto srcTblInfo = (*g)[srcTblIt.value()];
+                    auto srcTbl = srcTblInfo.nodes[0].node;
+                    auto curCallIds = sinkInfo.callSiteIdMap[srcTbl];
+                    auto refCallId = srcTblInfo.callSiteIdMap[srcTbl][0];
+
+                    if (curCallIds.size() > 0) {
+                        int allowed = 0;
+                        std::stringstream sstream;
+                        for (auto curCallId : curCallIds) {
+                            sstream << curCallId << " ";
+                            if (curCallId >= refCallId)
+                                allowed ++;
+                        }
+                        if (!allowed) {
+                            LOG2("Skip " << v << ": tbl"
+                                    << src << "("
+                                    << refCallId << ")->cur"
+                                    << *vit << "("
+                                    << cstring(sstream) << "): "
+                                    << srcTblInfo.name);
+                            toRemoveEdges.push_back({src, *vit});
+                            continue;
+                        }
+                    }
                 }
 
                 defUseEdgeMap[{src, *vit}].insert(v);
@@ -881,8 +1044,14 @@ void GraphDependency::process_subgraph(Graph *g) {
         }
     }
 
-    // 4. Draw DDG edges
+    // 5. Draw DDG edges
     for (auto &p : defUseEdgeMap) {
+        bool toRemove = std::find(toRemoveEdges.begin(), toRemoveEdges.end(), p.first)
+            != toRemoveEdges.end();
+        // Skip backward edges
+        if (toRemove)
+            continue;
+
         auto src = p.first.first;
         auto sink = p.first.second;
         // Skip inout parameters
@@ -895,7 +1064,7 @@ void GraphDependency::process_subgraph(Graph *g) {
         add_defuse_edge(g, src, sink, edgeVars);
     }
 
-    // 5. clear
+    // 6. clear
     defUseEdgeMap.clear();
     vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
@@ -938,6 +1107,39 @@ void GraphDependency::dump_vars_in_graph(Graph *g) {
             }
         }
         std::cout << std::endl;
+    }
+}
+
+void GraphDependency::dump_table_ids(Graph *g) {
+    // Dump tables
+    std::vector<const IR::Node *> tableNodes;
+    int tableNum = 0;
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto &vinfo = (*g)[*vit];
+        if (vinfo.type == VertexType::TABLE) {
+            auto tableNode = vinfo.nodes[0].node;
+            std::stringstream sstream;
+            sstream << tableNode;
+            LOG2("[T" << tableNum++ << "] " << cstring(sstream));
+            tableNodes.push_back(tableNode);
+        }
+    }
+
+    // Dump table IDs for every vertex
+    vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto &vinfo = (*g)[*vit];
+        std::stringstream sstream;
+        sstream << *vit << "[" << vinfo.name << "]";
+        tableNum = 0;
+        for (auto &tableNode : tableNodes) {
+            for (auto id : vinfo.callSiteIdMap[tableNode]) {
+                sstream << " " << id;
+            }
+            sstream << "(" << tableNum++ << ")";
+        }
+        LOG2(cstring(sstream));
     }
 }
 

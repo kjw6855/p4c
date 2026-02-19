@@ -149,9 +149,11 @@ class Graphs {
         cstring name;
         VertexType type;
         bool isStateful;
+        bool isActionStmt;
         std::vector<NodeId> nodes;
         NodeVarMap definedVars;     // defined vars
         NodeVarMap usedVars;        // used vars
+        hvec_map<const IR::Node *, std::vector<int>> callSiteIdMap;
     };
 
     enum class EdgeType {
@@ -256,9 +258,6 @@ class Graphs {
                 const auto &vinfo = g[*vit];
                 auto attrs = boost::get(boost::vertex_attribute, g);
                 cstring labelName = vinfo.name;
-                if (vinfo.nodes.size() == 1) {
-                    labelName += ":"_cs + std::to_string(vinfo.nodes[0].callSiteId);
-                }
                 attrs[*vit]["label"_cs] = labelName;
                 attrs[*vit]["style"_cs] = vertexTypeGetStyle(vinfo.type, vinfo.isStateful);
                 attrs[*vit]["fillcolor"_cs] = vertexTypeGetColor(vinfo.type, vinfo.isStateful);
@@ -354,6 +353,7 @@ class Graphs {
     Parents parents{};
     std::vector<const IR::Statement *> statementsStack{};
     hvec_map<const IR::Node *, size_t> callSiteIdMap{};
+    bool globalIsActionStmt = false;
 
  private:
     /// Limits string size in helper_sstream and resets it

@@ -54,6 +54,19 @@ class GraphDependency : public Graphs {
     void analyze();
     void dump_def_use();
 
+    VertexType get_next_table_rev_order(Vertex &vinfo) {
+        if (vinfo.isActionStmt) return VertexType::ACTION;
+        switch (vinfo.type) {
+            case VertexType::ACTION:
+                return VertexType::KEY;
+            case VertexType::KEY:
+                return VertexType::TABLE;
+            default:
+                break;
+        }
+        return VertexType::EMPTY;
+    }
+
  private:
     /** PDG Generators **/
     // Generate PDG for each subgraph
@@ -103,14 +116,15 @@ class GraphDependency : public Graphs {
                                std::vector<Graphs::vertex_t> &statefulVertices,
                                DfsSecResult &dsr);
 
-    bool is_next_vertex(Graph *g, Graphs::vertex_t s, Graphs::vertex_t d);
+    std::optional<Graphs::vertex_t> get_table_vertex(Graph *g, Graphs::vertex_t v);
+    bool is_action_stmt_vertex(Graph *g, Graphs::vertex_t act, Graphs::vertex_t stmt);
     bool is_empty_action(Graph *g, Graphs::vertex_t u);
 
     void find_action_vertices(Graph *g, Graphs::vertex_t u,
                           hvec_map<Graphs::vertex_t, cstring> &foundVertices,
                           cstring actionName);
 
-    std::vector<Graphs::vertex_t> find_all_action_vertices(Graph *g);
+    std::vector<Graphs::vertex_t> find_all_action_stmt_vertices(Graph *g);
 
     std::optional<Graphs::vertex_t> get_match_vertex(Graph *g, Graphs::vertex_t src);
 
@@ -126,12 +140,15 @@ class GraphDependency : public Graphs {
 
     VariableType get_variable_type(const IR::Node *node, const IR::Node *var);
 
+    void assign_table_call_site_id(Graph *g);
+
     /** Misc **/
     // Check if the node is stateful
     bool is_stateful(const Graphs::NodeId &nid);
 
     // Dump defuse variables
     void dump_vars_in_graph(Graph *g);
+    void dump_table_ids(Graph *g);
 
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
