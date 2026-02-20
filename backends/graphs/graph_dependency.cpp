@@ -136,9 +136,10 @@ void GraphDependency::dump_def_use() {
     for (auto &line : uses) std::cout << line << std::endl;
 }
 
-void GraphDependency::process() {
+void GraphDependency::process(const IR::P4Program *&program) {
     for (auto g : controlGraphsArray) {
-        process_subgraph(g);
+        curG = g;
+        program->apply(*this);
         //dump_vars_in_graph(g);
     }
 }
@@ -684,7 +685,11 @@ bool GraphDependency::is_cyclic(Graph *g) {
                     std::cout << "--" << found_edges[i - 1] << "-> ";
                 }
                 auto cinfo = (*g)[c];
-                std::cout << cinfo.name << '(' << index[c] << ')' << std::endl;
+                std::cout << cinfo.name;
+                if (cinfo.type == VertexType::TABLE) {
+                    std::cout << ':' << cinfo.callSiteIdMap[cinfo.nodes[0].node][0];
+                }
+                std::cout << '(' << index[c] << ')' << std::endl;
             }
             std::cout << std::endl;
             return true;
@@ -864,14 +869,67 @@ void GraphDependency::assign_table_call_site_id(Graph *g) {
     }
 }
 
+void GraphDependency::split_extern_vertices(Graph *g) {
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto &vinfo = (*g)[*vit];
+        if (vinfo.nodes.size() == 0)
+            continue;
+        if (vinfo.type != VertexType::STATEMENTS)
+            continue;
+
+        std::vector<std::pair<std::vector<Graphs::NodeId>, bool>> newNodes;
+        std::vector<Graphs::NodeId> curNodes;
+        newNodes.reserve(vinfo.nodes.size());
+        for (auto nid : vinfo.nodes) {
+            if (auto *stmt = nid.node->to<IR::BaseAssignmentStatement>()) {
+                foundExtern = false;
+                visit(stmt->right);
+
+                if (foundExtern) {
+                    if (curNodes.size() > 0) {
+                        newNodes.push_back({curNodes, false});
+                        curNodes.clear();
+                    }
+                    newNodes.push_back({{nid}, true});
+                    continue;
+                }
+            }
+
+            curNodes.push_back(nid);
+        }
+        if (curNodes.size() > 0)
+            newNodes.push_back({curNodes, false});
+
+        if (newNodes.size() == 1) {
+            if (newNodes[0].second)
+                vinfo.isStateful = true;
+            continue;
+        }
+
+        // TODO: split vertex based on newNodes
+        std::stringstream sstream;
+        for (auto &p : newNodes) {
+            sstream << "{";
+            for (auto &nid : p.first) {
+                sstream << nid.node << ",";
+            }
+            sstream << "} ";
+        }
+        LOG2("[" << *vit << "] " << cstring(sstream));
+    }
+}
+
 /*
  * TODO: Shorten long-length function
  */
 void GraphDependency::process_subgraph(Graph *g) {
     // 1. Split cfg graphs
     auto defuse = defUse->getAllDefUse();
-    if (splitVertex)
+    if (splitVertex) {
+        split_extern_vertices(g);
         split_cfg_vertices(g);
+    }
 
     // 2. Map def-use variables to CFG vertices by using loc_t
     hvec_map<const IR::Node *, Graphs::vertex_t> defToVertexMap;
@@ -1141,6 +1199,28 @@ void GraphDependency::dump_table_ids(Graph *g) {
         }
         LOG2(cstring(sstream));
     }
+}
+
+bool GraphDependency::preorder(const IR::P4Program *prog) {
+    process_subgraph(curG);
+    return false;
+}
+
+bool GraphDependency::preorder(const IR::MethodCallExpression *expr) {
+    // Find externs
+    auto inst = P4::MethodInstance::resolve(expr, refMap, typeMap);
+    if (inst->is<P4::ExternMethod>()) {
+        auto em = inst->to<P4::ExternMethod>();
+        std::string statefulExternNames[4] = {"Counter", "Meter", "Register", "RegisterAction"};
+        for (const std::string &name : statefulExternNames) {
+            if (em->originalExternType->getName().name == name) {
+                foundExtern = true;
+                break;
+            }
+        }
+    }
+
+    return false;
 }
 
 }  // namespace P4::graphs

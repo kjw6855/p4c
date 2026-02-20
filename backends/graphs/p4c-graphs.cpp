@@ -235,7 +235,7 @@ int main(int argc, char *const argv[]) {
         graphs::GraphDependency gd(&midEnd.refMap, &midEnd.typeMap, defUse,
                                    cgen.controlGraphsArray, options.splitVertex);
         // create PDG (CFG + DDG)
-        gd.process();
+        gd.process(program);
         // find dependency
         if (options.doAnalysis)
             gd.analyze();

@@ -26,7 +26,8 @@ class DfsSecResult {
     hvec_map<Graphs::vertex_t, hvec_set<Graphs::vertex_t>> dataVertices;
 };
 
-class GraphDependency : public Graphs {
+class GraphDependency : public Graphs,
+                        public Inspector {
  public:
     enum class VariableType {
         INDEX,
@@ -50,9 +51,12 @@ class GraphDependency : public Graphs {
 
     std::vector<Graphs::vertex_t> find_path_from_vertices(Graph *g, Graphs::vertex_t &sv, Graphs::vertex_t &dv);
 
-    void process();
+    void process(const IR::P4Program *&program);
     void analyze();
     void dump_def_use();
+
+    bool preorder(const IR::P4Program *prog) override;
+    bool preorder(const IR::MethodCallExpression *expr) override;
 
     VertexType get_next_table_rev_order(Vertex &vinfo) {
         if (vinfo.isActionStmt) return VertexType::ACTION;
@@ -79,6 +83,8 @@ class GraphDependency : public Graphs {
     void split_cfg_vertices(Graph *g);
     void split_cfg_vertex(Graph *g, const Graphs::vertex_t &v,
                           hvec_map<const IR::Node *, locset_t> &nodeToVarMap);
+
+    void split_extern_vertices(Graph *g);
 
     // Add uses/defs in every vertex
     std::vector<Graphs::vertex_t> add_var_in_cfg(Graph *g, const ComputeDefUse::loc_t *loc, bool isDef);
@@ -150,11 +156,14 @@ class GraphDependency : public Graphs {
     void dump_vars_in_graph(Graph *g);
     void dump_table_ids(Graph *g);
 
+ protected:
+    Graph *curG;
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
     ComputeDefUse *defUse;
     std::vector<Graph *> &controlGraphsArray;
     bool splitVertex;
+    bool foundExtern;
 };
 }  // namespace P4::graphs
 #endif /* BACKENDS_GRAPHS_GRAPH_DEPENDENCY_H_ */
