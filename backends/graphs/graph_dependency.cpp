@@ -1076,24 +1076,25 @@ void GraphDependency::process_subgraph(Graph *g) {
                     auto curCallIds = sinkInfo.callSiteIdMap[srcTbl];
                     auto refCallId = srcTblInfo.callSiteIdMap[srcTbl][0];
 
-                    if (curCallIds.size() > 0) {
-                        int allowed = 0;
-                        std::stringstream sstream;
-                        for (auto curCallId : curCallIds) {
-                            sstream << curCallId << " ";
-                            if (curCallId >= refCallId)
-                                allowed ++;
-                        }
-                        if (!allowed) {
-                            LOG2("Skip " << v << ": tbl"
-                                    << src << "("
-                                    << refCallId << ")->cur"
-                                    << *vit << "("
-                                    << cstring(sstream) << "): "
-                                    << srcTblInfo.name);
-                            toRemoveEdges.push_back({src, *vit});
-                            continue;
-                        }
+                    if (curCallIds.size() == 0)
+                        curCallIds = {0};
+
+                    int allowed = 0;
+                    std::stringstream sstream;
+                    for (auto curCallId : curCallIds) {
+                        sstream << curCallId << " ";
+                        if (curCallId >= refCallId)
+                            allowed ++;
+                    }
+                    if (!allowed) {
+                        LOG2("Skip " << v << ": tbl"
+                                << src << "("
+                                << refCallId << ")->cur"
+                                << *vit << "("
+                                << cstring(sstream) << "): "
+                                << srcTblInfo.name);
+                        toRemoveEdges.push_back({src, *vit});
+                        continue;
                     }
                 }
 
