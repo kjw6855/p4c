@@ -50,6 +50,7 @@ CMAKE_DEPENDENT_OPTION (ENABLE_P4TEST "Build the P4Test backend (required for th
 CMAKE_DEPENDENT_OPTION (ENABLE_TEST_TOOLS "Build the P4Tools development platform" OFF ENABLE_CONTROL_PLANE OFF)
 OPTION (ENABLE_P4C_GRAPHS "Build the p4c-graphs backend" ON)
 OPTION (ENABLE_GC "Compile with the Boehm-Demers-Weiser garbage collector." ON)
+OPTION (ENABLE_STATE_DEPENDENCY "Build the p4c_state_dependency backend tool" ON)
 OPTION (ENABLE_WERROR "Treat warnings as errors" OFF)
 OPTION (ENABLE_SANITIZERS "Enable sanitizers" OFF)
 OPTION (STATIC_BUILD_WITH_DYNAMIC_GLIBC "Build a (mostly) statically linked release binary. \
@@ -511,6 +512,9 @@ if (ENABLE_TOFINO)
 endif ()
 if (ENABLE_GTESTS)
   add_subdirectory (test)
+endif ()
+if (ENABLE_STATE_DEPENDENCY AND HAVE_LIBBOOST_GRAPH EQUAL 1)
+    add_subdirectory (backends/state_dependency)
 endif ()
 
 ####################################### IR Generation Begin #######################################
