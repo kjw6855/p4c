@@ -1,5 +1,5 @@
-#ifndef BACKENDS_STATE_DEPENDENCY_STATE_GRAPHS_H_
-#define BACKENDS_STATE_DEPENDENCY_STATE_GRAPHS_H_
+#ifndef BACKENDS_STATE_DEPENDENCY_GRAPHS_H_
+#define BACKENDS_STATE_DEPENDENCY_GRAPHS_H_
 
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/graphviz.hpp>
@@ -16,4 +16,266 @@ class TypeMap;
 
 }  // namespace P4
 
-#endif /* BACKENDS_STATE_DEPENDENCY_STATE_GRAPHS_H_ */
+namespace P4::P4StateDependency {
+
+using namespace P4::literals;
+
+enum class VertexFlags : unsigned {
+    NONE            = 0,
+    TABLE           = 1u << 0,
+    KEY             = 1u << 1,
+    ACTION          = 1u << 2,
+    CONDITION       = 1u << 3,
+    SWITCH          = 1u << 4,
+    STATEMENT       = 1u << 5,
+    CONTROL         = 1u << 6,
+    PARSER_STATE    = 1u << 7,
+    STATEFUL        = 1u << 8,
+    CALL            = 1u << 9,
+    RETURN          = 1u << 10,
+    ENTRY           = 1u << 11,
+    EXIT            = 1u << 12,
+    EMPTY           = 1u << 13,
+};
+
+enum class EdgeType {
+    CONTROL,
+    CALL_TO_RETURN,
+    INTER_PROCEDURE,
+    DEFUSE,
+    IFDS,
+};
+
+class EdgeTypeIface {
+ public:
+    cstring name;
+    EdgeType type;
+
+    EdgeTypeIface() {}
+    EdgeTypeIface(EdgeType type) : type(type) {}
+    EdgeTypeIface(cstring name, EdgeType type)
+        : name(name), type(type) {}
+
+    virtual ~EdgeTypeIface() {}
+};
+
+class EdgeProcedural : public EdgeTypeIface {
+ public:
+    EdgeProcedural()
+        : EdgeTypeIface(cstring::empty, EdgeType::INTER_PROCEDURE) {}
+};
+
+class EdgeUnconditional : public EdgeTypeIface {
+ public:
+    EdgeUnconditional()
+        : EdgeTypeIface(cstring::empty, EdgeType::CONTROL) {}
+};
+
+class EdgeIf : public EdgeTypeIface {
+ public:
+    EdgeIf(bool isTrue)
+        : EdgeTypeIface(isTrue ? "TRUE"_cs : "FALSE"_cs,
+                EdgeType::CONTROL) {}
+};
+
+class EdgeSwitch : public EdgeTypeIface {
+ public:
+    EdgeSwitch(const IR::Expression *labelExpr)
+        : EdgeTypeIface(EdgeType::CONTROL),
+          labelExpr(labelExpr) {
+        std::stringstream sstream;
+        labelExpr->dbprint(sstream);
+        name = cstring(sstream);
+    }
+ private:
+    const IR::Expression *labelExpr;
+};
+
+inline VertexFlags operator|(VertexFlags a, VertexFlags b) {
+    return static_cast<VertexFlags>(static_cast<unsigned>(a) |
+            static_cast<unsigned>(b));
+}
+// OR-assign
+inline VertexFlags& operator|=(VertexFlags& a, VertexFlags b) {
+    a = a | b;
+    return a;
+}
+inline bool hasFlag(VertexFlags v, VertexFlags f) {
+    return (static_cast<unsigned>(v) & static_cast<unsigned>(f)) != 0;
+}
+inline cstring vertexFlagsToString(VertexFlags flags) {
+    if (flags == VertexFlags::NONE) return "NONE"_cs;
+
+    std::vector<cstring> parts;
+
+    if (hasFlag(flags, VertexFlags::TABLE))        parts.emplace_back("TABLE"_cs);
+    if (hasFlag(flags, VertexFlags::KEY))          parts.emplace_back("KEY"_cs);
+    if (hasFlag(flags, VertexFlags::ACTION))       parts.emplace_back("ACTION"_cs);
+    if (hasFlag(flags, VertexFlags::CONDITION))    parts.emplace_back("CONDITION"_cs);
+    if (hasFlag(flags, VertexFlags::SWITCH))       parts.emplace_back("SWITCH"_cs);
+    if (hasFlag(flags, VertexFlags::STATEMENT))    parts.emplace_back("STATEMENT"_cs);
+    if (hasFlag(flags, VertexFlags::CONTROL))      parts.emplace_back("CONTROL"_cs);
+    if (hasFlag(flags, VertexFlags::PARSER_STATE)) parts.emplace_back("PARSER_STATE"_cs);
+    if (hasFlag(flags, VertexFlags::STATEFUL))     parts.emplace_back("STATEFUL"_cs);
+    if (hasFlag(flags, VertexFlags::CALL))         parts.emplace_back("CALL"_cs);
+    if (hasFlag(flags, VertexFlags::RETURN))       parts.emplace_back("RETURN"_cs);
+    if (hasFlag(flags, VertexFlags::ENTRY))        parts.emplace_back("ENTRY"_cs);
+    if (hasFlag(flags, VertexFlags::EXIT))         parts.emplace_back("EXIT"_cs);
+
+    cstring res;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (i) res += "|"_cs;
+        res += parts[i];
+    }
+    return res;
+}
+
+class Graphs {
+ public:
+    struct Vertex {
+        cstring name;
+        VertexFlags flags;
+        const IR::Node *node;
+        std::vector<const IR::Node *> variables;
+    };
+
+    using GraphvizAttributes = std::map<cstring, cstring>;
+    using vertexProperties = boost::property<boost::vertex_attribute_t, GraphvizAttributes, Vertex>;
+    using edgeProperties =
+        boost::property<boost::edge_name_t, cstring,
+        boost::property<boost::edge_index_t, int,
+        boost::property<boost::edge_attribute_t, GraphvizAttributes, EdgeTypeIface>>>;
+    using graphProperties = boost::property<
+        boost::graph_name_t, std::string,
+        boost::property<
+            boost::graph_graph_attribute_t, GraphvizAttributes,
+            boost::property<boost::graph_vertex_attribute_t, GraphvizAttributes,
+                            boost::property<boost::graph_edge_attribute_t, GraphvizAttributes>>>>;
+    using Graph_ = boost::adjacency_list<boost::vecS, boost::vecS, boost::bidirectionalS,
+                                         vertexProperties, edgeProperties, graphProperties>;
+    using Graph = boost::subgraph<Graph_>;
+    using edge_t = boost::graph_traits<Graph>::edge_descriptor;
+    using vertex_t = boost::graph_traits<Graph>::vertex_descriptor;
+
+    using Parents = std::vector<std::pair<vertex_t, EdgeTypeIface *>>;
+
+    using IndexMap = boost::property_map<Graph, boost::vertex_index_t>::type;
+
+    vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
+
+    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name, EdgeType type);
+
+    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                  EdgeType type, unsigned cluster_id);
+
+    vertex_t add_and_connect_vertex(const cstring &name, VertexFlags flags,
+                                    const IR::Node *node=nullptr);
+
+    void add_and_connect_vertex(Graphs::vertex_t &target, EdgeType edgeType);
+
+    class GraphAttributeSetter {
+     public:
+        void operator()(Graph &g) const {
+            auto vertices = boost::vertices(g);
+            for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+                const auto &vinfo = g[*vit];
+                auto attrs = boost::get(boost::vertex_attribute, g);
+                cstring labelName = vinfo.name;
+                attrs[*vit]["label"_cs] = labelName;
+                attrs[*vit]["style"_cs] = vertexFlagGetStyle(vinfo.flags);
+                attrs[*vit]["fillcolor"_cs] = vertexFlagGetColor(vinfo.flags);
+                attrs[*vit]["shape"_cs] = vertexFlagGetShape(vinfo.flags);
+                attrs[*vit]["margin"_cs] = vertexFlagGetMargin();
+            }
+            auto edges = boost::edges(g);
+            for (auto &eit = edges.first; eit != edges.second; ++eit) {
+                auto attrs = boost::get(boost::edge_attribute, g);
+                auto ep = g[*eit];
+                attrs[*eit]["label"_cs] = ep.name;
+                attrs[*eit]["style"_cs] = edgeTypeGetStyle(ep.type);
+                attrs[*eit]["color"_cs] = edgeTypeGetColor(ep.type);
+                attrs[*eit]["penwidth"_cs] = edgeTypeGetPenWidth(ep.type);
+            }
+        }
+
+     private:
+        static cstring vertexFlagGetShape(VertexFlags flags) {
+            if (hasFlag(flags, VertexFlags::TABLE) ||
+                    hasFlag(flags, VertexFlags::ACTION))
+                return "ellipse"_cs;
+
+            return "rectangle"_cs;
+        }
+        static cstring vertexFlagGetStyle(VertexFlags flags) {
+            if (hasFlag(flags, VertexFlags::CONTROL))
+                return "dashed"_cs;
+            else if (hasFlag(flags, VertexFlags::EMPTY))
+                return "invis"_cs;
+            else if (hasFlag(flags, VertexFlags::CONDITION))
+                return "rounded"_cs;
+            else if (hasFlag(flags, VertexFlags::KEY))
+                return "rounded"_cs;
+            else if (hasFlag(flags, VertexFlags::SWITCH))
+                return "rounded"_cs;
+            else if (hasFlag(flags, VertexFlags::TABLE))
+                return "filled"_cs;
+            else if (hasFlag(flags, VertexFlags::STATEFUL))
+                return "filled"_cs;
+
+            return "solid"_cs;
+        }
+        static cstring vertexFlagGetColor(VertexFlags flags) {
+            cstring colorName = cstring::empty;
+            if (hasFlag(flags, VertexFlags::TABLE))
+                colorName = "lightsalmon"_cs;
+            if (hasFlag(flags, VertexFlags::STATEFUL))
+                colorName = "lightgreen"_cs;
+            return colorName;
+        }
+        static cstring vertexFlagGetMargin() {
+            return cstring::empty;
+        }
+        static cstring edgeTypeGetStyle(EdgeType type) {
+            switch (type) {
+                case EdgeType::INTER_PROCEDURE:
+                    return "dotted"_cs;
+                case EdgeType::CALL_TO_RETURN:
+                    return "bold"_cs;
+                case EdgeType::DEFUSE:
+                    return "dashed"_cs;
+                default:
+                    break;
+            }
+            return cstring::empty;
+        }
+        static cstring edgeTypeGetPenWidth(EdgeType type) {
+            switch (type) {
+                case EdgeType::INTER_PROCEDURE:
+                    return "2"_cs;
+                default:
+                    break;
+            }
+            return cstring::empty;
+        }
+        static cstring edgeTypeGetColor(EdgeType type) {
+            switch (type) {
+                case EdgeType::DEFUSE:
+                    return "grey"_cs;
+                default:
+                    break;
+            }
+            return cstring::empty;
+        }
+    };  // end class GraphAttributeSetter
+
+ protected:
+    Graph *g{nullptr};
+    vertex_t start_v{};
+    vertex_t exit_v{};
+    Parents parents{};
+
+};
+
+}  // namespace P4::P4StateDependency
+
+#endif /* BACKENDS_STATE_DEPENDENCY_GRAPHS_H_ */

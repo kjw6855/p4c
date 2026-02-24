@@ -3,13 +3,20 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.cmake"
 
 set (STATE_DEPENDENCY_SRCS
   state_dependency.cpp
+  controls.cpp
+  parsers.cpp
   options.cpp
+  graphs.cpp
+  graph_visitor.cpp
 )
 
 set (STATE_DEPENDENCY_HDRS
   state_dependency.h
+  controls.h
+  parsers.h
   options.h
   graphs.h
+  graph_visitor.h
 )
 
 add_executable(p4c_state_dependency ${STATE_DEPENDENCY_SRCS} ${EXTENSION_P4_14_CONV_SOURCES})

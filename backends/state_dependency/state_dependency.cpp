@@ -22,6 +22,10 @@
 #include "lib/log.h"
 #include "lib/nullstream.h"
 
+#include "controls.h"
+#include "parsers.h"
+#include "graph_visitor.h"
+
 namespace P4::P4StateDependency {
 
 class MidEnd : public PassManager {
@@ -119,6 +123,19 @@ int main(int argc, char *const argv[]) {
         return 1;
     }
     if (::P4::errorCount() > 0) return 1;
+
+    LOG2("Generating graphs under " << options.graphsDir);
+    LOG2("Generating control graphs");
+    P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap, options.graphsDir);
+    top->getMain()->apply(cgen);
+
+    LOG2("Generating parser graphs");
+    P4StateDependency::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
+    program->apply(pgg);
+
+    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut, options.file);
+
+    gvs.process(cgen.controlGraphsArray, pgg.parserGraphsArray);
 
     return ::P4::errorCount() > 0;
 }
