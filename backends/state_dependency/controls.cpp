@@ -68,7 +68,8 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             Graph *g_ = new Graph();
             g = g_;
             instanceName = std::nullopt;
-            boost::get_property(*g_, boost::graph_name) = name.string();
+            graphName = name.string();
+            boost::get_property(*g_, boost::graph_name) = graphName;
             BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
             g = controlStack.pushBack(*g_, cstring::empty);
             start_v = add_vertex("__START__"_cs, VertexFlags::ENTRY);
@@ -102,8 +103,19 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
         doPop = true;
     }
     return_parents.clear();
+
+    for (auto *p : cont->getApplyParameters()->parameters) {
+        if (p->direction == IR::Direction::In) {
+            add_variable_in_vertex(p, start_v);
+        } else if (p->direction == IR::Direction::Out) {
+            add_variable_in_vertex(p, exit_v);
+        } else if (p->direction == IR::Direction::InOut) {
+            add_variable_in_vertex(p, start_v);
+            add_variable_in_vertex(p, exit_v);
+        }
+    }
+
     visit(cont->body);
-    //merge_other_statements_into_vertex();
 
     parents.insert(parents.end(), return_parents.begin(), return_parents.end());
     return_parents.clear();
@@ -115,7 +127,6 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
 
 bool ControlGraphs::preorder(const IR::BlockStatement *statement) {
     for (const auto component : statement->components) visit(component);
-    //merge_other_statements_into_vertex();
 
     return false;
 }

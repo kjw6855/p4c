@@ -8,6 +8,8 @@
 #include "frontends/p4/parserCallGraph.h"
 #include "ir/ir.h"
 #include "ir/visitor.h"
+#include "lib/hvec_map.h"
+#include "lib/hvec_set.h"
 
 namespace P4 {
 
@@ -36,6 +38,7 @@ enum class VertexFlags : unsigned {
     ENTRY           = 1u << 11,
     EXIT            = 1u << 12,
     EMPTY           = 1u << 13,
+    VARIABLE        = 1u << 14,
 };
 
 enum class EdgeType {
@@ -44,6 +47,7 @@ enum class EdgeType {
     INTER_PROCEDURE,
     DEFUSE,
     IFDS,
+    HAS_VAR,
 };
 
 class EdgeTypeIface {
@@ -90,6 +94,11 @@ class EdgeSwitch : public EdgeTypeIface {
  private:
     const IR::Expression *labelExpr;
 };
+class EdgeVar : public EdgeTypeIface {
+ public:
+    EdgeVar()
+        : EdgeTypeIface(cstring::empty, EdgeType::HAS_VAR) {}
+};
 
 inline VertexFlags operator|(VertexFlags a, VertexFlags b) {
     return static_cast<VertexFlags>(static_cast<unsigned>(a) |
@@ -121,6 +130,7 @@ inline cstring vertexFlagsToString(VertexFlags flags) {
     if (hasFlag(flags, VertexFlags::RETURN))       parts.emplace_back("RETURN"_cs);
     if (hasFlag(flags, VertexFlags::ENTRY))        parts.emplace_back("ENTRY"_cs);
     if (hasFlag(flags, VertexFlags::EXIT))         parts.emplace_back("EXIT"_cs);
+    if (hasFlag(flags, VertexFlags::VARIABLE))     parts.emplace_back("VARIABLE"_cs);
 
     cstring res;
     for (std::size_t i = 0; i < parts.size(); ++i) {
@@ -139,18 +149,19 @@ class Graphs {
         std::vector<const IR::Node *> variables;
     };
 
+    hvec_map<cstring, hvec_set<const IR::Node *>> graphVars;
+
     using GraphvizAttributes = std::map<cstring, cstring>;
     using vertexProperties = boost::property<boost::vertex_attribute_t, GraphvizAttributes, Vertex>;
     using edgeProperties =
         boost::property<boost::edge_name_t, cstring,
         boost::property<boost::edge_index_t, int,
         boost::property<boost::edge_attribute_t, GraphvizAttributes, EdgeTypeIface>>>;
-    using graphProperties = boost::property<
-        boost::graph_name_t, std::string,
-        boost::property<
-            boost::graph_graph_attribute_t, GraphvizAttributes,
-            boost::property<boost::graph_vertex_attribute_t, GraphvizAttributes,
-                            boost::property<boost::graph_edge_attribute_t, GraphvizAttributes>>>>;
+    using graphProperties =
+        boost::property<boost::graph_name_t, std::string,
+        boost::property<boost::graph_graph_attribute_t, GraphvizAttributes,
+        boost::property<boost::graph_vertex_attribute_t, GraphvizAttributes,
+        boost::property<boost::graph_edge_attribute_t, GraphvizAttributes>>>>;
     using Graph_ = boost::adjacency_list<boost::vecS, boost::vecS, boost::bidirectionalS,
                                          vertexProperties, edgeProperties, graphProperties>;
     using Graph = boost::subgraph<Graph_>;
@@ -173,6 +184,25 @@ class Graphs {
 
     void add_and_connect_vertex(Graphs::vertex_t &target, EdgeType edgeType);
 
+    cstring get_var_name(const IR::Node *var) {
+        std::stringstream sstream;
+        sstream << var;
+        auto fullName = cstring(sstream);
+        if (auto *p = fullName.findlast(' ')) return cstring(p + 1);
+        return fullName;
+    }
+
+    void add_variable_in_vertex(const IR::Node *var, const vertex_t &v) {
+        auto vinfo = (*g)[v];
+        vinfo.variables.push_back(var);
+        graphVars[graphName].insert(var);
+
+        if (showVar) {
+            auto vv = add_vertex(get_var_name(var), VertexFlags::VARIABLE, var);
+            add_edge(v, vv, cstring::empty, EdgeType::HAS_VAR);
+        }
+    }
+
     class GraphAttributeSetter {
      public:
         void operator()(Graph &g) const {
@@ -181,12 +211,20 @@ class Graphs {
                 const auto &vinfo = g[*vit];
                 auto attrs = boost::get(boost::vertex_attribute, g);
                 cstring labelName = vinfo.name;
-                attrs[*vit]["label"_cs] = labelName;
+                if (vinfo.flags == VertexFlags::VARIABLE) {
+                    attrs[*vit]["label"_cs] = cstring::empty;
+                    attrs[*vit]["xlabel"_cs] = labelName;
+                    attrs[*vit]["fixedsize"_cs] = "true"_cs;
+                } else {
+                    attrs[*vit]["label"_cs] = labelName;
+                }
                 attrs[*vit]["style"_cs] = vertexFlagGetStyle(vinfo.flags);
                 attrs[*vit]["fillcolor"_cs] = vertexFlagGetColor(vinfo.flags);
                 attrs[*vit]["shape"_cs] = vertexFlagGetShape(vinfo.flags);
+                attrs[*vit]["width"_cs] = vertexFlagGetWidth(vinfo.flags);
                 attrs[*vit]["margin"_cs] = vertexFlagGetMargin();
             }
+
             auto edges = boost::edges(g);
             for (auto &eit = edges.first; eit != edges.second; ++eit) {
                 auto attrs = boost::get(boost::edge_attribute, g);
@@ -200,6 +238,8 @@ class Graphs {
 
      private:
         static cstring vertexFlagGetShape(VertexFlags flags) {
+            if (hasFlag(flags, VertexFlags::VARIABLE))
+                return "circle"_cs;
             if (hasFlag(flags, VertexFlags::TABLE) ||
                     hasFlag(flags, VertexFlags::ACTION))
                 return "ellipse"_cs;
@@ -221,6 +261,8 @@ class Graphs {
                 return "filled"_cs;
             else if (hasFlag(flags, VertexFlags::STATEFUL))
                 return "filled"_cs;
+            if (hasFlag(flags, VertexFlags::VARIABLE))
+                return "filled"_cs;
 
             return "solid"_cs;
         }
@@ -230,7 +272,14 @@ class Graphs {
                 colorName = "lightsalmon"_cs;
             if (hasFlag(flags, VertexFlags::STATEFUL))
                 colorName = "lightgreen"_cs;
+            if (hasFlag(flags, VertexFlags::VARIABLE))
+                colorName = "black"_cs;
             return colorName;
+        }
+        static cstring vertexFlagGetWidth(VertexFlags flags) {
+            if (hasFlag(flags, VertexFlags::VARIABLE))
+                return "0.2"_cs;
+            return cstring::empty;
         }
         static cstring vertexFlagGetMargin() {
             return cstring::empty;
@@ -243,6 +292,8 @@ class Graphs {
                     return "bold"_cs;
                 case EdgeType::DEFUSE:
                     return "dashed"_cs;
+                case EdgeType::HAS_VAR:
+                    return "invis"_cs;
                 default:
                     break;
             }
@@ -273,7 +324,9 @@ class Graphs {
     vertex_t start_v{};
     vertex_t exit_v{};
     Parents parents{};
-
+    cstring graphName;
+ public:
+    bool showVar;
 };
 
 }  // namespace P4::P4StateDependency

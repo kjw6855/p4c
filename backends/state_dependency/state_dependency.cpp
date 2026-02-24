@@ -127,13 +127,14 @@ int main(int argc, char *const argv[]) {
     LOG2("Generating graphs under " << options.graphsDir);
     LOG2("Generating control graphs");
     P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap, options.graphsDir);
+    cgen.showVar = options.showVar;
     top->getMain()->apply(cgen);
 
     LOG2("Generating parser graphs");
     P4StateDependency::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
     program->apply(pgg);
 
-    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut, options.file);
+    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut, options.file, options.showVar);
 
     gvs.process(cgen.controlGraphsArray, pgg.parserGraphsArray);
 

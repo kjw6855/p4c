@@ -18,8 +18,49 @@
 
 #include "graphs.h"
 #include "lib/nullstream.h"
+#include "lib/hvec_map.h"
+#include "lib/hvec_set.h"
 
 namespace P4::P4StateDependency {
+
+void inject_rank_to_dot(const std::string& filename,
+        const hvec_map<Graphs::vertex_t, hvec_set<Graphs::vertex_t>> groups) {
+    if (groups.empty()) return;
+
+    std::ifstream infile(filename);
+    if (!infile.is_open()) return;
+
+    std::vector<std::string> lines;
+    std::string line;
+
+    // Read the whole file into memory
+    while (std::getline(infile, line)) {
+        lines.push_back(line);
+    }
+    infile.close();
+
+    if (lines.size() < 5) return;
+
+    for (auto git : groups) {
+        if (git.second.size() == 0)
+            continue;
+        std::stringstream out;
+        out << "    {rank=same; ";
+        out << git.first;
+        for (auto v : git.second) out << ", " << v;
+        out << ";}";
+        lines.insert(lines.begin() + 4, out.str());
+    }
+
+    // Safety check: Ensure the file actually has at least 5 lines
+    // If it's shorter, we'll just append it to the end before the closing '}'
+
+    // Write it back out
+    std::ofstream outfile(filename);
+    for (const auto& l : lines) {
+        outfile << l << "\n";
+    }
+}
 
 void GraphVisitor::writeGraphToFile(const Graph &g, const std::string &name) {
     auto path = graphsDir / (name + ".dot");
@@ -31,6 +72,26 @@ void GraphVisitor::writeGraphToFile(const Graph &g, const std::string &name) {
     // Custom label writers not supported with subgraphs, so we populate
     // *_attribute_t properties instead using our GraphAttributeSetter class.
     boost::write_graphviz(*out, g);
+
+    if (!showVar)
+        return;
+
+    hvec_map<Graphs::vertex_t, hvec_set<Graphs::vertex_t>> groups;
+    auto vertices = boost::vertices(g);
+
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        const auto &vinfo = g[*vit];
+        if (hasFlag(vinfo.flags, VertexFlags::VARIABLE))
+            continue;
+
+        auto [ei, ei_end] = boost::out_edges(*vit, g);
+        for (; ei != ei_end; ++ei) {
+            auto edge = g[*ei];
+            if (edge.type == EdgeType::HAS_VAR)
+                groups[*vit].insert(boost::target(*ei, g));
+        }
+    }
+    inject_rank_to_dot(path, groups);
 }
 
 const char *GraphVisitor::getType(const VertexFlags &v_flags) {

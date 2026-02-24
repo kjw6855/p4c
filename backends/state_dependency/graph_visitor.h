@@ -64,12 +64,14 @@ class GraphVisitor : public Graphs, public Inspector {
     /// @param fullGraph option to create fullGraph
     /// @param jsonOut option to create json fullGraph.
     GraphVisitor(std::filesystem::path graphsDir, const bool graphs, const bool fullGraph,
-                  const bool jsonOut, std::filesystem::path filename)
+                  const bool jsonOut, std::filesystem::path filename,
+                  const bool showVar)
         : graphsDir(std::move(graphsDir)),
           graphs(graphs),
           fullGraph(fullGraph),
           jsonOut(jsonOut),
-          filename(std::move(filename)) {}
+          filename(std::move(filename)),
+          showVar(showVar) {}
     /// @brief Maps VertexType to string
     /// @param v_type VertexType to map
     /// @return string representation of v_type.
@@ -121,6 +123,7 @@ class GraphVisitor : public Graphs, public Inspector {
     const bool jsonOut;    // iterate over boost graphs, and create json representation of these
                            // graphs
     const std::filesystem::path filename;
+    const bool showVar;
 };
 
 }  // namespace P4::P4StateDependency

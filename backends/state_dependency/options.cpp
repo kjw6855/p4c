@@ -49,6 +49,13 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             return true;
             },
             "Use to generate json output of fullGraph.");
+    registerOption(
+            "--showVar", nullptr,
+            [this](const char *) {
+            showVar = true;
+            return true;
+            },
+            "Use to show nodes' variables in graph.");
 }
 
 }  // namespace P4::P4StateDependency
