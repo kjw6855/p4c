@@ -56,6 +56,13 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             return true;
             },
             "Use to show nodes' variables in graph.");
+    registerOption(
+            "--actionAsProc", nullptr,
+            [this](const char *) {
+            setActionAsProc = true;
+            return true;
+            },
+            "Use to consider P4Action as procedure call.");
 }
 
 }  // namespace P4::P4StateDependency

@@ -31,7 +31,8 @@ class ControlGraphs : public Graphs,
         std::vector<Graph *> subgraphs{};
     };
 
-    ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap, std::filesystem::path graphsDir);
+    ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            std::filesystem::path graphsDir, bool setActionAsProc);
 
     bool preorder(const IR::PackageBlock *block) override;
     bool preorder(const IR::ControlBlock *block) override;
@@ -70,6 +71,7 @@ class ControlGraphs : public Graphs,
     P4::TypeMap *typeMap;
     const cstring graphsDir;
     Parents return_parents{};
+    bool setActionAsProc;
 
     ControlStack controlStack{};
     std::optional<cstring> instanceName{};

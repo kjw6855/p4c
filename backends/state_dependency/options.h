@@ -17,6 +17,7 @@ class P4StateDependencyOptions : public CompilerOptions {
     bool fullGraph = false;
     bool jsonOut = false;
     bool showVar = false;
+    bool setActionAsProc = false;
 
  private:
     bool isGraphsSet = false;

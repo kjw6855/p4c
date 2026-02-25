@@ -126,7 +126,9 @@ int main(int argc, char *const argv[]) {
 
     LOG2("Generating graphs under " << options.graphsDir);
     LOG2("Generating control graphs");
-    P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap, options.graphsDir);
+    P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap,
+            options.graphsDir, options.setActionAsProc);
+    // TODO: set options in contructor
     cgen.showVar = options.showVar;
     top->getMain()->apply(cgen);
 
