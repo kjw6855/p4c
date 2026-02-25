@@ -6,12 +6,17 @@
 #define BACKENDS_STATE_DEPENDENCY_CONTROLS_H_
 
 #include <optional>
+
+#include "frontends/common/resolveReferences/resolveReferences.h"
 #include "graphs.h"
+#include "ir/ir.h"
 #include "lib/hvec_map.h"
 
 namespace P4::P4StateDependency {
 
-class ControlGraphs : public Graphs, public Inspector {
+class ControlGraphs : public Graphs,
+                      public Inspector,
+                      public P4::ResolutionContext {
  public:
     class ControlStack {
      public:
@@ -35,14 +40,20 @@ class ControlGraphs : public Graphs, public Inspector {
     bool preorder(const IR::IfStatement *statement) override;
     bool preorder(const IR::SwitchStatement *statement) override;
     bool preorder(const IR::MethodCallStatement *statement) override;
+    bool preorder(const IR::MethodCallExpression *mc) override;
     bool preorder(const IR::BaseAssignmentStatement *statement) override;
+    bool preorder(const IR::Function *fn) override;
     bool preorder(const IR::ReturnStatement *) override;
     bool preorder(const IR::ExitStatement *) override;
     bool preorder(const IR::P4Table *table) override;
     bool preorder(const IR::Key *key) override;
+    bool preorder(const IR::KeyElement *ke) override;
     bool preorder(const IR::P4Action *action) override;
+    bool preorder(const IR::PathExpression *pe) override;
 
     void visit_call(const cstring &name, const IR::Node *node);
+
+    const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt);
 
     std::vector<Graph *> controlGraphsArray{};
 
@@ -63,6 +74,7 @@ class ControlGraphs : public Graphs, public Inspector {
     ControlStack controlStack{};
     std::optional<cstring> instanceName{};
     hvec_map<const IR::Node *, procedure_pair_t> procedureGraphs;
+    std::optional<Graphs::vertex_t> cur_v{};
 };
 
 }  // namespace P4::P4StateDependency

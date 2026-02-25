@@ -136,6 +136,8 @@ bool ControlGraphs::preorder(const IR::IfStatement *statement) {
     // If condition is either hit or miss
     auto hitTbl = P4::TableApplySolver::isHit(statement->condition, refMap, typeMap);
     auto missTbl = P4::TableApplySolver::isMiss(statement->condition, refMap, typeMap);
+
+    bool visitCond = false;
     if (hitTbl != nullptr) {
         visit_call(hitTbl->getName(), hitTbl);
         sstream << "hit";
@@ -143,10 +145,15 @@ bool ControlGraphs::preorder(const IR::IfStatement *statement) {
         visit_call(missTbl->getName(), missTbl);
         sstream << "miss";
     } else {
+        visitCond = true;
         statement->condition->dbprint(sstream);
     }
 
     auto v = add_and_connect_vertex(cstring(sstream), VertexFlags::CONDITION, statement);
+    auto prev_cur_v = cur_v;
+    cur_v = v;
+    if (visitCond) visit(statement->condition);
+    cur_v = prev_cur_v;
 
     Parents new_parents;
     parents = {{v, new EdgeIf(true)}};
@@ -252,6 +259,11 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         auto v = add_and_connect_vertex(vName, flags, statement);
         LOG2("has ExternMethod:" << vName);
         parents = {{v, new EdgeUnconditional()}};
+
+        auto prev_cur_v = cur_v;
+        cur_v = v;
+        for (auto *p : *statement->methodCall->arguments) visit(p);
+        cur_v = prev_cur_v;
     } else {
         std::stringstream sstream;
         statement->dbprint(sstream);
@@ -259,7 +271,30 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
 
         auto v = add_and_connect_vertex(vName, VertexFlags::STATEMENT, statement);
         parents = {{v, new EdgeUnconditional()}};
+
+        auto prev_cur_v = cur_v;
+        cur_v = v;
+        for (auto *p : *statement->methodCall->arguments) visit(p);
+        cur_v = prev_cur_v;
     }
+    return false;
+}
+
+bool ControlGraphs::preorder(const IR::MethodCallExpression *mc) {
+    auto *instance = P4::MethodInstance::resolve(mc, refMap, typeMap);
+
+    visit(mc->arguments);
+    if (instance->to<P4::ActionCall>()) {
+        BUG("ActionCall should be called in MethodCallStatement");
+
+    } else if (instance->to<P4::BuiltInMethod>()) {
+        visit(mc->method);
+
+    } else if (instance->object) {
+        auto obj = instance->object->getNode();
+        if (!isInContext(obj)) visit(obj);
+    }
+
     return false;
 }
 
@@ -270,22 +305,38 @@ bool ControlGraphs::preorder(const IR::BaseAssignmentStatement *statement) {
 
     auto v = add_and_connect_vertex(vName, VertexFlags::STATEMENT, statement);
     parents = {{v, new EdgeUnconditional()}};
+
+    auto prev_cur_v = cur_v;
+    cur_v = v;
+    visit(statement->right);
+    visit(statement->left);
+    cur_v = prev_cur_v;
+
     return false;
 }
 
 bool ControlGraphs::preorder(const IR::ReturnStatement *) {
-    //merge_other_statements_into_vertex();
-
     return_parents.insert(return_parents.end(), parents.begin(), parents.end());
     parents.clear();
     return false;
 }
 
-bool ControlGraphs::preorder(const IR::ExitStatement *) {
-    //merge_other_statements_into_vertex();
+bool ControlGraphs::preorder(const IR::Function *fn) {
+    if (!cur_v.has_value()) return false;
 
+    for (auto *p : *fn->type->parameters)
+        add_variable_in_vertex(p, cur_v.value());
+    return false;
+}
+
+bool ControlGraphs::preorder(const IR::ExitStatement *) {
     for (auto parent : parents) add_edge(parent.first, exit_v, parent.second->name, EdgeType::CONTROL);
     parents.clear();
+    return false;
+}
+
+bool ControlGraphs::preorder(const IR::KeyElement *ke) {
+    visit(ke->expression);
     return false;
 }
 
@@ -308,8 +359,12 @@ bool ControlGraphs::preorder(const IR::Key *key) {
     }
 
     auto v = add_and_connect_vertex(cstring(sstream), VertexFlags::KEY, key);
-
     parents = {{v, new EdgeUnconditional()}};
+
+    auto prev_cur_v = cur_v;
+    cur_v = v;
+    for (auto elVec : key->keyElements) visit(elVec);
+    cur_v = prev_cur_v;
 
     return false;
 }
@@ -326,7 +381,12 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
     auto start_v = add_and_connect_vertex(name,
             VertexFlags::ACTION | VertexFlags::ENTRY, action);
     parents = {{start_v, new EdgeUnconditional()}};
+
+    for (auto *p : *action->parameters)
+        add_variable_in_vertex(p, start_v);
+
     visit(action->body);
+
     auto exit_v = add_and_connect_vertex("EXIT "_cs + name, VertexFlags::EXIT);
     parents = {{exit_v, new EdgeProcedural}};
 
@@ -418,6 +478,23 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
     return false;
 }
 
+bool ControlGraphs::preorder(const IR::PathExpression *pe) {
+    if (pe->type->is<IR::Type_State>()) {
+        auto *d = resolveUnique(pe->path->name, P4::ResolutionType::Any);
+        BUG_CHECK(d, "failed to resolve %s", pe);
+        auto ps = d->to<IR::ParserState>();
+        BUG_CHECK(ps, "%s is not a parser state", d);
+        visit(ps);
+        return false;
+    }
+    // TODO: should I check state?
+
+    if (cur_v.has_value())
+        add_variables(pe, getContext());
+
+    return false;
+}
+
 void ControlGraphs::visit_call(const cstring &name, const IR::Node *node) {
     // before visit
     auto call_v = add_and_connect_vertex("CALL "_cs + name, VertexFlags::CALL);
@@ -429,6 +506,59 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node) {
     auto ret_v = add_and_connect_vertex("RETURN "_cs + name, VertexFlags::RETURN);
     parents = {{ret_v, new EdgeUnconditional()}};
     add_edge(call_v, ret_v, cstring::empty, EdgeType::CALL_TO_RETURN);
+}
+
+static const IR::Expression *get_primary(const IR::Expression *e, const Visitor::Context *ctxt) {
+    if (ctxt && (ctxt->node->is<IR::Member>() || ctxt->node->is<IR::AbstractSlice>() ||
+                 ctxt->node->is<IR::ArrayIndex>())) {
+        return get_primary(ctxt->node->to<IR::Expression>(), ctxt->parent);
+    } else {
+        return e;
+    }
+}
+
+static const IR::Expression *isValid(const IR::Member *m, const Visitor::Context *ctxt) {
+    if (m->member.name == "$valid") return m;
+    if (!ctxt || !ctxt->node->is<IR::MethodCallExpression>()) return nullptr;
+    if (m->member.name == "isValid" || m->member.name == "setValid" ||
+        m->member.name == "setInvalid")
+        return ctxt->node->to<IR::Expression>();
+    return nullptr;
+}
+
+const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, const Context *ctxt) {
+    if (!ctxt) {
+    } else if (auto *m = ctxt->node->to<IR::Member>()) {
+        if (auto *t = isValid(m, ctxt->parent)) {
+            add_variable_in_vertex(t, cur_v.value());
+            return t;
+
+        } else if (m->expr->type->to<IR::Type_StructLike>()) {
+            e = get_primary(m, ctxt->parent);
+
+        } else if (m->expr->type->to<IR::Type_Array>()) {
+            if (m->member.name == "lastIndex") {
+                e = m;
+            } else if (m->member.name == "next" || m->member.name == "last") {
+                add_variable_in_vertex(m, cur_v.value());
+                e = m;
+            } else {
+                BUG("invalid read of header stack: %s", m);
+            }
+        } else {
+            BUG("%s: Member of unexpected type %s", m, m->expr->type);
+        }
+    } else if (auto *sl = ctxt->node->to<IR::Slice>()) {
+        // TODO: should I check overlapped slices?
+        e = add_variables(sl, ctxt->parent);
+        BUG_CHECK(e == sl, "slice %s is not primary in ControlGraphs::add_variables", sl);
+        e = sl;
+    } else if (auto *ai = ctxt->node->to<IR::ArrayIndex>()) {
+        e = get_primary(ai, ctxt->parent);
+    }
+
+    add_variable_in_vertex(e, cur_v.value());
+    return e;
 }
 
 }  // namespace P4::P4StateDependency
