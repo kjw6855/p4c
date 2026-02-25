@@ -1,6 +1,9 @@
 #include "graphs.h"
 
 namespace P4::P4StateDependency {
+
+const IR::Node *Graphs::globalNode = new IR::Constant(0);
+
 Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);

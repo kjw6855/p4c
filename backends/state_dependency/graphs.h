@@ -50,6 +50,26 @@ enum class EdgeType {
     HAS_VAR,
 };
 
+inline cstring edgeTypeToString(EdgeType type) {
+    switch (type) {
+        case EdgeType::CONTROL:
+            return "CONTROL"_cs;
+        case EdgeType::CALL_TO_RETURN:
+            return "CALL_TO_RETURN"_cs;
+        case EdgeType::INTER_PROCEDURE:
+            return "INTER_PROCEDURE"_cs;
+        case EdgeType::DEFUSE:
+            return "DEFUSE"_cs;
+        case EdgeType::IFDS:
+            return "IFDS"_cs;
+        case EdgeType::HAS_VAR:
+            return "HAS_VAR"_cs;
+        default:
+            break;
+    }
+    return cstring::empty;
+}
+
 class EdgeTypeIface {
  public:
     cstring name;
@@ -192,20 +212,32 @@ class Graphs {
         return fullName;
     }
 
-    void add_variable_in_vertex(const IR::Node *var, const vertex_t &v) {
+    vertex_t add_var_vertex(const IR::Node *var, const vertex_t &node) {
+        cstring vname = get_var_name(var);
+        auto vv = add_vertex(vname, VertexFlags::VARIABLE, var);
+        add_edge(node, vv, cstring::empty, EdgeType::HAS_VAR);
+
+        return vv;
+    }
+
+    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var, const vertex_t &v) {
         auto vinfo = (*g)[v];
-        vinfo.variables.push_back(var);
         graphVars[graphName].insert(var);
 
-        if (showVar) {
-            auto vv = add_vertex(get_var_name(var), VertexFlags::VARIABLE, var);
-            add_edge(v, vv, cstring::empty, EdgeType::HAS_VAR);
+        if (showVar && !genSupergraphs) {
+            vinfo.variables.push_back(var);
+            return add_var_vertex(var, v);
         }
+        return {};
+    }
+
+    vertex_t get_root_vertex(Graph *g) {
+        return *boost::vertices(*g).first;
     }
 
     class GraphAttributeSetter {
      public:
-        void operator()(Graph &g) const {
+        void operator()(Graph &g, bool showVar=false) const {
             auto vertices = boost::vertices(g);
             for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
                 const auto &vinfo = g[*vit];
@@ -218,7 +250,7 @@ class Graphs {
                 } else {
                     attrs[*vit]["label"_cs] = labelName;
                 }
-                attrs[*vit]["style"_cs] = vertexFlagGetStyle(vinfo.flags);
+                attrs[*vit]["style"_cs] = vertexFlagGetStyle(vinfo.flags, showVar);
                 attrs[*vit]["fillcolor"_cs] = vertexFlagGetColor(vinfo.flags);
                 attrs[*vit]["shape"_cs] = vertexFlagGetShape(vinfo.flags);
                 attrs[*vit]["width"_cs] = vertexFlagGetWidth(vinfo.flags);
@@ -246,7 +278,7 @@ class Graphs {
 
             return "rectangle"_cs;
         }
-        static cstring vertexFlagGetStyle(VertexFlags flags) {
+        static cstring vertexFlagGetStyle(VertexFlags flags, bool showVar) {
             if (hasFlag(flags, VertexFlags::CONTROL))
                 return "dashed"_cs;
             else if (hasFlag(flags, VertexFlags::EMPTY))
@@ -261,8 +293,12 @@ class Graphs {
                 return "filled"_cs;
             else if (hasFlag(flags, VertexFlags::STATEFUL))
                 return "filled"_cs;
-            if (hasFlag(flags, VertexFlags::VARIABLE))
-                return "filled"_cs;
+            if (hasFlag(flags, VertexFlags::VARIABLE)) {
+                if (showVar)
+                    return "filled"_cs;
+                else
+                    return "invis"_cs;
+            }
 
             return "solid"_cs;
         }
@@ -294,6 +330,8 @@ class Graphs {
                     return "dashed"_cs;
                 case EdgeType::HAS_VAR:
                     return "invis"_cs;
+                case EdgeType::IFDS:
+                    return "bold"_cs;
                 default:
                     break;
             }
@@ -327,6 +365,8 @@ class Graphs {
     cstring graphName;
  public:
     bool showVar;
+    bool genSupergraphs;
+    static const IR::Node *globalNode;
 };
 
 }  // namespace P4::P4StateDependency

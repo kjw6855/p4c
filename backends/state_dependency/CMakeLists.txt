@@ -8,6 +8,7 @@ set (STATE_DEPENDENCY_SRCS
   options.cpp
   graphs.cpp
   graph_visitor.cpp
+  supergraphs.cpp
 )
 
 set (STATE_DEPENDENCY_HDRS
@@ -17,6 +18,7 @@ set (STATE_DEPENDENCY_HDRS
   options.h
   graphs.h
   graph_visitor.h
+  supergraphs.h
 )
 
 add_executable(p4c_state_dependency ${STATE_DEPENDENCY_SRCS} ${EXTENSION_P4_14_CONV_SOURCES})

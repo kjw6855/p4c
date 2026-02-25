@@ -206,7 +206,7 @@ void GraphVisitor::process(std::vector<Graph *> &controlGraphsArray,
                             std::vector<Graph *> &parserGraphsArray) {
     if (graphs) {
         for (auto g : controlGraphsArray) {
-            GraphAttributeSetter()(*g);
+            GraphAttributeSetter()(*g, showVar);
             writeGraphToFile(*g, boost::get_property(*g, boost::graph_name));
         }
         for (auto g : parserGraphsArray) {

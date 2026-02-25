@@ -63,6 +63,13 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             return true;
             },
             "Use to consider P4Action as procedure call.");
+    registerOption(
+            "--supergraph", nullptr,
+            [this](const char *) {
+            genSupergraphs = true;
+            return true;
+            },
+            "Use if you want to create supergraph for IFDS.");
 }
 
 }  // namespace P4::P4StateDependency

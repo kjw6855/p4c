@@ -25,6 +25,7 @@
 #include "controls.h"
 #include "parsers.h"
 #include "graph_visitor.h"
+#include "supergraphs.h"
 
 namespace P4::P4StateDependency {
 
@@ -130,7 +131,16 @@ int main(int argc, char *const argv[]) {
             options.graphsDir, options.setActionAsProc);
     // TODO: set options in contructor
     cgen.showVar = options.showVar;
+    cgen.genSupergraphs = options.genSupergraphs;
     top->getMain()->apply(cgen);
+
+    if (options.genSupergraphs) {
+        P4StateDependency::SuperGraphs sg(&midEnd.refMap, &midEnd.typeMap,
+                &cgen.graphVars,
+                &cgen.controlGraphsArray);
+
+        top->getMain()->apply(sg);
+    }
 
     LOG2("Generating parser graphs");
     P4StateDependency::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
