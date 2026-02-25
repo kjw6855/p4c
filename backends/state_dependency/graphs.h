@@ -251,7 +251,7 @@ class Graphs {
                     attrs[*vit]["label"_cs] = labelName;
                 }
                 attrs[*vit]["style"_cs] = vertexFlagGetStyle(vinfo.flags, showVar);
-                attrs[*vit]["fillcolor"_cs] = vertexFlagGetColor(vinfo.flags);
+                attrs[*vit]["fillcolor"_cs] = vertexFlagGetColor(g, *vit);
                 attrs[*vit]["shape"_cs] = vertexFlagGetShape(vinfo.flags);
                 attrs[*vit]["width"_cs] = vertexFlagGetWidth(vinfo.flags);
                 attrs[*vit]["margin"_cs] = vertexFlagGetMargin();
@@ -302,14 +302,27 @@ class Graphs {
 
             return "solid"_cs;
         }
-        static cstring vertexFlagGetColor(VertexFlags flags) {
+        cstring vertexFlagGetColor(Graph &g, const vertex_t &v) const {
+            const auto &vinfo = g[v];
+            auto flags = vinfo.flags;
             cstring colorName = cstring::empty;
             if (hasFlag(flags, VertexFlags::TABLE))
                 colorName = "lightsalmon"_cs;
             if (hasFlag(flags, VertexFlags::STATEFUL))
                 colorName = "lightgreen"_cs;
-            if (hasFlag(flags, VertexFlags::VARIABLE))
-                colorName = "black"_cs;
+            if (hasFlag(flags, VertexFlags::VARIABLE)) {
+                if (boost::out_degree(v, g) > 0) return "black"_cs;
+                bool filled = false;
+                for (auto [ei, ei_end] = boost::in_edges(v, g); ei != ei_end; ++ei) {
+                    auto edge = g[*ei];
+                    if (edge.type != EdgeType::HAS_VAR) {
+                        filled = true;
+                        break;
+                    }
+                }
+
+                colorName = filled ? "black"_cs : "white"_cs;
+            }
             return colorName;
         }
         static cstring vertexFlagGetWidth(VertexFlags flags) {
