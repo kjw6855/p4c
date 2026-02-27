@@ -11,6 +11,73 @@ SuperGraphs::SuperGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
                 std::vector<Graph *> *controlGraphsArray)
     : refMap(refMap), typeMap(typeMap), controlGraphsArray(controlGraphsArray), graphVars(graphVars) {}
 
+void SuperGraphs::init_all_variables() {
+    variableList.clear();
+    varIndexMap.clear();
+    globalVariables.clear();
+
+    auto graphName = boost::get_property(*g, boost::graph_name);
+    auto graphVarIt = graphVars->find(graphName);
+    if (graphVarIt == graphVars->end()) BUG("Graph vars are not found: %1%", graphName);
+
+    auto localGraphVars = graphVarIt->second;
+    varNum = 0;
+
+    // Assign indexMap
+    variableList.push_back(Graphs::globalNode);
+    varIndexMap[Graphs::globalNode] = varNum++;
+    for (auto *node : localGraphVars) {
+        variableList.push_back(node);
+        varIndexMap[node] = varNum++;
+    }
+
+    // For each vertex, create VAR vertex ID
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto varNode = add_var_vertex(Graphs::globalNode, *vit);
+        globalVariables[*vit].push_back(varNode);
+        for (auto *node : localGraphVars) {
+            auto varNode = add_var_vertex(node, *vit);
+            globalVariables[*vit].push_back(varNode);
+        }
+    }
+}
+
+const IR::PathExpression* get_base(const IR::Expression* e) {
+    if (auto m = e->to<IR::Member>()) return get_base(m->expr);
+    return e->to<IR::PathExpression>();
+}
+
+
+void SuperGraphs::setup_root_vars() {
+    auto rootVar = add_var_vertex(Graphs::globalNode);
+    auto rootNode = get_root_vertex(g);
+
+    add_edge(rootVar, globalVariables[rootNode][0],
+            cstring::empty, EdgeType::IFDS_FT);
+
+    auto &rootInfo = (*g)[rootNode];
+    for (size_t n = 1; n < varNum; n++) {
+        auto *var = variableList[n];
+        const IR::Node *parent = nullptr;
+        if (auto *mem = var->to<IR::Member>()) {
+            if (auto path = get_base(mem->expr)) {
+                auto *decl = refMap->getDeclaration(path->path, true);
+                parent = decl->to<IR::Parameter>();
+            }
+        }
+
+        for (auto *defVar : rootInfo.defVars) {
+            if (var->equiv(*defVar) ||
+                    (parent != nullptr && parent->equiv(*defVar))) {
+                add_edge(rootVar, globalVariables[rootNode][n],
+                        cstring::empty, EdgeType::IFDS_FT);
+                break;
+            }
+        }
+    }
+}
+
 void SuperGraphs::gen_supergraph(Graph *g_) {
     // Init
     g = g_;
@@ -22,6 +89,7 @@ void SuperGraphs::gen_supergraph(Graph *g_) {
     std::vector<bool> visited(n, false);
     std::queue<Graphs::vertex_t> q;
 
+    setup_root_vars();
     q.push(get_root_vertex(g));
     while (!q.empty()) {
         auto u = q.front();
@@ -72,38 +140,6 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
                 add_edge(globalVariables[src][uvi], globalVariables[dst][n],
                          cstring::empty, EdgeType::IFDS);
             }
-        }
-    }
-}
-
-void SuperGraphs::init_all_variables() {
-    variableList.clear();
-    varIndexMap.clear();
-    globalVariables.clear();
-
-    auto graphName = boost::get_property(*g, boost::graph_name);
-    auto graphVarIt = graphVars->find(graphName);
-    if (graphVarIt == graphVars->end()) BUG("Graph vars are not found: %1%", graphName);
-
-    auto localGraphVars = graphVarIt->second;
-    varNum = 0;
-
-    // Assign indexMap
-    variableList.push_back(Graphs::globalNode);
-    varIndexMap[Graphs::globalNode] = varNum++;
-    for (auto *node : localGraphVars) {
-        variableList.push_back(node);
-        varIndexMap[node] = varNum++;
-    }
-
-    // For each vertex, set VAR vertex ID
-    auto vertices = boost::vertices(*g);
-    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        auto varNode = add_var_vertex(Graphs::globalNode, *vit);
-        globalVariables[*vit].push_back(varNode);
-        for (auto *node : localGraphVars) {
-            auto varNode = add_var_vertex(node, *vit);
-            globalVariables[*vit].push_back(varNode);
         }
     }
 }

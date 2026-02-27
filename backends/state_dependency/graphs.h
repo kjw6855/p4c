@@ -215,10 +215,12 @@ class Graphs {
         return fullName;
     }
 
-    vertex_t add_var_vertex(const IR::Node *var, const vertex_t &node) {
+    vertex_t add_var_vertex(const IR::Node *var, std::optional<const vertex_t> node=std::nullopt) {
         cstring vname = get_var_name(var);
         auto vv = add_vertex(vname, VertexFlags::VARIABLE, var);
-        add_edge(node, vv, cstring::empty, EdgeType::HAS_VAR);
+
+        if (node.has_value())
+            add_edge(node.value(), vv, cstring::empty, EdgeType::HAS_VAR);
 
         return vv;
     }

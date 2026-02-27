@@ -21,6 +21,7 @@ class SuperGraphs : public Graphs,
 
     void gen_supergraph(Graph *g_);
     void init_all_variables();
+    void setup_root_vars();
     void gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst);
     bool preorder(const IR::PackageBlock *block);
 
@@ -30,7 +31,6 @@ class SuperGraphs : public Graphs,
     P4::TypeMap *typeMap;
     std::vector<Graph *> *controlGraphsArray{};
     hvec_map<cstring, hvec_set<const IR::Node *>> *graphVars;
-    std::optional<Graphs::vertex_t> cur_v{};
 
     std::size_t varNum;
     std::vector<const IR::Node *> variableList;
