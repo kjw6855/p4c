@@ -46,6 +46,7 @@ enum class EdgeType {
     CALL_TO_RETURN,
     INTER_PROCEDURE,
     DEFUSE,
+    IFDS_FT,
     IFDS,
     HAS_VAR,
 };
@@ -61,6 +62,7 @@ inline cstring edgeTypeToString(EdgeType type) {
         case EdgeType::DEFUSE:
             return "DEFUSE"_cs;
         case EdgeType::IFDS:
+        case EdgeType::IFDS_FT:
             return "IFDS"_cs;
         case EdgeType::HAS_VAR:
             return "HAS_VAR"_cs;
@@ -166,7 +168,8 @@ class Graphs {
         cstring name;
         VertexFlags flags;
         const IR::Node *node;
-        std::vector<const IR::Node *> variables;
+        std::vector<const IR::Node *> defVars;
+        std::vector<const IR::Node *> useVars;
     };
 
     hvec_map<cstring, hvec_set<const IR::Node *>> graphVars;
@@ -220,13 +223,28 @@ class Graphs {
         return vv;
     }
 
-    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var, const vertex_t &v) {
-        auto vinfo = (*g)[v];
-        graphVars[graphName].insert(var);
+    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var, const vertex_t &v,
+            bool isUsed) {
+        /* check duplicate variable in set */
+        auto &varset = graphVars[graphName];
+        auto *newVar = var;
+        for (auto *inVar : varset) {
+            if (inVar->equiv(*var)) {
+                newVar = inVar;
+                break;
+            }
+        }
+        // Insert new variable
+        if (newVar == var)
+            graphVars[graphName].insert(var);
 
-        if (showVar && !genSupergraphs) {
-            vinfo.variables.push_back(var);
-            return add_var_vertex(var, v);
+        if (showVar || genSupergraphs) {
+            auto &vinfo = (*g)[v];
+            auto &varList = isUsed ? vinfo.useVars : vinfo.defVars;
+            varList.push_back(newVar);
+
+            if (showVar && !genSupergraphs)
+                return add_var_vertex(newVar, v);
         }
         return {};
     }
@@ -362,6 +380,7 @@ class Graphs {
         static cstring edgeTypeGetColor(EdgeType type) {
             switch (type) {
                 case EdgeType::DEFUSE:
+                case EdgeType::IFDS_FT:
                     return "grey"_cs;
                 default:
                     break;

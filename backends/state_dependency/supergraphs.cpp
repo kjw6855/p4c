@@ -50,12 +50,35 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
 
     // Add 0->0
     add_edge(globalVariables[src][0], globalVariables[dst][0],
-             cstring::empty, EdgeType::IFDS);
+             cstring::empty, EdgeType::IFDS_FT);
 
-    // TODO...
+    auto &dstInfo = (*g)[dst];
+    for (size_t n = 1; n < varNum; n++) {
+        auto *var = variableList[n];
+        // Fall through if var is not newly defined
+        if (std::find(dstInfo.defVars.begin(), dstInfo.defVars.end(), var)
+                == dstInfo.defVars.end()) {
+            add_edge(globalVariables[src][n], globalVariables[dst][n],
+                     cstring::empty, EdgeType::IFDS_FT);
+            continue;
+        }
+
+        if (dstInfo.useVars.size() == 0) {
+            add_edge(globalVariables[src][0], globalVariables[dst][n],
+                     cstring::empty, EdgeType::IFDS);
+        } else {
+            for (auto uv : dstInfo.useVars) {
+                auto uvi = varIndexMap[uv];
+                add_edge(globalVariables[src][uvi], globalVariables[dst][n],
+                         cstring::empty, EdgeType::IFDS);
+            }
+        }
+    }
 }
 
 void SuperGraphs::init_all_variables() {
+    variableList.clear();
+    varIndexMap.clear();
     globalVariables.clear();
 
     auto graphName = boost::get_property(*g, boost::graph_name);
@@ -63,15 +86,19 @@ void SuperGraphs::init_all_variables() {
     if (graphVarIt == graphVars->end()) BUG("Graph vars are not found: %1%", graphName);
 
     auto localGraphVars = graphVarIt->second;
-    varNum = localGraphVars.size() + 1;
+    varNum = 0;
+
+    // Assign indexMap
+    variableList.push_back(Graphs::globalNode);
+    varIndexMap[Graphs::globalNode] = varNum++;
+    for (auto *node : localGraphVars) {
+        variableList.push_back(node);
+        varIndexMap[node] = varNum++;
+    }
+
+    // For each vertex, set VAR vertex ID
     auto vertices = boost::vertices(*g);
-
-    // For each vertex, add variables
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        auto &vinfo = (*g)[*vit];
-        vinfo.variables.insert(vinfo.variables.end(),
-                localGraphVars.begin(), localGraphVars.end());
-
         auto varNode = add_var_vertex(Graphs::globalNode, *vit);
         globalVariables[*vit].push_back(varNode);
         for (auto *node : localGraphVars) {

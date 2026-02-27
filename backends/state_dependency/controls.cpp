@@ -109,12 +109,12 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
 
     for (auto *p : cont->getApplyParameters()->parameters) {
         if (p->direction == IR::Direction::In) {
-            add_variable_in_vertex(p, start_v);
+            add_variable_in_vertex(p, start_v, false);
         } else if (p->direction == IR::Direction::Out) {
-            add_variable_in_vertex(p, exit_v);
+            add_variable_in_vertex(p, exit_v, true);
         } else if (p->direction == IR::Direction::InOut) {
-            add_variable_in_vertex(p, start_v);
-            add_variable_in_vertex(p, exit_v);
+            add_variable_in_vertex(p, start_v, false);
+            add_variable_in_vertex(p, exit_v, true);
         }
     }
 
@@ -286,11 +286,31 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
 bool ControlGraphs::preorder(const IR::MethodCallExpression *mc) {
     auto *instance = P4::MethodInstance::resolve(mc, refMap, typeMap);
 
+    if (state == WRITE_ONLY) {
+        BUG_CHECK(!isWrite(), "Method call in out or inout arg should have failed typechecking");
+        return false;
+    } else if (state == READ_ONLY) {
+        if (!isRead()) return false;
+    }
+
+    auto oldstate = state;
+    state = READ_ONLY;
     visit(mc->arguments);
+    state = NORMAL;
+
     if (instance->to<P4::ActionCall>()) {
         BUG("ActionCall should be called in MethodCallStatement");
 
-    } else if (instance->to<P4::BuiltInMethod>()) {
+    } else if (auto *bi = instance->to<P4::BuiltInMethod>()) {
+        if (bi->name == "isValid")
+            state = READ_ONLY;
+        else if (bi->name == "setValid" || bi->name == "setInvalid")
+            state = WRITE_ONLY;
+        else if (bi->name == "setValid" || bi->name == "setInvalid")
+            state = WRITE_ONLY;
+        else
+            BUG("unknown BuiltInMethod: %s", mc);
+
         visit(mc->method);
 
     } else if (instance->object) {
@@ -298,6 +318,9 @@ bool ControlGraphs::preorder(const IR::MethodCallExpression *mc) {
         if (!isInContext(obj)) visit(obj);
     }
 
+    state = WRITE_ONLY;
+    visit(mc->arguments);
+    state = oldstate;
     return false;
 }
 
@@ -311,8 +334,12 @@ bool ControlGraphs::preorder(const IR::BaseAssignmentStatement *statement) {
 
     auto prev_cur_v = cur_v;
     cur_v = v;
+    auto oldstate = state;
+    state = WRITE_ONLY;
     visit(statement->right);
+    state = READ_ONLY;
     visit(statement->left);
+    state = oldstate;
     cur_v = prev_cur_v;
 
     return false;
@@ -327,8 +354,14 @@ bool ControlGraphs::preorder(const IR::ReturnStatement *) {
 bool ControlGraphs::preorder(const IR::Function *fn) {
     if (!cur_v.has_value()) return false;
 
-    for (auto *p : *fn->type->parameters)
-        add_variable_in_vertex(p, cur_v.value());
+    auto oldstate = state;
+    if (state == SKIPPING) state = NORMAL;
+    for (auto *p : *fn->type->parameters) {
+        // TODO: register param could be output
+        add_variable_in_vertex(p, cur_v.value(), true);
+    }
+    visit(fn->body);
+    state = oldstate;
     return false;
 }
 
@@ -390,7 +423,7 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
     parents = {{start_v, new EdgeUnconditional()}};
 
     for (auto *p : *action->parameters)
-        add_variable_in_vertex(p, start_v);
+        add_variable_in_vertex(p, start_v, true);
 
     visit(action->body);
 
@@ -499,10 +532,14 @@ bool ControlGraphs::preorder(const IR::PathExpression *pe) {
         visit(ps);
         return false;
     }
-    // TODO: should I check state?
 
-    if (cur_v.has_value())
-        add_variables(pe, getContext());
+    if (state == SKIPPING) return false;
+    if (cur_v.has_value()) {
+        if (isRead() && state != WRITE_ONLY)
+            add_variables(pe, getContext(), false);
+        if (isWrite() && state != READ_ONLY)
+            add_variables(pe, getContext(), true);
+    }
 
     return false;
 }
@@ -538,11 +575,11 @@ static const IR::Expression *isValid(const IR::Member *m, const Visitor::Context
     return nullptr;
 }
 
-const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, const Context *ctxt) {
+const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed) {
     if (!ctxt) {
     } else if (auto *m = ctxt->node->to<IR::Member>()) {
         if (auto *t = isValid(m, ctxt->parent)) {
-            add_variable_in_vertex(t, cur_v.value());
+            add_variable_in_vertex(t, cur_v.value(), isUsed);
             return t;
 
         } else if (m->expr->type->to<IR::Type_StructLike>()) {
@@ -552,7 +589,7 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
             if (m->member.name == "lastIndex") {
                 e = m;
             } else if (m->member.name == "next" || m->member.name == "last") {
-                add_variable_in_vertex(m, cur_v.value());
+                add_variable_in_vertex(m, cur_v.value(), isUsed);
                 e = m;
             } else {
                 BUG("invalid read of header stack: %s", m);
@@ -562,14 +599,14 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
         }
     } else if (auto *sl = ctxt->node->to<IR::Slice>()) {
         // TODO: should I check overlapped slices?
-        e = add_variables(sl, ctxt->parent);
+        e = add_variables(sl, ctxt->parent, isUsed);
         BUG_CHECK(e == sl, "slice %s is not primary in ControlGraphs::add_variables", sl);
         e = sl;
     } else if (auto *ai = ctxt->node->to<IR::ArrayIndex>()) {
         e = get_primary(ai, ctxt->parent);
     }
 
-    add_variable_in_vertex(e, cur_v.value());
+    add_variable_in_vertex(e, cur_v.value(), isUsed);
     return e;
 }
 

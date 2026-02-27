@@ -31,7 +31,10 @@ class SuperGraphs : public Graphs,
     std::vector<Graph *> *controlGraphsArray{};
     hvec_map<cstring, hvec_set<const IR::Node *>> *graphVars;
     std::optional<Graphs::vertex_t> cur_v{};
+
     std::size_t varNum;
+    std::vector<const IR::Node *> variableList;
+    hvec_map<const IR::Node *, std::size_t> varIndexMap;
     hvec_map<Graphs::vertex_t, std::vector<Graphs::vertex_t>> globalVariables;
 };
 

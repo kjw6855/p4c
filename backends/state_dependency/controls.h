@@ -16,6 +16,7 @@ namespace P4::P4StateDependency {
 
 class ControlGraphs : public Graphs,
                       public Inspector,
+                      public P4WriteContext,
                       public P4::ResolutionContext {
  public:
     class ControlStack {
@@ -33,6 +34,8 @@ class ControlGraphs : public Graphs,
 
     ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
             std::filesystem::path graphsDir, bool setActionAsProc);
+
+    enum { SKIPPING, NORMAL, READ_ONLY, WRITE_ONLY } state = SKIPPING;
 
     bool preorder(const IR::PackageBlock *block) override;
     bool preorder(const IR::ControlBlock *block) override;
@@ -54,7 +57,7 @@ class ControlGraphs : public Graphs,
 
     void visit_call(const cstring &name, const IR::Node *node);
 
-    const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt);
+    const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed);
 
     std::vector<Graph *> controlGraphsArray{};
 
