@@ -11,54 +11,21 @@ SuperGraphs::SuperGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
                 std::vector<Graph *> *controlGraphsArray)
     : refMap(refMap), typeMap(typeMap), controlGraphsArray(controlGraphsArray), graphVars(graphVars) {}
 
-void SuperGraphs::init_all_variables() {
-    variableList.clear();
-    varIndexMap.clear();
-    globalVariables.clear();
-
-    auto graphName = boost::get_property(*g, boost::graph_name);
-    auto graphVarIt = graphVars->find(graphName);
-    if (graphVarIt == graphVars->end()) BUG("Graph vars are not found: %1%", graphName);
-
-    auto localGraphVars = graphVarIt->second;
-    varNum = 0;
-
-    // Assign indexMap
-    variableList.push_back(Graphs::globalNode);
-    varIndexMap[Graphs::globalNode] = varNum++;
-    for (auto *node : localGraphVars) {
-        variableList.push_back(node);
-        varIndexMap[node] = varNum++;
-    }
-
-    // For each vertex, create VAR vertex ID
-    auto vertices = boost::vertices(*g);
-    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        auto varNode = add_var_vertex(Graphs::globalNode, *vit);
-        globalVariables[*vit].push_back(varNode);
-        for (auto *node : localGraphVars) {
-            auto varNode = add_var_vertex(node, *vit);
-            globalVariables[*vit].push_back(varNode);
-        }
-    }
-}
-
 const IR::PathExpression* get_base(const IR::Expression* e) {
     if (auto m = e->to<IR::Member>()) return get_base(m->expr);
     return e->to<IR::PathExpression>();
 }
 
-
-void SuperGraphs::setup_root_vars() {
-    auto rootVar = add_var_vertex(Graphs::globalNode);
+void SuperGraphs::create_root_var_vertex() {
+    curProp->rootVar = add_var_vertex(Graphs::globalNode);
     auto rootNode = get_root_vertex(g);
 
-    add_edge(rootVar, globalVariables[rootNode][0],
+    add_edge(curProp->rootVar, curProp->globalVariables[rootNode][0],
             cstring::empty, EdgeType::IFDS_FT);
 
     auto &rootInfo = (*g)[rootNode];
-    for (size_t n = 1; n < varNum; n++) {
-        auto *var = variableList[n];
+    for (size_t n = 1; n < curProp->varNum; n++) {
+        auto *var = curProp->variableList[n];
         const IR::Node *parent = nullptr;
         if (auto *mem = var->to<IR::Member>()) {
             if (auto path = get_base(mem->expr)) {
@@ -70,7 +37,7 @@ void SuperGraphs::setup_root_vars() {
         for (auto *defVar : rootInfo.defVars) {
             if (var->equiv(*defVar) ||
                     (parent != nullptr && parent->equiv(*defVar))) {
-                add_edge(rootVar, globalVariables[rootNode][n],
+                add_edge(curProp->rootVar, curProp->globalVariables[rootNode][n],
                         cstring::empty, EdgeType::IFDS_FT);
                 break;
             }
@@ -78,10 +45,40 @@ void SuperGraphs::setup_root_vars() {
     }
 }
 
-void SuperGraphs::gen_supergraph(Graph *g_) {
+void SuperGraphs::create_var_vertices(const cstring &graphName) {
+    auto graphVarIt = graphVars->find(graphName);
+    if (graphVarIt == graphVars->end()) BUG("Graph vars are not found: %1%", graphName);
+
+    auto localGraphVars = graphVarIt->second;
+    curProp->varNum = 0;
+
+    // Assign indexMap
+    curProp->variableList.push_back(Graphs::globalNode);
+    curProp->varIndexMap[Graphs::globalNode] = curProp->varNum++;
+    for (auto *node : localGraphVars) {
+        curProp->variableList.push_back(node);
+        curProp->varIndexMap[node] = curProp->varNum++;
+    }
+
+    // For each vertex, create VAR vertex ID
+    auto vertices = boost::vertices(*g);
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto varNode = add_var_vertex(Graphs::globalNode, *vit);
+        curProp->globalVariables[*vit].push_back(varNode);
+        for (auto *node : localGraphVars) {
+            auto varNode = add_var_vertex(node, *vit);
+            curProp->globalVariables[*vit].push_back(varNode);
+        }
+    }
+}
+
+void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
     // Init
     g = g_;
-    init_all_variables();
+    curProp = sgProp;
+
+    create_var_vertices(boost::get_property(*g, boost::graph_name));
+    create_root_var_vertex();
 
     // Traverse ICFG
     std::size_t n = num_vertices(*g);
@@ -89,7 +86,6 @@ void SuperGraphs::gen_supergraph(Graph *g_) {
     std::vector<bool> visited(n, false);
     std::queue<Graphs::vertex_t> q;
 
-    setup_root_vars();
     q.push(get_root_vertex(g));
     while (!q.empty()) {
         auto u = q.front();
@@ -117,50 +113,39 @@ void SuperGraphs::gen_supergraph(Graph *g_) {
 void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
 
     // Add 0->0
-    add_edge(globalVariables[src][0], globalVariables[dst][0],
+    add_edge(curProp->globalVariables[src][0], curProp->globalVariables[dst][0],
              cstring::empty, EdgeType::IFDS_FT);
 
     auto &dstInfo = (*g)[dst];
-    for (size_t n = 1; n < varNum; n++) {
-        auto *var = variableList[n];
+    for (size_t n = 1; n < curProp->varNum; n++) {
+        auto *var = curProp->variableList[n];
         // Fall through if var is not newly defined
         if (std::find(dstInfo.defVars.begin(), dstInfo.defVars.end(), var)
                 == dstInfo.defVars.end()) {
-            add_edge(globalVariables[src][n], globalVariables[dst][n],
+            add_edge(curProp->globalVariables[src][n], curProp->globalVariables[dst][n],
                      cstring::empty, EdgeType::IFDS_FT);
             continue;
         }
 
         if (dstInfo.useVars.size() == 0) {
-            add_edge(globalVariables[src][0], globalVariables[dst][n],
+            add_edge(curProp->globalVariables[src][0], curProp->globalVariables[dst][n],
                      cstring::empty, EdgeType::IFDS);
         } else {
             for (auto uv : dstInfo.useVars) {
-                auto uvi = varIndexMap[uv];
-                add_edge(globalVariables[src][uvi], globalVariables[dst][n],
+                auto uvi = curProp->varIndexMap[uv];
+                add_edge(curProp->globalVariables[src][uvi], curProp->globalVariables[dst][n],
                          cstring::empty, EdgeType::IFDS);
             }
         }
     }
 }
 
-bool SuperGraphs::preorder(const IR::PackageBlock *block) {
-    for (auto it : block->constantValue) {
-        if (!it.second) continue;
-        if (it.second->is<IR::ControlBlock>()) {
-            auto name = it.second->to<IR::ControlBlock>()->container->name;
-            for (auto *cgg : *controlGraphsArray) {
-                auto cggName = boost::get_property(*cgg, boost::graph_name);
-                if (cggName != name.string()) continue;
-
-                // FOUND
-                gen_supergraph(cgg);
-            }
-        } else if (it.second->is<IR::PackageBlock>()) {
-            visit(it.second->getNode());
-        }
+void SuperGraphs::gen_supergraphs() {
+    for (auto *cgg : *controlGraphsArray) {
+        SuperGraphProp sgProp;
+        graphProps.push_back(sgProp);
+        gen_supergraph(cgg, &sgProp);
     }
-    return false;
 }
 
 }  // namespace P4::P4StateDependency

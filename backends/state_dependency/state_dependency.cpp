@@ -26,6 +26,7 @@
 #include "parsers.h"
 #include "graph_visitor.h"
 #include "supergraphs.h"
+#include "non_exact_to_stateful.h"
 
 namespace P4::P4StateDependency {
 
@@ -139,7 +140,12 @@ int main(int argc, char *const argv[]) {
                 &cgen.graphVars,
                 &cgen.controlGraphsArray);
 
-        top->getMain()->apply(sg);
+        // generate supergraphs
+        sg.gen_supergraphs();
+
+        P4StateDependency::NonExactToStateful netsChecker(&cgen.controlGraphsArray,
+                &sg.graphProps);
+        program->apply(netsChecker);
     }
 
     LOG2("Generating parser graphs");
