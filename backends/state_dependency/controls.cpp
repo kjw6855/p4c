@@ -335,10 +335,9 @@ bool ControlGraphs::preorder(const IR::BaseAssignmentStatement *statement) {
     auto prev_cur_v = cur_v;
     cur_v = v;
     auto oldstate = state;
-    state = WRITE_ONLY;
-    visit(statement->right);
-    state = READ_ONLY;
-    visit(statement->left);
+    state = NORMAL;
+    visit(statement->right, "right", 1);
+    visit(statement->left, "left", 0);
     state = oldstate;
     cur_v = prev_cur_v;
 
@@ -399,7 +398,10 @@ bool ControlGraphs::preorder(const IR::Key *key) {
 
     auto prev_cur_v = cur_v;
     cur_v = v;
+    auto oldstate = state;
+    state = READ_ONLY;      // store keys in useVars
     for (auto elVec : key->keyElements) visit(elVec);
+    state = oldstate;
     cur_v = prev_cur_v;
 
     return false;
@@ -536,9 +538,9 @@ bool ControlGraphs::preorder(const IR::PathExpression *pe) {
     if (state == SKIPPING) return false;
     if (cur_v.has_value()) {
         if (isRead() && state != WRITE_ONLY)
-            add_variables(pe, getContext(), false);
-        if (isWrite() && state != READ_ONLY)
             add_variables(pe, getContext(), true);
+        if (isWrite() && state != READ_ONLY)
+            add_variables(pe, getContext(), false);
     }
 
     return false;

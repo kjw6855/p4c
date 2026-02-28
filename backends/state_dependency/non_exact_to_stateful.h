@@ -9,7 +9,8 @@ namespace P4::P4StateDependency {
 
 using Graph = Graphs::Graph;
 
-class FindNonExactToStateful : public Inspector {
+class FindNonExactToStateful : public Graphs,
+                               public Inspector {
 
  public:
     explicit FindNonExactToStateful(std::vector<Graph *> *controlGraphsArray,

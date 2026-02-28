@@ -21,8 +21,20 @@ void FindNonExactToStateful::analyze_control_graph(Graph *g, SuperGraphProp &sgP
             if (elVec->matchType->path->name.name == "exact"_cs)
                 continue;
 
-            // Found NonExact Match
-            // Check if it's accessible from Root
+            auto elVar = elVec->to<IR::KeyElement>()->expression;
+            // Find NonExact Match Var
+            const IR::Node *nonExactVar = nullptr;
+            for (auto uv : vinfo.useVars) {
+                if (uv->equiv(*elVar)) {
+                    nonExactVar = uv;
+                    break;
+                }
+            }
+            if (!nonExactVar)
+                continue;
+
+            auto nonExactVarIdx = sgProp.varIndexMap[nonExactVar];
+            auto nonExactVarVit = sgProp.globalVariables[*vit][nonExactVarIdx];
         }
     }
 }

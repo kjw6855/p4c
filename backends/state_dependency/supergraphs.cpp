@@ -9,7 +9,7 @@ namespace P4::P4StateDependency {
 SuperGraphs::SuperGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
                 hvec_map<cstring, hvec_set<const IR::Node *>> *graphVars,
                 std::vector<Graph *> *controlGraphsArray)
-    : refMap(refMap), typeMap(typeMap), controlGraphsArray(controlGraphsArray), graphVars(graphVars) {}
+    : refMap(refMap), typeMap(typeMap), graphVars(graphVars), controlGraphsArray(controlGraphsArray) {}
 
 const IR::PathExpression* get_base(const IR::Expression* e) {
     if (auto m = e->to<IR::Member>()) return get_base(m->expr);
@@ -128,9 +128,11 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
         }
 
         if (dstInfo.useVars.size() == 0) {
+            // 0 -> DEF
             add_edge(curProp->globalVariables[src][0], curProp->globalVariables[dst][n],
                      cstring::empty, EdgeType::IFDS);
         } else {
+            // USE -> DEF
             for (auto uv : dstInfo.useVars) {
                 auto uvi = curProp->varIndexMap[uv];
                 add_edge(curProp->globalVariables[src][uvi], curProp->globalVariables[dst][n],

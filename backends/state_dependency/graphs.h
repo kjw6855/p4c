@@ -225,8 +225,8 @@ class Graphs {
         return vv;
     }
 
-    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var, const vertex_t &v,
-            bool isUsed) {
+    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var,
+            const vertex_t &v, bool isUsed) {
         /* check duplicate variable in set */
         auto &varset = graphVars[graphName];
         auto *newVar = var;
@@ -331,6 +331,7 @@ class Graphs {
             if (hasFlag(flags, VertexFlags::STATEFUL))
                 colorName = "lightgreen"_cs;
             if (hasFlag(flags, VertexFlags::VARIABLE)) {
+                if (vinfo.node == globalNode) return "black"_cs;
                 if (boost::out_degree(v, g) > 0) return "black"_cs;
                 bool filled = false;
                 for (auto [ei, ei_end] = boost::in_edges(v, g); ei != ei_end; ++ei) {
