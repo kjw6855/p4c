@@ -416,8 +416,9 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
     auto start_v = add_and_connect_vertex(name, flags, action);
     parents = {{start_v, new EdgeUnconditional()}};
 
+    // ActionParam is newly defined by control plane rules
     for (auto *p : *action->parameters)
-        add_variable_in_vertex(p, start_v, true);
+        add_variable_in_vertex(p, start_v, false);
 
     visit(action->body);
 
@@ -612,7 +613,16 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
         e = get_primary(ai, ctxt->parent);
     }
 
-    add_variable_in_vertex(e, cur_v.value(), isUsed);
+    if (auto *pe = e->to<IR::PathExpression>()) {
+        auto *decl = refMap->getDeclaration(pe->path, false);
+        if (decl != nullptr && decl->is<IR::Parameter>()) {
+            add_variable_in_vertex(decl->to<IR::Parameter>(), cur_v.value(), isUsed);
+        } else {
+            add_variable_in_vertex(e, cur_v.value(), isUsed);
+        }
+    } else {
+        add_variable_in_vertex(e, cur_v.value(), isUsed);
+    }
     return e;
 }
 
