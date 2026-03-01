@@ -195,6 +195,17 @@ class Graphs {
 
     using IndexMap = boost::property_map<Graph, boost::vertex_index_t>::type;
 
+    // Vertex ID -> Procedure Name
+    using ProcOf = hvec_map<vertex_t, cstring>;
+    // CALL (caller) -> ENTRY (callee), RETURN (caller)
+    using CallMap = hvec_map<vertex_t, std::pair<vertex_t, vertex_t>>;
+    // Procedure Name -> list of CALL (caller)
+    using ProcCallers = hvec_map<cstring, std::vector<vertex_t>>;
+
+    hvec_map<cstring, ProcOf> procOfs;
+    hvec_map<cstring, CallMap> callMaps;
+    hvec_map<cstring, ProcCallers> procCallerMaps;
+
     vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
 
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name, EdgeType type);
@@ -398,6 +409,8 @@ class Graphs {
     vertex_t exit_v{};
     Parents parents{};
     cstring graphName;
+    cstring procName;
+
  public:
     bool showVar;
     bool genSupergraphs;

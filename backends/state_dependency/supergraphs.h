@@ -15,13 +15,28 @@ class SuperGraphProp {
     std::vector<const IR::Node *> variableList;
     hvec_map<const IR::Node *, std::size_t> varIndexMap;
     hvec_map<Graphs::vertex_t, std::vector<Graphs::vertex_t>> globalVariables;
+    Graphs::ProcOf procOf;
+    Graphs::CallMap callMap;
+    Graphs::ProcCallers procCallerMap;
+    hvec_map<cstring, std::vector<Graphs::vertex_t>> caller;
 };
 
 class SuperGraphs : public Graphs {
  public:
     SuperGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+                std::vector<Graph *> *controlGraphsArray,
                 hvec_map<cstring, hvec_set<const IR::Node *>> *graphVars,
-                std::vector<Graph *> *controlGraphsArray);
+                hvec_map<cstring, Graphs::ProcOf> *procOfs,
+                hvec_map<cstring, Graphs::CallMap> *callMaps,
+                hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps)
+    : refMap(refMap),
+      typeMap(typeMap),
+      controlGraphsArray(controlGraphsArray),
+      graphVars(graphVars),
+      procOfs(procOfs),
+      callMaps(callMaps),
+      procCallerMaps(procCallerMaps) {}
+
 
     void gen_supergraphs();
 
@@ -34,13 +49,16 @@ class SuperGraphs : public Graphs {
  protected:
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
-    hvec_map<cstring, hvec_set<const IR::Node *>> *graphVars;
     std::vector<Graph *> *controlGraphsArray{};
+    hvec_map<cstring, hvec_set<const IR::Node *>> *graphVars;
+    hvec_map<cstring, Graphs::ProcOf> *procOfs;
+    hvec_map<cstring, Graphs::CallMap> *callMaps;
+    hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps;
 
     SuperGraphProp *curProp{};
 
  public:
-    std::vector<SuperGraphProp> graphProps;
+    std::vector<SuperGraphProp*> graphProps;
 
 };
 

@@ -6,11 +6,6 @@
 
 namespace P4::P4StateDependency {
 
-SuperGraphs::SuperGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-                hvec_map<cstring, hvec_set<const IR::Node *>> *graphVars,
-                std::vector<Graph *> *controlGraphsArray)
-    : refMap(refMap), typeMap(typeMap), graphVars(graphVars), controlGraphsArray(controlGraphsArray) {}
-
 const IR::PathExpression* get_base(const IR::Expression* e) {
     if (auto m = e->to<IR::Member>()) return get_base(m->expr);
     return e->to<IR::PathExpression>();
@@ -48,8 +43,28 @@ void SuperGraphs::create_root_var_vertex() {
 void SuperGraphs::create_var_vertices(const cstring &graphName) {
     auto graphVarIt = graphVars->find(graphName);
     if (graphVarIt == graphVars->end()) BUG("Graph vars are not found: %1%", graphName);
-
     auto localGraphVars = graphVarIt->second;
+
+    auto callMapIt = callMaps->find(graphName);
+    if (callMapIt == callMaps->end()) {
+        // No interprocedural calls in graph
+        curProp->callMap = Graphs::CallMap();
+    } else {
+        curProp->callMap = callMapIt->second;
+    }
+
+    auto procOfIt = procOfs->find(graphName);
+    if (procOfIt == procOfs->end()) BUG("No procOf: %1%", graphName);
+    curProp->procOf = procOfIt->second;
+
+    auto procCallerMapIt = procCallerMaps->find(graphName);
+    if (procCallerMapIt == procCallerMaps->end()) {
+        // No interprocedural calls in graph
+        curProp->procCallerMap = Graphs::ProcCallers();
+    } else {
+        curProp->procCallerMap = procCallerMapIt->second;
+    }
+
     curProp->varNum = 0;
 
     // Assign indexMap
@@ -144,9 +159,9 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
 
 void SuperGraphs::gen_supergraphs() {
     for (auto *cgg : *controlGraphsArray) {
-        SuperGraphProp sgProp;
+        auto *sgProp = new SuperGraphProp();
         graphProps.push_back(sgProp);
-        gen_supergraph(cgg, &sgProp);
+        gen_supergraph(cgg, sgProp);
     }
 }
 

@@ -9,6 +9,7 @@ set (STATE_DEPENDENCY_SRCS
   graphs.cpp
   graph_visitor.cpp
   supergraphs.cpp
+  tabulation.cpp
   non_exact_to_stateful.cpp
 )
 
@@ -20,6 +21,7 @@ set (STATE_DEPENDENCY_HDRS
   graphs.h
   graph_visitor.h
   supergraphs.h
+  tabulation.h
   non_exact_to_stateful.h
 )
 

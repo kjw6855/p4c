@@ -137,8 +137,11 @@ int main(int argc, char *const argv[]) {
 
     if (options.genSupergraphs) {
         P4StateDependency::SuperGraphs sg(&midEnd.refMap, &midEnd.typeMap,
+                &cgen.controlGraphsArray,
                 &cgen.graphVars,
-                &cgen.controlGraphsArray);
+                &cgen.procOfs,
+                &cgen.callMaps,
+                &cgen.procCallerMaps);
 
         // generate supergraphs
         sg.gen_supergraphs();

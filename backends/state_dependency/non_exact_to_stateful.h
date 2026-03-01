@@ -3,6 +3,7 @@
 
 #include "graphs.h"
 #include "supergraphs.h"
+#include "tabulation.h"
 #include "ir/ir.h"
 
 namespace P4::P4StateDependency {
@@ -14,23 +15,23 @@ class FindNonExactToStateful : public Graphs,
 
  public:
     explicit FindNonExactToStateful(std::vector<Graph *> *controlGraphsArray,
-            std::vector<SuperGraphProp> *graphProps)
+            std::vector<SuperGraphProp *> *graphProps)
         : controlGraphsArray(controlGraphsArray),
           graphProps(graphProps) {}
     Visitor::profile_t init_apply(const IR::Node *) override;
 
  private:
-    void analyze_control_graph(Graph *g, SuperGraphProp &sgProp);
+    void analyze_control_graph(Tabulation *tab);
 
  protected:
     std::vector<Graph *> *controlGraphsArray{};
-    std::vector<SuperGraphProp> *graphProps{};
+    std::vector<SuperGraphProp *> *graphProps{};
 };
 
 class NonExactToStateful : public PassManager {
  public:
     explicit NonExactToStateful(std::vector<Graph *> *controlGraphsArray,
-            std::vector<SuperGraphProp> *graphProps) {
+            std::vector<SuperGraphProp *> *graphProps) {
         passes.push_back(new FindNonExactToStateful(controlGraphsArray, graphProps));
     }
 };

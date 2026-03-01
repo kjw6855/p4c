@@ -3,7 +3,9 @@
 
 namespace P4::P4StateDependency {
 
-void FindNonExactToStateful::analyze_control_graph(Graph *g, SuperGraphProp &sgProp) {
+void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
     auto vertices = boost::vertices(*g);
 
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
@@ -33,8 +35,8 @@ void FindNonExactToStateful::analyze_control_graph(Graph *g, SuperGraphProp &sgP
             if (!nonExactVar)
                 continue;
 
-            auto nonExactVarIdx = sgProp.varIndexMap[nonExactVar];
-            auto nonExactVarVit = sgProp.globalVariables[*vit][nonExactVarIdx];
+            auto nonExactVarIdx = sgProp->varIndexMap[nonExactVar];
+            auto nonExactVarVit = sgProp->globalVariables[*vit][nonExactVarIdx];
         }
     }
 }
@@ -42,9 +44,14 @@ void FindNonExactToStateful::analyze_control_graph(Graph *g, SuperGraphProp &sgP
 Visitor::profile_t FindNonExactToStateful::init_apply(const IR::Node *n) {
     for (size_t i = 0; i < controlGraphsArray->size(); i++) {
         auto *cgg = (*controlGraphsArray)[i];
-        auto &sgProp = (*graphProps)[i];
-        analyze_control_graph(cgg, sgProp);
+        auto *sgProp = (*graphProps)[i];
+        auto *tab = new Tabulation{cgg, sgProp};
+        tab->init();
+        tab->forward_tabulate();
+
+        analyze_control_graph(tab);
     }
+
     return (this->Inspector::init_apply(n));
 }
 

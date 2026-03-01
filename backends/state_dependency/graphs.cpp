@@ -11,6 +11,8 @@ Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, cons
     if (node != nullptr)
         boost::put(&Vertex::node, *g, v, node);
 
+    procOfs[graphName][v] = procName;
+
     return g->local_to_global(v);
 }
 

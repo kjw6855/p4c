@@ -73,6 +73,7 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             instanceName = std::nullopt;
             graphName = name.string();
             boost::get_property(*g_, boost::graph_name) = graphName;
+            procName = name.string();
             BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
             g = controlStack.pushBack(*g_, cstring::empty);
             start_v = add_vertex("__START__"_cs, VertexFlags::ENTRY);
@@ -408,15 +409,6 @@ bool ControlGraphs::preorder(const IR::Key *key) {
 }
 
 bool ControlGraphs::preorder(const IR::P4Action *action) {
-    if (setActionAsProc) {
-        auto pp = getProcedure(action);
-        if (pp != emptyProcedure) {
-            add_and_connect_vertex(pp.first, EdgeType::INTER_PROCEDURE);
-            parents = {{pp.second, new EdgeProcedural()}};
-            return false;
-        }
-    }
-
     auto name = action->getName();
     auto flags = VertexFlags::ACTION;
     if (setActionAsProc)
@@ -439,12 +431,6 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
 }
 
 bool ControlGraphs::preorder(const IR::P4Table *table) {
-    auto pp = getProcedure(table);
-    if (pp != emptyProcedure) {
-        add_and_connect_vertex(pp.first, EdgeType::INTER_PROCEDURE);
-        parents = {{pp.second, new EdgeProcedural()}};
-        return false;
-    }
     auto name = table->getName();
 
     // Check if it's add-on-miss
@@ -551,10 +537,28 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node) {
     auto call_v = add_and_connect_vertex("CALL "_cs + name, VertexFlags::CALL);
     parents = {{call_v, new EdgeProcedural()}};
 
-    visit(node);
+    auto pp = getProcedure(node);
+    if (pp == emptyProcedure) {
+        // Visit
+        auto oldProcName = procName;
+        procName = name;
+        visit(node);
+        procName = oldProcName;
+        pp = getProcedure(node);
+    } else {
+        add_and_connect_vertex(pp.first, EdgeType::INTER_PROCEDURE);
+        parents = {{pp.second, new EdgeProcedural()}};
+    }
+
+    // Maintain callers
+    procCallerMaps[graphName][name].push_back(call_v);
 
     // after visit
     auto ret_v = add_and_connect_vertex("RETURN "_cs + name, VertexFlags::RETURN);
+
+    // store callMap (ENTRY, RETURN)
+    callMaps[graphName][call_v] = {pp.first, ret_v};
+
     parents = {{ret_v, new EdgeUnconditional()}};
     add_edge(call_v, ret_v, cstring::empty, EdgeType::CALL_TO_RETURN);
 }
