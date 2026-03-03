@@ -73,7 +73,7 @@ void GraphVisitor::writeGraphToFile(const Graph &g, const std::string &name) {
     // *_attribute_t properties instead using our GraphAttributeSetter class.
     boost::write_graphviz(*out, g);
 
-    if (!showVar)
+    if (varVis == VarVisibility::NONE)
         return;
 
     hvec_map<Graphs::vertex_t, hvec_set<Graphs::vertex_t>> groups;
@@ -81,7 +81,9 @@ void GraphVisitor::writeGraphToFile(const Graph &g, const std::string &name) {
 
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = g[*vit];
-        if (hasFlag(vinfo.flags, VertexFlags::VARIABLE))
+        if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
+        if (varVis == VarVisibility::REACHABLE &&
+                !vinfo.interesting)
             continue;
 
         auto [ei, ei_end] = boost::out_edges(*vit, g);
@@ -206,7 +208,7 @@ void GraphVisitor::process(std::vector<Graph *> &controlGraphsArray,
                             std::vector<Graph *> &parserGraphsArray) {
     if (graphs) {
         for (auto g : controlGraphsArray) {
-            GraphAttributeSetter()(*g, showVar);
+            GraphAttributeSetter()(*g, varVis);
             writeGraphToFile(*g, boost::get_property(*g, boost::graph_name));
         }
         for (auto g : parserGraphsArray) {

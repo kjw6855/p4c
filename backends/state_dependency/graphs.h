@@ -166,6 +166,12 @@ inline cstring vertexFlagsToString(VertexFlags flags) {
     return res;
 }
 
+enum class VarVisibility {
+    NONE,
+    REACHABLE,
+    FULL,
+};
+
 class Graphs {
  public:
     struct Vertex {
@@ -175,6 +181,7 @@ class Graphs {
         std::vector<const IR::Node *> defVars;
         std::vector<const IR::Node *> useVars;
         cstring color = cstring::empty;
+        bool interesting = false;   // used only for VarVertex
     };
 
     hvec_map<cstring, hvec_set<const IR::Node *>> graphVars;
@@ -258,13 +265,14 @@ class Graphs {
         if (newVar == var)
             graphVars[graphName].insert(var);
 
-        if (showVar || genSupergraphs) {
+        bool createVar = varVis != VarVisibility::NONE;
+        if (createVar || genSupergraphs) {
             auto &vinfo = (*g)[v];
             auto &varList = isUsed ? vinfo.useVars : vinfo.defVars;
             varList.push_back(newVar);
 
             // supergraphs.cpp will create vertex later
-            if (showVar && !genSupergraphs)
+            if (createVar && !genSupergraphs)
                 return add_var_vertex(newVar, v, name);
         }
         return {};
@@ -276,7 +284,7 @@ class Graphs {
 
     class GraphAttributeSetter {
      public:
-        void operator()(Graph &g, bool showVar=false) const {
+        void operator()(Graph &g, VarVisibility varVis=VarVisibility::NONE) const {
             auto vertices = boost::vertices(g);
             for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
                 const auto &vinfo = g[*vit];
@@ -289,7 +297,7 @@ class Graphs {
                 } else {
                     attrs[*vit]["label"_cs] = labelName;
                 }
-                attrs[*vit]["style"_cs] = vertexFlagGetStyle(vinfo.flags, showVar);
+                attrs[*vit]["style"_cs] = vertexFlagGetStyle(vinfo, varVis);
                 attrs[*vit]["fillcolor"_cs] = vertexFlagGetColor(g, *vit);
                 attrs[*vit]["shape"_cs] = vertexFlagGetShape(vinfo.flags);
                 attrs[*vit]["width"_cs] = vertexFlagGetWidth(vinfo.flags);
@@ -301,7 +309,7 @@ class Graphs {
                 auto attrs = boost::get(boost::edge_attribute, g);
                 auto ep = g[*eit];
                 attrs[*eit]["label"_cs] = ep.name;
-                attrs[*eit]["style"_cs] = edgeTypeGetStyle(ep.type);
+                attrs[*eit]["style"_cs] = edgeTypeGetStyle(g, *eit, varVis);
                 attrs[*eit]["color"_cs] = edgeTypeGetColor(ep.type);
                 attrs[*eit]["penwidth"_cs] = edgeTypeGetPenWidth(ep.type);
             }
@@ -317,26 +325,34 @@ class Graphs {
 
             return "rectangle"_cs;
         }
-        static cstring vertexFlagGetStyle(VertexFlags flags, bool showVar) {
-            if (hasFlag(flags, VertexFlags::CONTROL))
+        static cstring vertexFlagGetStyle(const Vertex &vinfo, VarVisibility varVis) {
+            if (hasFlag(vinfo.flags, VertexFlags::CONTROL))
                 return "dashed"_cs;
-            else if (hasFlag(flags, VertexFlags::EMPTY))
+            else if (hasFlag(vinfo.flags, VertexFlags::EMPTY))
                 return "invis"_cs;
-            else if (hasFlag(flags, VertexFlags::CONDITION))
+            else if (hasFlag(vinfo.flags, VertexFlags::CONDITION))
                 return "rounded"_cs;
-            else if (hasFlag(flags, VertexFlags::KEY))
+            else if (hasFlag(vinfo.flags, VertexFlags::KEY))
                 return "rounded"_cs;
-            else if (hasFlag(flags, VertexFlags::SWITCH))
+            else if (hasFlag(vinfo.flags, VertexFlags::SWITCH))
                 return "rounded"_cs;
-            else if (hasFlag(flags, VertexFlags::TABLE))
+            else if (hasFlag(vinfo.flags, VertexFlags::TABLE))
                 return "filled"_cs;
-            else if (hasFlag(flags, VertexFlags::STATEFUL))
+            else if (hasFlag(vinfo.flags, VertexFlags::STATEFUL))
                 return "filled"_cs;
-            if (hasFlag(flags, VertexFlags::VARIABLE)) {
-                if (showVar)
-                    return "filled"_cs;
-                else
-                    return "invis"_cs;
+            if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) {
+                switch (varVis) {
+                    case VarVisibility::NONE:
+                        return "invis"_cs;
+                    case VarVisibility::FULL:
+                        return "filled"_cs;
+                    case VarVisibility::REACHABLE:
+                        return vinfo.interesting ? "filled"_cs : "invis"_cs;
+                    default:
+                        break;
+                }
+                // Unreachable ...
+                return "invis"_cs;
             }
 
             return "solid"_cs;
@@ -365,8 +381,18 @@ class Graphs {
         static cstring vertexFlagGetMargin() {
             return cstring::empty;
         }
-        static cstring edgeTypeGetStyle(EdgeType type) {
-            switch (type) {
+        static cstring edgeTypeGetStyle(Graph &g, const edge_t &ei,
+                VarVisibility varVis) {
+            bool showVar = false;
+            if (varVis == VarVisibility::FULL) showVar = true;
+            else if (varVis == VarVisibility::REACHABLE) {
+                auto &sinfo = g[boost::source(ei, g)];
+                auto &tinfo = g[boost::target(ei, g)];
+                if (sinfo.interesting && tinfo.interesting)
+                    showVar = true;
+            }
+            auto &edge = g[ei];
+            switch (edge.type) {
                 case EdgeType::INTER_PROCEDURE:
                     return "dotted"_cs;
                 case EdgeType::CALL_TO_RETURN:
@@ -376,7 +402,9 @@ class Graphs {
                 case EdgeType::HAS_VAR:
                     return "invis"_cs;
                 case EdgeType::IFDS:
-                    return "bold"_cs;
+                    return showVar ? "bold"_cs : "invis"_cs;
+                case EdgeType::IFDS_FT:
+                    return showVar ? cstring::empty : "invis"_cs;
                 default:
                     break;
             }
@@ -412,7 +440,7 @@ class Graphs {
     cstring procName;
 
  public:
-    bool showVar;
+    VarVisibility varVis = VarVisibility::NONE;
     bool genSupergraphs;
     static const IR::Node *globalNode;
 };

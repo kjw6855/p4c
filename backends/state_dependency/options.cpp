@@ -1,6 +1,6 @@
 #include "backends/state_dependency/options.h"
 
-#include "backends/p4tools/common/compiler/context.h"
+#include <utility>
 
 namespace P4::P4StateDependency {
 
@@ -50,10 +50,38 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             },
             "Use to generate json output of fullGraph.");
     registerOption(
-            "--showVar", nullptr,
-            [this](const char *) {
-            showVar = true;
-            return true;
+            "--showVar", "varVis",
+            [this](const char *arg) {
+
+                static std::map<cstring, VarVisibility> const SHOW_VAR_OPTIONS = {
+                    {"NONE"_cs, VarVisibility::NONE},
+                    {"REACHABLE"_cs, VarVisibility::REACHABLE},
+                    {"FULL"_cs, VarVisibility::FULL},
+                };
+                auto selectionString = cstring(arg).toUpper();
+                auto it = SHOW_VAR_OPTIONS.find(selectionString);
+                if (it != SHOW_VAR_OPTIONS.end()) {
+                    varVis = it->second;
+                    return true;
+                }
+                std::set<cstring> printSet;
+                std::transform(SHOW_VAR_OPTIONS.cbegin(), SHOW_VAR_OPTIONS.cend(),
+                               std::inserter(printSet, printSet.begin()),
+                               [](const std::pair<cstring, VarVisibility> &mapTuple) {
+                                   return mapTuple.first;
+                               });
+                std::stringstream sstream;
+                sstream << "[";
+                for (auto it = printSet.begin(); it != printSet.end(); ++it) {
+                    if (it != printSet.begin()) sstream << ", ";
+                    sstream << *it;
+                }
+                sstream << "]";
+                error(
+                    "Variable visibility %1% not supported. Supported visibilities are "
+                    "%2%.",
+                    selectionString, cstring(sstream));
+                return false;
             },
             "Use to show nodes' variables in graph.");
     registerOption(

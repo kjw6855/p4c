@@ -131,7 +131,7 @@ int main(int argc, char *const argv[]) {
     P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap,
             options.graphsDir, options.setActionAsProc);
     // TODO: set options in contructor
-    cgen.showVar = options.showVar;
+    cgen.varVis = options.varVis;
     cgen.genSupergraphs = options.genSupergraphs;
     top->getMain()->apply(cgen);
 
@@ -155,7 +155,7 @@ int main(int argc, char *const argv[]) {
     P4StateDependency::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
     program->apply(pgg);
 
-    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut, options.file, options.showVar);
+    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut, options.file, options.varVis);
 
     gvs.process(cgen.controlGraphsArray, pgg.parserGraphsArray);
 

@@ -2,6 +2,7 @@
 #define BACKENDS_STATE_DEPENDENCY_OPTIONS_H_
 
 #include <filesystem>
+#include "backends/state_dependency/graphs.h"
 #include "frontends/common/options.h"
 
 namespace P4::P4StateDependency {
@@ -16,7 +17,7 @@ class P4StateDependencyOptions : public CompilerOptions {
     bool graphs = true;           // default behavior
     bool fullGraph = false;
     bool jsonOut = false;
-    bool showVar = false;
+    VarVisibility varVis = VarVisibility::NONE;
     bool setActionAsProc = false;
     bool genSupergraphs = false;
 
