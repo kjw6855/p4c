@@ -39,6 +39,8 @@ enum class VertexFlags : unsigned {
     EXIT            = 1u << 12,
     EMPTY           = 1u << 13,
     VARIABLE        = 1u << 14,
+    SO_IDX          = 1u << 15,
+    SO_DATA         = 1u << 16,
 };
 
 enum class EdgeType {
@@ -153,6 +155,8 @@ inline cstring vertexFlagsToString(VertexFlags flags) {
     if (hasFlag(flags, VertexFlags::ENTRY))        parts.emplace_back("ENTRY"_cs);
     if (hasFlag(flags, VertexFlags::EXIT))         parts.emplace_back("EXIT"_cs);
     if (hasFlag(flags, VertexFlags::VARIABLE))     parts.emplace_back("VARIABLE"_cs);
+    if (hasFlag(flags, VertexFlags::SO_IDX))       parts.emplace_back("SO_IDX"_cs);
+    if (hasFlag(flags, VertexFlags::SO_DATA))      parts.emplace_back("SO_DATA"_cs);
 
     cstring res;
     for (std::size_t i = 0; i < parts.size(); ++i) {

@@ -57,6 +57,9 @@ class ControlGraphs : public Graphs,
 
     bool isWrite(bool root_value = false);
 
+    void visit_stateful(const cstring &name, const IR::Node *node,
+                        const IR::Node *idx, bool isWrite,
+                        const IR::Node *data=nullptr);
     void visit_call(const cstring &name, const IR::Node *node);
 
     const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed);

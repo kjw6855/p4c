@@ -254,6 +254,29 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         // Check if externs are stateful or not.
         bool isStateful = false;
         auto em = instance->to<P4::ExternMethod>();
+
+        if (em->originalExternType->getName().name == "register") {
+            std::vector<const IR::Node *> params;
+            for (auto *p : *statement->methodCall->arguments) {
+                if (auto *arg = p->to<IR::Argument>()) {
+                    params.push_back(arg->expression);
+                } else {
+                    params.push_back(p);
+                }
+            }
+            if (em->method->name.name == "read" && params.size() >= 2) {
+                // void read(out T result, in I index);
+                visit_stateful(vName, statement, params[1], true, params[0]);
+                return false;
+
+            } else if (em->method->name.name == "write" && params.size() >= 2) {
+                // void write(in I index, in T value);
+                visit_stateful(vName, statement, params[0], false, params[1]);
+                return false;
+            }
+        }
+
+        // Other externs...
         std::vector<std::string> statefulExternNames = {"Counter", "Meter", "Register", "RegisterAction", "register"};
 
         for (const std::string &name : statefulExternNames) {
@@ -272,22 +295,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
 
         auto prev_cur_v = cur_v;
         cur_v = v;
-        auto oldstate = state;
-        bool skipVisit = false;
-        if (em->originalExternType->getName().name == "register") {
-            if (em->method->name.name == "read") {
-                state = WRITE_ONLY;
-                auto *firstParam = (*statement->methodCall->arguments)[0]->to<IR::Argument>();
-                BUG_CHECK(firstParam != nullptr, "Can't find the first parameter of register.read()");
-                visit(firstParam->expression, "result", 2);
-                state = READ_ONLY;
-                visit((*statement->methodCall->arguments)[1], "index", 1);
-                skipVisit = true;
-            }
-        }
-        state = oldstate;
-        if (!skipVisit)
-            for (auto *p : *statement->methodCall->arguments) visit(p);
+        for (auto *p : *statement->methodCall->arguments) visit(p);
         cur_v = prev_cur_v;
     } else {
         auto flags = VertexFlags::STATEMENT;
@@ -557,6 +565,34 @@ bool ControlGraphs::preorder(const IR::PathExpression *pe) {
     }
 
     return false;
+}
+
+void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
+        const IR::Node *idx, bool isWrite,
+        const IR::Node *data) {
+    VertexFlags flags = VertexFlags::STATEMENT | VertexFlags::STATEFUL;
+    // Access idx first
+    auto fv = add_and_connect_vertex("ACCESS "_cs + name,
+            flags | VertexFlags::SO_IDX, node);
+    parents = {{fv, new EdgeUnconditional()}};
+    auto oldstate = state;
+    auto prev_cur_v = cur_v;
+    cur_v = fv;
+    state = READ_ONLY;
+    visit(idx, "index", 1);
+
+    if (data != nullptr) {
+        // Read or Write data next
+        auto svNamePrefix = isWrite ? "WRITE "_cs : "READ "_cs;
+        auto sv = add_and_connect_vertex(svNamePrefix + name,
+                flags | VertexFlags::SO_DATA, node);
+        cur_v = sv;
+        state = isWrite ? WRITE_ONLY : READ_ONLY;
+        visit(data, "data", isWrite ? 2 : 1);
+        parents = {{sv, new EdgeUnconditional()}};
+    }
+    cur_v = prev_cur_v;
+    state = oldstate;
 }
 
 void ControlGraphs::visit_call(const cstring &name, const IR::Node *node) {
