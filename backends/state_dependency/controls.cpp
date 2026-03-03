@@ -61,6 +61,12 @@ ControlGraphs::ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
     visitDagOnce = false;
 }
 
+bool ControlGraphs::isWrite(bool root_value) {
+    const Context *ctxt = getContext();
+    if (ctxt->child_index == 2) return true;
+    return P4WriteContext::isWrite(root_value);
+}
+
 bool ControlGraphs::preorder(const IR::PackageBlock *block) {
     for (auto it : block->constantValue) {
         if (!it.second) continue;
@@ -266,14 +272,34 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
 
         auto prev_cur_v = cur_v;
         cur_v = v;
-        for (auto *p : *statement->methodCall->arguments) visit(p);
+        auto oldstate = state;
+        bool skipVisit = false;
+        if (em->originalExternType->getName().name == "register") {
+            if (em->method->name.name == "read") {
+                state = WRITE_ONLY;
+                auto *firstParam = (*statement->methodCall->arguments)[0]->to<IR::Argument>();
+                BUG_CHECK(firstParam != nullptr, "Can't find the first parameter of register.read()");
+                visit(firstParam->expression, "result", 2);
+                state = READ_ONLY;
+                visit((*statement->methodCall->arguments)[1], "index", 1);
+                skipVisit = true;
+            }
+        }
+        state = oldstate;
+        if (!skipVisit)
+            for (auto *p : *statement->methodCall->arguments) visit(p);
         cur_v = prev_cur_v;
     } else {
+        auto flags = VertexFlags::STATEMENT;
+        if (auto *ec = instance->to<P4::ExternCall>()) {
+            if (ec->method->name.name == "add_entry")
+                flags |= VertexFlags::STATEFUL;
+        }
         std::stringstream sstream;
         statement->dbprint(sstream);
         auto vName = cstring(sstream);
 
-        auto v = add_and_connect_vertex(vName, VertexFlags::STATEMENT, statement);
+        auto v = add_and_connect_vertex(vName, flags, statement);
         parents = {{v, new EdgeUnconditional()}};
 
         auto prev_cur_v = cur_v;

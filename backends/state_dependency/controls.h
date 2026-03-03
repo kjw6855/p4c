@@ -55,6 +55,8 @@ class ControlGraphs : public Graphs,
     bool preorder(const IR::P4Action *action) override;
     bool preorder(const IR::PathExpression *pe) override;
 
+    bool isWrite(bool root_value = false);
+
     void visit_call(const cstring &name, const IR::Node *node);
 
     const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed);

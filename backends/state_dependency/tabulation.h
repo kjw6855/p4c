@@ -64,15 +64,25 @@ class Tabulation : public Graphs {
         return TabVertex{};
     }
 
-    cstring dump_tab_vertex(TabVertex &a) const {
+    cstring dump_tab_vertex(TabVertex &a) {
         std::stringstream logstr;
         if (a.node == sgProp->rootVar)
             logstr << "ROOT:";
-        else
-            logstr << a.node << ":";
-        logstr << a.var;
+        else {
+            auto &ainfo = (*g)[a.node];
+            logstr << ainfo.name << "(";
+            logstr << a.node << "):";
+        }
+        auto tvIt = get_vertex_id(a);
+        auto tvInfo = (*g)[tvIt];
+        logstr << tvInfo.name;
         return cstring(logstr);
     }
+
+ private:
+    void propagate(TabVertex a, TabVertex b);
+    std::vector<TabVertex> &get_successors(TabVertex &tb,
+            std::vector<TabVertex> &succ);
 
  public:
     Graph *g;
@@ -81,16 +91,13 @@ class Tabulation : public Graphs {
 
     void init();
     void forward_tabulate();
-    void propagate(TabVertex a, TabVertex b);
-    std::vector<TabVertex> &get_successors(TabVertex &tb,
-            std::vector<TabVertex> &succ);
-
- private:
-    //std::vector<TabVertex *> get_successors(TabVertex *d);
+    void find_path(std::vector<TabVertex> &tvs);
 
     hvec_set<TabEdge> pathEdge;
-    std::queue<TabEdge> workList;
     hvec_set<TabEdge> summaryEdge;
+
+ private:
+    std::queue<TabEdge> workList;
 };
 
 }  // namespace P4::P4StateDependency

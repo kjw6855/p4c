@@ -130,6 +130,9 @@ void Tabulation::forward_tabulate() {
     LOG2("=== Meet-Over-All-Valid-Paths Solutions ===\n");
     for (auto pe : pathEdge) {
         LOG2(dump_tab_vertex(pe.first) << "->" << dump_tab_vertex(pe.second));
+        auto varVit = get_vertex_id(pe.second);
+        auto &varInfo = (*g)[varVit];
+        varInfo.color = "black"_cs;
     }
 
     LOG2("=== SummaryEdges ===\n");

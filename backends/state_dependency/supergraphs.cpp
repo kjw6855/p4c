@@ -15,29 +15,12 @@ void SuperGraphs::create_root_var_vertex() {
     curProp->rootVar = add_var_vertex(Graphs::globalNode);
     auto rootNode = get_root_vertex(g);
 
+    // Put procedure name for rootVar
+    curProp->procOf.insert({curProp->rootVar,
+            curProp->procOf[rootNode]});
+
     add_edge(curProp->rootVar, curProp->globalVariables[rootNode][0],
             cstring::empty, EdgeType::IFDS_FT);
-
-    auto &rootInfo = (*g)[rootNode];
-    for (size_t n = 1; n < curProp->varNum; n++) {
-        auto *var = curProp->variableList[n];
-        const IR::Node *parent = nullptr;
-        if (auto *mem = var->to<IR::Member>()) {
-            if (auto path = get_base(mem->expr)) {
-                auto *decl = refMap->getDeclaration(path->path, true);
-                parent = decl->to<IR::Parameter>();
-            }
-        }
-
-        for (auto *defVar : rootInfo.defVars) {
-            if (var->equiv(*defVar) ||
-                    (parent != nullptr && parent->equiv(*defVar))) {
-                add_edge(curProp->rootVar, curProp->globalVariables[rootNode][n],
-                        cstring::empty, EdgeType::IFDS_FT);
-                break;
-            }
-        }
-    }
 }
 
 void SuperGraphs::create_var_vertices(const cstring &graphName) {
@@ -142,7 +125,12 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
             continue;
         }
 
-        if (dstInfo.useVars.size() == 0) {
+        // Create new edge
+        if (hasFlag(dstInfo.flags, VertexFlags::STATEFUL)) {
+            // 0 -> DEF (e.g., v = READ(idx))
+            add_edge(curProp->globalVariables[src][0], curProp->globalVariables[dst][n],
+                     cstring::empty, EdgeType::IFDS);
+        } else if (dstInfo.useVars.size() == 0) {
             // 0 -> DEF
             add_edge(curProp->globalVariables[src][0], curProp->globalVariables[dst][n],
                      cstring::empty, EdgeType::IFDS);

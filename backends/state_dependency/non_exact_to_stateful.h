@@ -22,6 +22,8 @@ class FindNonExactToStateful : public Graphs,
 
  private:
     void analyze_control_graph(Tabulation *tab);
+    void collect_non_exact_fields(Tabulation *tab,
+            hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> &fields);
 
  protected:
     std::vector<Graph *> *controlGraphsArray{};

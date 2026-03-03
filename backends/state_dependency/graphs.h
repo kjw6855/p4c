@@ -170,6 +170,7 @@ class Graphs {
         const IR::Node *node;
         std::vector<const IR::Node *> defVars;
         std::vector<const IR::Node *> useVars;
+        cstring color = cstring::empty;
     };
 
     hvec_map<cstring, hvec_set<const IR::Node *>> graphVars;
@@ -226,8 +227,9 @@ class Graphs {
         return fullName;
     }
 
-    vertex_t add_var_vertex(const IR::Node *var, std::optional<const vertex_t> node=std::nullopt) {
-        cstring vname = get_var_name(var);
+    vertex_t add_var_vertex(const IR::Node *var, std::optional<const vertex_t> node=std::nullopt,
+            std::optional<cstring> name=std::nullopt) {
+        cstring vname = name.has_value() ? name.value() : get_var_name(var);
         auto vv = add_vertex(vname, VertexFlags::VARIABLE, var);
 
         if (node.has_value())
@@ -237,7 +239,8 @@ class Graphs {
     }
 
     std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var,
-            const vertex_t &v, bool isUsed) {
+            const vertex_t &v, bool isUsed,
+            std::optional<cstring> name=std::nullopt) {
         /* check duplicate variable in set */
         auto &varset = graphVars[graphName];
         auto *newVar = var;
@@ -256,8 +259,9 @@ class Graphs {
             auto &varList = isUsed ? vinfo.useVars : vinfo.defVars;
             varList.push_back(newVar);
 
+            // supergraphs.cpp will create vertex later
             if (showVar && !genSupergraphs)
-                return add_var_vertex(newVar, v);
+                return add_var_vertex(newVar, v, name);
         }
         return {};
     }
@@ -335,6 +339,8 @@ class Graphs {
         }
         cstring vertexFlagGetColor(Graph &g, const vertex_t &v) const {
             const auto &vinfo = g[v];
+            if (vinfo.color != cstring::empty) return vinfo.color;
+
             auto flags = vinfo.flags;
             cstring colorName = cstring::empty;
             if (hasFlag(flags, VertexFlags::TABLE))
@@ -343,17 +349,7 @@ class Graphs {
                 colorName = "lightgreen"_cs;
             if (hasFlag(flags, VertexFlags::VARIABLE)) {
                 if (vinfo.node == globalNode) return "black"_cs;
-                if (boost::out_degree(v, g) > 0) return "black"_cs;
-                bool filled = false;
-                for (auto [ei, ei_end] = boost::in_edges(v, g); ei != ei_end; ++ei) {
-                    auto edge = g[*ei];
-                    if (edge.type != EdgeType::HAS_VAR) {
-                        filled = true;
-                        break;
-                    }
-                }
-
-                colorName = filled ? "black"_cs : "white"_cs;
+                colorName = "white"_cs;
             }
             return colorName;
         }
