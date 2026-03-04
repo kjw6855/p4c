@@ -19,6 +19,7 @@ class SuperGraphProp {
     Graphs::CallMap callMap;
     Graphs::ProcCallers procCallerMap;
     hvec_map<cstring, std::vector<Graphs::vertex_t>> caller;
+    hvec_map<const IR::Node *, Graphs::vertex_t> defBy;
 };
 
 class SuperGraphs : public Graphs {

@@ -125,6 +125,9 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
             continue;
         }
 
+        // TODO: check variable can be overwritten or not
+        curProp->defBy[var] = dst;
+
         // Create new edge
         if (hasFlag(dstInfo.flags, VertexFlags::STATEFUL)) {
             // 0 -> DEF (e.g., v = READ(idx))

@@ -38,7 +38,7 @@ class Tabulation : public Graphs {
             rootTv = TabVertex{sgProp->rootVar, Graphs::globalNode};
         }
 
-    Graphs::vertex_t get_vertex_id(TabVertex &tb) {
+    Graphs::vertex_t get_vertex_id(const TabVertex &tb) {
         if (tb.node == sgProp->rootVar) return tb.node;
         auto ninfo = (*g)[tb.node];
         BUG_CHECK(!hasFlag(ninfo.flags, VertexFlags::VARIABLE),
@@ -64,7 +64,7 @@ class Tabulation : public Graphs {
         return TabVertex{};
     }
 
-    cstring dump_tab_vertex(TabVertex &a) {
+    cstring dump_tab_vertex(const TabVertex &a) {
         std::stringstream logstr;
         if (a.node == sgProp->rootVar)
             logstr << "ROOT:";
@@ -76,6 +76,13 @@ class Tabulation : public Graphs {
         auto tvIt = get_vertex_id(a);
         auto tvInfo = (*g)[tvIt];
         logstr << tvInfo.name;
+        return cstring(logstr);
+    }
+
+    cstring dump_tab_edge(const TabEdge &a) {
+        std::stringstream logstr;
+        logstr << dump_tab_vertex(a.first) << "->";
+        logstr << dump_tab_vertex(a.second);
         return cstring(logstr);
     }
 
@@ -95,6 +102,7 @@ class Tabulation : public Graphs {
 
     hvec_set<TabEdge> pathEdge;
     hvec_set<TabEdge> summaryEdge;
+    hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> reachableVars;
 
  private:
     std::queue<TabEdge> workList;

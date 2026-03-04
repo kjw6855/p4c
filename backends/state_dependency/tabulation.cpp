@@ -151,18 +151,17 @@ void Tabulation::forward_tabulate() {
         if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
         auto vProcName = sgProp->procOf[*vit];
         LOG5(vProcName << "  ProcOf " << vinfo.name);
-        std::vector<const IR::Node *> reachableNodes;
         for (auto pe : pathEdge) {
             auto firstProcName = sgProp->procOf[pe.first.node];
             if (firstProcName == vProcName && pe.second.node == *vit) {
-                reachableNodes.push_back(pe.second.var);
+                reachableVars[*vit].push_back(pe.second.var);
             }
         }
 
-        if (reachableNodes.size() > 0) {
+        if (reachableVars[*vit].size() > 0) {
             std::stringstream sstream;
             sstream << "  " << vinfo.name << "(" << *vit << "):";
-            for (auto rn : reachableNodes) {
+            for (auto rn : reachableVars[*vit]) {
                 sstream << " " << rn;
             }
             LOG2(cstring(sstream));

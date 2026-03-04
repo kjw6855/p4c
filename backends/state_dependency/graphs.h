@@ -22,6 +22,7 @@ namespace P4::P4StateDependency {
 
 using namespace P4::literals;
 
+// TODO: minimize bit vector size
 enum class VertexFlags : unsigned {
     NONE            = 0,
     TABLE           = 1u << 0,
@@ -40,7 +41,8 @@ enum class VertexFlags : unsigned {
     EMPTY           = 1u << 13,
     VARIABLE        = 1u << 14,
     SO_IDX          = 1u << 15,
-    SO_DATA         = 1u << 16,
+    SO_READ_DATA    = 1u << 16,
+    SO_WRITE_DATA   = 1u << 17,
 };
 
 enum class EdgeType {
@@ -156,7 +158,8 @@ inline cstring vertexFlagsToString(VertexFlags flags) {
     if (hasFlag(flags, VertexFlags::EXIT))         parts.emplace_back("EXIT"_cs);
     if (hasFlag(flags, VertexFlags::VARIABLE))     parts.emplace_back("VARIABLE"_cs);
     if (hasFlag(flags, VertexFlags::SO_IDX))       parts.emplace_back("SO_IDX"_cs);
-    if (hasFlag(flags, VertexFlags::SO_DATA))      parts.emplace_back("SO_DATA"_cs);
+    if (hasFlag(flags, VertexFlags::SO_READ_DATA))      parts.emplace_back("SO_READ_DATA"_cs);
+    if (hasFlag(flags, VertexFlags::SO_WRITE_DATA))      parts.emplace_back("SO_WRITE_DATA"_cs);
 
     cstring res;
     for (std::size_t i = 0; i < parts.size(); ++i) {

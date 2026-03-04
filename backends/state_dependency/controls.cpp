@@ -266,12 +266,12 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
             }
             if (em->method->name.name == "read" && params.size() >= 2) {
                 // void read(out T result, in I index);
-                visit_stateful(vName, statement, params[1], true, params[0]);
+                visit_stateful(vName, statement, params[1], false, params[0]);
                 return false;
 
             } else if (em->method->name.name == "write" && params.size() >= 2) {
                 // void write(in I index, in T value);
-                visit_stateful(vName, statement, params[0], false, params[1]);
+                visit_stateful(vName, statement, params[0], true, params[1]);
                 return false;
             }
         }
@@ -582,12 +582,14 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
     visit(idx, "index", 1);
 
     if (data != nullptr) {
-        // Read or Write data next
+        // Whether the node reads or writes data
         auto svNamePrefix = isWrite ? "WRITE "_cs : "READ "_cs;
+        auto svFlag = isWrite ? VertexFlags::SO_WRITE_DATA : VertexFlags::SO_READ_DATA;
         auto sv = add_and_connect_vertex(svNamePrefix + name,
-                flags | VertexFlags::SO_DATA, node);
+                flags | svFlag, node);
         cur_v = sv;
-        state = isWrite ? WRITE_ONLY : READ_ONLY;
+        // Whether the data is read (node writes) or written (node reads)
+        state = isWrite ? READ_ONLY : WRITE_ONLY;
         visit(data, "data", isWrite ? 2 : 1);
         parents = {{sv, new EdgeUnconditional()}};
     }
