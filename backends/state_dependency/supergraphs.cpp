@@ -75,6 +75,15 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
     g = g_;
     curProp = sgProp;
 
+    auto vertices = boost::vertices(*g);
+    size_t actId = 0;
+    // TODO: Exclude actId assignments for emptyAction
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto vinfo = (*g)[*vit];
+        if (!hasFlag(vinfo.flags, VertexFlags::ACTION)) continue;
+        curProp->actionIdMap[*vit] = actId++;
+    }
+
     create_var_vertices(boost::get_property(*g, boost::graph_name));
     create_root_var_vertex();
 
@@ -90,7 +99,7 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
         q.pop();
 
         for (auto [ei, ei_end] = boost::out_edges(u, *g); ei != ei_end; ++ei) {
-            auto edge = (*g)[*ei];
+            auto &edge = (*g)[*ei];
             if (edge.type == EdgeType::HAS_VAR) continue;
             if (edge.type == EdgeType::IFDS) continue;
             auto v = boost::target(*ei, *g);
@@ -136,7 +145,8 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
         } else if (dstInfo.useVars.size() == 0) {
             // 0 -> DEF
             add_edge(curProp->globalVariables[src][0], curProp->globalVariables[dst][n],
-                     cstring::empty, EdgeType::IFDS);
+                     cstring::empty, EdgeType::IFDS,
+                     curProp->get_action_id(dst));
         } else {
             // USE -> DEF
             for (auto uv : dstInfo.useVars) {

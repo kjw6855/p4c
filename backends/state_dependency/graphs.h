@@ -1,6 +1,8 @@
 #ifndef BACKENDS_STATE_DEPENDENCY_GRAPHS_H_
 #define BACKENDS_STATE_DEPENDENCY_GRAPHS_H_
 
+#include <memory>
+
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/graphviz.hpp>
 
@@ -76,10 +78,128 @@ inline cstring edgeTypeToString(EdgeType type) {
     return cstring::empty;
 }
 
+// TODO: extend size_t to template<D>
+class EdgeFunc {
+ public:
+    virtual size_t operator()(size_t i) const = 0;
+
+    virtual std::unique_ptr<EdgeFunc> compose(std::unique_ptr<EdgeFunc> g) const {
+        class ComposeFunc : public EdgeFunc {
+         public:
+
+            ComposeFunc(std::unique_ptr<EdgeFunc> o, std::unique_ptr<EdgeFunc> i)
+                : outer(std::move(o)), inner(std::move(i)) {}
+
+            size_t operator()(size_t x) const override {
+                return (*outer)((*inner)(x));
+            }
+
+            cstring getName() const override {
+                return outer->getName() + " U "_cs + inner->getName();
+            }
+
+            std::unique_ptr<EdgeFunc> clone() const override {
+                // deep copy: clone outer and inner
+                return std::make_unique<ComposeFunc>(
+                        outer ? outer->clone() : nullptr,
+                        inner ? inner->clone() : nullptr
+                        );
+            }
+
+         private:
+            std::unique_ptr<EdgeFunc> outer;
+            std::unique_ptr<EdgeFunc> inner;
+        };
+
+        return std::make_unique<ComposeFunc>(
+            std::unique_ptr<EdgeFunc>(this->clone()),
+            std::move(g)
+        );
+    }
+
+    virtual std::unique_ptr<EdgeFunc> clone() const = 0;
+    virtual cstring getName() const = 0;
+    virtual ~EdgeFunc() = default;
+};
+
+class IdFunc : public EdgeFunc {
+ public:
+    size_t operator()(size_t i) const override { return i; }
+    std::unique_ptr<EdgeFunc> clone() const override {
+        return std::make_unique<IdFunc>(*this);
+    }
+    cstring getName() const override { return "id"_cs; }
+};
+
+// TODO: Move custom EdgeFunc to child pass (e.g., non_exact_to_stateful)
+//       instead of common library like supergraph / tabulation
+struct ActionSetFunc : EdgeFunc {
+ public:
+    explicit ActionSetFunc(size_t actId) : actId(actId) {
+        BUG_CHECK(actId < 64, "Out of range!");
+    }
+
+    // TODO: Change return type from size_t to bitVector
+    size_t operator()(size_t i) const override {
+        return i | (1 << actId);
+    }
+    std::unique_ptr<EdgeFunc> clone() const override {
+        return std::make_unique<ActionSetFunc>(*this);
+    }
+    cstring getName() const override {
+        std::stringstream sstream;
+        sstream << "(i | (1 << " << actId << "))";
+        return cstring(sstream);
+    }
+
+ private:
+    size_t actId;
+};
+
+struct EdgeFuncHolder {
+ public:
+    EdgeFuncHolder() = default;
+
+    EdgeFuncHolder(std::unique_ptr<EdgeFunc> f) : fn(std::move(f)) {}
+
+    EdgeFuncHolder(const EdgeFuncHolder& other)
+        : fn(other.fn ? other.fn->clone() : nullptr) {}
+
+    EdgeFuncHolder& operator=(const EdgeFuncHolder& other) {
+        if (this != &other) {
+            fn = other.fn ? other.fn->clone() : nullptr;
+        }
+        return *this;
+    }
+
+    EdgeFuncHolder(EdgeFuncHolder&&) noexcept = default;
+    EdgeFuncHolder& operator=(EdgeFuncHolder&&) noexcept = default;
+
+    size_t operator()(size_t i) {
+        return (*fn)(i);
+    }
+
+    cstring getName() {
+        return fn->getName();
+    }
+
+ private:
+    std::unique_ptr<EdgeFunc> fn;
+};
+
+const struct EdgeFuncHolder globalIdFunc(std::make_unique<IdFunc>());
+
 class EdgeTypeIface {
  public:
     cstring name;
     EdgeType type;
+    EdgeFuncHolder fn = globalIdFunc;
+
+    void setFunc(std::unique_ptr<EdgeFunc> f) { fn = EdgeFuncHolder(std::move(f)); }
+
+    size_t apply(size_t i) {
+        return (fn)(i);
+    }
 
     EdgeTypeIface() {}
     EdgeTypeIface(EdgeType type) : type(type) {}
@@ -223,10 +343,12 @@ class Graphs {
 
     vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
 
-    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name, EdgeType type);
+    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                  EdgeType type, std::optional<size_t> actId=std::nullopt);
 
     void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                  EdgeType type, unsigned cluster_id);
+                  EdgeType type, unsigned cluster_id,
+                  std::optional<size_t> actId=std::nullopt);
 
     vertex_t add_and_connect_vertex(const cstring &name, VertexFlags flags,
                                     const IR::Node *node=nullptr);
@@ -310,8 +432,8 @@ class Graphs {
             auto edges = boost::edges(g);
             for (auto &eit = edges.first; eit != edges.second; ++eit) {
                 auto attrs = boost::get(boost::edge_attribute, g);
-                auto ep = g[*eit];
-                attrs[*eit]["label"_cs] = ep.name;
+                auto &ep = g[*eit];
+                attrs[*eit]["label"_cs] = edgeTypeGetName(ep);
                 attrs[*eit]["style"_cs] = edgeTypeGetStyle(g, *eit, varVis);
                 attrs[*eit]["color"_cs] = edgeTypeGetColor(ep.type);
                 attrs[*eit]["penwidth"_cs] = edgeTypeGetPenWidth(ep.type);
@@ -383,6 +505,13 @@ class Graphs {
         }
         static cstring vertexFlagGetMargin() {
             return cstring::empty;
+        }
+        static cstring edgeTypeGetName(EdgeTypeIface &edge) {
+            if (edge.type == EdgeType::IFDS ||
+                    edge.type == EdgeType::IFDS_FT) {
+                return edge.fn.getName();
+            }
+            return edge.name;
         }
         static cstring edgeTypeGetStyle(Graph &g, const edge_t &ei,
                 VarVisibility varVis) {

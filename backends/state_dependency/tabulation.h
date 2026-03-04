@@ -55,7 +55,7 @@ class Tabulation : public Graphs {
                 "%1% is not variable", v);
 
         for (auto [ei, ei_end] = boost::in_edges(v, *g); ei != ei_end; ++ei) {
-            auto edge = (*g)[*ei];
+            auto &edge = (*g)[*ei];
             if (edge.type == EdgeType::HAS_VAR)
                 return TabVertex{boost::source(*ei, *g), vinfo.node};
         }

@@ -16,17 +16,28 @@ Graphs::vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, cons
     return g->local_to_global(v);
 }
 
-void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name, EdgeType type) {
+void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                      EdgeType type, std::optional<size_t> actId) {
     auto ep = boost::add_edge(from, to, g->root());
     boost::put(&EdgeTypeIface::name, g->root(), ep.first, name);
     boost::put(&EdgeTypeIface::type, g->root(), ep.first, type);
+
+    if (actId.has_value()) {
+        auto &edge = g->root()[ep.first];
+        edge.setFunc(std::make_unique<ActionSetFunc>(actId.value()));
+    }
 }
 
 void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                      EdgeType type, unsigned cluster_id) {
+                      EdgeType type, unsigned cluster_id, std::optional<size_t> actId) {
     auto ep = boost::add_edge(from, to, g->root());
     boost::put(&EdgeTypeIface::name, g->root(), ep.first, name);
     boost::put(&EdgeTypeIface::type, g->root(), ep.first, type);
+
+    if (actId.has_value()) {
+        auto &edge = g->root()[ep.first];
+        edge.setFunc(std::make_unique<ActionSetFunc>(actId.value()));
+    }
 
     auto attrs = boost::get(boost::edge_attribute, g->root());
 

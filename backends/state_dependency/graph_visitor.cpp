@@ -88,7 +88,7 @@ void GraphVisitor::writeGraphToFile(const Graph &g, const std::string &name) {
 
         auto [ei, ei_end] = boost::out_edges(*vit, g);
         for (; ei != ei_end; ++ei) {
-            auto edge = g[*ei];
+            auto &edge = g[*ei];
             if (edge.type == EdgeType::HAS_VAR)
                 groups[*vit].insert(boost::target(*ei, g));
         }

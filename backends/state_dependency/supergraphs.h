@@ -10,6 +10,13 @@ namespace P4::P4StateDependency {
 
 class SuperGraphProp {
  public:
+
+    std::optional<size_t> get_action_id(Graphs::vertex_t v) {
+        auto actionIdMapIt = actionIdMap.find(v);
+        return actionIdMapIt == actionIdMap.end() ?
+            std::nullopt : std::optional{actionIdMapIt->second};
+    }
+
     Graphs::vertex_t rootVar;
     std::size_t varNum;
     std::vector<const IR::Node *> variableList;
@@ -20,6 +27,7 @@ class SuperGraphProp {
     Graphs::ProcCallers procCallerMap;
     hvec_map<cstring, std::vector<Graphs::vertex_t>> caller;
     hvec_map<const IR::Node *, Graphs::vertex_t> defBy;
+    hvec_map<Graphs::vertex_t, size_t> actionIdMap;
 };
 
 class SuperGraphs : public Graphs {

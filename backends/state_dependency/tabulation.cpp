@@ -88,7 +88,7 @@ void Tabulation::forward_tabulate() {
                 // Line 23-1: <c, d4> -> srcVar(<s_p, d1>)
                 for (auto [ei, ei_end] = boost::in_edges(srcVar, *g);
                         ei != ei_end; ++ei) {
-                    auto edge = (*g)[*ei];
+                    auto &edge = (*g)[*ei];
                     // Skip CFG nodes among sources
                     if (edge.type == EdgeType::HAS_VAR) continue;
                     auto sourceVar = boost::source(*ei, *g);
