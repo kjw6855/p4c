@@ -28,6 +28,7 @@ class SuperGraphProp {
     hvec_map<cstring, std::vector<Graphs::vertex_t>> caller;
     hvec_map<const IR::Node *, Graphs::vertex_t> defBy;
     hvec_map<Graphs::vertex_t, size_t> actionIdMap;
+    hvec_map<cstring, Graphs::vertex_t> srcOf;
 };
 
 class SuperGraphs : public Graphs {

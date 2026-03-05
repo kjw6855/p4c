@@ -78,6 +78,10 @@ inline cstring edgeTypeToString(EdgeType type) {
     return cstring::empty;
 }
 
+inline size_t get_top_value(size_t actIdNum) {
+    return (actIdNum == 0) ? 0 : (size_t(1) << actIdNum) - 1;
+}
+
 // TODO: extend size_t to template<D>
 class EdgeFunc {
  public:
@@ -96,6 +100,21 @@ class EdgeFunc {
 
             cstring getName() const override {
                 return outer->getName() + " U "_cs + inner->getName();
+            }
+
+            std::optional<size_t> getValue() const override {
+                if (!inner && !outer) return {};
+                else if (!inner) return outer->getValue();
+                else if (!outer) return inner->getValue();
+
+                auto outVal = outer->getValue();
+                auto inVal = inner->getValue();
+                if (!outVal.has_value()) return inVal;
+                if (!inVal.has_value()) return outVal;
+
+                // x | y
+                size_t val = inVal.value() | outVal.value();
+                return std::optional{val};
             }
 
             std::unique_ptr<EdgeFunc> clone() const override {
@@ -119,6 +138,7 @@ class EdgeFunc {
 
     virtual std::unique_ptr<EdgeFunc> clone() const = 0;
     virtual cstring getName() const = 0;
+    virtual std::optional<size_t> getValue() const = 0;
     virtual ~EdgeFunc() = default;
 };
 
@@ -128,21 +148,41 @@ class IdFunc : public EdgeFunc {
     std::unique_ptr<EdgeFunc> clone() const override {
         return std::make_unique<IdFunc>(*this);
     }
+    std::optional<size_t> getValue() const override { return std::nullopt; }
     cstring getName() const override { return "id"_cs; }
+};
+
+class ActionBitSetFunc : public EdgeFunc {
+ public:
+    explicit ActionBitSetFunc(size_t actBits) : actBits(actBits) {}
+
+    // TODO: Change return type from size_t to bitVector
+    size_t operator()(size_t i) const override {
+        return i | actBits;
+    }
+    std::unique_ptr<EdgeFunc> clone() const override {
+        return std::make_unique<ActionBitSetFunc>(*this);
+    }
+    cstring getName() const override {
+        std::stringstream sstream;
+        sstream << "set " << __builtin_popcountll(actBits) << " 1s";
+        return cstring(sstream);
+    }
+    std::optional<size_t> getValue() const override {
+        return std::optional{actBits};
+    }
+
+ private:
+    size_t actBits;
 };
 
 // TODO: Move custom EdgeFunc to child pass (e.g., non_exact_to_stateful)
 //       instead of common library like supergraph / tabulation
-struct ActionSetFunc : EdgeFunc {
+struct ActionSetFunc : public ActionBitSetFunc {
  public:
-    explicit ActionSetFunc(size_t actId) : actId(actId) {
-        BUG_CHECK(actId < 64, "Out of range!");
-    }
-
-    // TODO: Change return type from size_t to bitVector
-    size_t operator()(size_t i) const override {
-        return i | (1 << actId);
-    }
+    explicit ActionSetFunc(size_t actId)
+        : ActionBitSetFunc(size_t(1) << actId),
+          actId(actId) {}
     std::unique_ptr<EdgeFunc> clone() const override {
         return std::make_unique<ActionSetFunc>(*this);
     }
@@ -154,6 +194,44 @@ struct ActionSetFunc : EdgeFunc {
 
  private:
     size_t actId;
+};
+
+struct TopFunc : public EdgeFunc {
+ public:
+    explicit TopFunc(size_t actNum) : actNum(actNum) {
+        BUG_CHECK(actNum < 64, "Out of range!");
+        actBits = get_top_value(actNum);
+    }
+    size_t operator()(size_t) const override {
+        // Top will absorb any bit index
+        return actBits;
+    }
+    std::unique_ptr<EdgeFunc> clone() const override {
+        return std::make_unique<TopFunc>(*this);
+    }
+    std::optional<size_t> getValue() const override { return std::optional{actBits}; }
+    cstring getName() const override { return "T"_cs; }
+
+ private:
+    size_t actNum;
+    size_t actBits;
+};
+
+struct BottomFunc : public EdgeFunc {
+ public:
+    explicit BottomFunc() : actBits(0) {}
+    size_t operator()(size_t) const override {
+        // Bottom will absorb any bit index
+        return actBits;
+    }
+    std::unique_ptr<EdgeFunc> clone() const override {
+        return std::make_unique<BottomFunc>(*this);
+    }
+    std::optional<size_t> getValue() const override { return std::optional{0}; }
+    cstring getName() const override { return "0"_cs; }
+
+ private:
+    size_t actBits;
 };
 
 struct EdgeFuncHolder {
@@ -183,11 +261,71 @@ struct EdgeFuncHolder {
         return fn->getName();
     }
 
+    std::optional<size_t> getValue() {
+        return fn->getValue();
+    }
+
+    EdgeFuncHolder compose(const EdgeFuncHolder &other) const {
+        if (!fn) return EdgeFuncHolder(other.fn ? other.fn->clone() : nullptr);
+        if (!other.fn) return EdgeFuncHolder(fn->clone());
+
+        auto other_clone = other.fn->clone();
+        auto composed = fn->compose(std::move(other_clone));
+        return EdgeFuncHolder(std::move(composed));
+    }
+
+    EdgeFuncHolder join(const EdgeFuncHolder &other) const {
+        if (!fn || !other.fn) {
+            return EdgeFuncHolder(std::make_unique<BottomFunc>());
+        }
+        auto fVal = fn->getValue();
+        auto gVal = other.fn->getValue();
+
+        if (fVal.has_value() && gVal.has_value()) {
+            if (fVal.value() == gVal.value()) {
+                return EdgeFuncHolder(fn->clone());
+            } else {
+                // x v y
+                auto newVal = fVal.value() & gVal.value();
+                if (newVal == 0) {
+                    return EdgeFuncHolder(std::make_unique<BottomFunc>());
+                } else {
+                    return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(newVal));
+                }
+            }
+        } else if (fVal.has_value()) {
+            // 0 v Id = 0
+            if (fVal.value() == 0)
+                return EdgeFuncHolder(std::make_unique<BottomFunc>());
+            // T v Id = Id
+            else if (typeid(*fn) == typeid(TopFunc))
+                return EdgeFuncHolder(std::make_unique<IdFunc>());
+
+            // Id v x = x
+            else
+                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(fVal.value()));
+        } else if (gVal.has_value()) {
+            // Id v 0 = 0
+            if (gVal.value() == 0)
+                return EdgeFuncHolder(std::make_unique<BottomFunc>());
+            // Id v T = Id
+            else if (typeid(*other.fn) == typeid(TopFunc))
+                return EdgeFuncHolder(std::make_unique<IdFunc>());
+
+            // Id v x = x
+            else
+                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(gVal.value()));
+        }
+        // Id v Id = Id
+        return EdgeFuncHolder(fn->clone());
+    }
+
  private:
     std::unique_ptr<EdgeFunc> fn;
 };
 
 const struct EdgeFuncHolder globalIdFunc(std::make_unique<IdFunc>());
+const struct EdgeFuncHolder globalBottomFunc(std::make_unique<BottomFunc>());
 
 class EdgeTypeIface {
  public:

@@ -18,6 +18,11 @@ class Tabulation : public Graphs {
         const IR::Node *var;
         mutable size_t computedHash = 0;
 
+        /*
+        TabVertex() = default;
+        TabVertex(Graphs::vertex_t node, const IR::Node *var)
+            : node(node), var(var) {}
+            */
         bool operator==(const TabVertex &a) const {
             if (node != a.node) return false;
             return var == a.var;
@@ -28,6 +33,12 @@ class Tabulation : public Graphs {
                 computedHash = Util::Hash{}(node, var);
             }
             return computedHash;
+        }
+    };
+
+    struct TabVertexHash {
+        size_t operator()(const TabVertex &t) const noexcept {
+            return t.hash();
         }
     };
 
@@ -87,25 +98,36 @@ class Tabulation : public Graphs {
     }
 
  private:
-    void propagate(TabVertex a, TabVertex b);
+    void propagate_ifds(TabVertex a, TabVertex b);
+    void propagate_ide(TabVertex a, TabVertex b, EdgeFuncHolder fn);
+    void propagate_value_ide(TabVertex tv, size_t val);
     std::vector<TabVertex> &get_successors(TabVertex &tb,
             std::vector<TabVertex> &succ);
+    EdgeFuncHolder get_edge_func(TabVertex &a, TabVertex &b);
 
  public:
     Graph *g;
     SuperGraphProp *sgProp;
     TabVertex rootTv;
 
-    void init();
-    void forward_tabulate();
+    void init_ifds();
+    void init_ide();
+    void forward_tabulate_ifds();
+    void forward_tabulate_ide();
+    void compute_values_ide();
     void find_path(std::vector<TabVertex> &tvs);
+    void dump_result();
 
     hvec_set<TabEdge> pathEdge;
     hvec_set<TabEdge> summaryEdge;
     hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> reachableVars;
+    hvec_map<TabEdge, EdgeFuncHolder> jumpFunc;
+    hvec_map<TabEdge, EdgeFuncHolder> summaryFunc;
+    hvec_map<TabVertex, size_t, TabVertexHash> valueMap;
 
  private:
     std::queue<TabEdge> workList;
+    std::queue<TabVertex> nodeWorkList;
 };
 
 }  // namespace P4::P4StateDependency

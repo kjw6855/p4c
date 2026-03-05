@@ -38,8 +38,10 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
         return;
     }
 
-    tab->init();
-    tab->forward_tabulate();
+    tab->init_ide();
+    tab->forward_tabulate_ide();
+    tab->compute_values_ide();
+    tab->dump_result();
 
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;

@@ -77,15 +77,28 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
 
     auto vertices = boost::vertices(*g);
     size_t actId = 0;
-    // TODO: Exclude actId assignments for emptyAction
-    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
-        auto vinfo = (*g)[*vit];
-        if (!hasFlag(vinfo.flags, VertexFlags::ACTION)) continue;
-        curProp->actionIdMap[*vit] = actId++;
-    }
-
     create_var_vertices(boost::get_property(*g, boost::graph_name));
     create_root_var_vertex();
+
+    for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
+        auto vinfo = (*g)[*vit];
+        // Set srcOf
+        if (hasFlag(vinfo.flags, VertexFlags::ENTRY)) {
+            auto vProcName = curProp->procOf[*vit];
+            // TODO: move rootVar to __START__'s var, not special one
+            if (curProp->procOf[curProp->rootVar] == vProcName) {
+                curProp->srcOf[vProcName] = curProp->rootVar;
+            } else {
+                curProp->srcOf[vProcName] = *vit;
+            }
+        }
+
+        // Set actionIdMap
+        // TODO: Exclude actId assignments for emptyAction
+        if (hasFlag(vinfo.flags, VertexFlags::ACTION)) {
+            curProp->actionIdMap[*vit] = actId++;
+        }
+    }
 
     // Traverse ICFG
     std::size_t n = num_vertices(*g);
@@ -102,6 +115,7 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
             auto &edge = (*g)[*ei];
             if (edge.type == EdgeType::HAS_VAR) continue;
             if (edge.type == EdgeType::IFDS) continue;
+            if (edge.type == EdgeType::IFDS_FT) continue;
             auto v = boost::target(*ei, *g);
 
             // main
