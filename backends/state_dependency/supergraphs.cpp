@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <queue>
 #include <boost/graph/visitors.hpp>
 
@@ -9,6 +10,31 @@ namespace P4::P4StateDependency {
 const IR::PathExpression* get_base(const IR::Expression* e) {
     if (auto m = e->to<IR::Member>()) return get_base(m->expr);
     return e->to<IR::PathExpression>();
+}
+
+// TODO: Move this to Utils
+const std::vector<unsigned> indices_from_bitmap(size_t bitmap) {
+    std::vector<unsigned> idx;
+    while (bitmap) {
+        // isolate lowest set bit
+        std::size_t t = bitmap & -bitmap;
+        // index of that bit
+        unsigned bit = __builtin_ctzll(bitmap);  // or ctzl/ctz depending on size_t
+        idx.push_back(bit);
+        // clear that bit
+        bitmap ^= t;
+    }
+    return idx;
+}
+
+std::vector<Graphs::vertex_t> SuperGraphProp::get_action_vertices(size_t bitmap) {
+    if (bitmap == topEnvValue || bitmap == 0) return {};
+    auto indices = indices_from_bitmap(bitmap);
+    std::vector<Graphs::vertex_t> foundActions;
+    for (auto idx : indices) {
+        foundActions.push_back(actions[idx]);
+    }
+    return foundActions;
 }
 
 void SuperGraphs::create_root_var_vertex() {
@@ -96,9 +122,11 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
         // Set actionIdMap
         // TODO: Exclude actId assignments for emptyAction
         if (hasFlag(vinfo.flags, VertexFlags::ACTION)) {
+            curProp->actions.push_back(*vit);
             curProp->actionIdMap[*vit] = actId++;
         }
     }
+    curProp->topEnvValue = get_top_value(actId);
 
     // Traverse ICFG
     std::size_t n = num_vertices(*g);

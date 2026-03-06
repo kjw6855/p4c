@@ -274,7 +274,59 @@ struct EdgeFuncHolder {
         return EdgeFuncHolder(std::move(composed));
     }
 
-    EdgeFuncHolder join(const EdgeFuncHolder &other) const {
+    EdgeFuncHolder may_join(const EdgeFuncHolder &other) const {
+        if (!fn || !other.fn) {
+            return EdgeFuncHolder(std::make_unique<BottomFunc>());
+        }
+        auto fVal = fn->getValue();
+        auto gVal = other.fn->getValue();
+
+        if (fVal.has_value() && gVal.has_value()) {
+            if (fVal.value() == gVal.value()) {
+                return EdgeFuncHolder(fn->clone());
+            } else if (typeid(*fn) == typeid(TopFunc)){
+                // T | x = x
+                return EdgeFuncHolder(other.fn->clone());
+            } else if (typeid(*other.fn) == typeid(TopFunc)) {
+                // x | T = x
+                return EdgeFuncHolder(fn->clone());
+            } else {
+                // x | y
+                auto newVal = fVal.value() | gVal.value();
+                if (newVal == 0) {
+                    return EdgeFuncHolder(std::make_unique<BottomFunc>());
+                } else {
+                    return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(newVal));
+                }
+            }
+        } else if (fVal.has_value()) {
+            // 0 | Id = 0
+            if (fVal.value() == 0)
+                return EdgeFuncHolder(std::make_unique<BottomFunc>());
+            // T | Id = Id
+            else if (typeid(*fn) == typeid(TopFunc))
+                return EdgeFuncHolder(std::make_unique<IdFunc>());
+
+            // Id | x = x
+            else
+                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(fVal.value()));
+        } else if (gVal.has_value()) {
+            // Id | 0 = 0
+            if (gVal.value() == 0)
+                return EdgeFuncHolder(std::make_unique<BottomFunc>());
+            // Id | T = Id
+            else if (typeid(*other.fn) == typeid(TopFunc))
+                return EdgeFuncHolder(std::make_unique<IdFunc>());
+
+            // Id | x = x
+            else
+                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(gVal.value()));
+        }
+        // Id | Id = Id
+        return EdgeFuncHolder(fn->clone());
+    }
+
+    EdgeFuncHolder must_join(const EdgeFuncHolder &other) const {
         if (!fn || !other.fn) {
             return EdgeFuncHolder(std::make_unique<BottomFunc>());
         }

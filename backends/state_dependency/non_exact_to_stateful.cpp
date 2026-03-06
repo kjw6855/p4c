@@ -41,7 +41,7 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
     tab->init_ide();
     tab->forward_tabulate_ide();
     tab->compute_values_ide();
-    tab->dump_result();
+    //tab->dump_result();
 
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
@@ -50,39 +50,31 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
         auto &vinfo = (*g)[*vit];
         if (hasFlag(vinfo.flags, VertexFlags::SO_IDX)) {
             // Check ACTION->IDX with WRITE_DATA
-            // TODO: check write or not
-            for (auto var : tab->reachableVars[*vit]) {
-                auto sit = sgProp->defBy[var];
-                auto sinfo = (*g)[sit];
-                if (hasFlag(sinfo.flags, VertexFlags::ACTION)) {
+            // TODO: check WRITE
+            for (auto var : vinfo.useVars) {
+                size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
+                auto actions = sgProp->get_action_vertices(actionBitMap);
+                for (auto ait : actions) {
+                    // TODO: find src var
                     std::cout << "A->I: " << tab->dump_tab_edge({
-                        TabVertex{sit, var}, TabVertex{*vit, vinfo.useVars[0]}})
+                        TabVertex{ait, var}, TabVertex{*vit, var}})
                         << std::endl;
                 }
             }
         } else if (hasFlag(vinfo.flags, VertexFlags::SO_WRITE_DATA)) {
-            // TODO: We can't guarantee that usedVar is dependent on given variable..
-            //       IFDS just simply shows actionVar is reachable to that statement.
-            for (auto var : tab->reachableVars[*vit]) {
-                auto sit = sgProp->defBy[var];
-                auto sinfo = (*g)[sit];
-                if (hasFlag(sinfo.flags, VertexFlags::ACTION)) {
+            // Check ACTION->DATA
+            for (auto var : vinfo.useVars) {
+                size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
+                auto actions = sgProp->get_action_vertices(actionBitMap);
+                for (auto ait : actions) {
+                    // TODO: find src var
                     std::cout << "A->D: " << tab->dump_tab_edge({
-                        TabVertex{sit, var}, TabVertex{*vit, vinfo.useVars[0]}})
+                        TabVertex{ait, var}, TabVertex{*vit, var}})
                         << std::endl;
                 }
             }
         } else if (hasFlag(vinfo.flags, VertexFlags::KEY)) {
-            // Check READ_DATA->MATCH
-            for (auto var : tab->reachableVars[*vit]) {
-                auto sit = sgProp->defBy[var];
-                auto sinfo = (*g)[sit];
-                if (hasFlag(sinfo.flags, VertexFlags::SO_READ_DATA)) {
-                    std::cout << "D->M: " << tab->dump_tab_edge({
-                        TabVertex{sit, var}, TabVertex{*vit, vinfo.useVars[0]}})
-                        << std::endl;
-                }
-            }
+            // TODO: Check READ_DATA->MATCH
         }
     }
 }

@@ -27,8 +27,12 @@ class SuperGraphProp {
     Graphs::ProcCallers procCallerMap;
     hvec_map<cstring, std::vector<Graphs::vertex_t>> caller;
     hvec_map<const IR::Node *, Graphs::vertex_t> defBy;
+    std::vector<Graphs::vertex_t> actions;
     hvec_map<Graphs::vertex_t, size_t> actionIdMap;
     hvec_map<cstring, Graphs::vertex_t> srcOf;
+    std::size_t topEnvValue;
+
+    std::vector<Graphs::vertex_t> get_action_vertices(size_t bitmap);
 };
 
 class SuperGraphs : public Graphs {

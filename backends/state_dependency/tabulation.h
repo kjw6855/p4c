@@ -104,6 +104,7 @@ class Tabulation : public Graphs {
     std::vector<TabVertex> &get_successors(TabVertex &tb,
             std::vector<TabVertex> &succ);
     EdgeFuncHolder get_edge_func(TabVertex &a, TabVertex &b);
+    size_t may_meet_value(size_t a, size_t b);
 
  public:
     Graph *g;

@@ -80,10 +80,19 @@ void Tabulation::propagate_ifds(TabVertex a, TabVertex b) {
 }
 
 void Tabulation::propagate_ide(TabVertex a, TabVertex b, EdgeFuncHolder fn) {
-    LOG5(dump_tab_vertex(a) << "->" << dump_tab_vertex(b) << ":" << fn.getName());
 
     TabEdge ab = {a, b};
-    auto newFn = fn.join(jumpFunc[ab]);
+    auto newFn = fn.may_join(jumpFunc[ab]);
+    std::stringstream sstream;
+    sstream << dump_tab_vertex(a)
+        << "->" << dump_tab_vertex(b)
+        << ":" << newFn.getName();
+    if (newFn.getValue().has_value())
+        sstream << "=" << newFn.getValue().value();
+    else
+        sstream << "=id";
+    LOG5(cstring(sstream));
+
     if (newFn.getValue() != jumpFunc[ab].getValue()) {
         jumpFunc[ab] = newFn;
         workList.push(ab);
@@ -288,7 +297,7 @@ void Tabulation::forward_tabulate_ide() {
             for (auto sf : summaryFunc) {
                 auto sfn = sf.second;
                 // skip T fn
-                if (sfn.getValue() == get_top_value(sgProp->actionIdMap.size()))
+                if (sfn.getValue() == sgProp->topEnvValue)
                     continue;
                 auto se = sf.first;
                 if (se.first.node == te.second.node &&
@@ -327,7 +336,7 @@ void Tabulation::forward_tabulate_ide() {
                         auto f4 = get_edge_func(sourceTabTv, te.first);
                         auto f5 = get_edge_func(te.second, targetTabTv);
                         auto sfn = summaryFunc[te];     // XXX
-                        auto fPrime = (f5.compose(fn.compose(f4))).join(sfn);
+                        auto fPrime = (f5.compose(fn.compose(f4))).may_join(sfn);
 
                         // Line 25-29
                         if (fPrime.getValue() != sfn.getValue()) {
@@ -340,7 +349,7 @@ void Tabulation::forward_tabulate_ide() {
                             for (auto jf : jumpFunc) {
                                 auto jfn = jf.second;
                                 // skip T fn
-                                if (jfn.getValue() == get_top_value(sgProp->actionIdMap.size()))
+                                if (jfn.getValue() == sgProp->topEnvValue)
                                     continue;
                                 auto je = jf.first;
                                 if (je.second.node == sourceTabTv.node &&
@@ -363,9 +372,18 @@ void Tabulation::forward_tabulate_ide() {
     LOG5("=== (END) IDE Tabulate Process ===");
 }
 
+size_t Tabulation::may_meet_value(size_t a, size_t b) {
+    size_t c = a | b;
+    // T (unknown) | v = v
+    if (sgProp->topEnvValue == a) return b;
+    if (sgProp->topEnvValue == b) return a;
+    return c;
+}
+
 void Tabulation::propagate_value_ide(TabVertex tv, size_t val) {
     LOG5("[II-1] " << dump_tab_vertex(tv) << "&=" << val);
-    auto newVal = val & valueMap[tv];
+
+    size_t newVal = may_meet_value(val, valueMap[tv]);
     if (newVal != valueMap[tv]) {
         valueMap[tv] = newVal;
         nodeWorkList.push(tv);
@@ -379,7 +397,7 @@ void Tabulation::compute_values_ide() {
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto vinfo = (*g)[*vit];
         if (!hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
-        valueMap[get_tab_vertex(*vit)] = get_top_value(sgProp->actionIdMap.size());
+        valueMap[get_tab_vertex(*vit)] = sgProp->topEnvValue;
     }
 
     // Line 1-14: Phase II-1
@@ -433,7 +451,7 @@ void Tabulation::compute_values_ide() {
                     auto jfn = jf.second;
                     // <n, d> -> <c, d'>
                     if (te.first == tv && te.second.node == *vit &&
-                            jfn.getValue() != get_top_value(sgProp->actionIdMap.size())) {
+                            jfn.getValue() != sgProp->topEnvValue) {
                             // (c, d'), f'(val(s_p, d)): s_p == n
                             propagate_value_ide(te.second, jfn(valueMap[te.first]));
                     }
@@ -447,7 +465,7 @@ void Tabulation::compute_values_ide() {
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto vinfo = (*g)[*vit];
         // Skip CALL
-        if (!hasFlag(vinfo.flags, VertexFlags::CALL)) continue;
+        if (hasFlag(vinfo.flags, VertexFlags::CALL)) continue;
         // Set vProcName only for s_p to skip ENTRY
         cstring vProcName = cstring::empty;
         if (sgProp->rootVar == *vit) {
@@ -466,7 +484,7 @@ void Tabulation::compute_values_ide() {
             // Find jumpFn with dst n(*vit)
             if (te.second.node != *vit) continue;
             // Skip top-lattice value
-            if (jfn.getValue() == get_top_value(sgProp->actionIdMap.size()))
+            if (jfn.getValue() == sgProp->topEnvValue)
                 continue;
             auto vProcName = sgProp->procOf[*vit];
             auto src = sgProp->srcOf[vProcName];
@@ -476,7 +494,7 @@ void Tabulation::compute_values_ide() {
             // val(<n,d>) := val(<n,d>) ^ jf(val(<s_p, d'>))
             auto val = jfn(valueMap[te.first]);
             LOG5("[II-2] " << dump_tab_vertex(te.second) << "&=" << val);
-            valueMap[te.second] &= val;
+            valueMap[te.second] = may_meet_value(val, valueMap[te.second]);
         }
 
     }
