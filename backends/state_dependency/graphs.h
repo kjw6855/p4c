@@ -545,52 +545,19 @@ class Graphs {
 
     void add_and_connect_vertex(Graphs::vertex_t &target, EdgeType edgeType);
 
+    vertex_t add_var_vertex(const IR::Node *var, std::optional<const vertex_t> node=std::nullopt,
+            std::optional<cstring> name=std::nullopt);
+
+    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var,
+            const vertex_t &v, bool isUsed,
+            std::optional<cstring> name=std::nullopt);
+
     cstring get_var_name(const IR::Node *var) {
         std::stringstream sstream;
         sstream << var;
         auto fullName = cstring(sstream);
         if (auto *p = fullName.findlast(' ')) return cstring(p + 1);
         return fullName;
-    }
-
-    vertex_t add_var_vertex(const IR::Node *var, std::optional<const vertex_t> node=std::nullopt,
-            std::optional<cstring> name=std::nullopt) {
-        cstring vname = name.has_value() ? name.value() : get_var_name(var);
-        auto vv = add_vertex(vname, VertexFlags::VARIABLE, var);
-
-        if (node.has_value())
-            add_edge(node.value(), vv, cstring::empty, EdgeType::HAS_VAR);
-
-        return vv;
-    }
-
-    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var,
-            const vertex_t &v, bool isUsed,
-            std::optional<cstring> name=std::nullopt) {
-        /* check duplicate variable in set */
-        auto &varset = graphVars[graphName];
-        auto *newVar = var;
-        for (auto *inVar : varset) {
-            if (inVar->equiv(*var)) {
-                newVar = inVar;
-                break;
-            }
-        }
-        // Insert new variable
-        if (newVar == var)
-            graphVars[graphName].insert(var);
-
-        bool createVar = varVis != VarVisibility::NONE;
-        if (createVar || genSupergraphs) {
-            auto &vinfo = (*g)[v];
-            auto &varList = isUsed ? vinfo.useVars : vinfo.defVars;
-            varList.push_back(newVar);
-
-            // supergraphs.cpp will create vertex later
-            if (createVar && !genSupergraphs)
-                return add_var_vertex(newVar, v, name);
-        }
-        return {};
     }
 
     vertex_t get_root_vertex(Graph *g) {
@@ -760,6 +727,10 @@ class Graphs {
     Parents parents{};
     cstring graphName;
     cstring procName;
+
+    // Used by controls.cpp
+    std::vector<const IR::Node *> curKeyVars;
+    bool storeKeys = false;
 
  public:
     VarVisibility varVis = VarVisibility::NONE;

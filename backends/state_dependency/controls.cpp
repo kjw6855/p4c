@@ -221,6 +221,15 @@ bool ControlGraphs::preorder(const IR::SwitchStatement *statement) {
 bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
     auto instance = P4::MethodInstance::resolve(statement->methodCall, refMap, typeMap);
 
+    std::vector<const IR::Node *> params;
+    for (auto *p : *statement->methodCall->arguments) {
+        if (auto *arg = p->to<IR::Argument>()) {
+            params.push_back(arg->expression);
+        } else {
+            params.push_back(p);
+        }
+    }
+
     if (instance->is<P4::ApplyMethod>()) {
         auto am = instance->to<P4::ApplyMethod>();
         if (auto table = am->object->to<IR::P4Table>()) {
@@ -256,22 +265,14 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         auto em = instance->to<P4::ExternMethod>();
 
         if (em->originalExternType->getName().name == "register") {
-            std::vector<const IR::Node *> params;
-            for (auto *p : *statement->methodCall->arguments) {
-                if (auto *arg = p->to<IR::Argument>()) {
-                    params.push_back(arg->expression);
-                } else {
-                    params.push_back(p);
-                }
-            }
             if (em->method->name.name == "read" && params.size() >= 2) {
                 // void read(out T result, in I index);
-                visit_stateful(vName, statement, params[1], false, params[0]);
+                visit_stateful(vName, statement, {params[1]}, false, {params[0]});
                 return false;
 
             } else if (em->method->name.name == "write" && params.size() >= 2) {
                 // void write(in I index, in T value);
-                visit_stateful(vName, statement, params[0], true, params[1]);
+                visit_stateful(vName, statement, {params[0]}, true, {params[1]});
                 return false;
             }
         }
@@ -298,14 +299,21 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         for (auto *p : *statement->methodCall->arguments) visit(p);
         cur_v = prev_cur_v;
     } else {
-        auto flags = VertexFlags::STATEMENT;
-        if (auto *ec = instance->to<P4::ExternCall>()) {
-            if (ec->method->name.name == "add_entry")
-                flags |= VertexFlags::STATEFUL;
-        }
         std::stringstream sstream;
         statement->dbprint(sstream);
         auto vName = cstring(sstream);
+        auto flags = VertexFlags::STATEMENT;
+        if (auto *ec = instance->to<P4::ExternCall>()) {
+            // add_entry
+            if (ec->method->name.name == "add_entry") {
+                BUG_CHECK(params.size() >= 2,
+                        "add_entry requires more params: %1%",
+                        params.size());
+                // Key goes index
+                visit_stateful(vName, statement, curKeyVars, true, {params[1]});
+                return false;
+            }
+        }
 
         auto v = add_and_connect_vertex(vName, flags, statement);
         parents = {{v, new EdgeUnconditional()}};
@@ -434,8 +442,11 @@ bool ControlGraphs::preorder(const IR::Key *key) {
     auto prev_cur_v = cur_v;
     cur_v = v;
     auto oldstate = state;
+    storeKeys = true;
+    curKeyVars = {};
     state = READ_ONLY;      // store keys in useVars
     for (auto elVec : key->keyElements) visit(elVec);
+    storeKeys = false;
     state = oldstate;
     cur_v = prev_cur_v;
 
@@ -568,8 +579,8 @@ bool ControlGraphs::preorder(const IR::PathExpression *pe) {
 }
 
 void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
-        const IR::Node *idx, bool isWrite,
-        const IR::Node *data) {
+        std::vector<const IR::Node *> indices, bool isWrite,
+        std::vector<const IR::Node *> dataVals) {
     VertexFlags flags = VertexFlags::STATEMENT | VertexFlags::STATEFUL;
     // Access idx first
     auto fv = add_and_connect_vertex("ACCESS "_cs + name,
@@ -579,9 +590,9 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
     auto prev_cur_v = cur_v;
     cur_v = fv;
     state = READ_ONLY;
-    visit(idx, "index", 1);
+    for (auto idx : indices) visit(idx, "index", 1);
 
-    if (data != nullptr) {
+    if (dataVals.size() > 0) {
         // Whether the node reads or writes data
         auto svNamePrefix = isWrite ? "WRITE "_cs : "READ "_cs;
         auto svFlag = isWrite ? VertexFlags::SO_WRITE_DATA : VertexFlags::SO_READ_DATA;
@@ -590,7 +601,7 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
         cur_v = sv;
         // Whether the data is read (node writes) or written (node reads)
         state = isWrite ? READ_ONLY : WRITE_ONLY;
-        visit(data, "data", isWrite ? 2 : 1);
+        for (auto data : dataVals) visit(data, "data", isWrite ? 2 : 1);
         parents = {{sv, new EdgeUnconditional()}};
     }
     cur_v = prev_cur_v;
