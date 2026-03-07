@@ -275,6 +275,21 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                 visit_stateful(vName, statement, {params[0]}, true, {params[1]});
                 return false;
             }
+        } else if (em->originalExternType->getName().name == "Counter") {
+            if (em->method->name.name == "count" && params.size() == 1) {
+                // No data field
+                visit_stateful(vName, statement, {params[0]});
+                return false;
+            }
+        } else if (em->originalExternType->getName().name == "Meter") {
+            if (em->method->name.name == "execute") {
+                if (params.size() == 1) {
+                    visit_stateful(vName, statement, {params[0]});
+                } else if (params.size() == 2) {
+                    visit_stateful(vName, statement, {params[0]}, true, {params[1]});
+                }
+                return false;
+            }
         }
 
         // Other externs...
