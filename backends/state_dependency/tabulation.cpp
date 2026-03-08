@@ -23,8 +23,6 @@ void Tabulation::init_ide() {
 
     BUG_CHECK(sgProp->actionIdMap.size() > 0, "Action does not exist.");
 
-    auto topFunc = EdgeFuncHolder(std::make_unique<TopFunc>(sgProp->actionIdMap.size()));
-
     auto vertices = boost::vertices(*g);
 
     // Line 1-2: Init jumpFunc
@@ -36,12 +34,12 @@ void Tabulation::init_ide() {
         // 1) main process
         if (vProcName == sgProp->procOf[sgProp->rootVar]) {
             for (auto *p : sgProp->variableList)
-                jumpFunc.add_func({rootTv, TabVertex{*vit, p}}, topFunc);
+                jumpFunc.add_func({rootTv, TabVertex{*vit, p}}, sgProp->topFunc);
         } else {
             auto src = sgProp->srcOf[vProcName];
             for (auto *p : sgProp->variableList)
                 for (auto *q : sgProp->variableList)
-                    jumpFunc.add_func({TabVertex{src, p}, TabVertex{*vit, q}}, topFunc);
+                    jumpFunc.add_func({TabVertex{src, p}, TabVertex{*vit, q}}, sgProp->topFunc);
         }
     }
 
@@ -55,7 +53,7 @@ void Tabulation::init_ide() {
             auto dstTv = get_tab_vertex(boost::target(*ei, *g));
             // TODO: check d, d' should be all pair of data facts
             if (sgProp->procOf[srcTv.node] == sgProp->procOf[dstTv.node])
-                jumpFunc.add_func({srcTv, dstTv}, topFunc);
+                jumpFunc.add_func({srcTv, dstTv}, sgProp->topFunc);
 
         } else if (edge.type == EdgeType::CALL_TO_RETURN) {
             auto src = boost::source(*ei, *g);
@@ -63,7 +61,7 @@ void Tabulation::init_ide() {
 
             for (auto *p : sgProp->variableList)
                 for (auto *q : sgProp->variableList)
-                    summaryFunc.add_func({TabVertex{src, p}, TabVertex{dst, q}}, topFunc);
+                    summaryFunc.add_func({TabVertex{src, p}, TabVertex{dst, q}}, sgProp->topFunc);
         }
     }
 

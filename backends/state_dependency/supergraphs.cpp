@@ -127,7 +127,9 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
             curProp->actionIdMap[*vit] = actId++;
         }
     }
-    curProp->topEnvValue = get_top_value(actId);
+    // Increment actId to differentiate from all-enabled value
+    curProp->topEnvValue = get_top_value(actId + 1);
+    curProp->topFunc = EdgeFuncHolder(std::make_unique<TopFunc>(actId + 1));
 
     // Traverse ICFG
     std::size_t n = num_vertices(*g);

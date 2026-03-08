@@ -36,6 +36,7 @@ class SuperGraphProp {
     hvec_map<Graphs::vertex_t, size_t> actionIdMap;
     hvec_map<cstring, Graphs::vertex_t> srcOf;
     std::size_t topEnvValue;
+    EdgeFuncHolder topFunc;
 
     std::vector<Graphs::vertex_t> get_action_vertices(size_t bitmap);
 };
