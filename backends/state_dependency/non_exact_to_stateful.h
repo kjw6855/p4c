@@ -15,9 +15,11 @@ class FindNonExactToStateful : public Graphs,
 
  public:
     explicit FindNonExactToStateful(std::vector<Graph *> *controlGraphsArray,
-            std::vector<SuperGraphProp *> *graphProps)
+            std::vector<SuperGraphProp *> *graphProps,
+            GenSGMode genSupergraphs)
         : controlGraphsArray(controlGraphsArray),
-          graphProps(graphProps) {}
+          graphProps(graphProps),
+          genSupergraphs(genSupergraphs) {}
     Visitor::profile_t init_apply(const IR::Node *) override;
 
  private:
@@ -28,13 +30,16 @@ class FindNonExactToStateful : public Graphs,
  protected:
     std::vector<Graph *> *controlGraphsArray{};
     std::vector<SuperGraphProp *> *graphProps{};
+    GenSGMode genSupergraphs;
 };
 
 class NonExactToStateful : public PassManager {
  public:
     explicit NonExactToStateful(std::vector<Graph *> *controlGraphsArray,
-            std::vector<SuperGraphProp *> *graphProps) {
-        passes.push_back(new FindNonExactToStateful(controlGraphsArray, graphProps));
+            std::vector<SuperGraphProp *> *graphProps,
+            GenSGMode genSupergraphs) {
+        passes.push_back(new FindNonExactToStateful(controlGraphsArray,
+                    graphProps, genSupergraphs));
     }
 };
 

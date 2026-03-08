@@ -89,13 +89,14 @@ std::optional<vertex_t> Graphs::add_variable_in_vertex(const IR::Node *var,
         graphVars[graphName].insert(var);
 
     bool createVar = varVis != VarVisibility::NONE;
-    if (createVar || genSupergraphs) {
+    bool genSG = genSupergraphs != GenSGMode::NONE;
+    if (createVar || genSG) {
         auto &vinfo = (*g)[v];
         auto &varList = isUsed ? vinfo.useVars : vinfo.defVars;
         varList.push_back(newVar);
 
         // supergraphs.cpp will create vertex later
-        if (createVar && !genSupergraphs)
+        if (createVar && !genSG)
             return add_var_vertex(newVar, v, name);
     }
     return {};

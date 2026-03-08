@@ -120,8 +120,9 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
         }
 
         // Set actionIdMap
-        // TODO: Exclude actId assignments for emptyAction
-        if (hasFlag(vinfo.flags, VertexFlags::ACTION)) {
+        // TODO: Check defVars in ACTION statements
+        if (hasFlag(vinfo.flags, VertexFlags::ACTION) &&
+                vinfo.defVars.size() > 0) {
             curProp->actions.push_back(*vit);
             curProp->actionIdMap[*vit] = actId++;
         }

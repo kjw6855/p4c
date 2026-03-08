@@ -485,6 +485,12 @@ enum class VarVisibility {
     FULL,
 };
 
+enum class GenSGMode {
+    NONE,
+    ON_DEMAND,
+    FULL,
+};
+
 class Graphs {
  public:
     struct Vertex {
@@ -734,7 +740,7 @@ class Graphs {
 
  public:
     VarVisibility varVis = VarVisibility::NONE;
-    bool genSupergraphs;
+    GenSGMode genSupergraphs = GenSGMode::NONE;
     static const IR::Node *globalNode;
 };
 

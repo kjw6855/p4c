@@ -18,11 +18,6 @@ class Tabulation : public Graphs {
         const IR::Node *var;
         mutable size_t computedHash = 0;
 
-        /*
-        TabVertex() = default;
-        TabVertex(Graphs::vertex_t node, const IR::Node *var)
-            : node(node), var(var) {}
-            */
         bool operator==(const TabVertex &a) const {
             if (node != a.node) return false;
             return var == a.var;
@@ -43,11 +38,47 @@ class Tabulation : public Graphs {
     };
 
     using TabEdge = std::pair<TabVertex, TabVertex>;
+    using FuncMap = hvec_map<TabEdge, EdgeFuncHolder>;
 
-    explicit Tabulation(Graph *g, SuperGraphProp *sgProp)
-        : g(g), sgProp(sgProp) {
-            rootTv = TabVertex{sgProp->rootVar, Graphs::globalNode};
+    struct FuncMapHelper {
+     public:
+        void add_func(const TabEdge &te, EdgeFuncHolder fn) {
+            funcMap[te] = fn;
+            funcSecondKeyMap[te.second].insert(te);
+            funcKeyMap[{te.first.node, te.second.node}].insert(te);
         }
+
+        FuncMap get_func_by_nodes(const Graphs::vertex_t &a, const Graphs::vertex_t &b) {
+            FuncMap foundFunc;
+            auto fkit = funcKeyMap.find({a, b});
+            if (fkit == funcKeyMap.end()) return foundFunc;
+            for (auto funcKey : fkit->second)
+                foundFunc[funcKey] = funcMap[funcKey];
+            return foundFunc;
+        }
+
+        FuncMap get_func_by_second(const TabVertex &tb) {
+            FuncMap foundFunc;
+            auto fskit = funcSecondKeyMap.find(tb);
+            if (fskit == funcSecondKeyMap.end()) return foundFunc;
+            for (auto funcKey : fskit->second)
+                foundFunc[funcKey] = funcMap[funcKey];
+            return foundFunc;
+        }
+
+        EdgeFuncHolder &operator[](const TabEdge &k) {
+            return funcMap[k];
+        }
+
+        EdgeFuncHolder &operator[](TabEdge &&k) {
+            return funcMap[k];
+        }
+
+     private:
+        FuncMap funcMap;
+        hvec_map<TabVertex, hvec_set<TabEdge>, TabVertexHash> funcSecondKeyMap;
+        hvec_map<std::pair<Graphs::vertex_t, Graphs::vertex_t>, hvec_set<TabEdge>> funcKeyMap;
+    };
 
     Graphs::vertex_t get_vertex_id(const TabVertex &tb) {
         if (tb.node == sgProp->rootVar) return tb.node;
@@ -97,6 +128,23 @@ class Tabulation : public Graphs {
         return cstring(logstr);
     }
 
+    explicit Tabulation(Graph *g, SuperGraphProp *sgProp)
+        : g(g), sgProp(sgProp) {
+            rootTv = TabVertex{sgProp->rootVar, Graphs::globalNode};
+        }
+
+    std::vector<TabVertex> get_incoming(const TabVertex &a) {
+        auto iit = incomingList.find(a);
+        if (iit == incomingList.end()) return {};
+        return iit->second;
+    }
+
+    std::vector<TabVertex> get_end_summary(const TabVertex &a) {
+        auto esit = endSummary.find(a);
+        if (esit == endSummary.end()) return {};
+        return esit->second;
+    }
+
  private:
     void propagate_ifds(TabVertex a, TabVertex b);
     void propagate_ide(TabVertex a, TabVertex b, EdgeFuncHolder fn);
@@ -105,6 +153,8 @@ class Tabulation : public Graphs {
             std::vector<TabVertex> &succ);
     EdgeFuncHolder get_edge_func(TabVertex &a, TabVertex &b);
     size_t may_meet_value(size_t a, size_t b);
+    std::vector<TabVertex> get_return_val(const TabVertex &exitTv,
+            const TabVertex &callerTv);
 
  public:
     Graph *g;
@@ -115,6 +165,7 @@ class Tabulation : public Graphs {
     void init_ide();
     void forward_tabulate_ifds();
     void forward_tabulate_ide();
+    void forward_tabulate_on_demand_ide();
     void compute_values_ide();
     void find_path(std::vector<TabVertex> &tvs);
     void dump_result();
@@ -122,13 +173,15 @@ class Tabulation : public Graphs {
     hvec_set<TabEdge> pathEdge;
     hvec_set<TabEdge> summaryEdge;
     hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> reachableVars;
-    hvec_map<TabEdge, EdgeFuncHolder> jumpFunc;
-    hvec_map<TabEdge, EdgeFuncHolder> summaryFunc;
+    FuncMapHelper jumpFunc;
+    FuncMapHelper summaryFunc;
     hvec_map<TabVertex, size_t, TabVertexHash> valueMap;
 
  private:
     std::queue<TabEdge> workList;
     std::queue<TabVertex> nodeWorkList;
+    hvec_map<TabVertex, std::vector<TabVertex>, TabVertexHash> incomingList;
+    hvec_map<TabVertex, std::vector<TabVertex>, TabVertexHash> endSummary;
 };
 
 }  // namespace P4::P4StateDependency

@@ -16,8 +16,10 @@ void Tabulation::init_ifds() {
 
 void Tabulation::init_ide() {
     workList = std::queue<TabEdge>();
-    jumpFunc.clear();
-    summaryFunc.clear();
+    incomingList.clear();
+    endSummary.clear();
+    jumpFunc = FuncMapHelper();
+    summaryFunc = FuncMapHelper();
 
     BUG_CHECK(sgProp->actionIdMap.size() > 0, "Action does not exist.");
 
@@ -34,12 +36,12 @@ void Tabulation::init_ide() {
         // 1) main process
         if (vProcName == sgProp->procOf[sgProp->rootVar]) {
             for (auto *p : sgProp->variableList)
-                jumpFunc[{rootTv, TabVertex{*vit, p}}] = topFunc;
+                jumpFunc.add_func({rootTv, TabVertex{*vit, p}}, topFunc);
         } else {
             auto src = sgProp->srcOf[vProcName];
             for (auto *p : sgProp->variableList)
                 for (auto *q : sgProp->variableList)
-                    jumpFunc[{TabVertex{src, p}, TabVertex{*vit, q}}] = topFunc;
+                    jumpFunc.add_func({TabVertex{src, p}, TabVertex{*vit, q}}, topFunc);
         }
     }
 
@@ -53,7 +55,7 @@ void Tabulation::init_ide() {
             auto dstTv = get_tab_vertex(boost::target(*ei, *g));
             // TODO: check d, d' should be all pair of data facts
             if (sgProp->procOf[srcTv.node] == sgProp->procOf[dstTv.node])
-                jumpFunc[{srcTv, dstTv}] = topFunc;
+                jumpFunc.add_func({srcTv, dstTv}, topFunc);
 
         } else if (edge.type == EdgeType::CALL_TO_RETURN) {
             auto src = boost::source(*ei, *g);
@@ -61,12 +63,12 @@ void Tabulation::init_ide() {
 
             for (auto *p : sgProp->variableList)
                 for (auto *q : sgProp->variableList)
-                    summaryFunc[{TabVertex{src, p}, TabVertex{dst, q}}] = topFunc;
+                    summaryFunc.add_func({TabVertex{src, p}, TabVertex{dst, q}}, topFunc);
         }
     }
 
     workList.push({rootTv, rootTv});
-    jumpFunc[{rootTv, rootTv}] = globalIdFunc;
+    jumpFunc.add_func({rootTv, rootTv}, globalIdFunc);
 }
 
 void Tabulation::propagate_ifds(TabVertex a, TabVertex b) {
@@ -132,15 +134,7 @@ void Tabulation::forward_tabulate_ifds() {
         auto dstProc = sgProp->procOf[te.second.node];
         auto dstInfo = (*g)[te.second.node];
         if (hasFlag(dstInfo.flags, VertexFlags::CALL)) {
-            auto callMapIt = sgProp->callMap.find(te.second.node);
-            if (callMapIt == sgProp->callMap.end()) {
-                std::stringstream sstream;
-                sstream << dstInfo.node;
-                BUG("No callMap for %1% (%2%)",
-                        cstring(sstream), te.second.node);
-            }
-            auto [calleeEntry, callerRet] = callMapIt->second;
-
+            auto [calleeEntry, callerRet] = sgProp->get_call_map(te.second.node);
             auto dstVar = get_vertex_id(te.second);
             for (auto [ei, ei_end] = boost::out_edges(dstVar, *g);
                     ei != ei_end; ++ei) {
@@ -187,7 +181,7 @@ void Tabulation::forward_tabulate_ifds() {
                             ej != ej_end; ++ej) {
                         auto targetVar = boost::target(*ej, *g);
                         auto targetTabTv = get_tab_vertex(targetVar);
-                        auto [_, retSite] = sgProp->callMap[cvit];
+                        auto [_, retSite] = sgProp->get_call_map(cvit);
                         if (targetTabTv.node != retSite) continue;
                         // Line 24
                         TabEdge te = {sourceTabTv, targetTabTv};
@@ -267,14 +261,7 @@ void Tabulation::forward_tabulate_ide() {
         auto dstProc = sgProp->procOf[te.second.node];
         auto dstInfo = (*g)[te.second.node];
         if (hasFlag(dstInfo.flags, VertexFlags::CALL)) {
-            auto callMapIt = sgProp->callMap.find(te.second.node);
-            if (callMapIt == sgProp->callMap.end()) {
-                std::stringstream sstream;
-                sstream << dstInfo.node;
-                BUG("No callMap for %1% (%2%)",
-                        cstring(sstream), te.second.node);
-            }
-            auto [calleeEntry, callerRet] = callMapIt->second;
+            auto [calleeEntry, callerRet] = sgProp->get_call_map(te.second.node);
 
             auto dstVar = get_vertex_id(te.second);
             for (auto [ei, ei_end] = boost::out_edges(dstVar, *g);
@@ -294,16 +281,13 @@ void Tabulation::forward_tabulate_ide() {
             }
 
             // Line 17-18: (2) if summary edge exists, short-circuit
-            for (auto sf : summaryFunc) {
+            for (auto sf : summaryFunc.get_func_by_nodes(te.second.node, callerRet)) {
                 auto sfn = sf.second;
                 // skip T fn
                 if (sfn.getValue() == sgProp->topEnvValue)
                     continue;
                 auto se = sf.first;
-                if (se.first.node == te.second.node &&
-                        se.second.node == callerRet) {
-                    propagate_ide(te.first, se.second, sfn.compose(fn));
-                }
+                propagate_ide(te.first, se.second, sfn.compose(fn));
             }
         } else if (hasFlag(dstInfo.flags, VertexFlags::EXIT) &&
                 srcProc == dstProc) {
@@ -328,35 +312,179 @@ void Tabulation::forward_tabulate_ide() {
                             ej != ej_end; ++ej) {
                         auto targetVar = boost::target(*ej, *g);
                         auto targetTabTv = get_tab_vertex(targetVar);   // <ret, d5>
-                        auto [_, retSite] = sgProp->callMap[cvit];
+                        auto [_, retSite] = sgProp->get_call_map(cvit);
                         if (targetTabTv.node != retSite) continue;
 
-                        TabEdge te = {sourceTabTv, targetTabTv};
+                        TabEdge newTe = {sourceTabTv, targetTabTv};
                         // Line 22-24
                         auto f4 = get_edge_func(sourceTabTv, te.first);
                         auto f5 = get_edge_func(te.second, targetTabTv);
-                        auto sfn = summaryFunc[te];     // XXX
+                        auto sfn = summaryFunc[newTe];     // XXX
                         auto fPrime = (f5.compose(fn.compose(f4))).may_join(sfn);
 
                         // Line 25-29
                         if (fPrime.getValue() != sfn.getValue()) {
-                            summaryFunc[te] = fPrime;
-                        }
-                        if (summaryEdge.find(te) == summaryEdge.end()) {
-                            summaryEdge.insert(te);
+                            summaryFunc[newTe] = fPrime;
+
                             // Line 26-29
                             auto callProcName = sgProp->procOf[cvit];
-                            for (auto jf : jumpFunc) {
+                            for (auto jf : jumpFunc.get_func_by_second(sourceTabTv)) {
                                 auto jfn = jf.second;
                                 // skip T fn
                                 if (jfn.getValue() == sgProp->topEnvValue)
                                     continue;
                                 auto je = jf.first;
-                                if (je.second.node == sourceTabTv.node &&
-                                        je.second.var == sourceTabTv.var &&
-                                        sgProp->procOf[je.first.node] == callProcName)
+                                if (sgProp->procOf[je.first.node] == callProcName)
                                     propagate_ide(je.first, targetTabTv, fPrime.compose(jfn));
                             }
+                        }
+                    }
+                }
+            }
+        } else {
+            std::vector<TabVertex> succ;
+            for (auto tb : get_successors(te.second, succ)) {
+                auto efn = get_edge_func(te.second, tb);
+                propagate_ide(te.first, tb, efn.compose(fn));
+            }
+        }
+    }
+    LOG5("=== (END) IDE Tabulate Process ===");
+}
+
+std::vector<TabVertex> Tabulation::get_return_val(const TabVertex &exitTv,
+        const TabVertex &callerTv) {
+    auto exitVit = get_vertex_id(exitTv);
+    auto [_, retSite] = sgProp->get_call_map(callerTv.node);
+
+    std::vector<TabVertex> retVals;
+    for (auto [ei, ei_end] = boost::out_edges(exitVit, *g); ei != ei_end; ++ei) {
+        auto retVit = boost::target(*ei, *g);
+        auto retTabTv = get_tab_vertex(retVit);
+        if (retSite != retTabTv.node) continue;
+
+        // TODO: check if it's okay to add d2 for <caller, d2> -> <ret, d5>
+        for (auto [ej, ej_end] = boost::in_edges(retVit, *g); ej != ej_end; ++ej) {
+            auto &edge = (*g)[*ej];
+            if (edge.type == EdgeType::HAS_VAR) continue;
+
+            auto srcVit = boost::source(*ej, *g);
+            if (srcVit == exitVit) continue;
+
+            auto srcTabTv = get_tab_vertex(srcVit);
+            if (srcTabTv.node != callerTv.node) continue;
+
+            // If source is caller, store found retTabTv
+            retVals.push_back(retTabTv);
+        }
+    }
+    return retVals;
+}
+
+void Tabulation::forward_tabulate_on_demand_ide() {
+    LOG5("=== (BEGIN) IDE Tabulate Process ===");
+    while (!workList.empty()) {
+        TabEdge te = workList.front();
+        workList.pop();
+
+        auto fn = jumpFunc[te];
+        auto srcProc = sgProp->procOf[te.first.node];
+        auto dstProc = sgProp->procOf[te.second.node];
+        auto dstInfo = (*g)[te.second.node];
+        if (hasFlag(dstInfo.flags, VertexFlags::CALL)) {
+            // <s_q, d1> -> <c, d2>
+            // <c> -> <s_p, r>
+            auto [calleeEntry, callerRet] = sgProp->get_call_map(te.second.node);
+
+            auto dstVar = get_vertex_id(te.second);
+            for (auto [ei, ei_end] = boost::out_edges(dstVar, *g);
+                    ei != ei_end; ++ei) {
+                auto targetVar = boost::target(*ei, *g);
+                auto targetTabTv = get_tab_vertex(targetVar);
+                // Line 12-13: propagate into callee start
+                if (targetTabTv.node == calleeEntry) {
+                    // targetTabTv = <s_p, d1>
+                    incomingList[targetTabTv].push_back(te.second);
+                    propagate_ide(targetTabTv, targetTabTv, globalIdFunc);
+                    // Line 15.2-15.6 (CC10 paper)
+                    for (auto es : get_end_summary(targetTabTv)) {
+                        for (auto rv : get_return_val(es, te.second)) {
+                            // TODO
+                            auto exitTabTv = es;    // <e_p, d4>
+                            auto retTabTv = rv;     // <r, d5>
+
+                            // <n=c, d2>, <r, d5>
+                            TabEdge newTe = {te.second, retTabTv};
+                            // <c, d2>, <s_p, d1>
+                            auto f4 = get_edge_func(te.second, targetTabTv);
+                            // <e_p, d2> -> <r, d5>
+                            auto f5 = get_edge_func(exitTabTv, retTabTv);
+                            auto sfn = summaryFunc[newTe];     // XXX
+                            auto fPrime = (f5.compose(fn.compose(f4))).may_join(sfn);
+                            if (fPrime.getValue() != sfn.getValue()) {
+                                summaryFunc[newTe] = fPrime;
+                            }
+                        }
+                    }
+                }
+
+                // Line 14-16 (1) short-circuit
+                if (targetTabTv.node == callerRet) {
+                    auto efn = get_edge_func(te.first, targetTabTv);
+                    propagate_ide(te.first, targetTabTv, efn.compose(fn));
+                }
+            }
+
+            // Line 17-18: (2) if summary edge exists, short-circuit
+            for (auto sf : summaryFunc.get_func_by_nodes(te.second.node, callerRet)) {
+                auto sfn = sf.second;
+                // skip T fn
+                if (sfn.getValue() == sgProp->topEnvValue)
+                    continue;
+                auto se = sf.first;
+                // <s_p, d1> -> <ret_n, d3>
+                propagate_ide(te.first, se.second, sfn.compose(fn));
+            }
+        } else if (hasFlag(dstInfo.flags, VertexFlags::EXIT) &&
+                srcProc == dstProc) {
+            //auto srcVar = get_vertex_id(te.first);
+            //auto dstVar = get_vertex_id(te.second);
+
+            endSummary[te.first].push_back(te.second);
+
+            // Line 20: For every caller
+            for (auto inTabTv : get_incoming(te.first)) {
+
+                auto cvit = inTabTv.node;
+
+                for (auto rv : get_return_val(te.second, inTabTv)) {
+                    auto sourceTabTv = inTabTv; // <c, d4>
+                    auto targetTabTv = rv;      // <ret, d5>
+
+                    // <c, d4> -> <ret, d5>
+                    TabEdge newTe = {sourceTabTv, targetTabTv};
+                    // Line 22-24
+                    // <c, d4> -> <s_p, d1>
+                    auto f4 = get_edge_func(sourceTabTv, te.first);
+                    // <e_p, d2> -> <r, d5>
+                    auto f5 = get_edge_func(te.second, targetTabTv);
+                    auto sfn = summaryFunc[newTe];     // XXX
+                    auto fPrime = (f5.compose(fn.compose(f4))).may_join(sfn);
+
+                    // Line 25-29
+                    if (fPrime.getValue() != sfn.getValue()) {
+                        summaryFunc[newTe] = fPrime;
+
+                        // Line 26-29
+                        auto callProcName = sgProp->procOf[cvit];
+                        for (auto jf : jumpFunc.get_func_by_second(sourceTabTv)) {
+                            auto jfn = jf.second;
+                            // skip T fn
+                            if (jfn.getValue() == sgProp->topEnvValue)
+                                continue;
+                            auto je = jf.first;
+                            if (sgProp->procOf[je.first.node] == callProcName)
+                                propagate_ide(je.first, targetTabTv, fPrime.compose(jfn));
                         }
                     }
                 }
@@ -446,14 +574,13 @@ void Tabulation::compute_values_ide() {
             if (hasFlag(vinfo.flags, VertexFlags::CALL) &&
                 sgProp->procOf[*vit] == vProcName) {
                 // Line 9
-                for (auto jf : jumpFunc) {
+                for (auto jf : jumpFunc.get_func_by_nodes(tv.node, *vit)) {
                     auto te = jf.first;
                     auto jfn = jf.second;
                     // <n, d> -> <c, d'>
-                    if (te.first == tv && te.second.node == *vit &&
-                            jfn.getValue() != sgProp->topEnvValue) {
-                            // (c, d'), f'(val(s_p, d)): s_p == n
-                            propagate_value_ide(te.second, jfn(valueMap[te.first]));
+                    if (te.first == tv && jfn.getValue() != sgProp->topEnvValue) {
+                        // (c, d'), f'(val(s_p, d)): s_p == n
+                        propagate_value_ide(te.second, jfn(valueMap[te.first]));
                     }
                 }
             }
@@ -466,6 +593,8 @@ void Tabulation::compute_values_ide() {
         auto vinfo = (*g)[*vit];
         // Skip CALL
         if (hasFlag(vinfo.flags, VertexFlags::CALL)) continue;
+        if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
+
         // Set vProcName only for s_p to skip ENTRY
         cstring vProcName = cstring::empty;
         if (sgProp->rootVar == *vit) {
@@ -478,18 +607,14 @@ void Tabulation::compute_values_ide() {
         }
         if (vProcName.size() > 0) continue;
 
-        for (auto jf : jumpFunc) {
+        auto src = sgProp->srcOf[sgProp->procOf[*vit]];
+
+        for (auto jf : jumpFunc.get_func_by_nodes(src, *vit)) {
             auto te = jf.first;     // <s_p, d'>, <n, d>
             auto jfn = jf.second;
-            // Find jumpFn with dst n(*vit)
-            if (te.second.node != *vit) continue;
             // Skip top-lattice value
             if (jfn.getValue() == sgProp->topEnvValue)
                 continue;
-            auto vProcName = sgProp->procOf[*vit];
-            auto src = sgProp->srcOf[vProcName];
-            // Skip non-source s_p
-            if (src != te.first.node) continue;
 
             // val(<n,d>) := val(<n,d>) ^ jf(val(<s_p, d'>))
             auto val = jfn(valueMap[te.first]);

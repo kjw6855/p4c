@@ -10,11 +10,16 @@ namespace P4::P4StateDependency {
 
 class SuperGraphProp {
  public:
-
     std::optional<size_t> get_action_id(Graphs::vertex_t v) {
         auto actionIdMapIt = actionIdMap.find(v);
         return actionIdMapIt == actionIdMap.end() ?
             std::nullopt : std::optional{actionIdMapIt->second};
+    }
+
+    std::pair<Graphs::vertex_t, Graphs::vertex_t> get_call_map(const Graphs::vertex_t &a) {
+        auto callMapIt = callMap.find(a);
+        if (callMapIt == callMap.end()) BUG("No callMap for %2%", a);
+        return callMapIt->second;
     }
 
     Graphs::vertex_t rootVar;

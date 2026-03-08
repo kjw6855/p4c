@@ -4,6 +4,38 @@
 
 namespace P4::P4StateDependency {
 
+template <typename Enum>
+bool pares_enum_option(const char* arg,
+                     const std::map<cstring, Enum>& options,
+                     Enum& out,
+                     const char* what) {
+    auto selectionString = cstring(arg).toUpper();
+    auto it = options.find(selectionString);
+    if (it != options.end()) {
+        out = it->second;
+        return true;
+    }
+
+    std::set<cstring> printSet;
+    std::transform(options.cbegin(), options.cend(),
+            std::inserter(printSet, printSet.begin()),
+            [](const std::pair<cstring, Enum> &mapTuple) {
+                return mapTuple.first;
+            });
+
+    std::stringstream sstream;
+    sstream << "[";
+    for (auto it2 = printSet.begin(); it2 != printSet.end(); ++it2) {
+        if (it2 != printSet.begin()) sstream << ", ";
+        sstream << *it2;
+    }
+    sstream << "]";
+
+    error("%1% %2% not supported. Supported values are %3%.",
+            what, selectionString, cstring(sstream));
+    return false;
+}
+
 P4StateDependencyOptions::P4StateDependencyOptions() {
     registerOption(
             "--graphs-dir", "dir",
@@ -58,30 +90,10 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
                     {"REACHABLE"_cs, VarVisibility::REACHABLE},
                     {"FULL"_cs, VarVisibility::FULL},
                 };
-                auto selectionString = cstring(arg).toUpper();
-                auto it = SHOW_VAR_OPTIONS.find(selectionString);
-                if (it != SHOW_VAR_OPTIONS.end()) {
-                    varVis = it->second;
-                    return true;
-                }
-                std::set<cstring> printSet;
-                std::transform(SHOW_VAR_OPTIONS.cbegin(), SHOW_VAR_OPTIONS.cend(),
-                               std::inserter(printSet, printSet.begin()),
-                               [](const std::pair<cstring, VarVisibility> &mapTuple) {
-                                   return mapTuple.first;
-                               });
-                std::stringstream sstream;
-                sstream << "[";
-                for (auto it = printSet.begin(); it != printSet.end(); ++it) {
-                    if (it != printSet.begin()) sstream << ", ";
-                    sstream << *it;
-                }
-                sstream << "]";
-                error(
-                    "Variable visibility %1% not supported. Supported visibilities are "
-                    "%2%.",
-                    selectionString, cstring(sstream));
-                return false;
+
+                return pares_enum_option(arg, SHOW_VAR_OPTIONS,
+                        varVis, "Variable visibility");
+
             },
             "Use to show nodes' variables in graph.");
     registerOption(
@@ -92,10 +104,17 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             },
             "Use to consider P4Action as procedure call.");
     registerOption(
-            "--supergraph", nullptr,
-            [this](const char *) {
-            genSupergraphs = true;
-            return true;
+            "--supergraph", "GenSGMode",
+            [this](const char *arg) {
+                static std::map<cstring, GenSGMode> const SUPERGRAPH_OPTIONS = {
+                    {"NONE"_cs, GenSGMode::NONE},
+                    {"ON_DEMAND"_cs, GenSGMode::ON_DEMAND},
+                    {"FULL"_cs, GenSGMode::FULL},
+                };
+
+                return pares_enum_option(arg, SUPERGRAPH_OPTIONS,
+                        genSupergraphs, "Generating supergraphs");
+
             },
             "Use if you want to create supergraph for IFDS.");
 }

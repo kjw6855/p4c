@@ -22,6 +22,7 @@
 #include "lib/log.h"
 #include "lib/nullstream.h"
 
+#include "graphs.h"
 #include "controls.h"
 #include "parsers.h"
 #include "graph_visitor.h"
@@ -135,7 +136,7 @@ int main(int argc, char *const argv[]) {
     cgen.genSupergraphs = options.genSupergraphs;
     top->getMain()->apply(cgen);
 
-    if (options.genSupergraphs) {
+    if (options.genSupergraphs != P4StateDependency::GenSGMode::NONE) {
         P4StateDependency::SuperGraphs sg(&midEnd.refMap, &midEnd.typeMap,
                 &cgen.controlGraphsArray,
                 &cgen.graphVars,
@@ -147,7 +148,8 @@ int main(int argc, char *const argv[]) {
         sg.gen_supergraphs();
 
         P4StateDependency::NonExactToStateful netsChecker(&cgen.controlGraphsArray,
-                &sg.graphProps);
+                &sg.graphProps,
+                options.genSupergraphs);
         program->apply(netsChecker);
     }
 

@@ -19,7 +19,7 @@ class P4StateDependencyOptions : public CompilerOptions {
     bool jsonOut = false;
     VarVisibility varVis = VarVisibility::NONE;
     bool setActionAsProc = false;
-    bool genSupergraphs = false;
+    GenSGMode genSupergraphs = GenSGMode::NONE;
 
  private:
     bool isGraphsSet = false;

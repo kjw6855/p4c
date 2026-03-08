@@ -39,7 +39,10 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
     }
 
     tab->init_ide();
-    tab->forward_tabulate_ide();
+    if (genSupergraphs == GenSGMode::ON_DEMAND)
+        tab->forward_tabulate_on_demand_ide();
+    else
+        tab->forward_tabulate_ide();
     tab->compute_values_ide();
     //tab->dump_result();
 
