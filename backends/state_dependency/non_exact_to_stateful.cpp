@@ -3,8 +3,6 @@
 
 namespace P4::P4StateDependency {
 
-using TabVertex = Tabulation::TabVertex;
-
 void FindNonExactToStateful::collect_non_exact_fields(Tabulation *tab,
         hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> &fields) {
 
@@ -56,11 +54,10 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
             // TODO: check WRITE
             for (auto var : vinfo.useVars) {
                 size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
-                auto actions = sgProp->get_action_vertices(actionBitMap);
-                for (auto ait : actions) {
+                for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
                     // TODO: find src var
                     std::cout << "A->I: " << tab->dump_tab_edge({
-                        TabVertex{ait, var}, TabVertex{*vit, var}})
+                        paramTv, TabVertex{*vit, var}})
                         << std::endl;
                 }
             }
@@ -68,11 +65,10 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
             // Check ACTION->DATA
             for (auto var : vinfo.useVars) {
                 size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
-                auto actions = sgProp->get_action_vertices(actionBitMap);
-                for (auto ait : actions) {
+                for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
                     // TODO: find src var
                     std::cout << "A->D: " << tab->dump_tab_edge({
-                        TabVertex{ait, var}, TabVertex{*vit, var}})
+                        paramTv, TabVertex{*vit, var}})
                         << std::endl;
                 }
             }

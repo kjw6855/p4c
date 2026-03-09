@@ -3,8 +3,6 @@
 
 namespace P4::P4StateDependency {
 
-using TabVertex = Tabulation::TabVertex;
-
 void Tabulation::init_ifds() {
     pathEdge.clear();
     workList = std::queue<TabEdge>();
@@ -21,7 +19,7 @@ void Tabulation::init_ide() {
     jumpFunc = FuncMapHelper();
     summaryFunc = FuncMapHelper();
 
-    BUG_CHECK(sgProp->actionIdMap.size() > 0, "Action does not exist.");
+    BUG_CHECK(sgProp->actionParams.size() > 0, "Action does not exist.");
 
     auto vertices = boost::vertices(*g);
 

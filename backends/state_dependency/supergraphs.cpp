@@ -27,14 +27,14 @@ const std::vector<unsigned> indices_from_bitmap(size_t bitmap) {
     return idx;
 }
 
-std::vector<Graphs::vertex_t> SuperGraphProp::get_action_vertices(size_t bitmap) {
+std::vector<TabVertex> SuperGraphProp::get_action_params(size_t bitmap) {
     if (bitmap == topEnvValue || bitmap == 0) return {};
     auto indices = indices_from_bitmap(bitmap);
-    std::vector<Graphs::vertex_t> foundActions;
+    std::vector<TabVertex> foundActionParams;
     for (auto idx : indices) {
-        foundActions.push_back(actions[idx]);
+        foundActionParams.push_back(actionParams[idx]);
     }
-    return foundActions;
+    return foundActionParams;
 }
 
 void SuperGraphs::create_root_var_vertex() {
@@ -119,12 +119,14 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
             }
         }
 
-        // Set actionIdMap
-        // TODO: Check defVars in ACTION statements
-        if (hasFlag(vinfo.flags, VertexFlags::ACTION) &&
-                vinfo.defVars.size() > 0) {
-            curProp->actions.push_back(*vit);
-            curProp->actionIdMap[*vit] = actId++;
+        // Set actionParamIdMap
+        if (hasFlag(vinfo.flags, VertexFlags::ACTION)) {
+            // Store each defVar in ACTION statements
+            for (auto dv : vinfo.defVars) {
+                auto dvTv = TabVertex{*vit, dv};
+                curProp->actionParams.push_back(dvTv);
+                curProp->actionParamIdMap[dvTv] = actId++;
+            }
         }
     }
     // Increment actId to differentiate from all-enabled value
@@ -191,7 +193,7 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
             // 0 -> DEF
             add_edge(curProp->globalVariables[src][0], curProp->globalVariables[dst][n],
                      cstring::empty, EdgeType::IFDS,
-                     curProp->get_action_id(dst));
+                     curProp->get_action_param_id(TabVertex{dst, var}));
         } else {
             // USE -> DEF
             for (auto uv : dstInfo.useVars) {

@@ -13,31 +13,7 @@ using Graph = Graphs::Graph;
 
 class Tabulation : public Graphs {
  public:
-    struct TabVertex {
-        Graphs::vertex_t node;
-        const IR::Node *var;
-        mutable size_t computedHash = 0;
 
-        bool operator==(const TabVertex &a) const {
-            if (node != a.node) return false;
-            return var == a.var;
-        }
-
-        std::size_t hash() const {
-            if (!computedHash) {
-                computedHash = Util::Hash{}(node, var);
-            }
-            return computedHash;
-        }
-    };
-
-    struct TabVertexHash {
-        size_t operator()(const TabVertex &t) const noexcept {
-            return t.hash();
-        }
-    };
-
-    using TabEdge = std::pair<TabVertex, TabVertex>;
     using FuncMap = hvec_map<TabEdge, EdgeFuncHolder>;
 
     struct FuncMapHelper {
@@ -185,13 +161,5 @@ class Tabulation : public Graphs {
 };
 
 }  // namespace P4::P4StateDependency
-
-namespace std {
-template <>
-struct hash<P4::P4StateDependency::Tabulation::TabVertex> {
-    std::size_t operator()(const P4::P4StateDependency::Tabulation::TabVertex &t) const { return t.hash(); }
-};
-
-}  // namespace std
 
 #endif /* BACKENDS_STATE_DEPENDENCY_TABULATION_H_ */
