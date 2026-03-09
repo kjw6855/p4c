@@ -92,6 +92,13 @@ void Tabulation::propagate_ide(TabVertex a, TabVertex b, EdgeFuncHolder fn) {
     LOG5(cstring(sstream));
 
     if (newFn.getValue() != jumpFunc[ab].getValue()) {
+        auto avit = get_vertex_id(a);
+        auto bvit = get_vertex_id(b);
+        auto &avinfo = (*g)[avit];
+        auto &bvinfo = (*g)[bvit];
+        bvinfo.color = "black"_cs;
+        avinfo.interesting = bvinfo.interesting = true;
+
         jumpFunc[ab] = newFn;
         workList.push(ab);
     }
