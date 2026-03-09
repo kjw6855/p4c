@@ -291,6 +291,29 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                 }
                 return false;
             }
+        } else if (em->originalExternType->getName().name == "RegisterAction") {
+            // TODO: support other methods?
+            if (em->method->name.name != "execute")
+                BUG("%1%: Unsupported method - %2%", vName, em->method->name);
+
+            auto extMethod = statement->methodCall->method;
+            if (!extMethod->is<IR::Member>())
+                BUG("%1%: It's not IR::Member - %2%", vName, extMethod->node_type_name());
+
+            auto em = extMethod->to<IR::Member>();
+            if (!em->expr->is<IR::PathExpression>())
+                BUG("%1%: It's not IR::PathExpression - %2%", vName, em->expr->node_type_name());
+
+            auto path = em->expr->to<IR::PathExpression>();
+            auto decl = refMap->getDeclaration(path->path, true);
+            if (!decl->is<IR::Declaration_Instance>()) return false;
+
+            auto extInst = decl->to<IR::Declaration_Instance>();
+            if (params.size() >= 1) {
+                // TODO: block statement handling
+                visit_stateful(vName, extInst->initializer, {params[0]},
+                        SOFlags::UPDATE | SOFlags::READ);
+            }
         }
 
         // Other externs...
