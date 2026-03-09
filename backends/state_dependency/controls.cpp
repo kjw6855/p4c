@@ -267,26 +267,27 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         if (em->originalExternType->getName().name == "register") {
             if (em->method->name.name == "read" && params.size() >= 2) {
                 // void read(out T result, in I index);
-                visit_stateful(vName, statement, {params[1]}, false, {params[0]});
+                visit_stateful(vName, statement, {params[1]}, SOFlags::READ, {params[0]});
                 return false;
 
             } else if (em->method->name.name == "write" && params.size() >= 2) {
                 // void write(in I index, in T value);
-                visit_stateful(vName, statement, {params[0]}, true, {params[1]});
+                visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE, {params[1]});
                 return false;
             }
         } else if (em->originalExternType->getName().name == "Counter") {
             if (em->method->name.name == "count" && params.size() == 1) {
                 // No data field
-                visit_stateful(vName, statement, {params[0]});
+                visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE);
                 return false;
             }
         } else if (em->originalExternType->getName().name == "Meter") {
             if (em->method->name.name == "execute") {
                 if (params.size() == 1) {
-                    visit_stateful(vName, statement, {params[0]});
+                    visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE);
                 } else if (params.size() == 2) {
-                    visit_stateful(vName, statement, {params[0]}, true, {params[1]});
+                    visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE,
+                            {params[1]});
                 }
                 return false;
             }
@@ -325,7 +326,8 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                         "add_entry requires more params: %1%",
                         params.size());
                 // Key goes index
-                visit_stateful(vName, statement, curKeyVars, true, {params[1]});
+                visit_stateful(vName, statement, curKeyVars,
+                        SOFlags::CREATE, {params[1]});
                 return false;
             }
         }
@@ -594,12 +596,15 @@ bool ControlGraphs::preorder(const IR::PathExpression *pe) {
 }
 
 void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
-        std::vector<const IR::Node *> indices, bool isWrite,
+        std::vector<const IR::Node *> indices, SOFlags soFlags,
         std::vector<const IR::Node *> dataVals) {
     VertexFlags flags = VertexFlags::STATEMENT | VertexFlags::STATEFUL;
     // Access idx first
     auto fv = add_and_connect_vertex("ACCESS "_cs + name,
             flags | VertexFlags::SO_IDX, node);
+    auto &fvinfo = (*g)[fv];
+    fvinfo.soFlags = soFlags;
+
     parents = {{fv, new EdgeUnconditional()}};
     auto oldstate = state;
     auto prev_cur_v = cur_v;
@@ -609,14 +614,21 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
 
     if (dataVals.size() > 0) {
         // Whether the node reads or writes data
-        auto svNamePrefix = isWrite ? "WRITE "_cs : "READ "_cs;
-        auto svFlag = isWrite ? VertexFlags::SO_WRITE_DATA : VertexFlags::SO_READ_DATA;
-        auto sv = add_and_connect_vertex(svNamePrefix + name,
-                flags | svFlag, node);
+        cstring svNamePrefix = soFlagsToString(soFlags);
+        auto sv = add_and_connect_vertex(svNamePrefix + " "_cs + name,
+                flags | VertexFlags::SO_DATA, node);
+        auto &svinfo = (*g)[sv];
+        svinfo.soFlags = soFlags;
+
         cur_v = sv;
         // Whether the data is read (node writes) or written (node reads)
-        state = isWrite ? READ_ONLY : WRITE_ONLY;
-        for (auto data : dataVals) visit(data, "data", isWrite ? 2 : 1);
+        if (hasSOFlag(soFlags, SOFlags::UPDATE) || hasSOFlag(soFlags, SOFlags::CREATE)) {
+            state = READ_ONLY;
+            for (auto data : dataVals) visit(data, "data", 2);
+        } else if (hasSOFlag(soFlags, SOFlags::READ)) {
+            state = WRITE_ONLY;
+            for (auto data : dataVals) visit(data, "data", 1);
+        }
         parents = {{sv, new EdgeUnconditional()}};
     }
     cur_v = prev_cur_v;

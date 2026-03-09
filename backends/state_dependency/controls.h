@@ -58,7 +58,8 @@ class ControlGraphs : public Graphs,
     bool isWrite(bool root_value = false);
 
     void visit_stateful(const cstring &name, const IR::Node *node,
-                        std::vector<const IR::Node *> indices, bool isWrite=false,
+                        std::vector<const IR::Node *> indices,
+                        SOFlags soFlags=SOFlags::NONE,
                         std::vector<const IR::Node *> dataVals={});
     void visit_call(const cstring &name, const IR::Node *node);
 

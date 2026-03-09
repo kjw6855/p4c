@@ -43,8 +43,15 @@ enum class VertexFlags : unsigned {
     EMPTY           = 1u << 13,
     VARIABLE        = 1u << 14,
     SO_IDX          = 1u << 15,
-    SO_READ_DATA    = 1u << 16,
-    SO_WRITE_DATA   = 1u << 17,
+    SO_DATA         = 1u << 16,
+};
+
+enum class SOFlags : unsigned {
+    NONE            = 0,
+    CREATE          = 1u << 0,
+    READ            = 1u << 1,
+    UPDATE          = 1u << 2,
+    DELETE          = 1u << 3,      // TODO: unsupported
 };
 
 enum class EdgeType {
@@ -468,9 +475,36 @@ inline cstring vertexFlagsToString(VertexFlags flags) {
     if (hasFlag(flags, VertexFlags::EXIT))         parts.emplace_back("EXIT"_cs);
     if (hasFlag(flags, VertexFlags::VARIABLE))     parts.emplace_back("VARIABLE"_cs);
     if (hasFlag(flags, VertexFlags::SO_IDX))       parts.emplace_back("SO_IDX"_cs);
-    if (hasFlag(flags, VertexFlags::SO_READ_DATA))      parts.emplace_back("SO_READ_DATA"_cs);
-    if (hasFlag(flags, VertexFlags::SO_WRITE_DATA))      parts.emplace_back("SO_WRITE_DATA"_cs);
+    if (hasFlag(flags, VertexFlags::SO_DATA))      parts.emplace_back("SO_DATA"_cs);
 
+    cstring res;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (i) res += "|"_cs;
+        res += parts[i];
+    }
+    return res;
+}
+inline SOFlags operator|(SOFlags a, SOFlags b) {
+    return static_cast<SOFlags>(static_cast<unsigned>(a) |
+            static_cast<unsigned>(b));
+}
+// OR-assign
+inline SOFlags& operator|=(SOFlags& a, SOFlags b) {
+    a = a | b;
+    return a;
+}
+inline bool hasSOFlag(SOFlags v, SOFlags f) {
+    return (static_cast<unsigned>(v) & static_cast<unsigned>(f)) != 0;
+}
+inline cstring soFlagsToString(SOFlags flags) {
+    if (flags == SOFlags::NONE) return "NONE"_cs;
+
+    std::vector<cstring> parts;
+
+    if (hasSOFlag(flags, SOFlags::CREATE))  parts.emplace_back("CREATE"_cs);
+    if (hasSOFlag(flags, SOFlags::READ))    parts.emplace_back("READ"_cs);
+    if (hasSOFlag(flags, SOFlags::UPDATE))  parts.emplace_back("UPDATE"_cs);
+    if (hasSOFlag(flags, SOFlags::DELETE))  parts.emplace_back("DELETE"_cs);
     cstring res;
     for (std::size_t i = 0; i < parts.size(); ++i) {
         if (i) res += "|"_cs;
@@ -496,6 +530,7 @@ class Graphs {
     struct Vertex {
         cstring name;
         VertexFlags flags;
+        SOFlags soFlags;
         const IR::Node *node;
         std::vector<const IR::Node *> defVars;
         std::vector<const IR::Node *> useVars;
