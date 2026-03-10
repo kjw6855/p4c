@@ -49,15 +49,21 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto &vinfo = (*g)[*vit];
-        if (hasFlag(vinfo.flags, VertexFlags::SO_IDX) &&
-                hasSOFlag(vinfo.soFlags, SOFlags::UPDATE)) {
-            // Check ACTION->IDX with WRITE_DATA
-            // TODO: check cases with CREATE
+        if (hasFlag(vinfo.flags, VertexFlags::SO_IDX)) {
+            // Check ACTION->IDX
+            cstring caseString = cstring::empty;
+
+            // TODO: differentiate stateful CALL and procedures
+            // TODO: apply block could be used only for read
+            if (!hasFlag(vinfo.flags, VertexFlags::STATEFUL) ||
+                    hasSOFlag(vinfo.soFlags, SOFlags::UPDATE)) {    //TODO: CREATE
+                caseString = "[B1/3:A->I] "_cs;
+            }
+            if (caseString.size() == 0) continue;
             for (auto var : vinfo.useVars) {
                 size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
                 for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                    // TODO: find src var
-                    std::cout << "[B1/3:A->I] " << tab->dump_tab_edge({
+                    std::cout << caseString << tab->dump_tab_edge({
                         paramTv, TabVertex{*vit, var}})
                         << std::endl;
                 }
@@ -65,16 +71,21 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
         } else if (hasFlag(vinfo.flags, VertexFlags::SO_DATA)) {
             // Check ACTION->DATA
             cstring caseString = cstring::empty;
-            if (hasSOFlag(vinfo.soFlags, SOFlags::UPDATE))
+
+            // TODO: differentiate stateful CALL and procedures
+            if (!hasFlag(vinfo.flags, VertexFlags::STATEFUL)) {
+                // Assuming it's procedure statements
                 caseString = "[B3:A->D] "_cs;
-            else if (hasSOFlag(vinfo.soFlags, SOFlags::CREATE))
+            } else if (hasSOFlag(vinfo.soFlags, SOFlags::UPDATE)) {
+                caseString = "[B3:A->D] "_cs;
+            } else if (hasSOFlag(vinfo.soFlags, SOFlags::CREATE)) {
                 caseString = "[B2:A->D] "_cs;
+            }
             if (caseString.size() == 0) continue;
 
             for (auto var : vinfo.useVars) {
                 size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
                 for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                    // TODO: find src var
                     std::cout << caseString << tab->dump_tab_edge({
                         paramTv, TabVertex{*vit, var}})
                         << std::endl;

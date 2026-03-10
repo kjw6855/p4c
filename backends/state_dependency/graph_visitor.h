@@ -65,13 +65,14 @@ class GraphVisitor : public Graphs, public Inspector {
     /// @param jsonOut option to create json fullGraph.
     GraphVisitor(std::filesystem::path graphsDir, const bool graphs, const bool fullGraph,
                   const bool jsonOut, std::filesystem::path filename,
-                  VarVisibility varVis)
+                  VarVisibility varVis, const bool showVarEdgeLabel)
         : graphsDir(std::move(graphsDir)),
           graphs(graphs),
           fullGraph(fullGraph),
           jsonOut(jsonOut),
           filename(std::move(filename)),
-          varVis(varVis) {}
+          varVis(varVis),
+          showVarEdgeLabel(showVarEdgeLabel) {}
     /// @brief Maps VertexType to string
     /// @param v_type VertexType to map
     /// @return string representation of v_type.
@@ -124,6 +125,7 @@ class GraphVisitor : public Graphs, public Inspector {
                            // graphs
     const std::filesystem::path filename;
     const VarVisibility varVis;
+    const bool showVarEdgeLabel;
 };
 
 }  // namespace P4::P4StateDependency

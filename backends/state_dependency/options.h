@@ -20,6 +20,7 @@ class P4StateDependencyOptions : public CompilerOptions {
     VarVisibility varVis = VarVisibility::NONE;
     bool setActionAsProc = false;
     GenSGMode genSupergraphs = GenSGMode::NONE;
+    bool showVarEdgeLabel = false;
 
  private:
     bool isGraphsSet = false;

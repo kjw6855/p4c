@@ -157,7 +157,9 @@ int main(int argc, char *const argv[]) {
     P4StateDependency::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
     program->apply(pgg);
 
-    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs, options.fullGraph, options.jsonOut, options.file, options.varVis);
+    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs,
+            options.fullGraph, options.jsonOut, options.file,
+            options.varVis, options.showVarEdgeLabel);
 
     gvs.process(cgen.controlGraphsArray, pgg.parserGraphsArray);
 

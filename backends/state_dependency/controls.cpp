@@ -3,7 +3,6 @@
 
 #include <boost/graph/graphviz.hpp>
 
-#include "frontends/p4/methodInstance.h"
 #include "frontends/p4/tableApply.h"
 #include "graphs.h"
 #include "lib/cstring.h"
@@ -13,7 +12,7 @@
 namespace P4::P4StateDependency {
 
 using Graph = ControlGraphs::Graph;
-const ControlGraphs::procedure_pair_t ControlGraphs::emptyProcedure;
+const ControlGraphs::procedure_md_t ControlGraphs::emptyProcedure{};
 
 Graph *ControlGraphs::ControlStack::pushBack(Graph &currentSubgraph, const cstring &name) {
     auto &newSubgraph = currentSubgraph.create_subgraph();
@@ -293,26 +292,12 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
             }
         } else if (em->originalExternType->getName().name == "RegisterAction") {
             // TODO: support other methods?
-            if (em->method->name.name != "execute")
-                BUG("%1%: Unsupported method - %2%", vName, em->method->name);
-
-            auto extMethod = statement->methodCall->method;
-            if (!extMethod->is<IR::Member>())
-                BUG("%1%: It's not IR::Member - %2%", vName, extMethod->node_type_name());
-
-            auto em = extMethod->to<IR::Member>();
-            if (!em->expr->is<IR::PathExpression>())
-                BUG("%1%: It's not IR::PathExpression - %2%", vName, em->expr->node_type_name());
-
-            auto path = em->expr->to<IR::PathExpression>();
-            auto decl = refMap->getDeclaration(path->path, true);
-            if (!decl->is<IR::Declaration_Instance>()) return false;
-
-            auto extInst = decl->to<IR::Declaration_Instance>();
-            if (params.size() >= 1) {
-                // TODO: block statement handling
-                visit_stateful(vName, extInst->initializer, {params[0]},
-                        SOFlags::UPDATE | SOFlags::READ);
+            if (em->method->name.name == "execute" && instance->object) {
+                auto obj = instance->object->getNode();
+                if (!isInContext(obj)) {
+                    visit_call(vName, obj, VertexFlags::SO_IDX, params);
+                    return false;
+                }
             }
         }
 
@@ -408,6 +393,33 @@ bool ControlGraphs::preorder(const IR::MethodCallExpression *mc) {
 }
 
 bool ControlGraphs::preorder(const IR::BaseAssignmentStatement *statement) {
+    // Directly check if statement is RegisterAction to capture lvalue
+    if (auto *rmce = statement->right->to<IR::MethodCallExpression>()) {
+        auto instance = P4::MethodInstance::resolve(rmce, refMap, typeMap);
+        if (auto *em = instance->to<P4::ExternMethod>()) {
+            if (em->originalExternType->getName().name == "RegisterAction" &&
+                    em->method->name.name == "execute" &&
+                    instance->object) {
+                // FOUND
+                auto obj = instance->object->getNode();
+                if (!isInContext(obj)) {
+                    std::stringstream sstream;
+                    rmce->dbprint(sstream);
+                    auto extName = cstring(sstream);
+                    std::vector<const IR::Node *> params;
+                    for (auto *p : *rmce->arguments) {
+                        if (auto *arg = p->to<IR::Argument>())
+                            params.push_back(arg->expression);
+                        else
+                            params.push_back(p);
+                    }
+                    visit_call(extName, obj, VertexFlags::SO_IDX,
+                            params, {statement->left});
+                    return false;
+                }
+            }
+        }
+    }
     std::stringstream sstream;
     statement->dbprint(sstream);
     auto vName = cstring(sstream);
@@ -433,13 +445,87 @@ bool ControlGraphs::preorder(const IR::ReturnStatement *) {
     return false;
 }
 
+const P4::ExternMethod *ControlGraphs::get_extern_method(const Visitor::Context *ctxt_) {
+    auto ctxt = ctxt_;
+    while (ctxt) {
+        // Check only first encountered method/assignment call (execute())
+        if (auto mcs = ctxt->node->to<IR::MethodCallStatement>()) {
+            auto instance = P4::MethodInstance::resolve(mcs->methodCall, refMap, typeMap);
+            if (auto em = instance->to<P4::ExternMethod>()) {
+                if (em->originalExternType->getName().name == "RegisterAction" &&
+                        em->method->name.name == "execute")
+                    return em;
+            }
+            return nullptr;
+        } else if (auto as = ctxt->node->to<IR::BaseAssignmentStatement>()) {
+            if (auto *rmce = as->right->to<IR::MethodCallExpression>()) {
+                auto instance = P4::MethodInstance::resolve(rmce, refMap, typeMap);
+                if (auto em = instance->to<P4::ExternMethod>()) {
+                    if (em->originalExternType->getName().name == "RegisterAction" &&
+                            em->method->name.name == "execute")
+                        return em;
+                }
+            }
+            return nullptr;
+        }
+        ctxt = ctxt->parent;
+    }
+
+    return nullptr;
+}
+
 bool ControlGraphs::preorder(const IR::Function *fn) {
+    if (auto *em = get_extern_method(getContext())) {
+        // TODO: create local variable for inout value
+        std::stringstream sstream;
+        em->expr->method->dbprint(sstream);
+        auto vName = cstring(sstream);
+
+        VertexFlags flags = VertexFlags::ENTRY | VertexFlags::STATEFUL;
+        auto start_v = add_and_connect_vertex(vName, flags, fn);
+        parents = {{start_v, new EdgeUnconditional()}};
+
+        auto oldstate = state;
+        if (state == SKIPPING) state = NORMAL;
+        for (auto *p : *fn->type->parameters) {
+            // register param could be output
+            if (p->direction == IR::Direction::In ||
+                    p->direction == IR::Direction::InOut)
+                add_variable_in_vertex(p, start_v, false);
+
+        }
+        state = oldstate;
+
+        // Visit internal body
+        setSOData = true;
+        visit(fn->body);
+        setSOData = false;
+
+        auto exit_v = add_and_connect_vertex("EXIT "_cs + vName, VertexFlags::EXIT);
+        parents = {{exit_v, new EdgeProcedural}};
+        oldstate = state;
+        if (state == SKIPPING) state = NORMAL;
+
+        // map Out retVar will be mapped to return values (e.g.., lvalue)
+        std::vector<const IR::Node *> retVals;
+        for (auto *p : *fn->type->parameters) {
+            // register param could be output
+            if (p->direction == IR::Direction::Out ||
+                    p->direction == IR::Direction::InOut)
+                retVals.push_back(add_variable_in_vertex(p, exit_v, true));
+
+        }
+        state = oldstate;
+        auto obj = em->object->getNode();
+        procedureGraphs[obj] = {start_v, exit_v, retVals};
+        return false;
+    }
+
     if (!cur_v.has_value()) return false;
 
     auto oldstate = state;
     if (state == SKIPPING) state = NORMAL;
     for (auto *p : *fn->type->parameters) {
-        // TODO: register param could be output
         add_variable_in_vertex(p, cur_v.value(), true);
     }
     visit(fn->body);
@@ -658,10 +744,21 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
     state = oldstate;
 }
 
-void ControlGraphs::visit_call(const cstring &name, const IR::Node *node) {
+void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
+                               VertexFlags flags, std::vector<const IR::Node *> args,
+                               std::vector<const IR::Node *> retArgs) {
     // before visit
-    auto call_v = add_and_connect_vertex("CALL "_cs + name, VertexFlags::CALL);
+    auto call_v = add_and_connect_vertex("CALL "_cs + name,
+            VertexFlags::CALL | flags);
     parents = {{call_v, new EdgeProcedural()}};
+
+    if (args.size() > 0) {
+        auto oldstate = state;
+        state = READ_ONLY;
+        for (auto *arg : args)
+            add_variable_in_vertex(arg, call_v, true);
+        state = oldstate;
+    }
 
     auto pp = getProcedure(node);
     if (pp == emptyProcedure) {
@@ -687,6 +784,12 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node) {
 
     parents = {{ret_v, new EdgeUnconditional()}};
     add_edge(call_v, ret_v, cstring::empty, EdgeType::CALL_TO_RETURN);
+    for (size_t i = 0; i < retArgs.size(); i++) {
+        auto *retArg = retArgs[i];
+        add_variable_in_vertex(retArg, ret_v, false);
+        if (i < pp.retVals.size())
+            add_variable_in_vertex(pp.retVals[i], ret_v, true);
+    }
 }
 
 static const IR::Expression *get_primary(const IR::Expression *e, const Visitor::Context *ctxt) {

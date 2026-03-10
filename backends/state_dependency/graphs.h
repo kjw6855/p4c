@@ -35,7 +35,7 @@ enum class VertexFlags : unsigned {
     STATEMENT       = 1u << 5,
     CONTROL         = 1u << 6,
     PARSER_STATE    = 1u << 7,
-    STATEFUL        = 1u << 8,
+    STATEFUL        = 1u << 8,      // require SOFlags
     CALL            = 1u << 9,
     RETURN          = 1u << 10,
     ENTRY           = 1u << 11,
@@ -589,7 +589,7 @@ class Graphs {
     vertex_t add_var_vertex(const IR::Node *var, std::optional<const vertex_t> node=std::nullopt,
             std::optional<cstring> name=std::nullopt);
 
-    std::optional<vertex_t> add_variable_in_vertex(const IR::Node *var,
+    const IR::Node *add_variable_in_vertex(const IR::Node *var,
             const vertex_t &v, bool isUsed,
             std::optional<cstring> name=std::nullopt);
 
@@ -607,7 +607,8 @@ class Graphs {
 
     class GraphAttributeSetter {
      public:
-        void operator()(Graph &g, VarVisibility varVis=VarVisibility::NONE) const {
+        void operator()(Graph &g, VarVisibility varVis=VarVisibility::NONE,
+                bool showVarEdgeLabel=false) const {
             auto vertices = boost::vertices(g);
             for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
                 const auto &vinfo = g[*vit];
@@ -631,7 +632,7 @@ class Graphs {
             for (auto &eit = edges.first; eit != edges.second; ++eit) {
                 auto attrs = boost::get(boost::edge_attribute, g);
                 auto &ep = g[*eit];
-                attrs[*eit]["label"_cs] = edgeTypeGetName(ep);
+                attrs[*eit]["label"_cs] = edgeTypeGetName(ep, showVarEdgeLabel);
                 attrs[*eit]["style"_cs] = edgeTypeGetStyle(g, *eit, varVis);
                 attrs[*eit]["color"_cs] = edgeTypeGetColor(ep.type);
                 attrs[*eit]["penwidth"_cs] = edgeTypeGetPenWidth(ep.type);
@@ -661,7 +662,9 @@ class Graphs {
                 return "rounded"_cs;
             else if (hasFlag(vinfo.flags, VertexFlags::TABLE))
                 return "filled"_cs;
-            else if (hasFlag(vinfo.flags, VertexFlags::STATEFUL))
+            else if (hasFlag(vinfo.flags, VertexFlags::STATEFUL) ||
+                     hasFlag(vinfo.flags, VertexFlags::SO_IDX) ||
+                     hasFlag(vinfo.flags, VertexFlags::SO_DATA))
                 return "filled"_cs;
             if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) {
                 switch (varVis) {
@@ -688,7 +691,9 @@ class Graphs {
             cstring colorName = cstring::empty;
             if (hasFlag(flags, VertexFlags::TABLE))
                 colorName = "lightsalmon"_cs;
-            if (hasFlag(flags, VertexFlags::STATEFUL))
+            if (hasFlag(flags, VertexFlags::STATEFUL) ||
+                    hasFlag(flags, VertexFlags::SO_IDX) ||
+                    hasFlag(flags, VertexFlags::SO_DATA))
                 colorName = "lightgreen"_cs;
             if (hasFlag(flags, VertexFlags::VARIABLE)) {
                 if (vinfo.node == globalNode) return "black"_cs;
@@ -704,9 +709,10 @@ class Graphs {
         static cstring vertexFlagGetMargin() {
             return cstring::empty;
         }
-        static cstring edgeTypeGetName(EdgeTypeIface &edge) {
-            if (edge.type == EdgeType::IFDS ||
-                    edge.type == EdgeType::IFDS_FT) {
+        static cstring edgeTypeGetName(EdgeTypeIface &edge, bool showVarEdgeLabel) {
+            if (showVarEdgeLabel &&
+                    (edge.type == EdgeType::IFDS ||
+                    edge.type == EdgeType::IFDS_FT)) {
                 return edge.fn.getName();
             }
             return edge.name;
@@ -772,6 +778,7 @@ class Graphs {
     // Used by controls.cpp
     std::vector<const IR::Node *> curKeyVars;
     bool storeKeys = false;
+    bool setSOData = false;
 
  public:
     VarVisibility varVis = VarVisibility::NONE;

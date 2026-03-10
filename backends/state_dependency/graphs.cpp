@@ -7,6 +7,8 @@ const IR::Node *Graphs::globalNode = new IR::Constant(0);
 vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);
+    if (setSOData)
+        flags |= VertexFlags::SO_DATA;
     boost::put(&Vertex::flags, *g, v, flags);
     if (node != nullptr)
         boost::put(&Vertex::node, *g, v, node);
@@ -68,7 +70,7 @@ vertex_t Graphs::add_var_vertex(const IR::Node *var, std::optional<const vertex_
     return vv;
 }
 
-std::optional<vertex_t> Graphs::add_variable_in_vertex(const IR::Node *var,
+const IR::Node *Graphs::add_variable_in_vertex(const IR::Node *var,
             const vertex_t &v, bool isUsed,
             std::optional<cstring> name) {
     /* check duplicate variable in set */
@@ -96,10 +98,11 @@ std::optional<vertex_t> Graphs::add_variable_in_vertex(const IR::Node *var,
         varList.push_back(newVar);
 
         // supergraphs.cpp will create vertex later
-        if (createVar && !genSG)
-            return add_var_vertex(newVar, v, name);
+        if (createVar && !genSG) {
+            add_var_vertex(newVar, v, name);
+        }
     }
-    return {};
+    return newVar;
 }
 
 

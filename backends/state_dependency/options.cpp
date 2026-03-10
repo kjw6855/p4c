@@ -117,6 +117,13 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
 
             },
             "Use if you want to create supergraph for IFDS.");
+    registerOption(
+            "--showVarEdge", nullptr,
+            [this](const char *) {
+            showVarEdgeLabel = true;
+            return true;
+            },
+            "Use to show variable edge label in graph.");
 }
 
 }  // namespace P4::P4StateDependency

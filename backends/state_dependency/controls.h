@@ -7,6 +7,7 @@
 
 #include <optional>
 
+#include "frontends/p4/methodInstance.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "graphs.h"
 #include "ir/ir.h"
@@ -61,16 +62,30 @@ class ControlGraphs : public Graphs,
                         std::vector<const IR::Node *> indices,
                         SOFlags soFlags=SOFlags::NONE,
                         std::vector<const IR::Node *> dataVals={});
-    void visit_call(const cstring &name, const IR::Node *node);
+    void visit_call(const cstring &name, const IR::Node *node,
+                    VertexFlags flags=VertexFlags::NONE,
+                    std::vector<const IR::Node *> args={},
+                    std::vector<const IR::Node *> retArgs={});
 
+    const P4::ExternMethod *get_extern_method(const Visitor::Context *ctxt_);
     const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed);
 
     std::vector<Graph *> controlGraphsArray{};
 
-    typedef std::pair<Graphs::vertex_t, Graphs::vertex_t> procedure_pair_t;
-    static const procedure_pair_t emptyProcedure;
+    struct procedure_md_t {
+        Graphs::vertex_t first;
+        Graphs::vertex_t second;
+        std::vector<const IR::Node *> retVals = {};
 
-    procedure_pair_t getProcedure(const IR::Node *node) const {
+        bool operator==(const procedure_md_t& other) const {
+            if (first != other.first) return false;
+            if (second != other.second) return false;
+            return retVals == other.retVals;
+        }
+    };
+    static const procedure_md_t emptyProcedure;
+
+    procedure_md_t getProcedure(const IR::Node *node) const {
         auto it = procedureGraphs.find(node);
         return it == procedureGraphs.end() ? emptyProcedure : it->second;
     }
@@ -84,7 +99,7 @@ class ControlGraphs : public Graphs,
 
     ControlStack controlStack{};
     std::optional<cstring> instanceName{};
-    hvec_map<const IR::Node *, procedure_pair_t> procedureGraphs;
+    hvec_map<const IR::Node *, procedure_md_t> procedureGraphs;
     std::optional<Graphs::vertex_t> cur_v{};
 };
 
