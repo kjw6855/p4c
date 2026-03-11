@@ -538,7 +538,9 @@ class Graphs {
         bool interesting = false;   // used only for VarVertex
     };
 
-    hvec_map<cstring, hvec_set<const IR::Node *>> graphVars;
+    using VarMap = hvec_map<cstring, hvec_set<const IR::Node *>>;
+    VarMap graphVars;   // graph_name to var
+    hvec_map<cstring, VarMap> graphLocalVars;   // graph_name to proc_name to var
 
     using GraphvizAttributes = std::map<cstring, cstring>;
     using vertexProperties = boost::property<boost::vertex_attribute_t, GraphvizAttributes, Vertex>;
@@ -568,9 +570,18 @@ class Graphs {
     // Procedure Name -> list of CALL (caller)
     using ProcCallers = hvec_map<cstring, std::vector<vertex_t>>;
 
+    // TODO: combine this with TabVertex/TabEdge in supergraphs
+    using VarVertex = std::pair<vertex_t, const IR::Node *>;
+    using VarEdge = std::pair<VarVertex, VarVertex>;
+
+    // TODO: find the best way to optimize these parameters
+    //       (maybe define class?)
+    //       currently, (1) controls.cpp collects all data for each graph (cstring)
+    //       then (2) supergraphs.cpp parses them into supergraph for each graph
     hvec_map<cstring, ProcOf> procOfs;
     hvec_map<cstring, CallMap> callMaps;
     hvec_map<cstring, ProcCallers> procCallerMaps;
+    hvec_map<cstring, std::vector<VarEdge>> retArgEdges;
 
     vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
 
@@ -590,6 +601,10 @@ class Graphs {
             std::optional<cstring> name=std::nullopt);
 
     const IR::Node *add_variable_in_vertex(const IR::Node *var,
+            const vertex_t &v, bool isUsed,
+            std::optional<cstring> name=std::nullopt);
+
+    const IR::Node *add_local_variable_in_vertex(const IR::Node *var,
             const vertex_t &v, bool isUsed,
             std::optional<cstring> name=std::nullopt);
 
@@ -778,7 +793,7 @@ class Graphs {
     // Used by controls.cpp
     std::vector<const IR::Node *> curKeyVars;
     bool storeKeys = false;
-    bool setSOData = false;
+    bool isInLocalProc = false;
 
  public:
     VarVisibility varVis = VarVisibility::NONE;

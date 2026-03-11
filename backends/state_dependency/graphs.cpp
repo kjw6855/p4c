@@ -7,7 +7,7 @@ const IR::Node *Graphs::globalNode = new IR::Constant(0);
 vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);
-    if (setSOData)
+    if (isInLocalProc)
         flags |= VertexFlags::SO_DATA;
     boost::put(&Vertex::flags, *g, v, flags);
     if (node != nullptr)
@@ -73,6 +73,16 @@ vertex_t Graphs::add_var_vertex(const IR::Node *var, std::optional<const vertex_
 const IR::Node *Graphs::add_variable_in_vertex(const IR::Node *var,
             const vertex_t &v, bool isUsed,
             std::optional<cstring> name) {
+    /* check if the variable was defined as local */
+    if (isInLocalProc) {
+        auto &varset = graphLocalVars[graphName][procName];
+        for (auto *inVar : varset) {
+            if (inVar->equiv(*var)) {
+                return add_local_variable_in_vertex(var, v, isUsed, name);
+            }
+        }
+    }
+
     /* check duplicate variable in set */
     auto &varset = graphVars[graphName];
     auto *newVar = var;
@@ -89,6 +99,35 @@ const IR::Node *Graphs::add_variable_in_vertex(const IR::Node *var,
     // Insert new variable
     if (newVar == var)
         graphVars[graphName].insert(var);
+
+    bool createVar = varVis != VarVisibility::NONE;
+    bool genSG = genSupergraphs != GenSGMode::NONE;
+    if (createVar || genSG) {
+        auto &vinfo = (*g)[v];
+        auto &varList = isUsed ? vinfo.useVars : vinfo.defVars;
+        varList.push_back(newVar);
+
+        // supergraphs.cpp will create vertex later
+        if (createVar && !genSG) {
+            add_var_vertex(newVar, v, name);
+        }
+    }
+    return newVar;
+}
+
+const IR::Node *Graphs::add_local_variable_in_vertex(const IR::Node *var,
+        const vertex_t &v, bool isUsed,
+        std::optional<cstring> name) {
+    auto &varset = graphLocalVars[graphName][procName];
+    auto *newVar = var;
+    for (auto *inVar : varset) {
+        if (inVar->equiv(*var)) {
+            newVar = inVar;
+            break;
+        }
+    }
+    if (newVar == var)
+        graphLocalVars[graphName][procName].insert(var);
 
     bool createVar = varVis != VarVisibility::NONE;
     bool genSG = genSupergraphs != GenSGMode::NONE;

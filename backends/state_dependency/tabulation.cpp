@@ -29,14 +29,15 @@ void Tabulation::init_ide() {
         auto vinfo = (*g)[*vit];
         if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
         auto vProcName = sgProp->procOf[*vit];
+        auto &variableList = sgProp->progVarInfo.get_all_vars(vProcName);
         // 1) main process
         if (vProcName == sgProp->procOf[sgProp->rootVar]) {
-            for (auto *p : sgProp->variableList)
+            for (auto *p : variableList)
                 jumpFunc.add_func({rootTv, TabVertex{*vit, p}}, sgProp->topFunc);
         } else {
             auto src = sgProp->srcOf[vProcName];
-            for (auto *p : sgProp->variableList)
-                for (auto *q : sgProp->variableList)
+            for (auto *p : variableList)
+                for (auto *q : variableList)
                     jumpFunc.add_func({TabVertex{src, p}, TabVertex{*vit, q}}, sgProp->topFunc);
         }
     }
@@ -57,8 +58,14 @@ void Tabulation::init_ide() {
             auto src = boost::source(*ei, *g);
             auto dst = boost::target(*ei, *g);
 
-            for (auto *p : sgProp->variableList)
-                for (auto *q : sgProp->variableList)
+            auto vProcName = sgProp->procOf[src];
+            BUG_CHECK(sgProp->procOf[dst] == vProcName,
+                    "%1%::Return has different procName rather than %2%",
+                    sgProp->procOf[dst], vProcName);
+
+            auto &variableList = sgProp->progVarInfo.get_all_vars(vProcName);
+            for (auto *p : variableList)
+                for (auto *q : variableList)
                     summaryFunc.add_func({TabVertex{src, p}, TabVertex{dst, q}}, sgProp->topFunc);
         }
     }

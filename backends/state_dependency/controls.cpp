@@ -474,6 +474,15 @@ const P4::ExternMethod *ControlGraphs::get_extern_method(const Visitor::Context 
     return nullptr;
 }
 
+bool ControlGraphs::preorder(const IR::Declaration_Variable *v) {
+    // Store variable only if it's in stateful statement
+    if (!isInLocalProc) return true;
+
+    if (cur_v.has_value())
+        add_local_variable_in_vertex(v, cur_v.value(), false);
+    return false;
+}
+
 bool ControlGraphs::preorder(const IR::Function *fn) {
     if (auto *em = get_extern_method(getContext())) {
         // TODO: create local variable for inout value
@@ -489,17 +498,19 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
         if (state == SKIPPING) state = NORMAL;
         for (auto *p : *fn->type->parameters) {
             // register param could be output
-            if (p->direction == IR::Direction::In ||
+            if (p->direction == IR::Direction::Out ||
                     p->direction == IR::Direction::InOut)
-                add_variable_in_vertex(p, start_v, false);
-
+                add_local_variable_in_vertex(p, start_v, false);
         }
         state = oldstate;
 
         // Visit internal body
-        setSOData = true;
+        isInLocalProc = true;
+        auto prev_cur_v = cur_v;
+        cur_v = start_v;
         visit(fn->body);
-        setSOData = false;
+        cur_v = prev_cur_v;
+        isInLocalProc = false;
 
         auto exit_v = add_and_connect_vertex("EXIT "_cs + vName, VertexFlags::EXIT);
         parents = {{exit_v, new EdgeProcedural}};
@@ -510,9 +521,8 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
         std::vector<const IR::Node *> retVals;
         for (auto *p : *fn->type->parameters) {
             // register param could be output
-            if (p->direction == IR::Direction::Out ||
-                    p->direction == IR::Direction::InOut)
-                retVals.push_back(add_variable_in_vertex(p, exit_v, true));
+            if (p->direction == IR::Direction::Out)
+                retVals.push_back(add_local_variable_in_vertex(p, exit_v, true));
 
         }
         state = oldstate;
@@ -784,11 +794,15 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
 
     parents = {{ret_v, new EdgeUnconditional()}};
     add_edge(call_v, ret_v, cstring::empty, EdgeType::CALL_TO_RETURN);
+
     for (size_t i = 0; i < retArgs.size(); i++) {
-        auto *retArg = retArgs[i];
-        add_variable_in_vertex(retArg, ret_v, false);
-        if (i < pp.retVals.size())
-            add_variable_in_vertex(pp.retVals[i], ret_v, true);
+        auto *retArg = add_variable_in_vertex(retArgs[i], ret_v, false);
+        BUG_CHECK(i < pp.retVals.size(),
+                "Number of proc return values (%1%) are less than number of caller's retArgs (%2%)",
+                pp.retVals.size(), i);
+        // Store <e_p, retVal> -> <ret_v, retArg>
+        retArgEdges[graphName].push_back({{pp.second, pp.retVals[i]},
+                {ret_v, retArg}});
     }
 }
 
@@ -841,16 +855,21 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
         e = get_primary(ai, ctxt->parent);
     }
 
+    const IR::Node *addVar = nullptr;
     if (auto *pe = e->to<IR::PathExpression>()) {
         auto *decl = refMap->getDeclaration(pe->path, false);
-        if (decl != nullptr && decl->is<IR::Parameter>()) {
-            add_variable_in_vertex(decl->to<IR::Parameter>(), cur_v.value(), isUsed);
-        } else {
-            add_variable_in_vertex(e, cur_v.value(), isUsed);
+        if (decl != nullptr) {
+            if (decl->is<IR::Parameter>()) {
+                addVar = add_variable_in_vertex(decl->to<IR::Parameter>(),
+                        cur_v.value(), isUsed);
+            } else if (decl->is<IR::Declaration_Variable>() && isInLocalProc) {
+                addVar = add_local_variable_in_vertex(decl->to<IR::Declaration_Variable>(),
+                        cur_v.value(), isUsed);
+            }
         }
-    } else {
-        add_variable_in_vertex(e, cur_v.value(), isUsed);
     }
+    if (!addVar)
+        add_variable_in_vertex(e, cur_v.value(), isUsed);
     return e;
 }
 

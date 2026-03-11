@@ -47,6 +47,7 @@ class ControlGraphs : public Graphs,
     bool preorder(const IR::MethodCallStatement *statement) override;
     bool preorder(const IR::MethodCallExpression *mc) override;
     bool preorder(const IR::BaseAssignmentStatement *statement) override;
+    bool preorder(const IR::Declaration_Variable *v) override;
     bool preorder(const IR::Function *fn) override;
     bool preorder(const IR::ReturnStatement *) override;
     bool preorder(const IR::ExitStatement *) override;

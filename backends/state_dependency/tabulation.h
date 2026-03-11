@@ -62,8 +62,9 @@ class Tabulation : public Graphs {
         BUG_CHECK(!hasFlag(ninfo.flags, VertexFlags::VARIABLE),
                   "TabVertex has wrong node Id %1%", tb.node);
 
-        auto idx = sgProp->varIndexMap[tb.var];
-        return sgProp->globalVariables[tb.node][idx];
+        auto idx = sgProp->progVarInfo.get_var_index(tb.var,
+                sgProp->procOf[tb.node]);
+        return sgProp->progVarInfo[tb.node][idx];
     }
 
     TabVertex get_tab_vertex(Graphs::vertex_t v) {

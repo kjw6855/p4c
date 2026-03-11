@@ -49,6 +49,7 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto &vinfo = (*g)[*vit];
+        auto &vProcName = sgProp->procOf[*vit];
         if (hasFlag(vinfo.flags, VertexFlags::SO_IDX)) {
             // Check ACTION->IDX
             cstring caseString = cstring::empty;
@@ -84,10 +85,18 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
             if (caseString.size() == 0) continue;
 
             for (auto var : vinfo.useVars) {
-                size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
+                TabVertex useTv{*vit, var};
+
+                // If useVar is local, it's not dependent on global
+                // RegisterAction local vars are inout value, out rv,
+                // and other declared values, which are not related
+                // to dependency analysis.
+                if (sgProp->progVarInfo.is_local(var, vProcName))
+                    continue;
+
+                size_t actionBitMap = tab->valueMap[useTv];
                 for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                    std::cout << caseString << tab->dump_tab_edge({
-                        paramTv, TabVertex{*vit, var}})
+                    std::cout << caseString << tab->dump_tab_edge({paramTv, useTv})
                         << std::endl;
                 }
             }
