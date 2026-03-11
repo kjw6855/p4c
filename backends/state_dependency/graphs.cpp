@@ -7,8 +7,8 @@ const IR::Node *Graphs::globalNode = new IR::Constant(0);
 vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node) {
     auto v = boost::add_vertex(*g);
     boost::put(&Vertex::name, *g, v, name);
-    if (isInLocalProc)
-        flags |= VertexFlags::SO_DATA;
+    if (localProcFlags != VertexFlags::NONE)
+        flags |= localProcFlags;
     boost::put(&Vertex::flags, *g, v, flags);
     if (node != nullptr)
         boost::put(&Vertex::node, *g, v, node);
@@ -74,7 +74,7 @@ const IR::Node *Graphs::add_variable_in_vertex(const IR::Node *var,
             const vertex_t &v, bool isUsed,
             std::optional<cstring> name) {
     /* check if the variable was defined as local */
-    if (isInLocalProc) {
+    if (localProcFlags != VertexFlags::NONE) {
         auto &varset = graphLocalVars[graphName][procName];
         for (auto *inVar : varset) {
             if (inVar->equiv(*var)) {

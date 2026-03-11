@@ -44,6 +44,7 @@ enum class VertexFlags : unsigned {
     VARIABLE        = 1u << 14,
     SO_IDX          = 1u << 15,
     SO_DATA         = 1u << 16,
+    ACTION_DATA     = 1u << 17,
 };
 
 enum class SOFlags : unsigned {
@@ -793,7 +794,7 @@ class Graphs {
     // Used by controls.cpp
     std::vector<const IR::Node *> curKeyVars;
     bool storeKeys = false;
-    bool isInLocalProc = false;
+    VertexFlags localProcFlags = VertexFlags::NONE;
 
  public:
     VarVisibility varVis = VarVisibility::NONE;

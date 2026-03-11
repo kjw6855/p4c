@@ -476,7 +476,7 @@ const P4::ExternMethod *ControlGraphs::get_extern_method(const Visitor::Context 
 
 bool ControlGraphs::preorder(const IR::Declaration_Variable *v) {
     // Store variable only if it's in stateful statement
-    if (!isInLocalProc) return true;
+    if (localProcFlags == VertexFlags::NONE) return true;
 
     if (cur_v.has_value())
         add_local_variable_in_vertex(v, cur_v.value(), false);
@@ -505,12 +505,12 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
         state = oldstate;
 
         // Visit internal body
-        isInLocalProc = true;
+        localProcFlags = VertexFlags::SO_DATA;
         auto prev_cur_v = cur_v;
         cur_v = start_v;
         visit(fn->body);
         cur_v = prev_cur_v;
-        isInLocalProc = false;
+        localProcFlags = VertexFlags::NONE;
 
         auto exit_v = add_and_connect_vertex("EXIT "_cs + vName, VertexFlags::EXIT);
         parents = {{exit_v, new EdgeProcedural}};
@@ -592,18 +592,25 @@ bool ControlGraphs::preorder(const IR::Key *key) {
 bool ControlGraphs::preorder(const IR::P4Action *action) {
     auto name = action->getName();
     auto flags = VertexFlags::ACTION;
-    if (setActionAsProc)
+    if (setActionAsProc) {
         flags |= VertexFlags::ENTRY;
+        localProcFlags = VertexFlags::ACTION_DATA;
+    }
     auto start_v = add_and_connect_vertex(name, flags, action);
     parents = {{start_v, new EdgeUnconditional()}};
 
     // ActionParam is newly defined by control plane rules
-    for (auto *p : *action->parameters)
-        add_variable_in_vertex(p, start_v, false);
+    for (auto *p : *action->parameters) {
+        if (setActionAsProc)
+            add_local_variable_in_vertex(p, start_v, false);
+        else
+            add_variable_in_vertex(p, start_v, false);
+    }
 
     visit(action->body);
 
     if (setActionAsProc) {
+        localProcFlags = VertexFlags::NONE;
         auto exit_v = add_and_connect_vertex("EXIT "_cs + name, VertexFlags::EXIT);
         parents = {{exit_v, new EdgeProcedural}};
         procedureGraphs[action] = {start_v, exit_v};
@@ -862,7 +869,8 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
             if (decl->is<IR::Parameter>()) {
                 addVar = add_variable_in_vertex(decl->to<IR::Parameter>(),
                         cur_v.value(), isUsed);
-            } else if (decl->is<IR::Declaration_Variable>() && isInLocalProc) {
+            } else if (decl->is<IR::Declaration_Variable>() &&
+                    localProcFlags != VertexFlags::NONE) {
                 addVar = add_local_variable_in_vertex(decl->to<IR::Declaration_Variable>(),
                         cur_v.value(), isUsed);
             }
