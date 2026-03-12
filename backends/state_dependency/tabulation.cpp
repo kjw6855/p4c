@@ -292,11 +292,14 @@ void Tabulation::forward_tabulate_ide() {
 
             // Line 17-18: (2) if summary edge exists, short-circuit
             for (auto sf : summaryFunc.get_func_by_nodes(te.second.node, callerRet)) {
+                auto se = sf.first;
+                // Find sfn from <n, d2>, not any <n, d>
+                if (se.first.var != te.second.var) continue;
                 auto sfn = sf.second;
                 // skip T fn
                 if (sfn.getValue() == sgProp->topEnvValue)
                     continue;
-                auto se = sf.first;
+                // <s_p, d1> -> <ret_n, d3>
                 propagate_ide(te.first, se.second, sfn.compose(fn));
             }
         } else if (hasFlag(dstInfo.flags, VertexFlags::EXIT) &&
@@ -447,11 +450,13 @@ void Tabulation::forward_tabulate_on_demand_ide() {
 
             // Line 17-18: (2) if summary edge exists, short-circuit
             for (auto sf : summaryFunc.get_func_by_nodes(te.second.node, callerRet)) {
+                auto se = sf.first;
+                // Find sfn from <n, d2>, not any <n, d>
+                if (se.first.var != te.second.var) continue;
                 auto sfn = sf.second;
                 // skip T fn
                 if (sfn.getValue() == sgProp->topEnvValue)
                     continue;
-                auto se = sf.first;
                 // <s_p, d1> -> <ret_n, d3>
                 propagate_ide(te.first, se.second, sfn.compose(fn));
             }
@@ -643,6 +648,26 @@ void Tabulation::dump_result() {
         sstream << dump_tab_vertex(val.first) << ": " << val.second;
         LOG2(cstring(sstream));
     }
+}
+
+bool Tabulation::sanity_check_ide() {
+    for (auto [ei, ei_end] = boost::edges(*g); ei != ei_end; ++ei) {
+        auto &edge = (*g)[*ei];
+        if (edge.type != EdgeType::IFDS &&
+                edge.type != EdgeType::IFDS_FT)
+            continue;
+
+        auto srcTv = get_tab_vertex(boost::source(*ei, *g));
+        auto dstTv = get_tab_vertex(boost::target(*ei, *g));
+
+        if (srcTv.var == globalNode && dstTv.var == globalNode) {
+            if (edge.fn.has_value()) return false;
+        } else if (srcTv.var != globalNode && dstTv.var == globalNode) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 }  // namespace P4::P4StateDependency

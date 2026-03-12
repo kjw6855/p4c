@@ -146,6 +146,7 @@ class Tabulation : public Graphs {
     void compute_values_ide();
     void find_path(std::vector<TabVertex> &tvs);
     void dump_result();
+    bool sanity_check_ide();
 
     hvec_set<TabEdge> pathEdge;
     hvec_set<TabEdge> summaryEdge;
