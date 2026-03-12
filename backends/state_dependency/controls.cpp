@@ -485,7 +485,6 @@ bool ControlGraphs::preorder(const IR::Declaration_Variable *v) {
 
 bool ControlGraphs::preorder(const IR::Function *fn) {
     if (auto *em = get_extern_method(getContext())) {
-        // TODO: create local variable for inout value
         std::stringstream sstream;
         em->expr->method->dbprint(sstream);
         auto vName = cstring(sstream);
@@ -494,23 +493,41 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
         auto start_v = add_and_connect_vertex(vName, flags, fn);
         parents = {{start_v, new EdgeUnconditional()}};
 
+        auto next_v = start_v;
+
+        if (fn->type->parameters->size() > 0) {
+            sstream.str("");
+            sstream << "INPUT: ";
+            bool isInit = true;
+            for (auto *p : *fn->type->parameters) {
+                if (isInit) isInit = false;
+                else sstream << ", ";
+                p->dbprint(sstream);
+            }
+
+            // TODO: check duplicated fn in two start_v
+            next_v = add_and_connect_vertex(cstring(sstream),
+                    flags & ~VertexFlags::ENTRY, fn);
+            parents = {{next_v, new EdgeUnconditional()}};
+        }
         auto oldstate = state;
         if (state == SKIPPING) state = NORMAL;
         for (auto *p : *fn->type->parameters) {
             // register param could be output
             if (p->direction == IR::Direction::Out ||
                     p->direction == IR::Direction::InOut)
-                add_local_variable_in_vertex(p, start_v, false);
+                add_local_variable_in_vertex(p, next_v, false);
         }
         state = oldstate;
 
         // Visit internal body
+        auto oldLocalProcFlags = localProcFlags;    // nested..
         localProcFlags = VertexFlags::SO_DATA;
         auto prev_cur_v = cur_v;
-        cur_v = start_v;
+        cur_v = next_v;
         visit(fn->body);
         cur_v = prev_cur_v;
-        localProcFlags = VertexFlags::NONE;
+        localProcFlags = oldLocalProcFlags;
 
         auto exit_v = add_and_connect_vertex("EXIT "_cs + vName, VertexFlags::EXIT);
         parents = {{exit_v, new EdgeProcedural}};
@@ -519,12 +536,22 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
 
         // map Out retVar will be mapped to return values (e.g.., lvalue)
         std::vector<const IR::Node *> retVals;
+        prev_cur_v = cur_v;
+        cur_v = exit_v;
         for (auto *p : *fn->type->parameters) {
             // register param could be output
-            if (p->direction == IR::Direction::Out)
-                retVals.push_back(add_local_variable_in_vertex(p, exit_v, true));
+            if (p->direction == IR::Direction::Out) {
+                if (auto *pe = p->to<IR::PathExpression>()) {
+                    const IR::Node *retVal;
+                    add_variables(pe, getContext(), true, &retVal);
+                    retVals.push_back(retVal);
+                } else {
+                    retVals.push_back(add_local_variable_in_vertex(p, exit_v, true));
+                }
+            }
 
         }
+        cur_v = prev_cur_v;
         state = oldstate;
         auto obj = em->object->getNode();
         procedureGraphs[obj] = {start_v, exit_v, retVals};
@@ -592,25 +619,42 @@ bool ControlGraphs::preorder(const IR::Key *key) {
 bool ControlGraphs::preorder(const IR::P4Action *action) {
     auto name = action->getName();
     auto flags = VertexFlags::ACTION;
+    auto oldLocalProcFlags = localProcFlags;
     if (setActionAsProc) {
         flags |= VertexFlags::ENTRY;
         localProcFlags = VertexFlags::ACTION_DATA;
     }
     auto start_v = add_and_connect_vertex(name, flags, action);
     parents = {{start_v, new EdgeUnconditional()}};
+    auto next_v = start_v;
 
+    if (setActionAsProc && action->parameters->size() > 0) {
+        // Create one more node to cover 0->param Edge
+        std::stringstream sstream;
+        sstream << "INPUT: ";
+        bool isInit = true;
+        for (auto *p : *action->parameters) {
+            if (isInit) isInit = false;
+            else sstream << ", ";
+            p->dbprint(sstream);
+        }
+        // TODO: check duplicated action in two start_v
+        next_v = add_and_connect_vertex(cstring(sstream),
+                flags & ~VertexFlags::ENTRY, action);
+        parents = {{next_v, new EdgeUnconditional()}};
+    }
     // ActionParam is newly defined by control plane rules
     for (auto *p : *action->parameters) {
         if (setActionAsProc)
-            add_local_variable_in_vertex(p, start_v, false);
+            add_local_variable_in_vertex(p, next_v, false);
         else
-            add_variable_in_vertex(p, start_v, false);
+            add_variable_in_vertex(p, next_v, false);
     }
 
     visit(action->body);
 
     if (setActionAsProc) {
-        localProcFlags = VertexFlags::NONE;
+        localProcFlags = oldLocalProcFlags;
         auto exit_v = add_and_connect_vertex("EXIT "_cs + name, VertexFlags::EXIT);
         parents = {{exit_v, new EdgeProcedural}};
         procedureGraphs[action] = {start_v, exit_v};
@@ -675,10 +719,11 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
                 }
 
                 if (!emptyAction) {
-                    if (setActionAsProc)
-                        visit_call(actionName, actNode);
-                    else
+                    if (setActionAsProc) {
+                        visit_call(actionName, actNode, VertexFlags::ACTION);
+                    } else {
                         visit(actNode);
+                    }
                 }
 
             } else {
@@ -770,11 +815,18 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
     parents = {{call_v, new EdgeProcedural()}};
 
     if (args.size() > 0) {
+        auto prev_cur_v = cur_v;
+        cur_v = call_v;
         auto oldstate = state;
         state = READ_ONLY;
-        for (auto *arg : args)
-            add_variable_in_vertex(arg, call_v, true);
+        for (auto *arg : args) {
+            if (auto *pe = arg->to<IR::PathExpression>())
+                add_variables(pe, getContext(), true);
+            else
+                add_variable_in_vertex(arg, call_v, true);
+        }
         state = oldstate;
+        cur_v = prev_cur_v;
     }
 
     auto pp = getProcedure(node);
@@ -802,8 +854,15 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
     parents = {{ret_v, new EdgeUnconditional()}};
     add_edge(call_v, ret_v, cstring::empty, EdgeType::CALL_TO_RETURN);
 
+    auto prev_cur_v = cur_v;
+    cur_v = ret_v;
     for (size_t i = 0; i < retArgs.size(); i++) {
-        auto *retArg = add_variable_in_vertex(retArgs[i], ret_v, false);
+        const IR::Node *retArg;
+        if (auto *pe = retArgs[i]->to<IR::PathExpression>())
+            add_variables(pe, getContext(), false, &retArg);
+        else
+            retArg = add_variable_in_vertex(retArgs[i], ret_v, false);
+
         BUG_CHECK(i < pp.retVals.size(),
                 "Number of proc return values (%1%) are less than number of caller's retArgs (%2%)",
                 pp.retVals.size(), i);
@@ -811,6 +870,7 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
         retArgEdges[graphName].push_back({{pp.second, pp.retVals[i]},
                 {ret_v, retArg}});
     }
+    cur_v = prev_cur_v;
 }
 
 static const IR::Expression *get_primary(const IR::Expression *e, const Visitor::Context *ctxt) {
@@ -831,7 +891,8 @@ static const IR::Expression *isValid(const IR::Member *m, const Visitor::Context
     return nullptr;
 }
 
-const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed) {
+const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, const Context *ctxt,
+        bool isUsed, const IR::Node **addVar) {
     if (!ctxt) {
     } else if (auto *m = ctxt->node->to<IR::Member>()) {
         if (auto *t = isValid(m, ctxt->parent)) {
@@ -855,29 +916,30 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
         }
     } else if (auto *sl = ctxt->node->to<IR::Slice>()) {
         // TODO: should I check overlapped slices?
-        e = add_variables(sl, ctxt->parent, isUsed);
+        e = add_variables(sl, ctxt->parent, isUsed, addVar);
         BUG_CHECK(e == sl, "slice %s is not primary in ControlGraphs::add_variables", sl);
         e = sl;
     } else if (auto *ai = ctxt->node->to<IR::ArrayIndex>()) {
         e = get_primary(ai, ctxt->parent);
     }
 
-    const IR::Node *addVar = nullptr;
+    const IR::Node *newVar = nullptr;
     if (auto *pe = e->to<IR::PathExpression>()) {
         auto *decl = refMap->getDeclaration(pe->path, false);
         if (decl != nullptr) {
-            if (decl->is<IR::Parameter>()) {
-                addVar = add_variable_in_vertex(decl->to<IR::Parameter>(),
+            // Find the declared variable
+            if (decl->is<IR::Parameter>())
+                newVar = add_variable_in_vertex(decl->to<IR::Parameter>(),
                         cur_v.value(), isUsed);
-            } else if (decl->is<IR::Declaration_Variable>() &&
-                    localProcFlags != VertexFlags::NONE) {
-                addVar = add_local_variable_in_vertex(decl->to<IR::Declaration_Variable>(),
+            else if (decl->is<IR::Declaration_Variable>())
+                newVar = add_local_variable_in_vertex(decl->to<IR::Declaration_Variable>(),
                         cur_v.value(), isUsed);
-            }
         }
     }
-    if (!addVar)
+    if (!newVar)
         add_variable_in_vertex(e, cur_v.value(), isUsed);
+    if (addVar)
+        *addVar = newVar;
     return e;
 }
 

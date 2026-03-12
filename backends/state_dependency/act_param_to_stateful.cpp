@@ -1,9 +1,10 @@
-#include "non_exact_to_stateful.h"
+#include "act_param_to_stateful.h"
 #include "graphs.h"
 
 namespace P4::P4StateDependency {
 
-void FindNonExactToStateful::collect_non_exact_fields(Tabulation *tab,
+/*
+void FindActParamToStateful::collect_action_params(Tabulation *tab,
         hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> &fields) {
 
     auto *g = tab->g;
@@ -26,15 +27,18 @@ void FindNonExactToStateful::collect_non_exact_fields(Tabulation *tab,
         }
     }
 }
+*/
 
-void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
-    hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> tabFields;
-    collect_non_exact_fields(tab, tabFields);
-
-    if (tabFields.size() == 0) {
-        std::cout << "No non-exact match fields" << std::endl;
+void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
+    auto graphName = boost::get_property(*g, boost::graph_name);
+    if (sgProp->actionParams.size() == 0) {
+        std::cout << "No action params in " << graphName << std::endl;
         return;
     }
+
+    BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
 
     tab->init_ide();
     if (genSupergraphs == GenSGMode::ON_DEMAND)
@@ -44,8 +48,6 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
     tab->compute_values_ide();
     //tab->dump_result();
 
-    auto *g = tab->g;
-    auto *sgProp = tab->sgProp;
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto &vinfo = (*g)[*vit];
@@ -106,7 +108,7 @@ void FindNonExactToStateful::analyze_control_graph(Tabulation *tab) {
     }
 }
 
-Visitor::profile_t FindNonExactToStateful::init_apply(const IR::Node *n) {
+Visitor::profile_t FindActParamToStateful::init_apply(const IR::Node *n) {
     for (size_t i = 0; i < controlGraphsArray->size(); i++) {
         auto *cgg = (*controlGraphsArray)[i];
         auto *sgProp = (*graphProps)[i];

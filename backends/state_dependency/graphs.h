@@ -45,6 +45,7 @@ enum class VertexFlags : unsigned {
     SO_IDX          = 1u << 15,
     SO_DATA         = 1u << 16,
     ACTION_DATA     = 1u << 17,
+    ALL             = (1u << 18) - 1u,
 };
 
 enum class SOFlags : unsigned {
@@ -184,7 +185,7 @@ class ActionBitSetFunc : public EdgeFunc {
     size_t actBits;
 };
 
-// TODO: Move custom EdgeFunc to child pass (e.g., non_exact_to_stateful)
+// TODO: Move custom EdgeFunc to child pass (e.g., act_param_to_stateful)
 //       instead of common library like supergraph / tabulation
 struct ActionSetFunc : public ActionBitSetFunc {
  public:
@@ -271,6 +272,10 @@ struct EdgeFuncHolder {
 
     std::optional<size_t> getValue() {
         return fn->getValue();
+    }
+
+    bool has_value() {
+        return fn->getValue().has_value();
     }
 
     EdgeFuncHolder compose(const EdgeFuncHolder &other) const {
@@ -448,9 +453,21 @@ inline VertexFlags operator|(VertexFlags a, VertexFlags b) {
     return static_cast<VertexFlags>(static_cast<unsigned>(a) |
             static_cast<unsigned>(b));
 }
+inline VertexFlags operator&(VertexFlags a, VertexFlags b) {
+    return static_cast<VertexFlags>(static_cast<unsigned>(a) &
+            static_cast<unsigned>(b));
+}
+inline VertexFlags operator~(VertexFlags a) {
+    return static_cast<VertexFlags>(~static_cast<unsigned>(a) & static_cast<unsigned>(VertexFlags::ALL));
+}
 // OR-assign
 inline VertexFlags& operator|=(VertexFlags& a, VertexFlags b) {
     a = a | b;
+    return a;
+}
+// AND-assign
+inline VertexFlags& operator&=(VertexFlags& a, VertexFlags b) {
+    a = a & b;
     return a;
 }
 inline bool hasFlag(VertexFlags v, VertexFlags f) {

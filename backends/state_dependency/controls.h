@@ -69,7 +69,8 @@ class ControlGraphs : public Graphs,
                     std::vector<const IR::Node *> retArgs={});
 
     const P4::ExternMethod *get_extern_method(const Visitor::Context *ctxt_);
-    const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed);
+    const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed,
+            const IR::Node **addVar=nullptr);
 
     std::vector<Graph *> controlGraphsArray{};
 
