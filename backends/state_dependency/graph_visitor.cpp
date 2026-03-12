@@ -82,15 +82,18 @@ void GraphVisitor::writeGraphToFile(const Graph &g, const std::string &name) {
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         const auto &vinfo = g[*vit];
         if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
-        if (varVis == VarVisibility::REACHABLE &&
-                !vinfo.interesting)
-            continue;
 
         auto [ei, ei_end] = boost::out_edges(*vit, g);
         for (; ei != ei_end; ++ei) {
             auto &edge = g[*ei];
-            if (edge.type == EdgeType::HAS_VAR)
+            if (edge.type == EdgeType::HAS_VAR) {
+                auto varit = boost::target(*ei, g);
+                const auto &var_vinfo = g[varit];
+                if (varVis == VarVisibility::REACHABLE &&
+                        !var_vinfo.interesting)
+                    continue;
                 groups[*vit].insert(boost::target(*ei, g));
+            }
         }
     }
     inject_rank_to_dot(path, groups);
