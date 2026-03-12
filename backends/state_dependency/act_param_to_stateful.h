@@ -14,18 +14,24 @@ class FindActParamToStateful : public Graphs,
                                public Inspector {
 
  public:
-    explicit FindActParamToStateful(std::vector<Graph *> *controlGraphsArray,
+    explicit FindActParamToStateful(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            std::vector<Graph *> *controlGraphsArray,
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs)
-        : controlGraphsArray(controlGraphsArray),
+        : refMap(refMap),
+          typeMap(typeMap),
+          controlGraphsArray(controlGraphsArray),
           graphProps(graphProps),
           genSupergraphs(genSupergraphs) {}
     Visitor::profile_t init_apply(const IR::Node *) override;
 
  private:
     void analyze_control_graph(Tabulation *tab);
+    std::vector<const IR::Node *> get_var_members(Tabulation *tab, const IR::Node *var);
 
  protected:
+    P4::ReferenceMap *refMap;
+    P4::TypeMap *typeMap;
     std::vector<Graph *> *controlGraphsArray{};
     std::vector<SuperGraphProp *> *graphProps{};
     GenSGMode genSupergraphs;
@@ -33,10 +39,12 @@ class FindActParamToStateful : public Graphs,
 
 class ActParamToStateful : public PassManager {
  public:
-    explicit ActParamToStateful(std::vector<Graph *> *controlGraphsArray,
+    explicit ActParamToStateful(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            std::vector<Graph *> *controlGraphsArray,
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs) {
-        passes.push_back(new FindActParamToStateful(controlGraphsArray,
+        passes.push_back(new FindActParamToStateful(refMap, typeMap,
+                    controlGraphsArray,
                     graphProps, genSupergraphs));
     }
 };

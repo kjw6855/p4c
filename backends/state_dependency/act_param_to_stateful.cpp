@@ -29,6 +29,53 @@ void FindActParamToStateful::collect_action_params(Tabulation *tab,
 }
 */
 
+std::vector<const IR::Node *> FindActParamToStateful::get_var_members(Tabulation *tab, const IR::Node *var) {
+    // TODO: support others
+    auto *varDecl = var->to<IR::Declaration>();
+    if (!varDecl) return {};
+
+    std::vector<const IR::Node *> foundVars;
+    for (auto gVar : tab->sgProp->progVarInfo.get_all_vars()) {
+        if (auto *sl = gVar->to<IR::Slice>()) {
+            if (!sl->e0->is<IR::PathExpression>()) continue;
+            auto *pe = sl->e0->to<IR::PathExpression>();
+            if (auto *decl = refMap->getDeclaration(pe->path)) {
+                if (decl == varDecl) {
+                    foundVars.push_back(sl);
+                    continue;
+                }
+            }
+        }
+    }
+
+    return foundVars;
+}
+
+cstring dump_found_dependency(Tabulation *tab, TabEdge te, const cstring &prefix) {
+    std::stringstream sstream;
+
+    sstream << prefix;
+
+    auto *g = tab->g;
+    auto srcit = te.first.node;
+    auto &srcinfo = (*g)[srcit];
+    if (hasFlag(srcinfo.flags, VertexFlags::ACTION) && srcinfo.node->is<IR::P4Action>()) {
+        // Some ACTION vertex has INPUT as its name, not action name
+        auto *actNode = srcinfo.node->to<IR::P4Action>();
+        sstream << actNode->getName();
+        sstream << "(" << srcit <<  "):";
+        auto srcVarIt = tab->get_vertex_id(te.first);
+        auto srcVarInfo = (*g)[srcVarIt];
+        sstream << srcVarInfo.name;
+    } else {
+        sstream << tab->dump_tab_vertex(te.first);
+    }
+
+    sstream << "->" << tab->dump_tab_vertex(te.second);
+
+    return cstring(sstream);
+}
+
 void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
@@ -66,9 +113,18 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
             for (auto var : vinfo.useVars) {
                 size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
                 for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                    std::cout << caseString << tab->dump_tab_edge({
-                        paramTv, TabVertex{*vit, var}})
-                        << std::endl;
+                    auto resultStr = dump_found_dependency(tab,
+                            {paramTv, TabVertex{*vit, var}}, caseString);
+                    std::cout << resultStr << std::endl;
+                }
+                // Find if any variable is a member of var
+                for (auto mem : get_var_members(tab, var)) {
+                    size_t actionBitMap = tab->valueMap[TabVertex{*vit, mem}];
+                    for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
+                        auto resultStr = dump_found_dependency(tab,
+                                {paramTv, TabVertex{*vit, mem}}, caseString);
+                        std::cout << resultStr << std::endl;
+                    }
                 }
             }
         } else if (hasFlag(vinfo.flags, VertexFlags::SO_DATA)) {
@@ -98,12 +154,23 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
 
                 size_t actionBitMap = tab->valueMap[useTv];
                 for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                    std::cout << caseString << tab->dump_tab_edge({paramTv, useTv})
-                        << std::endl;
+                    auto resultStr = dump_found_dependency(tab,
+                            {paramTv, useTv}, caseString);
+                    std::cout << resultStr << std::endl;
+                }
+                // Find if any variable is a member of var
+                for (auto mem : get_var_members(tab, var)) {
+                    size_t actionBitMap = tab->valueMap[TabVertex{*vit, mem}];
+                    for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
+                        auto resultStr = dump_found_dependency(tab,
+                                {paramTv, TabVertex{*vit, mem}}, caseString);
+                        std::cout << resultStr << std::endl;
+                    }
                 }
             }
         } else if (hasFlag(vinfo.flags, VertexFlags::KEY)) {
             // TODO: Check READ_DATA->MATCH
+            continue;
         }
     }
 }

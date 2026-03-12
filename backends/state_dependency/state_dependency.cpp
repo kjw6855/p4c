@@ -149,7 +149,8 @@ int main(int argc, char *const argv[]) {
         // generate supergraphs
         sg.gen_supergraphs();
 
-        P4StateDependency::ActParamToStateful sdChecker(&cgen.controlGraphsArray,
+        P4StateDependency::ActParamToStateful sdChecker(&midEnd.refMap, &midEnd.typeMap,
+                &cgen.controlGraphsArray,
                 &sg.graphProps,
                 options.genSupergraphs);
         program->apply(sdChecker);
