@@ -25,6 +25,7 @@ void Tabulation::init_ide() {
 
     // Line 1-2: Init jumpFunc
     vertices = boost::vertices(*g);
+    std::optional<Graphs::vertex_t> exit_v{};
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto vinfo = (*g)[*vit];
         if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
@@ -34,8 +35,17 @@ void Tabulation::init_ide() {
         if (vProcName == sgProp->procOf[sgProp->rootVar]) {
             for (auto *p : variableList)
                 jumpFunc.add_func({rootTv, TabVertex{*vit, p}}, sgProp->topFunc);
+            if (hasFlag(vinfo.flags, VertexFlags::EXIT))
+                exit_v = *vit;
         } else {
             auto src = sgProp->srcOf[vProcName];
+            // Special JumpFunc from any src to main exit
+            if (src == *vit && exit_v.has_value()) {
+                for (auto *p : variableList)
+                    for (auto *q : variableList)
+                        jumpFunc.add_func({TabVertex{src, p}, TabVertex{exit_v.value(), q}},
+                                sgProp->topFunc);
+            }
             for (auto *p : variableList)
                 for (auto *q : variableList)
                     jumpFunc.add_func({TabVertex{src, p}, TabVertex{*vit, q}}, sgProp->topFunc);

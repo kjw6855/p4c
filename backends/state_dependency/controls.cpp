@@ -186,7 +186,7 @@ bool ControlGraphs::preorder(const IR::SwitchStatement *statement) {
     if (tbl == nullptr) {
         statement->expression->dbprint(sstream);
     } else {
-        visit(tbl);
+        visit_call(tbl->getName(), tbl);
         sstream << "switch: action_run";
     }
     v = add_and_connect_vertex(cstring(sstream), VertexFlags::SWITCH, statement);
