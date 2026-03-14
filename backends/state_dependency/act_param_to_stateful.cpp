@@ -76,6 +76,11 @@ cstring dump_found_dependency(Tabulation *tab, TabEdge te, const cstring &prefix
     return cstring(sstream);
 }
 
+Graphs::VarEdge convert_to_var_edge(const TabEdge &te) {
+    return {{te.first.node, te.first.var},
+            {te.second.node, te.second.var}};
+}
+
 void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
@@ -87,6 +92,7 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
 
     BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
 
+    // TODO: make general for defVars
     tab->init_ide();
     if (genSupergraphs == GenSGMode::ON_DEMAND)
         tab->forward_tabulate_on_demand_ide();
@@ -113,16 +119,18 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
             for (auto var : vinfo.useVars) {
                 size_t actionBitMap = tab->valueMap[TabVertex{*vit, var}];
                 for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                    auto resultStr = dump_found_dependency(tab,
-                            {paramTv, TabVertex{*vit, var}}, caseString);
+                    TabEdge te = {paramTv, TabVertex{*vit, var}};
+                    foundDepEdges[graphName].push_back(convert_to_var_edge(te));
+                    auto resultStr = dump_found_dependency(tab, te, caseString);
                     std::cout << resultStr << std::endl;
                 }
                 // Find if any variable is a member of var
                 for (auto mem : get_var_members(tab, var)) {
                     size_t actionBitMap = tab->valueMap[TabVertex{*vit, mem}];
                     for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                        auto resultStr = dump_found_dependency(tab,
-                                {paramTv, TabVertex{*vit, mem}}, caseString);
+                        TabEdge te = {paramTv, TabVertex{*vit, mem}};
+                        foundDepEdges[graphName].push_back(convert_to_var_edge(te));
+                        auto resultStr = dump_found_dependency(tab, te, caseString);
                         std::cout << resultStr << std::endl;
                     }
                 }
@@ -154,6 +162,8 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
 
                 size_t actionBitMap = tab->valueMap[useTv];
                 for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
+                    TabEdge te = {paramTv, useTv};
+                    foundDepEdges[graphName].push_back(convert_to_var_edge(te));
                     auto resultStr = dump_found_dependency(tab,
                             {paramTv, useTv}, caseString);
                     std::cout << resultStr << std::endl;
@@ -162,20 +172,19 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
                 for (auto mem : get_var_members(tab, var)) {
                     size_t actionBitMap = tab->valueMap[TabVertex{*vit, mem}];
                     for (auto paramTv : sgProp->get_action_params(actionBitMap)) {
-                        auto resultStr = dump_found_dependency(tab,
-                                {paramTv, TabVertex{*vit, mem}}, caseString);
+                        TabEdge te = {paramTv, TabVertex{*vit, mem}};
+                        foundDepEdges[graphName].push_back(convert_to_var_edge(te));
+                        auto resultStr = dump_found_dependency(tab, te, caseString);
                         std::cout << resultStr << std::endl;
                     }
                 }
             }
-        } else if (hasFlag(vinfo.flags, VertexFlags::KEY)) {
-            // TODO: Check READ_DATA->MATCH
-            continue;
         }
     }
 }
 
 Visitor::profile_t FindActParamToStateful::init_apply(const IR::Node *n) {
+    foundDepEdges.clear();
     for (size_t i = 0; i < controlGraphsArray->size(); i++) {
         auto *cgg = (*controlGraphsArray)[i];
         auto *sgProp = (*graphProps)[i];

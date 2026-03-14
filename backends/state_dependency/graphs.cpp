@@ -144,5 +144,21 @@ const IR::Node *Graphs::add_local_variable_in_vertex(const IR::Node *var,
     return newVar;
 }
 
+cstring Graphs::dump_var_vertex(Graph *g, const VarVertex &a) {
+    std::stringstream logstr;
+    auto &ainfo = (*g)[a.first];
+    logstr << ainfo.name << "(";
+    logstr << a.first << "):";
+    logstr << a.second;
+    return cstring(logstr);
+}
+
+cstring Graphs::dump_var_edge(Graph *g, const VarEdge &ve) {
+    std::stringstream logstr;
+    logstr << dump_var_vertex(g, ve.first) << "->";
+    logstr << dump_var_vertex(g, ve.second);
+    return cstring(logstr);
+}
+
 
 }  // namespace P4::P4StateDependency

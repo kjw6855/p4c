@@ -154,6 +154,14 @@ int main(int argc, char *const argv[]) {
                 &sg.graphProps,
                 options.genSupergraphs);
         program->apply(sdChecker);
+
+        for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = boost::get_property(*g, boost::graph_name);
+            for (const auto &ve : sdChecker.getFoundDepEdges(graphName)) {
+                LOG2(P4StateDependency::Graphs::dump_var_edge(g, ve));
+            }
+        }
     }
 
     LOG2("Generating parser graphs");

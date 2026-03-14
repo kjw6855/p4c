@@ -35,6 +35,10 @@ class FindActParamToStateful : public Graphs,
     std::vector<Graph *> *controlGraphsArray{};
     std::vector<SuperGraphProp *> *graphProps{};
     GenSGMode genSupergraphs;
+
+ public:
+    // TODO: add dependency type
+    hvec_map<cstring, std::vector<Graphs::VarEdge>> foundDepEdges;
 };
 
 class ActParamToStateful : public PassManager {
@@ -43,10 +47,20 @@ class ActParamToStateful : public PassManager {
             std::vector<Graph *> *controlGraphsArray,
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs) {
-        passes.push_back(new FindActParamToStateful(refMap, typeMap,
+        ptsPass = new FindActParamToStateful(refMap, typeMap,
                     controlGraphsArray,
-                    graphProps, genSupergraphs));
+                    graphProps, genSupergraphs);
+        passes.push_back(ptsPass);
     }
+
+    std::vector<Graphs::VarEdge> getFoundDepEdges(const cstring &graphName) {
+        if (ptsPass->foundDepEdges.find(graphName) ==
+                ptsPass->foundDepEdges.end())
+            return {};
+        return ptsPass->foundDepEdges[graphName];
+    }
+ protected:
+    FindActParamToStateful *ptsPass{};
 };
 
 }  // namespace P4::P4StateDependency

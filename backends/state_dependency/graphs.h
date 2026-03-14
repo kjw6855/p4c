@@ -626,6 +626,9 @@ class Graphs {
             const vertex_t &v, bool isUsed,
             std::optional<cstring> name=std::nullopt);
 
+    static cstring dump_var_vertex(Graph *g, const VarVertex &a);
+    static cstring dump_var_edge(Graph *g, const VarEdge &ve);
+
     cstring get_var_name(const IR::Node *var) {
         std::stringstream sstream;
         sstream << var;
