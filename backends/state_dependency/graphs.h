@@ -3,6 +3,7 @@
 
 #include <memory>
 
+#include <boost/dynamic_bitset.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/graphviz.hpp>
 
@@ -87,14 +88,13 @@ inline cstring edgeTypeToString(EdgeType type) {
     return cstring::empty;
 }
 
-inline size_t get_top_value(size_t actIdNum) {
-    return (actIdNum == 0) ? 0 : (size_t(1) << actIdNum) - 1;
-}
+using VarBitSet = boost::dynamic_bitset<uint64_t>;
 
 // TODO: extend size_t to template<D>
 class EdgeFunc {
  public:
-    virtual size_t operator()(size_t i) const = 0;
+
+    virtual VarBitSet operator()(VarBitSet i) const = 0;
 
     virtual std::unique_ptr<EdgeFunc> compose(std::unique_ptr<EdgeFunc> g) const {
         class ComposeFunc : public EdgeFunc {
@@ -103,7 +103,7 @@ class EdgeFunc {
             ComposeFunc(std::unique_ptr<EdgeFunc> o, std::unique_ptr<EdgeFunc> i)
                 : outer(std::move(o)), inner(std::move(i)) {}
 
-            size_t operator()(size_t x) const override {
+            VarBitSet operator()(VarBitSet x) const override {
                 return (*outer)((*inner)(x));
             }
 
@@ -111,7 +111,7 @@ class EdgeFunc {
                 return outer->getName() + " U "_cs + inner->getName();
             }
 
-            std::optional<size_t> getValue() const override {
+            std::optional<VarBitSet> getValue() const override {
                 if (!inner && !outer) return {};
                 else if (!inner) return outer->getValue();
                 else if (!outer) return inner->getValue();
@@ -122,7 +122,7 @@ class EdgeFunc {
                 if (!inVal.has_value()) return outVal;
 
                 // x | y
-                size_t val = inVal.value() | outVal.value();
+                VarBitSet val = inVal.value() | outVal.value();
                 return std::optional{val};
             }
 
@@ -147,100 +147,111 @@ class EdgeFunc {
 
     virtual std::unique_ptr<EdgeFunc> clone() const = 0;
     virtual cstring getName() const = 0;
-    virtual std::optional<size_t> getValue() const = 0;
+    virtual std::optional<VarBitSet> getValue() const = 0;
     virtual ~EdgeFunc() = default;
 };
 
 class IdFunc : public EdgeFunc {
  public:
-    size_t operator()(size_t i) const override { return i; }
+    VarBitSet operator()(VarBitSet i) const override { return i; }
     std::unique_ptr<EdgeFunc> clone() const override {
         return std::make_unique<IdFunc>(*this);
     }
-    std::optional<size_t> getValue() const override { return std::nullopt; }
+    std::optional<VarBitSet> getValue() const override { return std::nullopt; }
     cstring getName() const override { return "id"_cs; }
 };
 
-class ActionBitSetFunc : public EdgeFunc {
+class VarBitSetFunc : public EdgeFunc {
  public:
-    explicit ActionBitSetFunc(size_t actBits) : actBits(actBits) {}
+    explicit VarBitSetFunc(const VarBitSet &from)
+    : varBits(from.size()) {
+        varBits = from;
+    }
 
-    // TODO: Change return type from size_t to bitVector
-    size_t operator()(size_t i) const override {
-        return i | actBits;
+    VarBitSet operator()(VarBitSet i) const override {
+        return i | varBits;
     }
     std::unique_ptr<EdgeFunc> clone() const override {
-        return std::make_unique<ActionBitSetFunc>(*this);
+        return std::make_unique<VarBitSetFunc>(*this);
     }
     cstring getName() const override {
         std::stringstream sstream;
-        sstream << "set " << __builtin_popcountll(actBits) << " 1s";
+        sstream << varBits;
         return cstring(sstream);
     }
-    std::optional<size_t> getValue() const override {
-        return std::optional{actBits};
+    std::optional<VarBitSet> getValue() const override {
+        return std::optional{varBits};
     }
 
- private:
-    size_t actBits;
+ protected:
+    size_t varNum;
+    VarBitSet varBits;
 };
 
 // TODO: Move custom EdgeFunc to child pass (e.g., act_param_to_stateful)
 //       instead of common library like supergraph / tabulation
-struct ActionSetFunc : public ActionBitSetFunc {
+struct VarSetFunc : public VarBitSetFunc {
  public:
-    explicit ActionSetFunc(size_t actId)
-        : ActionBitSetFunc(size_t(1) << actId),
-          actId(actId) {}
+    explicit VarSetFunc(size_t varNum, size_t varId)
+    : VarBitSetFunc(VarBitSet(varNum)),
+      varId(varId) {
+        varBits.set(varId);
+    }
+
     std::unique_ptr<EdgeFunc> clone() const override {
-        return std::make_unique<ActionSetFunc>(*this);
+        return std::make_unique<VarSetFunc>(*this);
     }
     cstring getName() const override {
         std::stringstream sstream;
-        sstream << "(i | (1 << " << actId << "))";
+        sstream << "(i | (1 << " << varId << "))";
         return cstring(sstream);
     }
 
  private:
-    size_t actId;
+    size_t varId;
 };
 
 struct TopFunc : public EdgeFunc {
  public:
-    explicit TopFunc(size_t actNum) : actNum(actNum) {
-        BUG_CHECK(actNum < 64, "Out of range!");
-        actBits = get_top_value(actNum);
+    explicit TopFunc(size_t varNum)
+    : varBits(varNum) {
+        varBits.set();
     }
-    size_t operator()(size_t) const override {
+
+    VarBitSet operator()(VarBitSet) const override {
         // Top will absorb any bit index
-        return actBits;
+        return varBits;
     }
     std::unique_ptr<EdgeFunc> clone() const override {
         return std::make_unique<TopFunc>(*this);
     }
-    std::optional<size_t> getValue() const override { return std::optional{actBits}; }
+    std::optional<VarBitSet> getValue() const override {
+        return std::optional{varBits};
+    }
     cstring getName() const override { return "T"_cs; }
 
- private:
-    size_t actNum;
-    size_t actBits;
+ protected:
+    size_t varNum;
+    VarBitSet varBits;
 };
 
 struct BottomFunc : public EdgeFunc {
  public:
-    explicit BottomFunc() : actBits(0) {}
-    size_t operator()(size_t) const override {
+    explicit BottomFunc() {}
+
+    VarBitSet operator()(VarBitSet i) const override {
         // Bottom will absorb any bit index
-        return actBits;
+        i |= varBits;
+        return i;
     }
     std::unique_ptr<EdgeFunc> clone() const override {
         return std::make_unique<BottomFunc>(*this);
     }
-    std::optional<size_t> getValue() const override { return std::optional{0}; }
+    std::optional<VarBitSet> getValue() const override { return std::optional{varBits}; }
     cstring getName() const override { return "0"_cs; }
 
- private:
-    size_t actBits;
+ protected:
+    VarBitSet varBits;
 };
 
 struct EdgeFuncHolder {
@@ -262,7 +273,7 @@ struct EdgeFuncHolder {
     EdgeFuncHolder(EdgeFuncHolder&&) noexcept = default;
     EdgeFuncHolder& operator=(EdgeFuncHolder&&) noexcept = default;
 
-    size_t operator()(size_t i) {
+    VarBitSet operator()(VarBitSet i) {
         return (*fn)(i);
     }
 
@@ -270,7 +281,7 @@ struct EdgeFuncHolder {
         return fn->getName();
     }
 
-    std::optional<size_t> getValue() {
+    std::optional<VarBitSet> getValue() {
         return fn->getValue();
     }
 
@@ -306,15 +317,15 @@ struct EdgeFuncHolder {
             } else {
                 // x | y
                 auto newVal = fVal.value() | gVal.value();
-                if (newVal == 0) {
+                if (newVal.none()) {
                     return EdgeFuncHolder(std::make_unique<BottomFunc>());
                 } else {
-                    return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(newVal));
+                    return EdgeFuncHolder(std::make_unique<VarBitSetFunc>(newVal));
                 }
             }
         } else if (fVal.has_value()) {
             // 0 | Id = 0
-            if (fVal.value() == 0)
+            if (fVal.value().none())
                 return EdgeFuncHolder(std::make_unique<BottomFunc>());
             // T | Id = Id
             else if (typeid(*fn) == typeid(TopFunc))
@@ -322,10 +333,10 @@ struct EdgeFuncHolder {
 
             // Id | x = x
             else
-                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(fVal.value()));
+                return EdgeFuncHolder(std::make_unique<VarBitSetFunc>(fVal.value()));
         } else if (gVal.has_value()) {
             // Id | 0 = 0
-            if (gVal.value() == 0)
+            if (gVal.value().none())
                 return EdgeFuncHolder(std::make_unique<BottomFunc>());
             // Id | T = Id
             else if (typeid(*other.fn) == typeid(TopFunc))
@@ -333,7 +344,7 @@ struct EdgeFuncHolder {
 
             // Id | x = x
             else
-                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(gVal.value()));
+                return EdgeFuncHolder(std::make_unique<VarBitSetFunc>(gVal.value()));
         }
         // Id | Id = Id
         return EdgeFuncHolder(fn->clone());
@@ -352,15 +363,15 @@ struct EdgeFuncHolder {
             } else {
                 // x v y
                 auto newVal = fVal.value() & gVal.value();
-                if (newVal == 0) {
+                if (newVal.none()) {
                     return EdgeFuncHolder(std::make_unique<BottomFunc>());
                 } else {
-                    return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(newVal));
+                    return EdgeFuncHolder(std::make_unique<VarBitSetFunc>(newVal));
                 }
             }
         } else if (fVal.has_value()) {
             // 0 v Id = 0
-            if (fVal.value() == 0)
+            if (fVal.value().none())
                 return EdgeFuncHolder(std::make_unique<BottomFunc>());
             // T v Id = Id
             else if (typeid(*fn) == typeid(TopFunc))
@@ -368,10 +379,10 @@ struct EdgeFuncHolder {
 
             // Id v x = x
             else
-                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(fVal.value()));
+                return EdgeFuncHolder(std::make_unique<VarBitSetFunc>(fVal.value()));
         } else if (gVal.has_value()) {
             // Id v 0 = 0
-            if (gVal.value() == 0)
+            if (gVal.value().none())
                 return EdgeFuncHolder(std::make_unique<BottomFunc>());
             // Id v T = Id
             else if (typeid(*other.fn) == typeid(TopFunc))
@@ -379,7 +390,7 @@ struct EdgeFuncHolder {
 
             // Id v x = x
             else
-                return EdgeFuncHolder(std::make_unique<ActionBitSetFunc>(gVal.value()));
+                return EdgeFuncHolder(std::make_unique<VarBitSetFunc>(gVal.value()));
         }
         // Id v Id = Id
         return EdgeFuncHolder(fn->clone());
@@ -390,7 +401,6 @@ struct EdgeFuncHolder {
 };
 
 const struct EdgeFuncHolder globalIdFunc(std::make_unique<IdFunc>());
-const struct EdgeFuncHolder globalBottomFunc(std::make_unique<BottomFunc>());
 
 class EdgeTypeIface {
  public:
@@ -400,7 +410,7 @@ class EdgeTypeIface {
 
     void setFunc(std::unique_ptr<EdgeFunc> f) { fn = EdgeFuncHolder(std::move(f)); }
 
-    size_t apply(size_t i) {
+    VarBitSet apply(VarBitSet i) {
         return (fn)(i);
     }
 
@@ -603,12 +613,11 @@ class Graphs {
 
     vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
 
-    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                  EdgeType type, std::optional<size_t> actId=std::nullopt);
+    edge_t add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                  EdgeType type);
 
-    void add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                  EdgeType type, unsigned cluster_id,
-                  std::optional<size_t> actId=std::nullopt);
+    edge_t add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                  EdgeType type, unsigned cluster_id);
 
     vertex_t add_and_connect_vertex(const cstring &name, VertexFlags flags,
                                     const IR::Node *node=nullptr);

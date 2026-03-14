@@ -525,18 +525,18 @@ void Tabulation::forward_tabulate_on_demand_ide() {
     LOG5("=== (END) IDE Tabulate Process ===");
 }
 
-size_t Tabulation::may_meet_value(size_t a, size_t b) {
-    size_t c = a | b;
+VarBitSet Tabulation::may_meet_value(VarBitSet a, VarBitSet b) {
+    VarBitSet c = a | b;
     // T (unknown) | v = v
     if (sgProp->topEnvValue == a) return b;
     if (sgProp->topEnvValue == b) return a;
     return c;
 }
 
-void Tabulation::propagate_value_ide(TabVertex tv, size_t val) {
+void Tabulation::propagate_value_ide(TabVertex tv, VarBitSet val) {
     LOG5("[II-1] " << dump_tab_vertex(tv) << "&=" << val);
 
-    size_t newVal = may_meet_value(val, valueMap[tv]);
+    VarBitSet newVal = may_meet_value(val, valueMap[tv]);
     if (newVal != valueMap[tv]) {
         valueMap[tv] = newVal;
         nodeWorkList.push(tv);
@@ -554,7 +554,7 @@ void Tabulation::compute_values_ide() {
     }
 
     // Line 1-14: Phase II-1
-    valueMap[rootTv] = 0;
+    valueMap[rootTv] = VarBitSet(sgProp->varBitSetSize);
     nodeWorkList.push(rootTv);
     LOG5("=== (BEGIN) IDE Compute Value Process ===");
     while (!nodeWorkList.empty()) {

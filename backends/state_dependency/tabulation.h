@@ -125,11 +125,11 @@ class Tabulation : public Graphs {
  private:
     void propagate_ifds(TabVertex a, TabVertex b);
     void propagate_ide(TabVertex a, TabVertex b, EdgeFuncHolder fn);
-    void propagate_value_ide(TabVertex tv, size_t val);
+    void propagate_value_ide(TabVertex tv, VarBitSet val);
     std::vector<TabVertex> &get_successors(TabVertex &tb,
             std::vector<TabVertex> &succ);
     EdgeFuncHolder get_edge_func(TabVertex &a, TabVertex &b);
-    size_t may_meet_value(size_t a, size_t b);
+    VarBitSet may_meet_value(VarBitSet a, VarBitSet b);
     std::vector<TabVertex> get_return_val(const TabVertex &exitTv,
             const TabVertex &callerTv);
 
@@ -153,7 +153,7 @@ class Tabulation : public Graphs {
     hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> reachableVars;
     FuncMapHelper jumpFunc;
     FuncMapHelper summaryFunc;
-    hvec_map<TabVertex, size_t, TabVertexHash> valueMap;
+    hvec_map<TabVertex, VarBitSet, TabVertexHash> valueMap;
 
  private:
     std::queue<TabEdge> workList;

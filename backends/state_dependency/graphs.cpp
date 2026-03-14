@@ -2,6 +2,7 @@
 
 namespace P4::P4StateDependency {
 using vertex_t = Graphs::vertex_t;
+using edge_t = Graphs::edge_t;
 const IR::Node *Graphs::globalNode = new IR::Constant(0);
 
 vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node) {
@@ -18,33 +19,25 @@ vertex_t Graphs::add_vertex(const cstring &name, VertexFlags flags, const IR::No
     return g->local_to_global(v);
 }
 
-void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                      EdgeType type, std::optional<size_t> actId) {
+edge_t Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                      EdgeType type) {
     auto ep = boost::add_edge(from, to, g->root());
     boost::put(&EdgeTypeIface::name, g->root(), ep.first, name);
     boost::put(&EdgeTypeIface::type, g->root(), ep.first, type);
-
-    if (actId.has_value()) {
-        auto &edge = g->root()[ep.first];
-        edge.setFunc(std::make_unique<ActionSetFunc>(actId.value()));
-    }
+    return ep.first;
 }
 
-void Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
-                      EdgeType type, unsigned cluster_id, std::optional<size_t> actId) {
+edge_t Graphs::add_edge(const vertex_t &from, const vertex_t &to, const cstring &name,
+                      EdgeType type, unsigned cluster_id) {
     auto ep = boost::add_edge(from, to, g->root());
     boost::put(&EdgeTypeIface::name, g->root(), ep.first, name);
     boost::put(&EdgeTypeIface::type, g->root(), ep.first, type);
-
-    if (actId.has_value()) {
-        auto &edge = g->root()[ep.first];
-        edge.setFunc(std::make_unique<ActionSetFunc>(actId.value()));
-    }
 
     auto attrs = boost::get(boost::edge_attribute, g->root());
 
     attrs[ep.first]["ltail"_cs] = "cluster"_cs + Util::toString(cluster_id - 2);
     attrs[ep.first]["lhead"_cs] = "cluster"_cs + Util::toString(cluster_id - 1);
+    return ep.first;
 }
 
 vertex_t Graphs::add_and_connect_vertex(const cstring &name, VertexFlags flags,

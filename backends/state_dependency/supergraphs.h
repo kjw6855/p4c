@@ -153,10 +153,12 @@ class SuperGraphProp {
     hvec_map<cstring, Graphs::vertex_t> srcOf;
     std::vector<TabVertex> actionParams;
     hvec_map<TabVertex, size_t, TabVertexHash> actionParamIdMap;
-    std::size_t topEnvValue;
+    VarBitSet topEnvValue;
+    size_t varBitSetSize;
+
     EdgeFuncHolder topFunc;
 
-    std::vector<TabVertex> get_action_params(size_t bitmap);
+    std::vector<TabVertex> get_action_params(const VarBitSet &bitmap);
 };
 
 class SuperGraphs : public Graphs {
