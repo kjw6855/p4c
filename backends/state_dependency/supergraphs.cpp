@@ -12,20 +12,6 @@ const IR::PathExpression* get_base(const IR::Expression* e) {
     return e->to<IR::PathExpression>();
 }
 
-std::vector<TabVertex> SuperGraphProp::get_action_params(const VarBitSet &bitmap) {
-    if (bitmap.none() || bitmap == topEnvValue) return {};
-
-    std::vector<TabVertex> foundActionParams;
-    // Get first set bit
-    size_t pos = bitmap.find_first();
-    while (pos != VarBitSet::npos) {
-        foundActionParams.push_back(actionParams[pos]);
-        // Get next set bit after current pos
-        pos = bitmap.find_next(pos);
-    }
-    return foundActionParams;
-}
-
 void SuperGraphs::create_root_var_vertex() {
     curProp->rootVar = add_var_vertex(Graphs::globalNode);
     auto rootNode = get_root_vertex(g);
@@ -121,13 +107,12 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
             }
         }
 
-        // Set actionParamIdMap
+        // Set actionParams
         if (hasFlag(vinfo.flags, VertexFlags::ACTION)) {
             // Store each defVar in ACTION statements
             for (auto dv : vinfo.defVars) {
                 auto dvTv = TabVertex{*vit, dv};
                 curProp->actionParams.push_back(dvTv);
-                curProp->actionParamIdMap[dvTv] = actId++;
             }
         }
     }
@@ -160,11 +145,6 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
                     cstring::empty, EdgeType::IFDS);
         }
     }
-
-    // Increment actId to differentiate from all-enabled value
-    curProp->varBitSetSize = actId + 1;
-    curProp->topFunc = EdgeFuncHolder(std::make_unique<TopFunc>(actId + 1));
-    curProp->topEnvValue = curProp->topFunc.getValue().value();
 
     // Traverse ICFG
     std::size_t n = num_vertices(*g);
@@ -235,12 +215,6 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
             // 0 -> DEF
             auto edgeId = add_edge(progVarInfo[src][0], progVarInfo[dst][n],
                      cstring::empty, EdgeType::IFDS);
-            auto varId = curProp->get_action_param_id(TabVertex{dst, var});
-            if (varId.has_value()) {
-                auto &edge = (*g)[edgeId];
-                edge.setFunc(std::make_unique<VarSetFunc>(curProp->varBitSetSize,
-                             varId.value()));
-            }
         } else {
             // USE -> DEF
             for (auto uv : dstInfo.useVars) {

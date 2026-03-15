@@ -130,12 +130,6 @@ struct ProgramVarInfo {
 
 class SuperGraphProp {
  public:
-    std::optional<size_t> get_action_param_id(const TabVertex &tv) {
-        auto actionParamIdMapIt = actionParamIdMap.find(tv);
-        return actionParamIdMapIt == actionParamIdMap.end() ?
-            std::nullopt : std::optional{actionParamIdMapIt->second};
-    }
-
     std::pair<Graphs::vertex_t, Graphs::vertex_t> get_call_map(const Graphs::vertex_t &a) {
         auto callMapIt = callMap.find(a);
         if (callMapIt == callMap.end()) BUG("No callMap for %2%", a);
@@ -152,13 +146,6 @@ class SuperGraphProp {
     hvec_map<const IR::Node *, Graphs::vertex_t> defBy;
     hvec_map<cstring, Graphs::vertex_t> srcOf;
     std::vector<TabVertex> actionParams;
-    hvec_map<TabVertex, size_t, TabVertexHash> actionParamIdMap;
-    VarBitSet topEnvValue;
-    size_t varBitSetSize;
-
-    EdgeFuncHolder topFunc;
-
-    std::vector<TabVertex> get_action_params(const VarBitSet &bitmap);
 };
 
 class SuperGraphs : public Graphs {

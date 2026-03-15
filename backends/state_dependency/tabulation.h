@@ -138,6 +138,12 @@ class Tabulation : public Graphs {
     SuperGraphProp *sgProp;
     TabVertex rootTv;
 
+    // Initialization for supergraph's EdgeFunc
+    bool init_edge_func(const std::vector<TabVertex> &tvList);
+    std::vector<TabVertex> get_target_vars(const VarBitSet &bitmap);
+    std::optional<size_t> get_target_var_id(const TabVertex &tv);
+    void clear_edge_func();
+
     void init_ifds();
     void init_ide();
     void forward_tabulate_ifds();
@@ -148,12 +154,20 @@ class Tabulation : public Graphs {
     void dump_result();
     bool sanity_check_ide();
 
+
     hvec_set<TabEdge> pathEdge;
     hvec_set<TabEdge> summaryEdge;
     hvec_map<Graphs::vertex_t, std::vector<const IR::Node *>> reachableVars;
     FuncMapHelper jumpFunc;
     FuncMapHelper summaryFunc;
     hvec_map<TabVertex, VarBitSet, TabVertexHash> valueMap;
+
+    // Used for EdgeFunc
+    size_t varBitSetSize;
+    std::vector<TabVertex> targetVars;
+    hvec_map<TabVertex, size_t, TabVertexHash> targetVarIdMap;
+    EdgeFuncHolder topFunc;
+    VarBitSet topEnvValue;
 
  private:
     std::queue<TabEdge> workList;

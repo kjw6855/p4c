@@ -3,7 +3,72 @@
 
 namespace P4::P4StateDependency {
 
+bool Tabulation::init_edge_func(const std::vector<TabVertex> &from) {
+    auto &progVarInfo = sgProp->progVarInfo;
+    targetVars = from;
+    varBitSetSize = targetVars.size() + 1;  // varBitSetSize >= 1+vars
+    targetVarIdMap.clear();
+    topFunc = EdgeFuncHolder(std::make_unique<TopFunc>(varBitSetSize));
+    topEnvValue = topFunc.getValue().value();
+
+    for (size_t i = 0 ; i < targetVars.size(); i++) {
+        auto &tv = targetVars[i];
+        auto procName = sgProp->procOf[tv.node];
+        auto varIdx = progVarInfo.get_var_index(tv.var, procName);
+        auto varIt = progVarInfo[tv.node][varIdx];
+
+        for (auto [ei, ei_end] = boost::in_edges(varIt, *g);
+                ei != ei_end; ++ei) {
+            auto &edge = (*g)[*ei];
+            if (edge.type != EdgeType::IFDS &&
+                    edge.type != EdgeType::IFDS_FT) continue;
+            auto srcVarIt = boost::source(*ei, *g);
+            auto srcTv = get_tab_vertex(srcVarIt);
+
+            if (progVarInfo[srcTv.node][0] == srcVarIt) {
+                // FOUND if <n, 0> -> <m, v>
+                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
+                targetVarIdMap[tv] = i;
+                break;      // should be one edge from 0
+            }
+        }
+    }
+
+    return (targetVarIdMap.size() > 0);
+}
+
+std::optional<size_t> Tabulation::get_target_var_id(const TabVertex &tv) {
+    auto targetVarIdMapIt = targetVarIdMap.find(tv);
+    return targetVarIdMapIt == targetVarIdMap.end() ?
+        std::nullopt : std::optional{targetVarIdMapIt->second};
+}
+
+std::vector<TabVertex> Tabulation::get_target_vars(const VarBitSet &bitmap) {
+    if (bitmap.none() || bitmap == topEnvValue) return {};
+
+    std::vector<TabVertex> foundTargetVars;
+    // Get first set bit
+    size_t pos = bitmap.find_first();
+    while (pos != VarBitSet::npos) {
+        foundTargetVars.push_back(targetVars[pos]);
+        // Get next set bit after current pos
+        pos = bitmap.find_next(pos);
+    }
+    return foundTargetVars;
+}
+
+void Tabulation::clear_edge_func() {
+    for (auto [ei, ei_end] = boost::edges(*g); ei != ei_end; ++ei) {
+        auto &edge = (*g)[*ei];
+        if (edge.type != EdgeType::IFDS &&
+                edge.type != EdgeType::IFDS_FT) continue;
+
+        edge.fn = globalIdFunc;
+    }
+}
+
 void Tabulation::init_ifds() {
+    // Initialize metadata
     pathEdge.clear();
     workList = std::queue<TabEdge>();
     summaryEdge.clear();
@@ -13,13 +78,17 @@ void Tabulation::init_ifds() {
 }
 
 void Tabulation::init_ide() {
+    // Initialize metadata
     workList = std::queue<TabEdge>();
     incomingList.clear();
     endSummary.clear();
     jumpFunc = FuncMapHelper();
     summaryFunc = FuncMapHelper();
 
-    BUG_CHECK(sgProp->actionParams.size() > 0, "Action does not exist.");
+    BUG_CHECK(targetVars.size() > 0, "targeVars does not exist.");
+    BUG_CHECK(topFunc.getValue().has_value() &&
+              (topFunc.getValue().value() == topEnvValue),
+              "topFunc is not set");
 
     auto vertices = boost::vertices(*g);
 
@@ -34,7 +103,7 @@ void Tabulation::init_ide() {
         // 1) main process
         if (vProcName == sgProp->procOf[sgProp->rootVar]) {
             for (auto *p : variableList)
-                jumpFunc.add_func({rootTv, TabVertex{*vit, p}}, sgProp->topFunc);
+                jumpFunc.add_func({rootTv, TabVertex{*vit, p}}, topFunc);
             if (hasFlag(vinfo.flags, VertexFlags::EXIT))
                 exit_v = *vit;
         } else {
@@ -44,11 +113,11 @@ void Tabulation::init_ide() {
                 for (auto *p : variableList)
                     for (auto *q : variableList)
                         jumpFunc.add_func({TabVertex{src, p}, TabVertex{exit_v.value(), q}},
-                                sgProp->topFunc);
+                                topFunc);
             }
             for (auto *p : variableList)
                 for (auto *q : variableList)
-                    jumpFunc.add_func({TabVertex{src, p}, TabVertex{*vit, q}}, sgProp->topFunc);
+                    jumpFunc.add_func({TabVertex{src, p}, TabVertex{*vit, q}}, topFunc);
         }
     }
 
@@ -62,7 +131,7 @@ void Tabulation::init_ide() {
             auto dstTv = get_tab_vertex(boost::target(*ei, *g));
             // TODO: check d, d' should be all pair of data facts
             if (sgProp->procOf[srcTv.node] == sgProp->procOf[dstTv.node])
-                jumpFunc.add_func({srcTv, dstTv}, sgProp->topFunc);
+                jumpFunc.add_func({srcTv, dstTv}, topFunc);
 
         } else if (edge.type == EdgeType::CALL_TO_RETURN) {
             auto src = boost::source(*ei, *g);
@@ -76,7 +145,7 @@ void Tabulation::init_ide() {
             auto &variableList = sgProp->progVarInfo.get_all_vars(vProcName);
             for (auto *p : variableList)
                 for (auto *q : variableList)
-                    summaryFunc.add_func({TabVertex{src, p}, TabVertex{dst, q}}, sgProp->topFunc);
+                    summaryFunc.add_func({TabVertex{src, p}, TabVertex{dst, q}}, topFunc);
         }
     }
 
@@ -307,7 +376,7 @@ void Tabulation::forward_tabulate_ide() {
                 if (se.first.var != te.second.var) continue;
                 auto sfn = sf.second;
                 // skip T fn
-                if (sfn.getValue() == sgProp->topEnvValue)
+                if (sfn.getValue() == topEnvValue)
                     continue;
                 // <s_p, d1> -> <ret_n, d3>
                 propagate_ide(te.first, se.second, sfn.compose(fn));
@@ -354,7 +423,7 @@ void Tabulation::forward_tabulate_ide() {
                             for (auto jf : jumpFunc.get_func_by_second(sourceTabTv)) {
                                 auto jfn = jf.second;
                                 // skip T fn
-                                if (jfn.getValue() == sgProp->topEnvValue)
+                                if (jfn.getValue() == topEnvValue)
                                     continue;
                                 auto je = jf.first;
                                 if (sgProp->procOf[je.first.node] == callProcName)
@@ -465,7 +534,7 @@ void Tabulation::forward_tabulate_on_demand_ide() {
                 if (se.first.var != te.second.var) continue;
                 auto sfn = sf.second;
                 // skip T fn
-                if (sfn.getValue() == sgProp->topEnvValue)
+                if (sfn.getValue() == topEnvValue)
                     continue;
                 // <s_p, d1> -> <ret_n, d3>
                 propagate_ide(te.first, se.second, sfn.compose(fn));
@@ -505,7 +574,7 @@ void Tabulation::forward_tabulate_on_demand_ide() {
                         for (auto jf : jumpFunc.get_func_by_second(sourceTabTv)) {
                             auto jfn = jf.second;
                             // skip T fn
-                            if (jfn.getValue() == sgProp->topEnvValue)
+                            if (jfn.getValue() == topEnvValue)
                                 continue;
                             auto je = jf.first;
                             if (sgProp->procOf[je.first.node] == callProcName)
@@ -528,8 +597,8 @@ void Tabulation::forward_tabulate_on_demand_ide() {
 VarBitSet Tabulation::may_meet_value(VarBitSet a, VarBitSet b) {
     VarBitSet c = a | b;
     // T (unknown) | v = v
-    if (sgProp->topEnvValue == a) return b;
-    if (sgProp->topEnvValue == b) return a;
+    if (topEnvValue == a) return b;
+    if (topEnvValue == b) return a;
     return c;
 }
 
@@ -550,11 +619,11 @@ void Tabulation::compute_values_ide() {
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto vinfo = (*g)[*vit];
         if (!hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
-        valueMap[get_tab_vertex(*vit)] = sgProp->topEnvValue;
+        valueMap[get_tab_vertex(*vit)] = topEnvValue;
     }
 
     // Line 1-14: Phase II-1
-    valueMap[rootTv] = VarBitSet(sgProp->varBitSetSize);
+    valueMap[rootTv] = VarBitSet(varBitSetSize);
     nodeWorkList.push(rootTv);
     LOG5("=== (BEGIN) IDE Compute Value Process ===");
     while (!nodeWorkList.empty()) {
@@ -603,7 +672,7 @@ void Tabulation::compute_values_ide() {
                     auto te = jf.first;
                     auto jfn = jf.second;
                     // <n, d> -> <c, d'>
-                    if (te.first == tv && jfn.getValue() != sgProp->topEnvValue) {
+                    if (te.first == tv && jfn.getValue() != topEnvValue) {
                         // (c, d'), f'(val(s_p, d)): s_p == n
                         propagate_value_ide(te.second, jfn(valueMap[te.first]));
                     }
@@ -638,7 +707,7 @@ void Tabulation::compute_values_ide() {
             auto te = jf.first;     // <s_p, d'>, <n, d>
             auto jfn = jf.second;
             // Skip top-lattice value
-            if (jfn.getValue() == sgProp->topEnvValue)
+            if (jfn.getValue() == topEnvValue)
                 continue;
 
             // val(<n,d>) := val(<n,d>) ^ jf(val(<s_p, d'>))
