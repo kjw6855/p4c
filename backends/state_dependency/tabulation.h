@@ -139,7 +139,7 @@ class Tabulation : public Graphs {
     TabVertex rootTv;
 
     // Initialization for supergraph's EdgeFunc
-    bool init_edge_func(const std::vector<TabVertex> &tvList);
+    bool init_edge_func(const std::vector<TabVertex> &from);
     std::vector<TabVertex> get_target_vars(const VarBitSet &bitmap);
     std::optional<size_t> get_target_var_id(const TabVertex &tv);
     void clear_edge_func();

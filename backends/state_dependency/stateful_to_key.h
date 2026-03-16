@@ -1,0 +1,67 @@
+#ifndef BACKENDS_STATE_DEPENDENCY_STATEFUL_TO_KEY_H_
+#define BACKENDS_STATE_DEPENDENCY_STATEFUL_TO_KEY_H_
+
+#include "ide_pass.h"
+#include "graphs.h"
+#include "supergraphs.h"
+#include "tabulation.h"
+#include "ir/ir.h"
+
+namespace P4::P4StateDependency {
+
+using Graph = Graphs::Graph;
+
+class FindStatefulToKey : public IDEPass {
+
+ public:
+    explicit FindStatefulToKey(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            std::vector<Graph *> *controlGraphsArray,
+            std::vector<SuperGraphProp *> *graphProps,
+            GenSGMode genSupergraphs,
+            hvec_map<cstring, std::vector<Graphs::VarEdge>> *ptsEdges)
+        : IDEPass(refMap, typeMap, controlGraphsArray, graphProps, genSupergraphs),
+          ptsEdges(ptsEdges) {}
+    Visitor::profile_t init_apply(const IR::Node *) override;
+
+ protected:
+    void set_edge_func_in_graph(Tabulation *tab) override;
+    void analyze_control_graph(Tabulation *tab) override;
+    std::vector<TabVertex> collect_state_vars(Tabulation *tab, bool showLog=false);
+
+ private:
+    std::vector<const IR::Node *> find_ret_vars(Tabulation *tab, Graphs::vertex_t ret_v);
+
+ protected:
+    hvec_map<cstring, std::vector<Graphs::VarEdge>> *ptsEdges{};
+};
+
+class StatefulToKey : public PassManager {
+ public:
+    explicit StatefulToKey(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            std::vector<Graph *> *controlGraphsArray,
+            std::vector<SuperGraphProp *> *graphProps,
+            GenSGMode genSupergraphs,
+            hvec_map<cstring, std::vector<Graphs::VarEdge>> *ptsEdges) {
+        stdPass = new FindStatefulToKey(refMap, typeMap,
+                    controlGraphsArray, graphProps,
+                    genSupergraphs, ptsEdges);
+        passes.push_back(stdPass);
+    }
+
+    std::vector<Graphs::VarEdge> getFoundDepEdges(const cstring &graphName) {
+        if (stdPass->foundDepEdges.find(graphName) ==
+                stdPass->foundDepEdges.end())
+            return {};
+        return stdPass->foundDepEdges[graphName];
+    }
+
+    void set_edge_func() {
+        stdPass->set_edge_func();
+    }
+ protected:
+    FindStatefulToKey *stdPass{};
+};
+
+}  // namespace P4::P4StateDependency
+
+#endif /* BACKENDS_STATE_DEPENDENCY_STATEFUL_TO_KEY_H_ */

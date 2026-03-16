@@ -295,7 +295,10 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
             if (em->method->name.name == "execute" && instance->object) {
                 auto obj = instance->object->getNode();
                 if (!isInContext(obj)) {
-                    visit_call(vName, obj, VertexFlags::SO_IDX, params);
+                    std::stringstream sstream;
+                    em->expr->method->dbprint(sstream);
+                    auto extName = cstring(sstream);
+                    visit_call(extName, obj, VertexFlags::SO_IDX, params);
                     return false;
                 }
             }
@@ -404,7 +407,7 @@ bool ControlGraphs::preorder(const IR::BaseAssignmentStatement *statement) {
                 auto obj = instance->object->getNode();
                 if (!isInContext(obj)) {
                     std::stringstream sstream;
-                    rmce->dbprint(sstream);
+                    em->expr->method->dbprint(sstream);
                     auto extName = cstring(sstream);
                     std::vector<const IR::Node *> params;
                     for (auto *p : *rmce->arguments) {

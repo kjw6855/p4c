@@ -87,7 +87,6 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
     curProp = sgProp;
 
     auto vertices = boost::vertices(*g);
-    size_t actId = 0;
     auto graphName = boost::get_property(*g, boost::graph_name);
 
     // Create <node, var> vertices for global + local variables
@@ -120,6 +119,7 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
     // Create retArg edges
     auto retArgEdgeIt = retArgEdges->find(graphName);
     if (retArgEdgeIt != retArgEdges->end()) {
+        curProp->retArgEdges = retArgEdgeIt->second;
         for (auto varEdge : retArgEdgeIt->second) {
             // <e_p, ret> -> <ret, val>
             // TODO: optimize this with the help of TabVertex

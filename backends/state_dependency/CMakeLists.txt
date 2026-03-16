@@ -10,7 +10,9 @@ set (STATE_DEPENDENCY_SRCS
   graph_visitor.cpp
   supergraphs.cpp
   tabulation.cpp
+  ide_pass.cpp
   act_param_to_stateful.cpp
+  stateful_to_key.cpp
 )
 
 set (STATE_DEPENDENCY_HDRS
@@ -22,7 +24,9 @@ set (STATE_DEPENDENCY_HDRS
   graph_visitor.h
   supergraphs.h
   tabulation.h
+  ide_pass.h
   act_param_to_stateful.h
+  stateful_to_key.h
 )
 
 add_executable(p4c_state_dependency ${STATE_DEPENDENCY_SRCS} ${EXTENSION_P4_14_CONV_SOURCES})

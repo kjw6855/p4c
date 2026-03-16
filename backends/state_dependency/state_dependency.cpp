@@ -28,6 +28,7 @@
 #include "graph_visitor.h"
 #include "supergraphs.h"
 #include "act_param_to_stateful.h"
+#include "stateful_to_key.h"
 
 namespace P4::P4StateDependency {
 
@@ -61,6 +62,8 @@ MidEnd::MidEnd(CompilerOptions &options) {
 
 using namespace P4;
 using P4StateDependencyContext = P4CContextWithOptions<::P4StateDependency::P4StateDependencyOptions>;
+
+using VarEdgeVisibility = P4StateDependency::VarEdgeVisibility;
 
 int main(int argc, char *const argv[]) {
     setup_gc_logging();
@@ -149,6 +152,7 @@ int main(int argc, char *const argv[]) {
         // generate supergraphs
         sg.gen_supergraphs();
 
+        // State dependency checker
         P4StateDependency::ActParamToStateful sdChecker(&midEnd.refMap, &midEnd.typeMap,
                 &cgen.controlGraphsArray,
                 &sg.graphProps,
@@ -162,6 +166,23 @@ int main(int argc, char *const argv[]) {
                 LOG2(P4StateDependency::Graphs::dump_var_edge(g, ve));
             }
         }
+
+        // Packet dependency checker
+        P4StateDependency::StatefulToKey pdChecker(&midEnd.refMap, &midEnd.typeMap,
+                &cgen.controlGraphsArray,
+                &sg.graphProps,
+                options.genSupergraphs,
+                sdChecker.getAllFoundDepEdges());
+        program->apply(pdChecker);
+
+        if (options.varEdgeVis == VarEdgeVisibility::ACTION_PARAM ||
+                options.varEdgeVis == VarEdgeVisibility::ALL) {
+            sdChecker.set_edge_func();
+        }
+        if (options.varEdgeVis == VarEdgeVisibility::STATEFUL_OBJECT ||
+                options.varEdgeVis == VarEdgeVisibility::ALL) {
+            pdChecker.set_edge_func();
+        }
     }
 
     LOG2("Generating parser graphs");
@@ -170,7 +191,7 @@ int main(int argc, char *const argv[]) {
 
     P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs,
             options.fullGraph, options.jsonOut, options.file,
-            options.varVis, options.showVarEdgeLabel);
+            options.varVis, options.varEdgeVis);
 
     gvs.process(cgen.controlGraphsArray, pgg.parserGraphsArray);
 

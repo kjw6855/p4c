@@ -146,6 +146,7 @@ class SuperGraphProp {
     hvec_map<const IR::Node *, Graphs::vertex_t> defBy;
     hvec_map<cstring, Graphs::vertex_t> srcOf;
     std::vector<TabVertex> actionParams;
+    std::vector<Graphs::VarEdge> retArgEdges;
 };
 
 class SuperGraphs : public Graphs {

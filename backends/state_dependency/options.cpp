@@ -118,10 +118,18 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             },
             "Use if you want to create supergraph for IFDS.");
     registerOption(
-            "--showVarEdge", nullptr,
-            [this](const char *) {
-            showVarEdgeLabel = true;
-            return true;
+            "--showVarEdge", "varEdgeVis",
+            [this](const char *arg) {
+                static std::map<cstring, VarEdgeVisibility> const SHOW_VAR_EDGE_OPTIONS = {
+                    {"NONE"_cs, VarEdgeVisibility::NONE},
+                    {"ACTION_PARAM"_cs, VarEdgeVisibility::ACTION_PARAM},
+                    {"STATEFUL_OBJECT"_cs, VarEdgeVisibility::STATEFUL_OBJECT},
+                    {"ALL"_cs, VarEdgeVisibility::ALL},
+                };
+
+                return pares_enum_option(arg, SHOW_VAR_EDGE_OPTIONS,
+                        varEdgeVis, "Variable visibility");
+
             },
             "Use to show variable edge label in graph.");
 }

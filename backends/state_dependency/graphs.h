@@ -553,6 +553,13 @@ enum class GenSGMode {
     FULL,
 };
 
+enum class VarEdgeVisibility {
+    NONE,
+    ACTION_PARAM,
+    STATEFUL_OBJECT,
+    ALL,
+};
+
 class Graphs {
  public:
     struct Vertex {
@@ -653,7 +660,7 @@ class Graphs {
     class GraphAttributeSetter {
      public:
         void operator()(Graph &g, VarVisibility varVis=VarVisibility::NONE,
-                bool showVarEdgeLabel=false) const {
+                VarEdgeVisibility varEdgeVis=VarEdgeVisibility::NONE) const {
             auto vertices = boost::vertices(g);
             for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
                 const auto &vinfo = g[*vit];
@@ -677,7 +684,7 @@ class Graphs {
             for (auto &eit = edges.first; eit != edges.second; ++eit) {
                 auto attrs = boost::get(boost::edge_attribute, g);
                 auto &ep = g[*eit];
-                attrs[*eit]["label"_cs] = edgeTypeGetName(ep, showVarEdgeLabel);
+                attrs[*eit]["label"_cs] = edgeTypeGetName(ep, varEdgeVis);
                 attrs[*eit]["style"_cs] = edgeTypeGetStyle(g, *eit, varVis);
                 attrs[*eit]["color"_cs] = edgeTypeGetColor(ep.type);
                 attrs[*eit]["penwidth"_cs] = edgeTypeGetPenWidth(ep.type);
@@ -754,8 +761,8 @@ class Graphs {
         static cstring vertexFlagGetMargin() {
             return cstring::empty;
         }
-        static cstring edgeTypeGetName(EdgeTypeIface &edge, bool showVarEdgeLabel) {
-            if (showVarEdgeLabel &&
+        static cstring edgeTypeGetName(EdgeTypeIface &edge, VarEdgeVisibility varEdgeVis) {
+            if (varEdgeVis != VarEdgeVisibility::NONE &&
                     (edge.type == EdgeType::IFDS ||
                     edge.type == EdgeType::IFDS_FT)) {
                 return edge.fn.getName();

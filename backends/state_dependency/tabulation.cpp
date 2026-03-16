@@ -13,6 +13,9 @@ bool Tabulation::init_edge_func(const std::vector<TabVertex> &from) {
 
     for (size_t i = 0 ; i < targetVars.size(); i++) {
         auto &tv = targetVars[i];
+        targetVarIdMap[tv] = i;
+
+        auto &tvinfo = (*g)[tv.node];
         auto procName = sgProp->procOf[tv.node];
         auto varIdx = progVarInfo.get_var_index(tv.var, procName);
         auto varIt = progVarInfo[tv.node][varIdx];
@@ -22,15 +25,23 @@ bool Tabulation::init_edge_func(const std::vector<TabVertex> &from) {
             auto &edge = (*g)[*ei];
             if (edge.type != EdgeType::IFDS &&
                     edge.type != EdgeType::IFDS_FT) continue;
+
             auto srcVarIt = boost::source(*ei, *g);
             auto srcTv = get_tab_vertex(srcVarIt);
 
-            if (progVarInfo[srcTv.node][0] == srcVarIt) {
-                // FOUND if <n, 0> -> <m, v>
+            // <src, 0> -> <act, var>
+            if (hasFlag(tvinfo.flags, VertexFlags::ACTION) &&
+                    progVarInfo[srcTv.node][0] == srcVarIt)
                 edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
-                targetVarIdMap[tv] = i;
-                break;      // should be one edge from 0
-            }
+            // <src, 0> -> <STATEFUL & SO_DATA, var>
+            else if (hasFlag(tvinfo.flags, VertexFlags::STATEFUL) &&
+                     hasFlag(tvinfo.flags, VertexFlags::SO_DATA) &&
+                     progVarInfo[srcTv.node][0] == srcVarIt)
+                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
+            // <src=exit, non-0> -> <ret, var>
+            else if (hasFlag(tvinfo.flags, VertexFlags::RETURN) &&
+                    progVarInfo[srcTv.node][0] != srcVarIt)
+                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
         }
     }
 
