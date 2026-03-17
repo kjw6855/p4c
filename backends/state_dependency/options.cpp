@@ -97,13 +97,6 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             },
             "Use to show nodes' variables in graph.");
     registerOption(
-            "--actionAsProc", nullptr,
-            [this](const char *) {
-            setActionAsProc = true;
-            return true;
-            },
-            "Use to consider P4Action as procedure call.");
-    registerOption(
             "--supergraph", "GenSGMode",
             [this](const char *arg) {
                 static std::map<cstring, GenSGMode> const SUPERGRAPH_OPTIONS = {

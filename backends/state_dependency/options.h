@@ -18,7 +18,6 @@ class P4StateDependencyOptions : public CompilerOptions {
     bool fullGraph = false;
     bool jsonOut = false;
     VarVisibility varVis = VarVisibility::NONE;
-    bool setActionAsProc = false;
     GenSGMode genSupergraphs = GenSGMode::NONE;
     VarEdgeVisibility varEdgeVis = VarEdgeVisibility::NONE;
 

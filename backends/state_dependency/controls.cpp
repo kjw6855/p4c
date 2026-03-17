@@ -52,11 +52,10 @@ bool ControlGraphs::ControlStack::isEmpty() const { return subgraphs.empty(); }
 using vertex_t = ControlGraphs::vertex_t;
 
 ControlGraphs::ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-                             std::filesystem::path graphsDir, bool setActionAsProc)
+                             std::filesystem::path graphsDir)
     : refMap(refMap),
       typeMap(typeMap),
-      graphsDir(std::move(graphsDir)),
-      setActionAsProc(setActionAsProc) {
+      graphsDir(std::move(graphsDir)) {
     visitDagOnce = false;
 }
 
@@ -623,15 +622,15 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
     auto name = action->getName();
     auto flags = VertexFlags::ACTION;
     auto oldLocalProcFlags = localProcFlags;
-    if (setActionAsProc) {
-        flags |= VertexFlags::ENTRY;
-        localProcFlags = VertexFlags::ACTION_DATA;
-    }
+
+    flags |= VertexFlags::ENTRY;
+    localProcFlags = VertexFlags::ACTION_DATA;
+
     auto start_v = add_and_connect_vertex(name, flags, action);
     parents = {{start_v, new EdgeUnconditional()}};
     auto next_v = start_v;
 
-    if (setActionAsProc && action->parameters->size() > 0) {
+    if (action->parameters->size() > 0) {
         // Create one more node to cover 0->param Edge
         std::stringstream sstream;
         sstream << "INPUT: ";
@@ -648,20 +647,15 @@ bool ControlGraphs::preorder(const IR::P4Action *action) {
     }
     // ActionParam is newly defined by control plane rules
     for (auto *p : *action->parameters) {
-        if (setActionAsProc)
-            add_local_variable_in_vertex(p, next_v, false);
-        else
-            add_variable_in_vertex(p, next_v, false);
+        add_local_variable_in_vertex(p, next_v, false);
     }
 
     visit(action->body);
 
-    if (setActionAsProc) {
-        localProcFlags = oldLocalProcFlags;
-        auto exit_v = add_and_connect_vertex("EXIT "_cs + name, VertexFlags::EXIT);
-        parents = {{exit_v, new EdgeProcedural}};
-        procedureGraphs[action] = {start_v, exit_v};
-    }
+    localProcFlags = oldLocalProcFlags;
+    auto exit_v = add_and_connect_vertex("EXIT "_cs + name, VertexFlags::EXIT);
+    parents = {{exit_v, new EdgeProcedural}};
+    procedureGraphs[action] = {start_v, exit_v};
 
     return false;
 }
@@ -722,15 +716,9 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
                 }
 
                 if (!emptyAction) {
-                    if (setActionAsProc) {
-                        visit_call(actionName, actNode, VertexFlags::ACTION);
-                        auto pp = getProcedure(actNode);
-                        actionMaps[graphName][actionName] = pp.first;
-
-                    } else {
-                        // TODO: Make setActionAsProc option deprecated
-                        visit(actNode);
-                    }
+                    visit_call(actionName, actNode, VertexFlags::ACTION);
+                    auto pp = getProcedure(actNode);
+                    actionMaps[graphName][actionName] = pp.first;
                 }
 
             } else {

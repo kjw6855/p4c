@@ -133,7 +133,7 @@ int main(int argc, char *const argv[]) {
     LOG2("Generating graphs under " << options.graphsDir);
     LOG2("Generating control graphs");
     P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap,
-            options.graphsDir, options.setActionAsProc);
+            options.graphsDir);
     // TODO: set options in contructor
     cgen.varVis = options.varVis;
     cgen.genSupergraphs = options.genSupergraphs;
