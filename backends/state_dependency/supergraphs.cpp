@@ -55,6 +55,13 @@ void SuperGraphs::create_var_vertices(const cstring &graphName) {
         curProp->procCallerMap = procCallerMapIt->second;
     }
 
+    auto actionMapIt = actionMaps->find(graphName);
+    if (actionMapIt == actionMaps->end()) {
+        curProp->actionMap = Graphs::ActionMap();
+    } else {
+        curProp->actionMap = actionMapIt->second;
+    }
+
     // Add root and global variables
     auto &progVarInfo = curProp->progVarInfo;
     progVarInfo.add_var(Graphs::globalNode);

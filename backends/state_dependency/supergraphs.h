@@ -142,6 +142,7 @@ class SuperGraphProp {
     Graphs::ProcOf procOf;
     Graphs::CallMap callMap;
     Graphs::ProcCallers procCallerMap;
+    Graphs::ActionMap actionMap;
     hvec_map<cstring, std::vector<Graphs::vertex_t>> caller;
     hvec_map<const IR::Node *, Graphs::vertex_t> defBy;
     hvec_map<cstring, Graphs::vertex_t> srcOf;
@@ -158,7 +159,8 @@ class SuperGraphs : public Graphs {
                 hvec_map<cstring, Graphs::ProcOf> *procOfs,
                 hvec_map<cstring, Graphs::CallMap> *callMaps,
                 hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps,
-                hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges)
+                hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges,
+                hvec_map<cstring, Graphs::ActionMap> *actionMaps)
     : refMap(refMap),
       typeMap(typeMap),
       controlGraphsArray(controlGraphsArray),
@@ -167,7 +169,8 @@ class SuperGraphs : public Graphs {
       procOfs(procOfs),
       callMaps(callMaps),
       procCallerMaps(procCallerMaps),
-      retArgEdges(retArgEdges) {}
+      retArgEdges(retArgEdges),
+      actionMaps(actionMaps) {}
 
     void gen_supergraphs();
 
@@ -187,6 +190,7 @@ class SuperGraphs : public Graphs {
     hvec_map<cstring, Graphs::CallMap> *callMaps;
     hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps;
     hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges;
+    hvec_map<cstring, Graphs::ActionMap> *actionMaps;
 
     SuperGraphProp *curProp{};
 

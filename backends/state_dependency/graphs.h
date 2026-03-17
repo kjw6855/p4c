@@ -604,6 +604,8 @@ class Graphs {
     using CallMap = hvec_map<vertex_t, std::pair<vertex_t, vertex_t>>;
     // Procedure Name -> list of CALL (caller)
     using ProcCallers = hvec_map<cstring, std::vector<vertex_t>>;
+    // Action Name -> vertex ID
+    using ActionMap = hvec_map<cstring, vertex_t>;
 
     // TODO: combine this with TabVertex/TabEdge in supergraphs
     using VarVertex = std::pair<vertex_t, const IR::Node *>;
@@ -617,6 +619,7 @@ class Graphs {
     hvec_map<cstring, CallMap> callMaps;
     hvec_map<cstring, ProcCallers> procCallerMaps;
     hvec_map<cstring, std::vector<VarEdge>> retArgEdges;
+    hvec_map<cstring, ActionMap> actionMaps;
 
     vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
 

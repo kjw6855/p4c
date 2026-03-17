@@ -96,4 +96,14 @@ void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v) {
     }
 }
 
+std::vector<Graphs::vertex_t> IDEPass::find_next_cfg_node(Graph *g, Graphs::vertex_t v) {
+    std::vector<Graphs::vertex_t> foundNodes;
+    for (auto [ei, ei_end] = boost::out_edges(v, *g); ei != ei_end; ++ei) {
+        auto &edge = (*g)[*ei];
+        if (edge.type == EdgeType::CONTROL)
+            foundNodes.push_back(boost::target(*ei, *g));
+    }
+    return foundNodes;
+}
+
 }  // namespace P4::P4StateDependency

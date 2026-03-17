@@ -1,4 +1,7 @@
 #include "stateful_to_key.h"
+
+#include "frontends/p4/methodInstance.h"
+#include "frontends/common/resolveReferences/resolveReferences.h"
 #include "graphs.h"
 
 namespace P4::P4StateDependency {
@@ -16,6 +19,7 @@ std::vector<const IR::Node *> FindStatefulToKey::find_ret_vars(Tabulation *tab, 
 
 std::vector<TabVertex> FindStatefulToKey::collect_state_vars(Tabulation *tab, bool showLog) {
     auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
     auto graphName = boost::get_property(*g, boost::graph_name);
     auto peit = ptsEdges->find(graphName);
     if (peit == ptsEdges->end()) return {};
@@ -40,11 +44,7 @@ std::vector<TabVertex> FindStatefulToKey::collect_state_vars(Tabulation *tab, bo
                         LOG2("- SO [IDX] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA] " << callerRetInfo.name << ":" << retTvVarInfo.name);
                 }
             } else if (hasFlag(dstInfo.flags, VertexFlags::STATEFUL)) {
-                for (auto [ei, ei_end] = boost::out_edges(ve.second.first, *g);
-                        ei != ei_end; ++ei) {
-                    auto &edge = (*g)[*ei];
-                    if (edge.type != EdgeType::CONTROL) continue;
-                    auto dit = boost::target(*ei, *g);
+                for (auto dit : find_next_cfg_node(g, ve.second.first)) {
                     auto dinfo = (*g)[dit];
                     if (!hasFlag(dinfo.flags, VertexFlags::SO_DATA)) continue;
                     for (auto dv : dinfo.defVars) {
@@ -58,6 +58,37 @@ std::vector<TabVertex> FindStatefulToKey::collect_state_vars(Tabulation *tab, bo
                 }
             }
         } else if (hasFlag(dstInfo.flags, VertexFlags::SO_DATA)) {
+            // For add_entry(), check the first param to find the hitAction name
+            if (hasSOFlag(dstInfo.soFlags, SOFlags::CREATE) &&
+                    dstInfo.node->is<IR::MethodCallStatement>()) {
+                auto stmt = dstInfo.node->to<IR::MethodCallStatement>();
+                auto instance = P4::MethodInstance::resolve(stmt->methodCall,
+                        refMap, typeMap);
+                if (auto *ec = instance->to<P4::ExternCall>()) {
+                    // TODO: check if it has to support other methods
+                    if (ec->method->name.name != "add_entry") continue;
+
+                    auto hitActionName = stmt->methodCall->arguments->at(0)
+                        ->expression->to<IR::StringLiteral>()->value;
+                    auto hitActionVit = sgProp->actionMap.find(hitActionName);
+                    BUG_CHECK(hitActionVit != sgProp->actionMap.end(),
+                            "Can't find %1% action", hitActionName);
+                    for (auto dit : find_next_cfg_node(g, hitActionVit->second)) {
+                        auto dinfo = (*g)[dit];
+                        // Find INPUT node, if actionParams exist
+                        if (!hasFlag(dinfo.flags, VertexFlags::ACTION)) continue;
+                        for (auto dv : dinfo.defVars) {
+                            auto dTvVar = TabVertex{dit, dv};
+                            auto dTvVarInfo = (*g)[tab->get_vertex_id(dTvVar)];
+
+                            stateVarSet.insert(dTvVar);
+                            if (showLog)
+                                LOG2("- SO [DATA:SRC] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA:DST] " << dinfo.name << ":" << dTvVarInfo.name);
+                        }
+                    }
+                }
+                continue;
+            }
             // TODO: Use VarVertex instead of TabVertex
             stateVarSet.insert(TabVertex{ve.second.first, ve.second.second});
             if (showLog)

@@ -36,6 +36,7 @@ class IDEPass : public Graphs,
     void collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v);
     std::vector<const IR::Node *> get_var_members(Tabulation *tab, const IR::Node *var);
     cstring dump_found_dependency(Tabulation *tab, const Graphs::VarEdge &ve);
+    std::vector<Graphs::vertex_t> find_next_cfg_node(Graph *g, Graphs::vertex_t v);
 
     inline Graphs::VarEdge convert_to_var_edge(const TabEdge &te) {
         return {{te.first.node, te.first.var},

@@ -147,7 +147,8 @@ int main(int argc, char *const argv[]) {
                 &cgen.procOfs,
                 &cgen.callMaps,
                 &cgen.procCallerMaps,
-                &cgen.retArgEdges);
+                &cgen.retArgEdges,
+                &cgen.actionMaps);
 
         // generate supergraphs
         sg.gen_supergraphs();

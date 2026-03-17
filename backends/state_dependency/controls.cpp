@@ -724,7 +724,11 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
                 if (!emptyAction) {
                     if (setActionAsProc) {
                         visit_call(actionName, actNode, VertexFlags::ACTION);
+                        auto pp = getProcedure(actNode);
+                        actionMaps[graphName][actionName] = pp.first;
+
                     } else {
+                        // TODO: Make setActionAsProc option deprecated
                         visit(actNode);
                     }
                 }
