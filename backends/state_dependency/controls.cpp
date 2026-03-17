@@ -798,10 +798,22 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
         // Whether the data is read (node writes) or written (node reads)
         if (hasSOFlag(soFlags, SOFlags::UPDATE) || hasSOFlag(soFlags, SOFlags::CREATE)) {
             state = READ_ONLY;
-            for (auto data : dataVals) visit(data, "data", 2);
+            for (auto data : dataVals) {
+                if (auto *mem = data->to<IR::Member>()) {
+                    add_variables(mem, getContext(), true);
+                } else {
+                    visit(data, "data", 2);
+                }
+            }
         } else if (hasSOFlag(soFlags, SOFlags::READ)) {
             state = WRITE_ONLY;
-            for (auto data : dataVals) visit(data, "data", 1);
+            for (auto data : dataVals) {
+                if (auto *mem = data->to<IR::Member>()) {
+                    add_variables(mem, getContext(), false);
+                } else {
+                    visit(data, "data", 1);
+                }
+            }
         }
         parents = {{sv, new EdgeUnconditional()}};
     }

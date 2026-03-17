@@ -41,6 +41,9 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
             if (!hasFlag(vinfo.flags, VertexFlags::STATEFUL) ||
                     hasSOFlag(vinfo.soFlags, SOFlags::UPDATE)) {    //TODO: CREATE
                 caseString = "[B1/3:A->I] "_cs;
+            } else if (hasFlag(vinfo.flags, VertexFlags::STATEFUL) &&
+                    hasSOFlag(vinfo.soFlags, SOFlags::READ)) {
+                caseString = "[A->I] "_cs;
             }
             if (caseString.size() == 0) continue;
 

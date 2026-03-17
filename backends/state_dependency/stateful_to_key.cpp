@@ -39,8 +39,23 @@ std::vector<TabVertex> FindStatefulToKey::collect_state_vars(Tabulation *tab, bo
                     if (showLog)
                         LOG2("- SO [IDX] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA] " << callerRetInfo.name << ":" << retTvVarInfo.name);
                 }
-            } else {
-                // TODO: support finding var of RCU
+            } else if (hasFlag(dstInfo.flags, VertexFlags::STATEFUL)) {
+                for (auto [ei, ei_end] = boost::out_edges(ve.second.first, *g);
+                        ei != ei_end; ++ei) {
+                    auto &edge = (*g)[*ei];
+                    if (edge.type != EdgeType::CONTROL) continue;
+                    auto dit = boost::target(*ei, *g);
+                    auto dinfo = (*g)[dit];
+                    if (!hasFlag(dinfo.flags, VertexFlags::SO_DATA)) continue;
+                    for (auto dv : dinfo.defVars) {
+                        auto dTvVar = TabVertex{dit, dv};
+                        auto dTvVarInfo = (*g)[tab->get_vertex_id(dTvVar)];
+
+                        stateVarSet.insert(dTvVar);
+                        if (showLog)
+                            LOG2("- SO [IDX] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA] " << dinfo.name << ":" << dTvVarInfo.name);
+                    }
+                }
             }
         } else if (hasFlag(dstInfo.flags, VertexFlags::SO_DATA)) {
             // TODO: Use VarVertex instead of TabVertex
