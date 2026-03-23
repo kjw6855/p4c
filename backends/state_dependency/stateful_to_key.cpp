@@ -6,6 +6,25 @@
 
 namespace P4::P4StateDependency {
 
+std::vector<Graphs::vertex_t> get_actions_from_key(Tabulation *tab, Graphs::vertex_t v) {
+    auto *g = tab->g;
+    auto vinfo = (*g)[v];
+    if (!hasFlag(vinfo.flags, VertexFlags::KEY)) return {};
+
+    std::vector<Graphs::vertex_t> actions;
+    for (auto [ei, ei_end] = boost::out_edges(v, *g); ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::CONTROL)
+            continue;
+
+        auto u = boost::target(*ei, *g);
+        auto uinfo = (*g)[u];
+        if (hasFlag(uinfo.flags, VertexFlags::ACTION))
+            actions.push_back(u);
+    }
+    return actions;
+}
+
 std::vector<const IR::Node *> FindStatefulToKey::find_ret_vars(Tabulation *tab, Graphs::vertex_t ret_v) {
 
     std::vector<const IR::Node *> foundRetVars;
@@ -33,7 +52,7 @@ std::vector<TabVertex> FindStatefulToKey::collect_state_vars(Tabulation *tab, bo
         if (hasFlag(dstInfo.flags, VertexFlags::SO_IDX)) {
             if (hasFlag(dstInfo.flags, VertexFlags::CALL)) {
                 // If it's procedure, get return value
-                auto [_, callerRet] = tab->sgProp->get_call_map(ve.second.first);
+                auto [_, callerRet] = sgProp->get_call_map(ve.second.first);
                 auto callerRetInfo = (*g)[callerRet];
                 for (auto retVar : find_ret_vars(tab, callerRet)) {
                     auto retTvVar = TabVertex{callerRet, retVar};
@@ -138,8 +157,24 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
     }
 
     for (auto &ve : foundDepEdges[graphName]) {
-        std::cout << "[SO->KEY] "
-            << dump_found_dependency(tab, ve) << std::endl;
+        std::stringstream sstream;
+        sstream << "[SO->KEY] "
+            << dump_found_dependency(tab, ve)
+            << " @TABLE:" << tab->sgProp->procOf[ve.second.first] << "(";
+        // get actions from table Key
+        bool init = true;
+        for (auto actit : get_actions_from_key(tab, ve.second.first)) {
+            auto actinfo = (*g)[actit];
+            if (init) init = false;
+            else sstream << ", ";
+
+            if (hasFlag(actinfo.flags, VertexFlags::CALL))
+                sstream << actinfo.name.substr(5);  // "CALL "
+            else
+                sstream << actinfo.name;
+        }
+        sstream << ")";
+        std::cout << sstream.str() << std::endl;
     }
     tab->clear_edge_func();
 }
