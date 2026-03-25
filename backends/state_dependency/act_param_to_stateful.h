@@ -38,14 +38,14 @@ class ActParamToStateful : public PassManager {
         passes.push_back(ptsPass);
     }
 
-    std::vector<Graphs::VarEdge> getFoundDepEdges(const cstring &graphName) {
+    IDEPass::DepEdgeMap getFoundDepEdges(const cstring &graphName) {
         if (ptsPass->foundDepEdges.find(graphName) ==
                 ptsPass->foundDepEdges.end())
-            return {};
+            return IDEPass::DepEdgeMap{};
         return ptsPass->foundDepEdges[graphName];
     }
 
-    hvec_map<cstring, std::vector<Graphs::VarEdge>> *getAllFoundDepEdges() {
+    hvec_map<cstring, IDEPass::DepEdgeMap> *getAllFoundDepEdges() {
         return &ptsPass->foundDepEdges;
     }
 

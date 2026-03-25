@@ -83,6 +83,14 @@ class Tabulation : public Graphs {
         return TabVertex{};
     }
 
+    cstring dump_tab_var_name(const TabVertex &a) {
+        std::stringstream logstr;
+        auto tvIt = get_vertex_id(a);
+        auto tvInfo = (*g)[tvIt];
+        logstr << tvInfo.name;
+        return cstring(logstr);
+    }
+
     cstring dump_tab_vertex(const TabVertex &a) {
         std::stringstream logstr;
         if (a.node == sgProp->rootVar)
@@ -92,9 +100,7 @@ class Tabulation : public Graphs {
             logstr << ainfo.name << "(";
             logstr << a.node << "):";
         }
-        auto tvIt = get_vertex_id(a);
-        auto tvInfo = (*g)[tvIt];
-        logstr << tvInfo.name;
+        logstr << dump_tab_var_name(a);
         return cstring(logstr);
     }
 

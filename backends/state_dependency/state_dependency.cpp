@@ -164,7 +164,9 @@ int main(int argc, char *const argv[]) {
             auto *g = cgen.controlGraphsArray[i];
             auto graphName = boost::get_property(*g, boost::graph_name);
             for (const auto &ve : sdChecker.getFoundDepEdges(graphName)) {
-                LOG2(P4StateDependency::Graphs::dump_var_edge(g, ve));
+                for (const auto &dst : ve.second) {
+                    LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
+                }
             }
         }
 

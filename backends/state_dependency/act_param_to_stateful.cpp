@@ -1,7 +1,48 @@
 #include "act_param_to_stateful.h"
+
+#include <regex>
 #include "graphs.h"
 
 namespace P4::P4StateDependency {
+
+std::vector<cstring> get_tables_from_action(Tabulation *tab, Graphs::vertex_t action_v) {
+    auto *g = tab->g;
+    auto actName = tab->sgProp->procOf[action_v];
+    auto actSrcit = tab->sgProp->srcOf[actName];
+    // Find all callers
+    std::vector<cstring> tables;
+    for (auto [ei, ei_end] = boost::in_edges(actSrcit, *g); ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::INTER_PROCEDURE)
+            continue;
+
+        auto u = boost::source(*ei, *g);
+        auto uinfo = (*g)[u];
+        if (hasFlag(uinfo.flags, VertexFlags::CALL)) {
+            auto callerName = tab->sgProp->procOf[u];
+            auto callerSrcit = tab->sgProp->srcOf[callerName];
+            auto callerSrcInfo = (*g)[callerSrcit];
+            if (hasFlag(callerSrcInfo.flags, VertexFlags::TABLE))
+                tables.push_back(callerName);
+        }
+    }
+    return tables;
+}
+
+std::optional<Graphs::vertex_t> get_table_key(Tabulation *tab, Graphs::vertex_t table_v) {
+    auto *g = tab->g;
+    for (auto [ei, ei_end] = boost::out_edges(table_v, *g); ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::CONTROL)
+            continue;
+
+        auto u = boost::target(*ei, *g);
+        auto uinfo = (*g)[u];
+        if (hasFlag(uinfo.flags, VertexFlags::KEY))
+            return u;
+    }
+    return {};
+}
 
 void FindActParamToStateful::set_edge_func_in_graph(Tabulation *tab) {
     tab->init_edge_func(tab->sgProp->actionParams);
@@ -40,10 +81,10 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
             // TODO: apply block could be used only for read
             if (!hasFlag(vinfo.flags, VertexFlags::STATEFUL) ||
                     hasSOFlag(vinfo.soFlags, SOFlags::UPDATE)) {    //TODO: CREATE
-                caseString = "[B1/3:A->I] "_cs;
+                caseString = "[B1/3:->I] "_cs;
             } else if (hasFlag(vinfo.flags, VertexFlags::STATEFUL) &&
                     hasSOFlag(vinfo.soFlags, SOFlags::READ)) {
-                caseString = "[A->I] "_cs;
+                caseString = "[->I] "_cs;
             }
             if (caseString.size() == 0) continue;
 
@@ -57,11 +98,11 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
             // TODO: differentiate stateful CALL and procedures
             if (!hasFlag(vinfo.flags, VertexFlags::STATEFUL)) {
                 // Assuming it's procedure statements
-                caseString = "[B3:A->D] "_cs;
+                caseString = "[B3:->D] "_cs;
             } else if (hasSOFlag(vinfo.soFlags, SOFlags::UPDATE)) {
-                caseString = "[B3:A->D] "_cs;
+                caseString = "[B3:->D] "_cs;
             } else if (hasSOFlag(vinfo.soFlags, SOFlags::CREATE)) {
-                caseString = "[B2:A->D] "_cs;
+                caseString = "[B2:->D] "_cs;
             }
             if (caseString.size() == 0) continue;
 
@@ -70,9 +111,30 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
         }
     }
 
-    for (auto &ve : foundDepEdges[graphName]) {
-        std::cout << caseStrings[ve.second.first]
-            << dump_found_dependency(tab, ve) << std::endl;
+    for (auto &de : foundDepEdges[graphName]) {
+        auto &src = de.first;
+        auto tableNames = get_tables_from_action(tab, src.first);
+        std::stringstream sstream;
+        sstream << "[ACT->] ";
+        // 1. Dump src
+        for (auto tableName : tableNames) {
+            auto tableKey = get_table_key(tab, tab->sgProp->srcOf[tableName]);
+            cstring keyString = tableKey.has_value() ? (*g)[*tableKey].name : "<no key>"_cs;
+            std::string keyStr = std::regex_replace(keyString.c_str(), std::regex("\\\\n"), ", ");
+            // Remove the last ", " if present
+            if (keyStr.size() >= 2 && keyStr.substr(keyStr.size() - 2) == ", ") {
+                keyStr = keyStr.substr(0, keyStr.size() - 2);
+            }
+            sstream << "@TABLE:" << tableName << "(" << keyStr << ") ";
+        }
+        sstream << tab->dump_tab_vertex(TabVertex{src.first, src.second}) << "\n";
+
+        // 2. Dump dst
+        for (auto dst : de.second)
+            sstream << "  " << caseStrings[dst.first]
+                    << tab->dump_tab_vertex(TabVertex{dst.first, dst.second}) << "\n";
+
+        std::cout << sstream.str();
     }
     tab->clear_edge_func();
 }

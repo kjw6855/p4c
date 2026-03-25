@@ -5,7 +5,6 @@
 #include "graphs.h"
 
 namespace P4::P4StateDependency {
-
 std::vector<Graphs::vertex_t> get_actions_from_key(Tabulation *tab, Graphs::vertex_t v) {
     auto *g = tab->g;
     auto vinfo = (*g)[v];
@@ -46,72 +45,74 @@ std::vector<TabVertex> FindStatefulToKey::collect_state_vars(Tabulation *tab, bo
     // Store second VarVertex <> -> <>
     hvec_set<TabVertex, TabVertexHash> stateVarSet;
     for (auto ve : peit->second) {
-        auto dstInfo = (*g)[ve.second.first];
-        auto dstTvVar = TabVertex{ve.second.first, ve.second.second};
-        auto dstTvVarInfo = (*g)[tab->get_vertex_id(dstTvVar)];
-        if (hasFlag(dstInfo.flags, VertexFlags::SO_IDX)) {
-            if (hasFlag(dstInfo.flags, VertexFlags::CALL)) {
-                // If it's procedure, get return value
-                auto [_, callerRet] = sgProp->get_call_map(ve.second.first);
-                auto callerRetInfo = (*g)[callerRet];
-                for (auto retVar : find_ret_vars(tab, callerRet)) {
-                    auto retTvVar = TabVertex{callerRet, retVar};
-                    auto retTvVarInfo = (*g)[tab->get_vertex_id(retTvVar)];
-                    stateVarSet.insert(retTvVar);
+        for (auto dst : ve.second) {
+            auto dstInfo = (*g)[dst.first];
+            auto dstTvVar = TabVertex{dst.first, dst.second};
+            auto dstTvVarInfo = (*g)[tab->get_vertex_id(dstTvVar)];
+            if (hasFlag(dstInfo.flags, VertexFlags::SO_IDX)) {
+                if (hasFlag(dstInfo.flags, VertexFlags::CALL)) {
+                    // If it's procedure, get return value
+                    auto [_, callerRet] = sgProp->get_call_map(dst.first);
+                    auto callerRetInfo = (*g)[callerRet];
+                    for (auto retVar : find_ret_vars(tab, callerRet)) {
+                        auto retTvVar = TabVertex{callerRet, retVar};
+                        auto retTvVarInfo = (*g)[tab->get_vertex_id(retTvVar)];
+                        stateVarSet.insert(retTvVar);
 
-                    if (showLog)
-                        LOG2("- SO [IDX] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA] " << callerRetInfo.name << ":" << retTvVarInfo.name);
-                }
-            } else if (hasFlag(dstInfo.flags, VertexFlags::STATEFUL)) {
-                for (auto dit : find_next_cfg_node(g, ve.second.first)) {
-                    auto dinfo = (*g)[dit];
-                    if (!hasFlag(dinfo.flags, VertexFlags::SO_DATA)) continue;
-                    for (auto dv : dinfo.defVars) {
-                        auto dTvVar = TabVertex{dit, dv};
-                        auto dTvVarInfo = (*g)[tab->get_vertex_id(dTvVar)];
-
-                        stateVarSet.insert(dTvVar);
                         if (showLog)
-                            LOG2("- SO [IDX] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA] " << dinfo.name << ":" << dTvVarInfo.name);
+                            LOG2("- SO [IDX] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA] " << callerRetInfo.name << ":" << retTvVarInfo.name);
                     }
-                }
-            }
-        } else if (hasFlag(dstInfo.flags, VertexFlags::SO_DATA)) {
-            // For add_entry(), check the first param to find the hitAction name
-            if (hasSOFlag(dstInfo.soFlags, SOFlags::CREATE) &&
-                    dstInfo.node->is<IR::MethodCallStatement>()) {
-                auto stmt = dstInfo.node->to<IR::MethodCallStatement>();
-                auto instance = P4::MethodInstance::resolve(stmt->methodCall,
-                        refMap, typeMap);
-                if (auto *ec = instance->to<P4::ExternCall>()) {
-                    // TODO: check if it has to support other methods
-                    if (ec->method->name.name != "add_entry") continue;
-
-                    auto hitActionName = stmt->methodCall->arguments->at(0)
-                        ->expression->to<IR::StringLiteral>()->value;
-                    auto hitActionVit = sgProp->actionMap.find(hitActionName);
-                    BUG_CHECK(hitActionVit != sgProp->actionMap.end(),
-                            "Can't find %1% action", hitActionName);
-                    for (auto dit : find_next_cfg_node(g, hitActionVit->second)) {
+                } else if (hasFlag(dstInfo.flags, VertexFlags::STATEFUL)) {
+                    for (auto dit : find_next_cfg_node(g, dst.first)) {
                         auto dinfo = (*g)[dit];
-                        // Find INPUT node, if actionParams exist
-                        if (!hasFlag(dinfo.flags, VertexFlags::ACTION)) continue;
+                        if (!hasFlag(dinfo.flags, VertexFlags::SO_DATA)) continue;
                         for (auto dv : dinfo.defVars) {
                             auto dTvVar = TabVertex{dit, dv};
                             auto dTvVarInfo = (*g)[tab->get_vertex_id(dTvVar)];
 
                             stateVarSet.insert(dTvVar);
                             if (showLog)
-                                LOG2("- SO [DATA:SRC] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA:DST] " << dinfo.name << ":" << dTvVarInfo.name);
+                                LOG2("- SO [IDX] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA] " << dinfo.name << ":" << dTvVarInfo.name);
                         }
                     }
                 }
-                continue;
+            } else if (hasFlag(dstInfo.flags, VertexFlags::SO_DATA)) {
+                // For add_entry(), check the first param to find the hitAction name
+                if (hasSOFlag(dstInfo.soFlags, SOFlags::CREATE) &&
+                        dstInfo.node->is<IR::MethodCallStatement>()) {
+                    auto stmt = dstInfo.node->to<IR::MethodCallStatement>();
+                    auto instance = P4::MethodInstance::resolve(stmt->methodCall,
+                            refMap, typeMap);
+                    if (auto *ec = instance->to<P4::ExternCall>()) {
+                        // TODO: check if it has to support other methods
+                        if (ec->method->name.name != "add_entry") continue;
+
+                        auto hitActionName = stmt->methodCall->arguments->at(0)
+                            ->expression->to<IR::StringLiteral>()->value;
+                        auto hitActionVit = sgProp->actionMap.find(hitActionName);
+                        BUG_CHECK(hitActionVit != sgProp->actionMap.end(),
+                                "Can't find %1% action", hitActionName);
+                        for (auto dit : find_next_cfg_node(g, hitActionVit->second)) {
+                            auto dinfo = (*g)[dit];
+                            // Find INPUT node, if actionParams exist
+                            if (!hasFlag(dinfo.flags, VertexFlags::ACTION)) continue;
+                            for (auto dv : dinfo.defVars) {
+                                auto dTvVar = TabVertex{dit, dv};
+                                auto dTvVarInfo = (*g)[tab->get_vertex_id(dTvVar)];
+
+                                stateVarSet.insert(dTvVar);
+                                if (showLog)
+                                    LOG2("- SO [DATA:SRC] " << dstInfo.name << ":" << dstTvVarInfo.name << " -> [DATA:DST] " << dinfo.name << ":" << dTvVarInfo.name);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // TODO: Use VarVertex instead of TabVertex
+                stateVarSet.insert(TabVertex{dst.first, dst.second});
+                if (showLog)
+                    LOG2("- SO [DATA] " << dstInfo.name << ":" << dstTvVarInfo.name);
             }
-            // TODO: Use VarVertex instead of TabVertex
-            stateVarSet.insert(TabVertex{ve.second.first, ve.second.second});
-            if (showLog)
-                LOG2("- SO [DATA] " << dstInfo.name << ":" << dstTvVarInfo.name);
         }
     }
 
@@ -128,6 +129,7 @@ void FindStatefulToKey::set_edge_func_in_graph(Tabulation *tab) {
 
 void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
     auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
     auto graphName = boost::get_property(*g, boost::graph_name);
 
     BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
@@ -147,6 +149,7 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
     tab->compute_values_ide();
     //tab->dump_result();
 
+    auto mainProcName = sgProp->procOf[sgProp->rootVar];
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto &vinfo = (*g)[*vit];
@@ -154,27 +157,40 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
         if (hasFlag(vinfo.flags, VertexFlags::KEY)) {
             collect_all_dep_edges(tab, *vit);
         }
+        if (hasFlag(vinfo.flags, VertexFlags::EXIT) && sgProp->procOf[*vit] == mainProcName) {
+            collect_all_dep_edge_to_hdr(tab, *vit);
+        }
     }
 
-    for (auto &ve : foundDepEdges[graphName]) {
+    for (auto &de : foundDepEdges[graphName]) {
+        auto &src = de.first;
         std::stringstream sstream;
-        sstream << "[SO->KEY] "
-            << dump_found_dependency(tab, ve)
-            << " @TABLE:" << tab->sgProp->procOf[ve.second.first] << "(";
-        // get actions from table Key
-        bool init = true;
-        for (auto actit : get_actions_from_key(tab, ve.second.first)) {
-            auto actinfo = (*g)[actit];
-            if (init) init = false;
-            else sstream << ", ";
+        sstream << "[SO->] " << tab->dump_tab_vertex(TabVertex{src.first, src.second}) << "\n";
 
-            if (hasFlag(actinfo.flags, VertexFlags::CALL))
-                sstream << actinfo.name.substr(5);  // "CALL "
-            else
-                sstream << actinfo.name;
+        for (auto &dst : de.second) {
+            auto dstInfo = (*g)[dst.first];
+            if (!hasFlag(dstInfo.flags, VertexFlags::KEY)) {
+                sstream << "  [->HDR] " << tab->dump_tab_var_name(TabVertex{dst.first, dst.second}) << "\n";
+
+            } else {
+                sstream << "  [->KEY] "
+                    << tab->dump_tab_var_name(TabVertex{dst.first, dst.second})
+                    << " @TABLE:" << tab->sgProp->procOf[dst.first] << "(";
+                bool init = true;
+                for (auto actit : get_actions_from_key(tab, dst.first)) {
+                    auto actinfo = (*g)[actit];
+                    if (init) init = false;
+                    else sstream << ", ";
+
+                    if (hasFlag(actinfo.flags, VertexFlags::CALL))
+                        sstream << actinfo.name.substr(5);  // "CALL "
+                    else
+                        sstream << actinfo.name;
+                }
+                sstream << ")\n";
+            }
         }
-        sstream << ")";
-        std::cout << sstream.str() << std::endl;
+        std::cout << sstream.str();
     }
     tab->clear_edge_func();
 }

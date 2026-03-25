@@ -1,6 +1,7 @@
 #include "ide_pass.h"
 
 namespace P4::P4StateDependency {
+
 std::vector<const IR::Node *> IDEPass::get_var_members(Tabulation *tab, const IR::Node *var) {
     // TODO: support others
     auto *varDecl = var->to<IR::Declaration>();
@@ -82,16 +83,34 @@ void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v) {
 
         auto varBitMap = tab->valueMap[TabVertex{v, var}];
         for (auto paramTv : tab->get_target_vars(varBitMap)) {
-            TabEdge te = {paramTv, TabVertex{v, var}};
-            foundDepEdges[graphName].push_back(convert_to_var_edge(te));
+            foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
         }
         // Find if any variable is a member of var
         for (auto mem : get_var_members(tab, var)) {
             auto varBitMap = tab->valueMap[TabVertex{v, mem}];
             for (auto paramTv : tab->get_target_vars(varBitMap)) {
-                TabEdge te = {paramTv, TabVertex{v, mem}};
-                foundDepEdges[graphName].push_back(convert_to_var_edge(te));
+                foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, mem});
             }
+        }
+    }
+}
+
+void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
+    auto vinfo = (*g)[v];
+    auto graphName = boost::get_property(*g, boost::graph_name);
+
+    for (auto var : sgProp->progVarInfo.get_all_vars()) {
+        auto varTv = TabVertex{v, var};
+        auto varVit = tab->get_vertex_id(varTv);
+        auto varInfo = (*g)[varVit];
+        // Skip non-header variables
+        if (!varInfo.name.startsWith("hdr")) continue;
+
+        auto varBitMap = tab->valueMap[varTv];
+        for (auto paramTv : tab->get_target_vars(varBitMap)) {
+            foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
         }
     }
 }

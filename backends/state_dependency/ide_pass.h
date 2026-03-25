@@ -12,7 +12,6 @@ using Graph = Graphs::Graph;
 
 class IDEPass : public Graphs,
                 public Inspector {
-
  public:
     explicit IDEPass(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
             std::vector<Graph *> *controlGraphsArray,
@@ -27,6 +26,8 @@ class IDEPass : public Graphs,
     virtual Visitor::profile_t init_apply(const IR::Node *) = 0;
     void set_edge_func();
 
+    using DepEdgeMap = hvec_map<Graphs::VarVertex, std::vector<Graphs::VarVertex>>;
+
  protected:
     // Common analysis method with IFDS/IDE
     virtual void analyze_control_graph(Tabulation *tab) = 0;
@@ -34,6 +35,7 @@ class IDEPass : public Graphs,
     virtual void set_edge_func_in_graph(Tabulation *tab) = 0;
     // Find dependency from src var for every dst vertex
     void collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v);
+    void collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v);
     std::vector<const IR::Node *> get_var_members(Tabulation *tab, const IR::Node *var);
     cstring dump_found_dependency(Tabulation *tab, const Graphs::VarEdge &ve);
     std::vector<Graphs::vertex_t> find_next_cfg_node(Graph *g, Graphs::vertex_t v);
@@ -50,8 +52,7 @@ class IDEPass : public Graphs,
     GenSGMode genSupergraphs;
 
  public:
-    // TODO: add dependency type
-    hvec_map<cstring, std::vector<Graphs::VarEdge>> foundDepEdges;
+    hvec_map<cstring, DepEdgeMap> foundDepEdges;
 };
 
 }  // namespace P4::P4StateDependency

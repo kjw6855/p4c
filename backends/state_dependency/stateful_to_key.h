@@ -18,7 +18,7 @@ class FindStatefulToKey : public IDEPass {
             std::vector<Graph *> *controlGraphsArray,
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs,
-            hvec_map<cstring, std::vector<Graphs::VarEdge>> *ptsEdges)
+            hvec_map<cstring, IDEPass::DepEdgeMap> *ptsEdges)
         : IDEPass(refMap, typeMap, controlGraphsArray, graphProps, genSupergraphs),
           ptsEdges(ptsEdges) {}
     Visitor::profile_t init_apply(const IR::Node *) override;
@@ -32,7 +32,7 @@ class FindStatefulToKey : public IDEPass {
     std::vector<const IR::Node *> find_ret_vars(Tabulation *tab, Graphs::vertex_t ret_v);
 
  protected:
-    hvec_map<cstring, std::vector<Graphs::VarEdge>> *ptsEdges{};
+    hvec_map<cstring, IDEPass::DepEdgeMap> *ptsEdges{};
 };
 
 class StatefulToKey : public PassManager {
@@ -41,17 +41,17 @@ class StatefulToKey : public PassManager {
             std::vector<Graph *> *controlGraphsArray,
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs,
-            hvec_map<cstring, std::vector<Graphs::VarEdge>> *ptsEdges) {
+            hvec_map<cstring, IDEPass::DepEdgeMap> *ptsEdges) {
         stdPass = new FindStatefulToKey(refMap, typeMap,
                     controlGraphsArray, graphProps,
                     genSupergraphs, ptsEdges);
         passes.push_back(stdPass);
     }
 
-    std::vector<Graphs::VarEdge> getFoundDepEdges(const cstring &graphName) {
+    IDEPass::DepEdgeMap getFoundDepEdges(const cstring &graphName) {
         if (stdPass->foundDepEdges.find(graphName) ==
                 stdPass->foundDepEdges.end())
-            return {};
+            return IDEPass::DepEdgeMap{};
         return stdPass->foundDepEdges[graphName];
     }
 
