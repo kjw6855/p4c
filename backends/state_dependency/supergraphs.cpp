@@ -62,6 +62,12 @@ void SuperGraphs::create_var_vertices(const cstring &graphName) {
         curProp->actionMap = actionMapIt->second;
     }
 
+    auto egressPortVarIt = egressPortVars->find(graphName);
+    curProp->egressPortVar = egressPortVarIt != egressPortVars->end() ? egressPortVarIt->second : nullptr;
+
+    auto dropVarIt = dropVars->find(graphName);
+    curProp->dropVar = dropVarIt != dropVars->end() ? dropVarIt->second : nullptr;
+
     // Add root and global variables
     auto &progVarInfo = curProp->progVarInfo;
     progVarInfo.add_var(Graphs::globalNode);
@@ -147,6 +153,7 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
                     "%1%(%2%) is not RETURN", dstInfo.name, dstit);
 
             // Directly create callee-to-caller retArg edges
+            // TODO: check with globalDefBits
             add_edge(curProp->progVarInfo[srcit][srcVarIdx],
                     curProp->progVarInfo[dstit][dstVarIdx],
                     cstring::empty, EdgeType::IFDS);
@@ -159,9 +166,21 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
     std::vector<bool> visited(n, false);
     std::queue<Graphs::vertex_t> q;
 
+    // isGlobalsDefined[vid][varIdx] = true if varIdx is defined in the path from entry to vertex vid
+    std::vector<boost::dynamic_bitset<uint64_t>> globalDefBits(n,
+        boost::dynamic_bitset<uint64_t>(curProp->progVarInfo.get_var_num()));
+    boost::dynamic_bitset<uint64_t> emptyBitSet(curProp->progVarInfo.get_var_num());
+
+    hvec_map<Graphs::vertex_t, Graphs::vertex_t> retToCall;
+    for (auto &ce : sgProp->callMap) {
+        auto [_, callerRet] = ce.second;
+        retToCall[callerRet] = ce.first;
+    }
+
     q.push(get_root_vertex(g));
     while (!q.empty()) {
         auto u = q.front();
+        auto uid = index[u];
         q.pop();
 
         for (auto [ei, ei_end] = boost::out_edges(u, *g); ei != ei_end; ++ei) {
@@ -170,43 +189,105 @@ void SuperGraphs::gen_supergraph(Graph *g_, SuperGraphProp *sgProp) {
             if (edge.type == EdgeType::IFDS) continue;
             if (edge.type == EdgeType::IFDS_FT) continue;
             auto v = boost::target(*ei, *g);
+            auto vid = index[v];
+            auto vinfo = (*g)[v];
+
+            // Use bitset of source vertex for current path
+            boost::dynamic_bitset<uint64_t> curGlobalDefBits;
+            if (visited[vid]) {
+                // If target is already visited, create new bitset for this path
+                curGlobalDefBits = globalDefBits[uid];
+            } else {
+                // Copy from source vertex's bitset
+                globalDefBits[vid] = globalDefBits[uid];
+                curGlobalDefBits = globalDefBits[vid];
+            }
 
             // main
-            LOG5(u << "->" << v << ": " << edgeTypeToString(edge.type));
-            gen_ifds_edge(u, v);
+            LOG5(u << "(" << uid << ")->" << v << "(" << vid << "): " << edgeTypeToString(edge.type));
+            if (edge.type == EdgeType::CALL_TO_RETURN) {
+                // Skip Call-to-Return edge, since ifds edges should be generated after calculating procedure
+                continue;
 
-            auto vid = index[v];
+            } else if (edge.type == EdgeType::INTER_PROCEDURE && hasFlag(vinfo.flags, VertexFlags::RETURN)) {
+                // (1) Exit-to-Return edge
+                gen_ifds_edge(u, v, curGlobalDefBits, emptyBitSet);
+                auto caller = retToCall[v];
+
+                // (2) Call-to-Return edge
+                // We don't have to calculate AND
+                gen_ifds_edge(caller, v, {}, curGlobalDefBits);
+
+            } else {
+                gen_ifds_edge(u, v, curGlobalDefBits, emptyBitSet);
+            }
+
             if (!visited[vid]) {
                 visited[vid] = true;
+                globalDefBits[vid] = curGlobalDefBits;
                 q.push(v);
+            } else {
+                // Calculate overwritten globals for already visited path
+                globalDefBits[vid] &= curGlobalDefBits;
             }
         }
     }
 }
 
-void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
+void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst,
+        std::optional<std::reference_wrapper<boost::dynamic_bitset<uint64_t>>> curGlobalDefBits,
+        const boost::dynamic_bitset<uint64_t> &skipGlobals) {
     auto &progVarInfo = curProp->progVarInfo;
     auto &srcProcName = curProp->procOf[src];
     auto &dstProcName = curProp->procOf[dst];
     auto &variables = progVarInfo.get_all_vars(dstProcName);
+    BUG_CHECK(progVarInfo.get_var_num(dstProcName) == variables.size(),
+            "var_num is not consistent with variables size for proc %1%: var_num=%2%, variables.size()=%3%",
+            dstProcName, progVarInfo.get_var_num(dstProcName), variables.size());
 
+    LOG2(src << "->" << dst << ": " << (curGlobalDefBits.has_value() ?
+            boost::to_string(curGlobalDefBits->get()) : std::string("null")));
     // Add 0->0
     add_edge(progVarInfo[src][0], progVarInfo[dst][0],
              cstring::empty, EdgeType::IFDS_FT);
 
-    auto &dstInfo = (*g)[dst];
+    auto dstInfo = (*g)[dst];
+    // Set drop flag if dst is marked as drop or dst's defVar is dropVar
+    bool isDrop = hasFlag(dstInfo.flags, VertexFlags::DROP);
+    if (!isDrop && curProp->dropVar) {
+        for (size_t n = 1; n < progVarInfo.get_var_num(dstProcName); n++) {
+            auto *var = variables[n];
+            if (std::find(dstInfo.defVars.begin(), dstInfo.defVars.end(), var)
+                    == dstInfo.defVars.end())
+                continue;
+            if (curProp->dropVar->equiv(*var)) {
+                isDrop = true;
+                break;
+            }
+        }
+    }
+
     for (size_t n = 1; n < progVarInfo.get_var_num(dstProcName); n++) {
-        BUG_CHECK(n < variables.size(),
-                "Var idx %1% should have a less number than total var_num: %2%",
-                n, variables.size());
+        // Skip if the global variable is overwritten in the callee
+        if (!progVarInfo.is_local(n) && skipGlobals.test(n)) continue;
+
         auto *var = variables[n];
         // Fall through if var is not newly defined
         if (std::find(dstInfo.defVars.begin(), dstInfo.defVars.end(), var)
                 == dstInfo.defVars.end()) {
-            // Only for global variables and same-proc variables
-            if (srcProcName == dstProcName || !progVarInfo.is_local(n))
+            if (isDrop && curProp->egressPortVar && var->equiv(*curProp->egressPortVar)) {
+                // If dst has drop flag, 0 -> egressVar
+                add_edge(progVarInfo[src][0], progVarInfo[dst][n],
+                         cstring::empty, EdgeType::IFDS);
+                if (curGlobalDefBits.has_value() && !progVarInfo.is_local(n)) {
+                    curGlobalDefBits->get().set(n);
+                }
+
+            } else if (srcProcName == dstProcName || !progVarInfo.is_local(n)) {
+                // Only for global variables and same-proc variables
                 add_edge(progVarInfo[src][n], progVarInfo[dst][n],
                          cstring::empty, EdgeType::IFDS_FT);
+            }
             continue;
         }
 
@@ -218,16 +299,25 @@ void SuperGraphs::gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst) {
             // 0 -> DEF (e.g., v = READ(idx))
             add_edge(progVarInfo[src][0], progVarInfo[dst][n],
                      cstring::empty, EdgeType::IFDS);
+            if (curGlobalDefBits.has_value() && !progVarInfo.is_local(n)) {
+                curGlobalDefBits->get().set(n);
+            }
         } else if (dstInfo.useVars.size() == 0) {
             // 0 -> DEF
             auto edgeId = add_edge(progVarInfo[src][0], progVarInfo[dst][n],
                      cstring::empty, EdgeType::IFDS);
+            if (curGlobalDefBits.has_value() && !progVarInfo.is_local(n)) {
+                curGlobalDefBits->get().set(n);
+            }
         } else {
             // USE -> DEF
             for (auto uv : dstInfo.useVars) {
                 auto uvi = progVarInfo.get_var_index(uv, srcProcName);
                 add_edge(progVarInfo[src][uvi], progVarInfo[dst][n],
                          cstring::empty, EdgeType::IFDS);
+                if (curGlobalDefBits.has_value() && !progVarInfo.is_local(n)) {
+                    curGlobalDefBits->get().set(n);
+                }
             }
         }
     }

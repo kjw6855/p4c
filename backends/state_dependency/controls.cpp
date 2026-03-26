@@ -52,10 +52,11 @@ bool ControlGraphs::ControlStack::isEmpty() const { return subgraphs.empty(); }
 using vertex_t = ControlGraphs::vertex_t;
 
 ControlGraphs::ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-                             std::filesystem::path graphsDir)
+                             std::filesystem::path graphsDir, cstring arch)
     : refMap(refMap),
       typeMap(typeMap),
-      graphsDir(std::move(graphsDir)) {
+      graphsDir(std::move(graphsDir)),
+      arch(arch) {
     visitDagOnce = false;
 }
 
@@ -339,6 +340,21 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                 visit_stateful(vName, statement, curKeyVars,
                         SOFlags::CREATE, {params[1]});
                 return false;
+            }
+
+            // psa and tna set drop in meta.drop and meta.drop_ctl, respectively
+            if (arch == "v1model") {
+                // v1model specific extern calls
+                if (ec->method->name.name == "mark_to_drop") {
+                    flags |= VertexFlags::DROP;
+                }
+            } else if (arch == "pna") {
+                // pna specific extern calls
+                if (ec->method->name.name == "drop_packet") {
+                    flags |= VertexFlags::DROP;
+                } else if (ec->method->name.name == "send_to_port") {
+                    // TODO: add special variable for egress_port
+                }
             }
         }
 
@@ -942,7 +958,78 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
                 newVar = add_local_variable_in_vertex(decl->to<IR::Declaration_Variable>(),
                         cur_v.value(), isUsed);
         }
+    } else if (auto *me = e->to<IR::Member>()) {
+        // Check if it's egress_port ("standard_metadata.egress_port")
+        if (me->expr->is<IR::PathExpression>()) {
+            auto *decl = refMap->getDeclaration(me->expr->to<IR::PathExpression>()->path, false);
+            if (decl != nullptr && decl->is<IR::Parameter>()) {
+                auto *param = decl->to<IR::Parameter>();
+                // PNA and PSA set the output port by extern send_to_port()
+                if (arch == "v1model") {
+                    // Check if the parameter's type is standard_metadata_t
+                    if (param->type->is<IR::Type_Name>() &&
+                        param->type->to<IR::Type_Name>()->path->name == "standard_metadata_t") {
+                        // Check if it's egress_port or egress_spec
+                        if (param->direction == IR::Direction::InOut &&
+                            (me->member.name == "egress_spec" || me->member.name == "egress_port")) {
+                            newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                            egressPortVars[graphName] = newVar;
+                        }
+                    }
+                } else if (arch == "tna") {
+                    // Check if the parameter's type is ingress_intrinsic_metadata_for_tm_t
+                    if (param->type->is<IR::Type_Name>()) {
+                        auto typeName = param->type->to<IR::Type_Name>();
+                        if (typeName->path->name == "ingress_intrinsic_metadata_for_tm_t" &&
+                            param->direction == IR::Direction::InOut &&
+                            me->member.name == "ucast_egress_port") {
+                            newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                            egressPortVars[graphName] = newVar;
+                        } else if (typeName->path->name == "egress_intrinsic_metadata_t" &&
+                                   param->direction == IR::Direction::In &&
+                                   me->member.name == "egress_port") {
+                            newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                            egressPortVars[graphName] = newVar;
+                        } else if (typeName->path->name == "ingress_intrinsic_metadata_for_tm_t" &&
+                                   param->direction == IR::Direction::In &&
+                                   me->member.name == "ingress_port") {
+                            newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                            dropVars[graphName] = newVar;
+                        }
+                    }
+                } else if (arch == "psa") {
+                    // Check if the parameter's type is standard_metadata_t
+                    if (param->type->is<IR::Type_Name>()) {
+                        auto typeName = param->type->to<IR::Type_Name>();
+                        if (typeName->path->name == "psa_ingress_output_metadata_t") {
+                            if (param->direction == IR::Direction::InOut) {
+                                if (me->member.name == "drop") {
+                                    newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                                    dropVars[graphName] = newVar;
+                                } else if (me->member.name == "egress_port") {
+                                    newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                                    egressPortVars[graphName] = newVar;
+                                }
+                            }
+                        } else if (typeName->path->name == "psa_egress_output_metadata_t") {
+                            if (param->direction == IR::Direction::InOut &&
+                                me->member.name == "drop") {
+                                newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                                dropVars[graphName] = newVar;
+                            }
+                        } else if (typeName->path->name == "psa_egress_input_metadata_t") {
+                            if (param->direction == IR::Direction::In &&
+                                me->member.name == "egress_port") {
+                                newVar = add_variable_in_vertex(me, cur_v.value(), isUsed);
+                                egressPortVars[graphName] = newVar;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
+
     if (!newVar)
         add_variable_in_vertex(e, cur_v.value(), isUsed);
     if (addVar)

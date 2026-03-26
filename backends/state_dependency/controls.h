@@ -34,7 +34,7 @@ class ControlGraphs : public Graphs,
     };
 
     ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-            std::filesystem::path graphsDir);
+            std::filesystem::path graphsDir, cstring arch);
 
     enum { SKIPPING, NORMAL, READ_ONLY, WRITE_ONLY } state = SKIPPING;
 
@@ -96,6 +96,7 @@ class ControlGraphs : public Graphs,
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
     const cstring graphsDir;
+    const cstring arch;
     Parents return_parents{};
 
     ControlStack controlStack{};

@@ -106,11 +106,11 @@ void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v) {
         auto varVit = tab->get_vertex_id(varTv);
         auto varInfo = (*g)[varVit];
         // Skip non-header variables
-        if (!varInfo.name.startsWith("hdr")) continue;
-
-        auto varBitMap = tab->valueMap[varTv];
-        for (auto paramTv : tab->get_target_vars(varBitMap)) {
-            foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
+        if (varInfo.name.startsWith("hdr") || (sgProp->egressPortVar && sgProp->egressPortVar->equiv(*var))) {
+            auto varBitMap = tab->valueMap[varTv];
+            for (auto paramTv : tab->get_target_vars(varBitMap)) {
+                foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
+            }
         }
     }
 }

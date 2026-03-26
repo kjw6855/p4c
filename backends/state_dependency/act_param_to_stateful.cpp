@@ -68,6 +68,8 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
     tab->compute_values_ide();
     //tab->dump_result();
 
+    std::cout << "================" << std::endl << std::endl;
+    std::cout << "[RESULT] Action Parameters -> Stateful Variables in " << graphName << ":\n";
     auto vertices = boost::vertices(*g);
     // Dependency cases for each dst vertex
     hvec_map<Graphs::vertex_t, cstring> caseStrings;
@@ -137,6 +139,7 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
         std::cout << sstream.str();
     }
     tab->clear_edge_func();
+    std::cout << "================" << std::endl << std::endl;
 }
 
 Visitor::profile_t FindActParamToStateful::init_apply(const IR::Node *n) {

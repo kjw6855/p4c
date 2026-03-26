@@ -2,6 +2,7 @@
 #define BACKENDS_STATE_DEPENDENCY_SUPERGRAPHS_H_
 
 #include <optional>
+#include <functional>
 
 #include "graphs.h"
 #include "ir/ir.h"
@@ -137,6 +138,8 @@ class SuperGraphProp {
     }
 
     Graphs::vertex_t rootVar;
+    const IR::Node *egressPortVar;
+    const IR::Node *dropVar;
     ProgramVarInfo progVarInfo;
 
     Graphs::ProcOf procOf;
@@ -160,7 +163,9 @@ class SuperGraphs : public Graphs {
                 hvec_map<cstring, Graphs::CallMap> *callMaps,
                 hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps,
                 hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges,
-                hvec_map<cstring, Graphs::ActionMap> *actionMaps)
+                hvec_map<cstring, Graphs::ActionMap> *actionMaps,
+                hvec_map<cstring, const IR::Node *> *egressPortVars,
+                hvec_map<cstring, const IR::Node *> *dropVars)
     : refMap(refMap),
       typeMap(typeMap),
       controlGraphsArray(controlGraphsArray),
@@ -170,7 +175,9 @@ class SuperGraphs : public Graphs {
       callMaps(callMaps),
       procCallerMaps(procCallerMaps),
       retArgEdges(retArgEdges),
-      actionMaps(actionMaps) {}
+      actionMaps(actionMaps),
+      egressPortVars(egressPortVars),
+      dropVars(dropVars) {}
 
     void gen_supergraphs();
 
@@ -178,7 +185,9 @@ class SuperGraphs : public Graphs {
     void gen_supergraph(Graph *g_, SuperGraphProp *sgProp);
     void create_var_vertices(const cstring &);
     void create_root_var_vertex();
-    void gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst);
+    void gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst,
+            std::optional<std::reference_wrapper<boost::dynamic_bitset<uint64_t>>> curGlobalDefBits,
+            const boost::dynamic_bitset<uint64_t> &skipGlobals);
 
  protected:
     P4::ReferenceMap *refMap;
@@ -191,6 +200,8 @@ class SuperGraphs : public Graphs {
     hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps;
     hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges;
     hvec_map<cstring, Graphs::ActionMap> *actionMaps;
+    hvec_map<cstring, const IR::Node *> *egressPortVars;
+    hvec_map<cstring, const IR::Node *> *dropVars;
 
     SuperGraphProp *curProp{};
 

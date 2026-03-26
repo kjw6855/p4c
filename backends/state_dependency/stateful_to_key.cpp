@@ -149,6 +149,8 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
     tab->compute_values_ide();
     //tab->dump_result();
 
+    std::cout << "================" << std::endl << std::endl;
+    std::cout << "[RESULT] Stateful Variables -> Headers/Keys in " << graphName << ":\n";
     auto mainProcName = sgProp->procOf[sgProp->rootVar];
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
@@ -170,7 +172,7 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
         for (auto &dst : de.second) {
             auto dstInfo = (*g)[dst.first];
             if (!hasFlag(dstInfo.flags, VertexFlags::KEY)) {
-                sstream << "  [->HDR] " << tab->dump_tab_var_name(TabVertex{dst.first, dst.second}) << "\n";
+                sstream << "  [->HDR/PORT] " << tab->dump_tab_var_name(TabVertex{dst.first, dst.second}) << "\n";
 
             } else {
                 sstream << "  [->KEY] "
@@ -193,6 +195,7 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
         std::cout << sstream.str();
     }
     tab->clear_edge_func();
+    std::cout << "================" << std::endl << std::endl;
 }
 
 Visitor::profile_t FindStatefulToKey::init_apply(const IR::Node *n) {

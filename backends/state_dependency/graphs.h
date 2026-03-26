@@ -46,7 +46,8 @@ enum class VertexFlags : unsigned {
     SO_IDX          = 1u << 15,
     SO_DATA         = 1u << 16,
     ACTION_DATA     = 1u << 17,
-    ALL             = (1u << 18) - 1u,
+    DROP            = 1u << 18,
+    ALL             = (1u << 19) - 1u,
 };
 
 enum class SOFlags : unsigned {
@@ -504,6 +505,8 @@ inline cstring vertexFlagsToString(VertexFlags flags) {
     if (hasFlag(flags, VertexFlags::VARIABLE))     parts.emplace_back("VARIABLE"_cs);
     if (hasFlag(flags, VertexFlags::SO_IDX))       parts.emplace_back("SO_IDX"_cs);
     if (hasFlag(flags, VertexFlags::SO_DATA))      parts.emplace_back("SO_DATA"_cs);
+    if (hasFlag(flags, VertexFlags::ACTION_DATA))  parts.emplace_back("ACTION_DATA"_cs);
+    if (hasFlag(flags, VertexFlags::DROP))         parts.emplace_back("DROP"_cs);
 
     cstring res;
     for (std::size_t i = 0; i < parts.size(); ++i) {
@@ -620,6 +623,9 @@ class Graphs {
     hvec_map<cstring, ProcCallers> procCallerMaps;
     hvec_map<cstring, std::vector<VarEdge>> retArgEdges;
     hvec_map<cstring, ActionMap> actionMaps;
+
+    hvec_map<cstring, const IR::Node *> egressPortVars;   // graph_name to egress port variable
+    hvec_map<cstring, const IR::Node *> dropVars;         // graph_name to drop variable
 
     vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
 

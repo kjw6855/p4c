@@ -130,10 +130,12 @@ int main(int argc, char *const argv[]) {
     }
     if (::P4::errorCount() > 0) return 1;
 
+    BUG_CHECK(options.arch, "Architecture must be specified with --arch option");
+
     LOG2("Generating graphs under " << options.graphsDir);
     LOG2("Generating control graphs");
     P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap,
-            options.graphsDir);
+            options.graphsDir, options.arch);
     // TODO: set options in contructor
     cgen.varVis = options.varVis;
     cgen.genSupergraphs = options.genSupergraphs;
@@ -148,7 +150,9 @@ int main(int argc, char *const argv[]) {
                 &cgen.callMaps,
                 &cgen.procCallerMaps,
                 &cgen.retArgEdges,
-                &cgen.actionMaps);
+                &cgen.actionMaps,
+                &cgen.egressPortVars,
+                &cgen.dropVars);
 
         // generate supergraphs
         sg.gen_supergraphs();
