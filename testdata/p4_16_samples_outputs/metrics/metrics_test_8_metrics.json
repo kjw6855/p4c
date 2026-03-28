@@ -141,5 +141,52 @@
     "structures" : 10,
     "structure_uses" : 6
   },
+  "action_parameters" : {
+    "num_actions" : 9,
+    "num_actions_with_parameter" : 3,
+    "total_parameters" : 6,
+    "total_parameter_size" : 185,
+    "avg_parameter_size" : 30.8333,
+    "avg_parameters_per_action" : 0.666667,
+    "max_parameters_per_action" : 3,
+    "per_action_metrics" : {
+      "NoAction_2" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "NoAction_3" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "drop" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "drop_2" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "set_ecmp_select" : {
+        "parameters" : 2,
+        "parameter_size_sum" : 48
+      },
+      "set_nhop" : {
+        "parameters" : 3,
+        "parameter_size_sum" : 89
+      },
+      "NoAction_4" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "rewrite_mac" : {
+        "parameters" : 1,
+        "parameter_size_sum" : 48
+      },
+      "drop_3" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      }
+    }
+  },
   "inlined_actions" : 0
 }

@@ -1,4 +1,6 @@
 
+Lines of Code: 222
+
 Cyclomatic Complexity:
   ParserImpl: 3
   ingress: 5
@@ -113,5 +115,23 @@ Extern Metrics:
   Function Calls: 15
   Extern Structures: 10
   Structure Uses: 13
+
+Action Parameter Metrics:
+  Number of Actions: 3
+  Number of Actions with Parameter: 2
+  Total Parameters: 16
+  Total Parameter Size: 17
+  Avg Parameter Size: 1.0625
+  Avg Parameters Per Action: 5.33333
+  Max Parameters Per Action: 15
+  set_output:
+	 Parameters: 1
+	 Parameter Size Sum: 9
+  set_headers:
+	 Parameters: 15
+	 Parameter Size Sum: 8
+  my_drop:
+	 Parameters: 0
+	 Parameter Size Sum: 0
 
 Number of Inlined Actions: 0

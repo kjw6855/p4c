@@ -288,6 +288,50 @@ bool ExportMetricsPass::preorder(const IR::P4Program * /*program*/) {
         root->emplace("extern", externJson);
     }
 
+    if (selectedMetrics.count("action-param"_cs)) {
+        textFile << "\nAction Parameter Metrics:\n"
+                 << "  Number of Actions: " << metrics.actionParameterMetrics.numActions << "\n"
+                 << "  Number of Actions with Parameter: " << metrics.actionParameterMetrics.numActionsWithParameter << "\n"
+                 << "  Total Parameters: " << metrics.actionParameterMetrics.totalParameters << "\n"
+                 << "  Total Parameter Size: " << metrics.actionParameterMetrics.totalParameterSizeSum << "\n"
+                 << "  Avg Parameter Size: " << metrics.actionParameterMetrics.avgParameterSize << "\n"
+                 << "  Avg Parameters Per Action: " << metrics.actionParameterMetrics.avgParametersPerAction
+                 << "\n"
+                 << "  Max Parameters Per Action: " << metrics.actionParameterMetrics.maxParametersPerAction
+                 << "\n";
+
+        auto *actionJson = new Util::JsonObject();
+        auto *perAction = new Util::JsonObject();
+        for (const auto &[action, params] : metrics.actionParameterMetrics.parametersNum) {
+            textFile << "  " << action << ":\n"
+                     << "\t Parameters: " << params << "\n"
+                     << "\t Parameter Size Sum: " << metrics.actionParameterMetrics.parameterSizeSum.at(action)
+                     << "\n";
+
+            auto *actionData = new Util::JsonObject();
+            actionData
+                ->emplace("parameters", new Util::JsonValue(params))
+                ->emplace(
+                    "parameter_size_sum",
+                    new Util::JsonValue(metrics.actionParameterMetrics.parameterSizeSum.at(action)));
+            perAction->emplace(action, actionData);
+        }
+        actionJson
+            ->emplace("num_actions", new Util::JsonValue(metrics.actionParameterMetrics.numActions))
+            ->emplace("num_actions_with_parameter", new Util::JsonValue(metrics.actionParameterMetrics.numActionsWithParameter))
+            ->emplace("total_parameters", new Util::JsonValue(metrics.actionParameterMetrics.totalParameters))
+            ->emplace("total_parameter_size",
+                      new Util::JsonValue(metrics.actionParameterMetrics.totalParameterSizeSum))
+            ->emplace("avg_parameter_size",
+                      new Util::JsonValue(metrics.actionParameterMetrics.avgParameterSize))
+            ->emplace("avg_parameters_per_action",
+                      new Util::JsonValue(metrics.actionParameterMetrics.avgParametersPerAction))
+            ->emplace("max_parameters_per_action",
+                      new Util::JsonValue(metrics.actionParameterMetrics.maxParametersPerAction))
+            ->emplace("per_action_metrics", perAction);
+        root->emplace("action_parameters", actionJson);
+    }
+
     if (selectedMetrics.count("inlined"_cs)) {
         textFile << "\nNumber of Inlined Actions: " << metrics.inlinedActions << "\n";
         root->emplace("inlined_actions", new Util::JsonValue(metrics.inlinedActions));

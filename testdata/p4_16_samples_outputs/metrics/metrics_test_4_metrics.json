@@ -127,5 +127,28 @@
     "structures" : 10,
     "structure_uses" : 13
   },
+  "action_parameters" : {
+    "num_actions" : 3,
+    "num_actions_with_parameter" : 2,
+    "total_parameters" : 16,
+    "total_parameter_size" : 17,
+    "avg_parameter_size" : 1.0625,
+    "avg_parameters_per_action" : 5.33333,
+    "max_parameters_per_action" : 15,
+    "per_action_metrics" : {
+      "set_output" : {
+        "parameters" : 1,
+        "parameter_size_sum" : 9
+      },
+      "set_headers" : {
+        "parameters" : 15,
+        "parameter_size_sum" : 8
+      },
+      "my_drop" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      }
+    }
+  },
   "inlined_actions" : 0
 }

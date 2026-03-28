@@ -83,6 +83,21 @@ struct MatchActionTableMetrics {
     unsigned maxActionsPerTable = 0;
 };
 
+struct ActionParameterMetrics {
+    unsigned numActions = 0;
+    unsigned numActionsWithParameter = 0;
+    // Action name -> value
+    P4::ordered_map<cstring, unsigned> parametersNum;
+    P4::ordered_map<cstring, unsigned> parameterSizeSum;
+
+    unsigned totalParameters = 0;
+    unsigned totalParameterSizeSum = 0;
+    double avgParameterSize = 0;
+    double avgParametersPerAction = 0.0;
+    double avgParametersPerActionWithParameter = 0.0;
+    unsigned maxParametersPerAction = 0;
+};
+
 struct NestingDepthMetrics {
     P4::ordered_map<cstring, unsigned> blockNestingDepth;  // Block name -> max depth.
     double avgNestingDepth = 0.0;
@@ -127,6 +142,7 @@ struct Metrics {
     HeaderPacketMetrics headerManipulationMetrics;  // Header addition and removal operations.
     HeaderPacketMetrics headerModificationMetrics;  // Assignment operations.
     MatchActionTableMetrics matchActionTableMetrics;
+    ActionParameterMetrics actionParameterMetrics;
     ParserMetrics parserMetrics;
     P4::ordered_map<cstring, unsigned> cyclomaticComplexity;  // Function name -> CC value.
     ExternMetrics externMetrics;

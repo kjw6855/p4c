@@ -69,7 +69,7 @@ set (P4_FRONTEND_SRCS
   p4/typeChecking/bindVariables.cpp
   p4/typeChecking/syntacticEquivalence.cpp
   p4/typeChecking/typeChecker.cpp
-  p4/typeChecking/typeCheckDecl.cpp  
+  p4/typeChecking/typeCheckDecl.cpp
   p4/typeChecking/typeCheckExpr.cpp
   p4/typeChecking/typeCheckStmt.cpp
   p4/typeChecking/typeCheckTypes.cpp
@@ -86,6 +86,7 @@ set (P4_FRONTEND_SRCS
   p4/validateParsedProgram.cpp
   p4/metrics/metricsPassManager.cpp
   p4/metrics/linesOfCodeMetric.cpp
+  p4/metrics/actionParameterMetrics.cpp
   p4/metrics/cyclomaticComplexity.cpp
   p4/metrics/unusedCodeMetric.cpp
   p4/metrics/nestingDepthMetric.cpp
@@ -176,6 +177,7 @@ set (P4_FRONTEND_HDRS
   p4/validateValueSets.h
   p4/metrics/metricsPassManager.h
   p4/metrics/linesOfCodeMetric.h
+  p4/metrics/actionParameterMetrics.h
   p4/metrics/cyclomaticComplexity.h
   p4/metrics/unusedCodeMetric.h
   p4/metrics/nestingDepthMetric.h

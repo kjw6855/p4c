@@ -1,4 +1,6 @@
 
+Lines of Code: 150
+
 Cyclomatic Complexity:
   MyParser: 5
   MyVerifyChecksum: 1
@@ -124,5 +126,41 @@ Extern Metrics:
   Function Calls: 10
   Extern Structures: 10
   Structure Uses: 6
+
+Action Parameter Metrics:
+  Number of Actions: 9
+  Number of Actions with Parameter: 3
+  Total Parameters: 6
+  Total Parameter Size: 185
+  Avg Parameter Size: 30.8333
+  Avg Parameters Per Action: 0.666667
+  Max Parameters Per Action: 3
+  NoAction_2:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  NoAction_3:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  drop:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  drop_2:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  set_ecmp_select:
+	 Parameters: 2
+	 Parameter Size Sum: 48
+  set_nhop:
+	 Parameters: 3
+	 Parameter Size Sum: 89
+  NoAction_4:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  rewrite_mac:
+	 Parameters: 1
+	 Parameter Size Sum: 48
+  drop_3:
+	 Parameters: 0
+	 Parameter Size Sum: 0
 
 Number of Inlined Actions: 0

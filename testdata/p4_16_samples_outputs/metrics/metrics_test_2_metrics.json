@@ -193,5 +193,68 @@
     "structures" : 10,
     "structure_uses" : 12
   },
+  "action_parameters" : {
+    "num_actions" : 13,
+    "num_actions_with_parameter" : 1,
+    "total_parameters" : 1,
+    "total_parameter_size" : 9,
+    "avg_parameter_size" : 9,
+    "avg_parameters_per_action" : 0.0769231,
+    "max_parameters_per_action" : 1,
+    "per_action_metrics" : {
+      "forward_0" : {
+        "parameters" : 1,
+        "parameter_size_sum" : 9
+      },
+      "forward_1" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "forward_2" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "forward_3" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "drop_0" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "drop_1" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "drop_2" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "set_priority_0" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "set_priority_1" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "set_priority_3" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "set_priority_4" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "set_priority_5" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      },
+      "set_priority_6" : {
+        "parameters" : 0,
+        "parameter_size_sum" : 0
+      }
+    }
+  },
   "inlined_actions" : 3
 }

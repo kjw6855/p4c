@@ -1,4 +1,6 @@
 
+Lines of Code: 116
+
 Cyclomatic Complexity:
   MyParser: 5
   MyVerifyChecksum: 1
@@ -112,5 +114,26 @@ Extern Metrics:
   Function Calls: 8
   Extern Structures: 10
   Structure Uses: 6
+
+Action Parameter Metrics:
+  Number of Actions: 4
+  Number of Actions with Parameter: 0
+  Total Parameters: 0
+  Total Parameter Size: 0
+  Avg Parameter Size: 0
+  Avg Parameters Per Action: 0
+  Max Parameters Per Action: 0
+  forward:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  drop:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  drop_1:
+	 Parameters: 0
+	 Parameter Size Sum: 0
+  clear:
+	 Parameters: 0
+	 Parameter Size Sum: 0
 
 Number of Inlined Actions: 1

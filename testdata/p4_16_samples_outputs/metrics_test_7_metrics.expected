@@ -1,4 +1,6 @@
 
+Lines of Code: 19
+
 Cyclomatic Complexity:
   c: 1
 
@@ -70,5 +72,14 @@ Extern Metrics:
   Function Calls: 2
   Extern Structures: 0
   Structure Uses: 0
+
+Action Parameter Metrics:
+  Number of Actions: 0
+  Number of Actions with Parameter: 0
+  Total Parameters: 0
+  Total Parameter Size: 0
+  Avg Parameter Size: 0
+  Avg Parameters Per Action: 0
+  Max Parameters Per Action: 0
 
 Number of Inlined Actions: 0

@@ -54,7 +54,8 @@ class MetricPassesTest : public P4CTest {
                                     "match-action"_cs,
                                     "parser"_cs,
                                     "inlined"_cs,
-                                    "extern"_cs};
+                                    "extern"_cs,
+                                    "action-param"_cs};
         } else
             opts.selectedMetrics = {"loc"_cs, "cyclomatic"_cs, "header-manipulation"_cs};
 
@@ -76,7 +77,6 @@ class MetricPassesTest : public P4CTest {
         else
             setenv("P4C_16_INCLUDE_PATH", originalEnv, 1);
     }
-
     std::string readFileContent(const fs::path &path) {
         std::ifstream in(path);
         if (!in.is_open()) {
@@ -147,6 +147,7 @@ TEST_F(MetricPassesTest, MetricsTest10) {
     EXPECT_EQ(metrics.parserMetrics.totalStates, 5u);
     EXPECT_EQ(metrics.externMetrics.externFunctions, 24u);
     EXPECT_EQ(metrics.inlinedActions, 0u);
+    EXPECT_EQ(metrics.actionParameterMetrics.numActionsWithParameter, 3u);
 }
 
 }  // namespace P4::Test

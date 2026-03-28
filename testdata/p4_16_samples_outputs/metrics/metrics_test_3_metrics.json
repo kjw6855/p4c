@@ -139,5 +139,16 @@
     "structures" : 10,
     "structure_uses" : 7
   },
+  "action_parameters" : {
+    "num_actions" : 0,
+    "num_actions_with_parameter" : 0,
+    "total_parameters" : 0,
+    "total_parameter_size" : 0,
+    "avg_parameter_size" : 0,
+    "avg_parameters_per_action" : 0,
+    "max_parameters_per_action" : 0,
+    "per_action_metrics" : {
+    }
+  },
   "inlined_actions" : 0
 }

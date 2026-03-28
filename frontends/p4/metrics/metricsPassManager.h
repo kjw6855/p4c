@@ -11,6 +11,7 @@ as well.
 #include <filesystem>
 
 #include "frontends/common/options.h"
+#include "frontends/p4/metrics/actionParameterMetrics.h"
 #include "frontends/p4/metrics/cyclomaticComplexity.h"
 #include "frontends/p4/metrics/exportMetrics.h"
 #include "frontends/p4/metrics/externalObjectsMetric.h"

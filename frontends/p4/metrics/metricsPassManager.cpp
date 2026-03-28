@@ -19,6 +19,8 @@ void MetricsPassManager::addUnusedCode(PassManager &pm, bool isBefore) {
 void MetricsPassManager::addMetricPasses(PassManager &pm) {
     if (selectedMetrics.count("loc"_cs))
         pm.addPasses({new LinesOfCodeMetricPass(metrics, fileName)});
+    if (selectedMetrics.count("action-param"_cs))
+        pm.addPasses({new ActionParameterMetricsPass(typeMap, metrics)});
     if (selectedMetrics.count("cyclomatic"_cs))
         pm.addPasses({new CyclomaticComplexityPass(metrics)});
     if (selectedMetrics.count("halstead"_cs)) pm.addPasses({new HalsteadMetricsPass(metrics)});
