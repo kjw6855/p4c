@@ -42,8 +42,14 @@ void MatchActionTableMetricsPass::postorder(const IR::P4Table *table) {
         }
     }
 
-    if (table->getActionList() != nullptr)
+    if (table->getActionList() != nullptr) {
+        std::stringstream sstream;
+        for (const auto *action : table->getActionList()->actionList) {
+            sstream << action->getName() << " ";
+        }
         metrics.actionsNum[tableName] = table->getActionList()->size();
+        LOG2("Table " << tableName << " has " << metrics.actionsNum[tableName] << " actions: " << sstream.str());
+    }
 
     metrics.numTables += 1;
     metrics.totalKeys += metrics.keysNum[tableName];

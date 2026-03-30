@@ -279,12 +279,25 @@ bool ExportMetricsPass::preorder(const IR::P4Program * /*program*/) {
                  << "  Structure Uses: " << metrics.externMetrics.externStructUses << "\n";
 
         auto *externJson = new Util::JsonObject();
+        auto *perStruct = new Util::JsonObject();
+        auto *perFunction = new Util::JsonObject();
+        for (const auto &[structName, uses] : metrics.externMetrics.externUsesPerStruct) {
+            textFile << "  Struct uses " << structName << ": " << uses << "\n";
+            perStruct->emplace(structName, new Util::JsonValue(uses));
+        }
+        for (const auto &[funcName, uses] : metrics.externMetrics.externUsesPerFunction) {
+            textFile << "  Function uses " << funcName << ": " << uses << "\n";
+            perFunction->emplace(funcName, new Util::JsonValue(uses));
+        }
         externJson->emplace("functions", new Util::JsonValue(metrics.externMetrics.externFunctions))
             ->emplace("function_calls",
                       new Util::JsonValue(metrics.externMetrics.externFunctionUses))
             ->emplace("structures", new Util::JsonValue(metrics.externMetrics.externStructures))
             ->emplace("structure_uses",
-                      new Util::JsonValue(metrics.externMetrics.externStructUses));
+                      new Util::JsonValue(metrics.externMetrics.externStructUses))
+            ->emplace("per_struct_uses", perStruct)
+            ->emplace("per_function_uses", perFunction);
+
         root->emplace("extern", externJson);
     }
 

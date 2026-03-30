@@ -5,10 +5,14 @@ namespace P4 {
 void ExternalObjectsMetricPass::postorder(const IR::Type_Extern *node) {
     externTypeNames.insert(node->name.name);
     metrics.externStructures++;
+    LOG2("Found extern structure: " << node->name.name);
 
+    std::stringstream sstream;
     for (const auto &method : node->methods) {
         externMethods[node->name.name].insert(method->name.name);
+        sstream << method->name.name << " ";
     }
+    LOG2("Extern structure " << node->name.name << " has methods: " << sstream.str());
 }
 
 void ExternalObjectsMetricPass::postorder(const IR::Declaration_Instance *node) {
@@ -19,6 +23,7 @@ void ExternalObjectsMetricPass::postorder(const IR::Declaration_Instance *node) 
         typeName = tn->path->name.name;
         if (externTypeNames.count(typeName)) {
             metrics.externStructUses++;
+            metrics.externUsesPerStruct[typeName]++;
         }
     }
 }
@@ -32,9 +37,12 @@ void ExternalObjectsMetricPass::postorder(const IR::Member *node) {
         cstring memberName = node->member.name;
 
         metrics.externStructUses++;
+        metrics.externUsesPerStruct[externName]++;
         // Check if member is a method call and count it.
         if (externMethods.count(externName) && externMethods[externName].count(memberName)) {
             metrics.externFunctionUses++;
+            auto key = externName + "."_cs + memberName;
+            metrics.externUsesPerFunction[key]++;
         }
     }
 }
@@ -54,6 +62,7 @@ void ExternalObjectsMetricPass::postorder(const IR::MethodCallExpression *node) 
         cstring calledName = path->path->name.name;
         if (externFunctions.count(calledName)) {
             metrics.externFunctionUses++;
+            metrics.externUsesPerFunction[calledName]++;
         }
     }
 }

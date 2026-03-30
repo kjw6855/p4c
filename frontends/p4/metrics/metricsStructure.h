@@ -55,6 +55,8 @@ struct ExternMetrics {
     unsigned externStructures = 0;
     unsigned externFunctionUses = 0;
     unsigned externStructUses = 0;
+    P4::ordered_map<cstring, unsigned> externUsesPerStruct;  // Extern structure name -> use count.
+    P4::ordered_map<cstring, unsigned> externUsesPerFunction;  // Extern structure name -> use count.
 };
 
 struct UnusedCodeHelperVars {  // Variables for storing inter-pass data.
