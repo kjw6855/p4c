@@ -21,6 +21,7 @@
 #include "lib/gc.h"
 #include "lib/log.h"
 #include "lib/nullstream.h"
+#include "lib/timer.h"
 
 #include "graphs.h"
 #include "controls.h"
@@ -97,9 +98,11 @@ int main(int argc, char *const argv[]) {
             ::P4::error(ErrorType::ERR_IO, "Not valid input file");
             return 1;
         }
+        Util::ScopedTimer jsonTimer("json loading");
         program = new IR::P4Program(jsonFileLoader);
         fb.close();
     } else {
+        Util::ScopedTimer frontendTimer("P4 compile frontend");
         program = P4::parseP4File(options);
         if (program == nullptr || ::P4::errorCount() > 0) return 1;
 
@@ -120,87 +123,120 @@ int main(int argc, char *const argv[]) {
     P4StateDependency::MidEnd midEnd(options);
     midEnd.addDebugHook(hook);
     const IR::ToplevelBlock *top = nullptr;
-    try {
-        top = midEnd.process(program);
-        if (!options.dumpJsonFile.empty())
-            JSONGenerator(*openFile(options.dumpJsonFile, true)).emit(program);
-    } catch (const std::exception &bug) {
-        std::cerr << bug.what() << std::endl;
-        return 1;
+    {
+        Util::ScopedTimer midendTimer("P4 compile midend");
+        try {
+            top = midEnd.process(program);
+            if (!options.dumpJsonFile.empty())
+                JSONGenerator(*openFile(options.dumpJsonFile, true)).emit(program);
+        } catch (const std::exception &bug) {
+            std::cerr << bug.what() << std::endl;
+            return 1;
+        }
     }
     if (::P4::errorCount() > 0) return 1;
 
     BUG_CHECK(options.arch, "Architecture must be specified with --arch option");
 
-    LOG2("Generating graphs under " << options.graphsDir);
-    LOG2("Generating control graphs");
     P4StateDependency::ControlGraphs cgen(&midEnd.refMap, &midEnd.typeMap,
             options.graphsDir, options.arch);
     // TODO: set options in contructor
     cgen.varVis = options.varVis;
     cgen.genSupergraphs = options.genSupergraphs;
-    top->getMain()->apply(cgen);
 
-    if (options.genSupergraphs != P4StateDependency::GenSGMode::NONE) {
-        P4StateDependency::SuperGraphs sg(&midEnd.refMap, &midEnd.typeMap,
-                &cgen.controlGraphsArray,
-                &cgen.graphVars,
-                &cgen.graphLocalVars,
-                &cgen.procOfs,
-                &cgen.callMaps,
-                &cgen.procCallerMaps,
-                &cgen.retArgEdges,
-                &cgen.actionMaps,
-                &cgen.egressPortVars,
-                &cgen.dropVars);
+    P4StateDependency::SuperGraphs *sg = nullptr;
+    P4StateDependency::ActParamToStateful *sdChecker = nullptr;
+    P4StateDependency::StatefulToKey *pdChecker = nullptr;
+    P4StateDependency::ParserGraphs *pgg = nullptr;
 
-        // generate supergraphs
-        sg.gen_supergraphs();
+    {
+        Util::ScopedTimer sdTimer("P4SD");
+        LOG2("Generating graphs under " << options.graphsDir);
+        LOG2("Generating control graphs");
+        {
+            Util::ScopedTimer cfgTimer("CFG");
+            top->getMain()->apply(cgen);
+        }
 
-        // State dependency checker
-        P4StateDependency::ActParamToStateful sdChecker(&midEnd.refMap, &midEnd.typeMap,
-                &cgen.controlGraphsArray,
-                &sg.graphProps,
-                options.genSupergraphs);
-        program->apply(sdChecker);
+        if (options.genSupergraphs != P4StateDependency::GenSGMode::NONE) {
+            {
+                Util::ScopedTimer esgTimer("ESG");
+                sg = new P4StateDependency::SuperGraphs(&midEnd.refMap, &midEnd.typeMap,
+                        &cgen.controlGraphsArray,
+                        &cgen.graphVars,
+                        &cgen.graphLocalVars,
+                        &cgen.procOfs,
+                        &cgen.callMaps,
+                        &cgen.procCallerMaps,
+                        &cgen.retArgEdges,
+                        &cgen.actionMaps,
+                        &cgen.egressPortVars,
+                        &cgen.dropVars);
+                // generate supergraphs
+                sg->gen_supergraphs();
+            }
 
-        for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
-            auto *g = cgen.controlGraphsArray[i];
-            auto graphName = boost::get_property(*g, boost::graph_name);
-            for (const auto &ve : sdChecker.getFoundDepEdges(graphName)) {
-                for (const auto &dst : ve.second) {
-                    LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
+            {
+                // State dependency checker
+                Util::ScopedTimer actToSoTimer("Act->SO");
+                sdChecker = new P4StateDependency::ActParamToStateful(&midEnd.refMap, &midEnd.typeMap,
+                        &cgen.controlGraphsArray,
+                        &sg->graphProps,
+                        options.genSupergraphs);
+                program->apply(*sdChecker);
+            }
+            for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                auto *g = cgen.controlGraphsArray[i];
+                auto graphName = boost::get_property(*g, boost::graph_name);
+                for (const auto &ve : sdChecker->getFoundDepEdges(graphName)) {
+                    for (const auto &dst : ve.second) {
+                        LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
+                    }
                 }
             }
-        }
 
-        // Packet dependency checker
-        P4StateDependency::StatefulToKey pdChecker(&midEnd.refMap, &midEnd.typeMap,
-                &cgen.controlGraphsArray,
-                &sg.graphProps,
-                options.genSupergraphs,
-                sdChecker.getAllFoundDepEdges());
-        program->apply(pdChecker);
-
-        if (options.varEdgeVis == VarEdgeVisibility::ACTION_PARAM ||
-                options.varEdgeVis == VarEdgeVisibility::ALL) {
-            sdChecker.set_edge_func();
-        }
-        if (options.varEdgeVis == VarEdgeVisibility::STATEFUL_OBJECT ||
-                options.varEdgeVis == VarEdgeVisibility::ALL) {
-            pdChecker.set_edge_func();
+            {
+                // Packet dependency checker
+                Util::ScopedTimer soToKeyTimer("SO->KEY/HDR");
+                pdChecker = new P4StateDependency::StatefulToKey(&midEnd.refMap, &midEnd.typeMap,
+                        &cgen.controlGraphsArray,
+                        &sg->graphProps,
+                        options.genSupergraphs,
+                        sdChecker->getAllFoundDepEdges());
+                program->apply(*pdChecker);
+            }
         }
     }
 
-    LOG2("Generating parser graphs");
-    P4StateDependency::ParserGraphs pgg(&midEnd.refMap, options.graphsDir);
-    program->apply(pgg);
+    {
+        Util::ScopedTimer parserTimer("Parser graphs");
+        LOG2("Generating parser graphs");
+        pgg = new P4StateDependency::ParserGraphs(&midEnd.refMap, options.graphsDir);
+        program->apply(*pgg);
+    }
 
-    P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs,
-            options.fullGraph, options.jsonOut, options.file,
-            options.varVis, options.varEdgeVis);
+    {
+        Util::ScopedTimer drawTimer("Drawing graphs");
+        if (options.varEdgeVis == VarEdgeVisibility::ACTION_PARAM ||
+                options.varEdgeVis == VarEdgeVisibility::ALL) {
+            sdChecker->set_edge_func();
+        }
+        if (options.varEdgeVis == VarEdgeVisibility::STATEFUL_OBJECT ||
+                options.varEdgeVis == VarEdgeVisibility::ALL) {
+            pdChecker->set_edge_func();
+        }
+        P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs,
+                options.fullGraph, options.jsonOut, options.file,
+                options.varVis, options.varEdgeVis);
 
-    gvs.process(cgen.controlGraphsArray, pgg.parserGraphsArray);
+        gvs.process(cgen.controlGraphsArray, pgg->parserGraphsArray);
+    }
 
+    P4StateDependency::printPerformanceReport();
+
+    delete pgg;
+    delete pdChecker;
+    delete sdChecker;
+    delete sg;
     return ::P4::errorCount() > 0;
 }

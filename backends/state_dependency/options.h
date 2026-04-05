@@ -2,6 +2,7 @@
 #define BACKENDS_STATE_DEPENDENCY_OPTIONS_H_
 
 #include <filesystem>
+#include <optional>
 #include "backends/state_dependency/graphs.h"
 #include "frontends/common/options.h"
 
@@ -24,6 +25,8 @@ class P4StateDependencyOptions : public CompilerOptions {
  private:
     bool isGraphsSet = false;
 };
+
+void printPerformanceReport(const std::optional<std::filesystem::path> &basePath = std::nullopt);
 
 }  // namespace P4::P4StateDependency
 

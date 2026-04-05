@@ -68,13 +68,24 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
     tab->compute_values_ide();
     //tab->dump_result();
 
-    std::cout << "================" << std::endl << std::endl;
+    std::cout << "================" << std::endl;
     std::cout << "[RESULT] Action Parameters -> Stateful Variables in " << graphName << ":\n";
     auto vertices = boost::vertices(*g);
     // Dependency cases for each dst vertex
     hvec_map<Graphs::vertex_t, cstring> caseStrings;
+    std::array<size_t, 6> numEntities{};
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         auto &vinfo = (*g)[*vit];
+        // Measure number of nodes in the graph
+        if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) {
+            //numReachableESGNodes
+            if (vinfo.interesting) numEntities[2]++;
+            numEntities[1]++;   // numESGNodes
+        } else {
+            numEntities[0]++;   // numNodes
+        }
+
+        // Check dependencies
         if (hasFlag(vinfo.flags, VertexFlags::SO_IDX)) {
             // Check ACTION->IDX
             cstring caseString = cstring::empty;
@@ -112,6 +123,29 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
             collect_all_dep_edges(tab, *vit);
         }
     }
+    auto edges = boost::edges(*g);
+    for (auto &eit = edges.first; eit != edges.second; ++eit) {
+        auto &edge = (*g)[*eit];
+        if (edge.type == EdgeType::IFDS || edge.type == EdgeType::IFDS_FT) {
+            auto src = boost::source(*eit, *g);
+            auto dst = boost::target(*eit, *g);
+            auto srcInfo = (*g)[src];
+            auto dstInfo = (*g)[dst];
+            // numReachableESGEdge
+            if (srcInfo.interesting && dstInfo.interesting) numEntities[5]++;
+            numEntities[4]++;   // numESGEdges
+
+        } else if (edge.type != EdgeType::HAS_VAR) {
+            numEntities[3]++;   // numEdges
+        }
+    }
+
+    std::cout << "Total nodes: " << numEntities[0] << std::endl;
+    std::cout << "Total edges: " << numEntities[3] << std::endl;
+    std::cout << "Total ESG nodes: " << numEntities[1] << std::endl;
+    std::cout << "Total ESG edges: " << numEntities[4] << std::endl;
+    std::cout << "Reachable ESG nodes: " << numEntities[2] << std::endl;
+    std::cout << "Reachable ESG edges: " << numEntities[5] << std::endl;
 
     for (auto &de : foundDepEdges[graphName]) {
         auto &src = de.first;
