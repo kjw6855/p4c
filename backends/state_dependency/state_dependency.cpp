@@ -23,6 +23,7 @@
 #include "lib/nullstream.h"
 #include "lib/timer.h"
 
+#include "utils.h"
 #include "graphs.h"
 #include "controls.h"
 #include "parsers.h"
@@ -176,33 +177,56 @@ int main(int argc, char *const argv[]) {
                 sg->gen_supergraphs();
             }
 
+            hvec_map<cstring, std::vector<P4StateDependency::TabVertex>> stateVars;
             {
                 // State dependency checker
-                Util::ScopedTimer actToSoTimer("Act->SO");
+                Util::ScopedTimer actToSoTimer("ACT->SO");
                 sdChecker = new P4StateDependency::ActParamToStateful(&midEnd.refMap, &midEnd.typeMap,
                         &cgen.controlGraphsArray,
                         &sg->graphProps,
                         options.genSupergraphs);
                 program->apply(*sdChecker);
-            }
-            for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
-                auto *g = cgen.controlGraphsArray[i];
-                auto graphName = boost::get_property(*g, boost::graph_name);
-                for (const auto &ve : sdChecker->getFoundDepEdges(graphName)) {
-                    for (const auto &dst : ve.second) {
-                        LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
+                for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                    auto *g = cgen.controlGraphsArray[i];
+                    auto graphName = boost::get_property(*g, boost::graph_name);
+                    const auto &ptsEdgeMap = sdChecker->getFoundDepEdges(graphName);
+                    stateVars[graphName] = collect_state_vars_from_dep_edges(cgen.controlGraphsArray[i],
+                        sg->graphProps[i], &midEnd.refMap, &midEnd.typeMap,
+                        ptsEdgeMap, true);
+                    for (const auto &ve : ptsEdgeMap) {
+                        for (const auto &dst : ve.second) {
+                            LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
+                        }
                     }
                 }
             }
 
             {
                 // Packet dependency checker
-                Util::ScopedTimer soToKeyTimer("SO->KEY/HDR");
+                Util::ScopedTimer soToKeyTimer("ACT->SO->KEY/HDR");
                 pdChecker = new P4StateDependency::StatefulToKey(&midEnd.refMap, &midEnd.typeMap,
                         &cgen.controlGraphsArray,
                         &sg->graphProps,
                         options.genSupergraphs,
-                        sdChecker->getAllFoundDepEdges());
+                        &stateVars,
+                        true);
+                program->apply(*pdChecker);
+            }
+
+            stateVars.clear();
+            {
+                Util::ScopedTimer soToKeyTimer("SO->KEY/HDR");
+                for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                    auto *g = cgen.controlGraphsArray[i];
+                    auto graphName = boost::get_property(*g, boost::graph_name);
+                    stateVars[graphName] = collect_state_vars(cgen.controlGraphsArray[i],
+                        sg->graphProps[i], &midEnd.refMap, &midEnd.typeMap, true);
+                }
+                pdChecker = new P4StateDependency::StatefulToKey(&midEnd.refMap, &midEnd.typeMap,
+                        &cgen.controlGraphsArray,
+                        &sg->graphProps,
+                        options.genSupergraphs,
+                        &stateVars);
                 program->apply(*pdChecker);
             }
         }

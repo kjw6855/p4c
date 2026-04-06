@@ -18,21 +18,22 @@ class FindStatefulToKey : public IDEPass {
             std::vector<Graph *> *controlGraphsArray,
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs,
-            hvec_map<cstring, IDEPass::DepEdgeMap> *ptsEdges)
+            hvec_map<cstring, std::vector<TabVertex>> *stateVars,
+            bool hasActToSo=false)
         : IDEPass(refMap, typeMap, controlGraphsArray, graphProps, genSupergraphs),
-          ptsEdges(ptsEdges) {}
+          stateVars(stateVars), hasActToSo(hasActToSo) {}
     Visitor::profile_t init_apply(const IR::Node *) override;
 
  protected:
     void set_edge_func_in_graph(Tabulation *tab) override;
     void analyze_control_graph(Tabulation *tab) override;
-    std::vector<TabVertex> collect_state_vars(Tabulation *tab, bool showLog=false);
 
  private:
     std::vector<const IR::Node *> find_ret_vars(Tabulation *tab, Graphs::vertex_t ret_v);
 
  protected:
-    hvec_map<cstring, IDEPass::DepEdgeMap> *ptsEdges{};
+    hvec_map<cstring, std::vector<TabVertex>> *stateVars{};
+    bool hasActToSo;
 };
 
 class StatefulToKey : public PassManager {
@@ -41,10 +42,11 @@ class StatefulToKey : public PassManager {
             std::vector<Graph *> *controlGraphsArray,
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs,
-            hvec_map<cstring, IDEPass::DepEdgeMap> *ptsEdges) {
+            hvec_map<cstring, std::vector<TabVertex>> *stateVars,
+            bool hasActToSo=false) {
         stdPass = new FindStatefulToKey(refMap, typeMap,
                     controlGraphsArray, graphProps,
-                    genSupergraphs, ptsEdges);
+                    genSupergraphs, stateVars, hasActToSo);
         passes.push_back(stdPass);
     }
 

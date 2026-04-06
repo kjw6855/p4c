@@ -209,12 +209,12 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             },
             "Use to show variable edge label in graph.");
     registerOption(
-        "--print-performance-report", nullptr,
-        [](const char *) {
-            enablePerformanceLogging();
-            return true;
-        },
-        "Print timing report summary at the end of the program.");
+            "--print-performance-report", nullptr,
+            [](const char *) {
+                enablePerformanceLogging();
+                return true;
+            },
+            "Print timing report summary at the end of the program.");
 }
 
 }  // namespace P4::P4StateDependency

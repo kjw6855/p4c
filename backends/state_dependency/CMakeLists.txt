@@ -13,6 +13,7 @@ set (STATE_DEPENDENCY_SRCS
   ide_pass.cpp
   act_param_to_stateful.cpp
   stateful_to_key.cpp
+  utils.cpp
 )
 
 set (STATE_DEPENDENCY_HDRS
@@ -27,6 +28,7 @@ set (STATE_DEPENDENCY_HDRS
   ide_pass.h
   act_param_to_stateful.h
   stateful_to_key.h
+  utils.h
 )
 
 add_executable(p4c_state_dependency ${STATE_DEPENDENCY_SRCS} ${EXTENSION_P4_14_CONV_SOURCES})
