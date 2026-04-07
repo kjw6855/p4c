@@ -2,6 +2,45 @@
 
 namespace P4::P4StateDependency {
 
+std::vector<cstring> IDEPass::get_tables_from_action(Tabulation *tab, Graphs::vertex_t action_v) {
+    auto *g = tab->g;
+    auto actName = tab->sgProp->procOf[action_v];
+    auto actSrcit = tab->sgProp->srcOf[actName];
+    // Find all callers
+    std::vector<cstring> tables;
+    for (auto [ei, ei_end] = boost::in_edges(actSrcit, *g); ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::INTER_PROCEDURE)
+            continue;
+
+        auto u = boost::source(*ei, *g);
+        auto uinfo = (*g)[u];
+        if (hasFlag(uinfo.flags, VertexFlags::CALL)) {
+            auto callerName = tab->sgProp->procOf[u];
+            auto callerSrcit = tab->sgProp->srcOf[callerName];
+            auto callerSrcInfo = (*g)[callerSrcit];
+            if (hasFlag(callerSrcInfo.flags, VertexFlags::TABLE))
+                tables.push_back(callerName);
+        }
+    }
+    return tables;
+}
+
+std::optional<Graphs::vertex_t> IDEPass::get_table_key(Tabulation *tab, Graphs::vertex_t table_v) {
+    auto *g = tab->g;
+    for (auto [ei, ei_end] = boost::out_edges(table_v, *g); ei != ei_end; ++ei) {
+        auto edge = (*g)[*ei];
+        if (edge.type != EdgeType::CONTROL)
+            continue;
+
+        auto u = boost::target(*ei, *g);
+        auto uinfo = (*g)[u];
+        if (hasFlag(uinfo.flags, VertexFlags::KEY))
+            return u;
+    }
+    return {};
+}
+
 std::vector<const IR::Node *> IDEPass::get_var_members(Tabulation *tab, const IR::Node *var) {
     // TODO: support others
     auto *varDecl = var->to<IR::Declaration>();
@@ -59,7 +98,7 @@ void IDEPass::set_edge_func() {
     }
 }
 
-void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v) {
+void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v, bool isSrcDstMap) {
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
     auto vinfo = (*g)[v];
@@ -83,7 +122,12 @@ void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v) {
 
         auto varBitMap = tab->valueMap[TabVertex{v, var}];
         for (auto paramTv : tab->get_target_vars(varBitMap)) {
-            foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
+            // If isSrcDstMap is true, create map from src (paramTv) to dst (v, var).
+            if (isSrcDstMap) {
+                foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
+            } else {
+                foundDepEdges[graphName][{v, var}].push_back({paramTv.node, paramTv.var});
+            }
         }
         // Find if any variable is a member of var
         for (auto mem : get_var_members(tab, var)) {

@@ -13,6 +13,7 @@ set (STATE_DEPENDENCY_SRCS
   ide_pass.cpp
   act_param_to_stateful.cpp
   stateful_to_key.cpp
+  hdr_to_stateful.cpp
   utils.cpp
 )
 
@@ -28,6 +29,7 @@ set (STATE_DEPENDENCY_HDRS
   ide_pass.h
   act_param_to_stateful.h
   stateful_to_key.h
+  hdr_to_stateful.h
   utils.h
 )
 

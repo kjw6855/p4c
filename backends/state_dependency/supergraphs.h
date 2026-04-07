@@ -138,6 +138,7 @@ class SuperGraphProp {
     }
 
     Graphs::vertex_t rootVar;
+    const IR::Node *ingressPortVar;
     const IR::Node *egressPortVar;
     const IR::Node *dropVar;
     ProgramVarInfo progVarInfo;
@@ -164,6 +165,7 @@ class SuperGraphs : public Graphs {
                 hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps,
                 hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges,
                 hvec_map<cstring, Graphs::ActionMap> *actionMaps,
+                hvec_map<cstring, const IR::Node *> *ingressPortVars,
                 hvec_map<cstring, const IR::Node *> *egressPortVars,
                 hvec_map<cstring, const IR::Node *> *dropVars)
     : refMap(refMap),
@@ -176,6 +178,7 @@ class SuperGraphs : public Graphs {
       procCallerMaps(procCallerMaps),
       retArgEdges(retArgEdges),
       actionMaps(actionMaps),
+      ingressPortVars(ingressPortVars),
       egressPortVars(egressPortVars),
       dropVars(dropVars) {}
 
@@ -200,6 +203,7 @@ class SuperGraphs : public Graphs {
     hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps;
     hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges;
     hvec_map<cstring, Graphs::ActionMap> *actionMaps;
+    hvec_map<cstring, const IR::Node *> *ingressPortVars;
     hvec_map<cstring, const IR::Node *> *egressPortVars;
     hvec_map<cstring, const IR::Node *> *dropVars;
 

@@ -42,6 +42,9 @@ bool Tabulation::init_edge_func(const std::vector<TabVertex> &from) {
             else if (hasFlag(tvinfo.flags, VertexFlags::RETURN) &&
                     progVarInfo[srcTv.node][0] != srcVarIt)
                 edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
+            // <0, 0> -> <CFGroot, var>
+            else if (srcVarIt == sgProp->rootVar)
+                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
         }
     }
 

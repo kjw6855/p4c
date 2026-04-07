@@ -31,6 +31,7 @@
 #include "supergraphs.h"
 #include "act_param_to_stateful.h"
 #include "stateful_to_key.h"
+#include "hdr_to_stateful.h"
 
 namespace P4::P4StateDependency {
 
@@ -148,7 +149,9 @@ int main(int argc, char *const argv[]) {
     P4StateDependency::SuperGraphs *sg = nullptr;
     P4StateDependency::ActParamToStateful *sdChecker = nullptr;
     P4StateDependency::StatefulToKey *pdChecker = nullptr;
+    P4StateDependency::FindHdrToStateful *hdChecker = nullptr;
     P4StateDependency::ParserGraphs *pgg = nullptr;
+    hvec_map<cstring, std::vector<P4StateDependency::TabVertex>> stateVars;
 
     {
         Util::ScopedTimer sdTimer("P4SD");
@@ -171,13 +174,13 @@ int main(int argc, char *const argv[]) {
                         &cgen.procCallerMaps,
                         &cgen.retArgEdges,
                         &cgen.actionMaps,
+                        &cgen.ingressPortVars,
                         &cgen.egressPortVars,
                         &cgen.dropVars);
                 // generate supergraphs
                 sg->gen_supergraphs();
             }
 
-            hvec_map<cstring, std::vector<P4StateDependency::TabVertex>> stateVars;
             {
                 // State dependency checker
                 Util::ScopedTimer actToSoTimer("ACT->SO");
@@ -229,6 +232,15 @@ int main(int argc, char *const argv[]) {
                         &stateVars);
                 program->apply(*pdChecker);
             }
+
+            {
+                Util::ScopedTimer hdrToStatefulTimer("HDR->SO");
+                hdChecker = new P4StateDependency::FindHdrToStateful(&midEnd.refMap, &midEnd.typeMap,
+                        &cgen.controlGraphsArray,
+                        &sg->graphProps,
+                        options.genSupergraphs);
+                program->apply(*hdChecker);
+            }
         }
     }
 
@@ -249,6 +261,10 @@ int main(int argc, char *const argv[]) {
                 options.varEdgeVis == VarEdgeVisibility::ALL) {
             pdChecker->set_edge_func();
         }
+        if (options.varEdgeVis == VarEdgeVisibility::HDR_TO_STATEFUL ||
+                options.varEdgeVis == VarEdgeVisibility::ALL) {
+            hdChecker->set_edge_func();
+        }
         P4StateDependency::GraphVisitor gvs(options.graphsDir, options.graphs,
                 options.fullGraph, options.jsonOut, options.file,
                 options.varVis, options.varEdgeVis);
@@ -261,6 +277,7 @@ int main(int argc, char *const argv[]) {
     delete pgg;
     delete pdChecker;
     delete sdChecker;
+    delete hdChecker;
     delete sg;
     return ::P4::errorCount() > 0;
 }

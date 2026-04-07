@@ -29,6 +29,13 @@ void FindStatefulToKey::set_edge_func_in_graph(Tabulation *tab) {
     auto *g = tab->g;
     auto graphName = boost::get_property(*g, boost::graph_name);
 
+    // Check if stateVars exists and contains this graph
+    if (!stateVars || stateVars->find(graphName) == stateVars->end()) {
+        LOG3("Warning: No state variables found for graph '" << graphName << "'");
+        return;
+    }
+
+    LOG3("Using stateVars for graph '" << graphName << "' with " << (*stateVars)[graphName].size() << " variables");
     tab->init_edge_func((*stateVars)[graphName]);
 }
 
@@ -37,9 +44,27 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
     auto *sgProp = tab->sgProp;
     auto graphName = boost::get_property(*g, boost::graph_name);
 
+    LOG3("Analyzing control graph '" << graphName << "'");
+
     BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
 
+    // Debug: Log available stateVars keys
+    if (stateVars) {
+        LOG3("Available stateVars keys:");
+        for (const auto& kv : *stateVars) {
+            LOG3("  " << kv.first);
+        }
+    }
+
+    // Check if stateVars exists and contains this graph
+    if (!stateVars || stateVars->find(graphName) == stateVars->end()) {
+        LOG2("No state variables found for graph '" << graphName << "', skipping analysis");
+        return;
+    }
+
     auto curStateVars = (*stateVars)[graphName];
+    LOG3("Found " << curStateVars.size() << " state variables for graph '" << graphName << "'");
+
     if (curStateVars.empty()) {
         std::cout << "No state variables in " << graphName << std::endl;
         return;

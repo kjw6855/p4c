@@ -200,6 +200,7 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
                     {"NONE"_cs, VarEdgeVisibility::NONE},
                     {"ACTION_PARAM"_cs, VarEdgeVisibility::ACTION_PARAM},
                     {"STATEFUL_OBJECT"_cs, VarEdgeVisibility::STATEFUL_OBJECT},
+                    {"HDR_TO_STATEFUL"_cs, VarEdgeVisibility::HDR_TO_STATEFUL},
                     {"ALL"_cs, VarEdgeVisibility::ALL},
                 };
 

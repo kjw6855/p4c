@@ -560,6 +560,7 @@ enum class VarEdgeVisibility {
     NONE,
     ACTION_PARAM,
     STATEFUL_OBJECT,
+    HDR_TO_STATEFUL,
     ALL,
 };
 
@@ -624,8 +625,9 @@ class Graphs {
     hvec_map<cstring, std::vector<VarEdge>> retArgEdges;
     hvec_map<cstring, ActionMap> actionMaps;
 
-    hvec_map<cstring, const IR::Node *> egressPortVars;   // graph_name to egress port variable
-    hvec_map<cstring, const IR::Node *> dropVars;         // graph_name to drop variable
+    hvec_map<cstring, const IR::Node *> ingressPortVars;    // graph_name to ingress port variable
+    hvec_map<cstring, const IR::Node *> egressPortVars;     // graph_name to egress port variable
+    hvec_map<cstring, const IR::Node *> dropVars;           // graph_name to drop variable
 
     vertex_t add_vertex(const cstring &name, VertexFlags flags, const IR::Node *node=nullptr);
 

@@ -62,6 +62,9 @@ void SuperGraphs::create_var_vertices(const cstring &graphName) {
         curProp->actionMap = actionMapIt->second;
     }
 
+    auto ingressPortVarIt = ingressPortVars->find(graphName);
+    curProp->ingressPortVar = ingressPortVarIt != ingressPortVars->end() ? ingressPortVarIt->second : nullptr;
+
     auto egressPortVarIt = egressPortVars->find(graphName);
     curProp->egressPortVar = egressPortVarIt != egressPortVars->end() ? egressPortVarIt->second : nullptr;
 

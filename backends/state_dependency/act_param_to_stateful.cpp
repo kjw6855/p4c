@@ -5,45 +5,6 @@
 
 namespace P4::P4StateDependency {
 
-std::vector<cstring> get_tables_from_action(Tabulation *tab, Graphs::vertex_t action_v) {
-    auto *g = tab->g;
-    auto actName = tab->sgProp->procOf[action_v];
-    auto actSrcit = tab->sgProp->srcOf[actName];
-    // Find all callers
-    std::vector<cstring> tables;
-    for (auto [ei, ei_end] = boost::in_edges(actSrcit, *g); ei != ei_end; ++ei) {
-        auto edge = (*g)[*ei];
-        if (edge.type != EdgeType::INTER_PROCEDURE)
-            continue;
-
-        auto u = boost::source(*ei, *g);
-        auto uinfo = (*g)[u];
-        if (hasFlag(uinfo.flags, VertexFlags::CALL)) {
-            auto callerName = tab->sgProp->procOf[u];
-            auto callerSrcit = tab->sgProp->srcOf[callerName];
-            auto callerSrcInfo = (*g)[callerSrcit];
-            if (hasFlag(callerSrcInfo.flags, VertexFlags::TABLE))
-                tables.push_back(callerName);
-        }
-    }
-    return tables;
-}
-
-std::optional<Graphs::vertex_t> get_table_key(Tabulation *tab, Graphs::vertex_t table_v) {
-    auto *g = tab->g;
-    for (auto [ei, ei_end] = boost::out_edges(table_v, *g); ei != ei_end; ++ei) {
-        auto edge = (*g)[*ei];
-        if (edge.type != EdgeType::CONTROL)
-            continue;
-
-        auto u = boost::target(*ei, *g);
-        auto uinfo = (*g)[u];
-        if (hasFlag(uinfo.flags, VertexFlags::KEY))
-            return u;
-    }
-    return {};
-}
-
 void FindActParamToStateful::set_edge_func_in_graph(Tabulation *tab) {
     tab->init_edge_func(tab->sgProp->actionParams);
 }
