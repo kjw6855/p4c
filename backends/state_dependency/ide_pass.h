@@ -40,7 +40,6 @@ class IDEPass : public Graphs,
     std::vector<cstring> get_tables_from_action(Tabulation *tab, Graphs::vertex_t action_v);
     std::optional<Graphs::vertex_t> get_table_key(Tabulation *tab, Graphs::vertex_t table_v);
     cstring dump_found_dependency(Tabulation *tab, const Graphs::VarEdge &ve);
-    std::vector<Graphs::vertex_t> find_next_cfg_node(Graph *g, Graphs::vertex_t v);
 
     inline Graphs::VarEdge convert_to_var_edge(const TabEdge &te) {
         return {{te.first.node, te.first.var},

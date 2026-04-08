@@ -81,7 +81,8 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
 
     std::cout << "================" << std::endl;
     std::cout << "[RESULT]";
-    if (hasActToSo) std::cout << " Action Parameters ->";
+    if (analysisType == "A2S2V"_cs) std::cout << " Action Parameters ->";
+    else if (analysisType == "H2S2V"_cs) std::cout << " Headers ->";
     std::cout << " Stateful Variables -> Headers/Keys in " << graphName << ":\n";
     auto mainProcName = sgProp->procOf[sgProp->rootVar];
     auto vertices = boost::vertices(*g);

@@ -60,6 +60,18 @@ ControlGraphs::ControlGraphs(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
     visitDagOnce = false;
 }
 
+bool isHeaderStruct(const IR::Type* type, const TypeMap* typeMap) {
+    if (auto ts = type->to<IR::Type_Struct>()) {
+        for (auto f : ts->fields) {
+            auto ftype = typeMap->getType(f, true);
+            if (ftype->is<IR::Type_Header>()) return true;
+            // Recurse for nested structs
+            if (isHeaderStruct(ftype, typeMap)) return true;
+        }
+    }
+    return false;
+}
+
 bool ControlGraphs::isWrite(bool root_value) {
     const Context *ctxt = getContext();
     if (ctxt->child_index == 2) return true;
@@ -115,13 +127,19 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
 
     // TODO: find the variable name for header
     for (auto *p : cont->getApplyParameters()->parameters) {
+        const IR::Node *newEntryVar = nullptr;
         if (p->direction == IR::Direction::In) {
-            add_variable_in_vertex(p, start_v, false);
+            newEntryVar = add_variable_in_vertex(p, start_v, false);
         } else if (p->direction == IR::Direction::Out) {
             add_variable_in_vertex(p, exit_v, true);
         } else if (p->direction == IR::Direction::InOut) {
-            add_variable_in_vertex(p, start_v, false);
+            newEntryVar = add_variable_in_vertex(p, start_v, false);
             add_variable_in_vertex(p, exit_v, true);
+        }
+
+        auto pType = typeMap->getType(p, true);
+        if (newEntryVar != nullptr && isHeaderStruct(pType, typeMap)) {
+            headerVarNames[graphName] = get_var_name(newEntryVar);
         }
     }
 

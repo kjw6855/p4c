@@ -110,6 +110,14 @@ struct ProgramVarInfo {
         return globalVars.varNum + lvit->second.varNum;
     }
 
+    const IR::Node * get_var(std::size_t idx, std::optional<cstring> procName=std::nullopt) {
+        if (!procName.has_value()) return globalVars.variableList[idx];
+        auto lvit = localVars.find(procName.value());
+        if (lvit == localVars.end() || idx < globalVars.varNum)
+            return globalVars.variableList[idx];
+        return lvit->second.variableList[idx - globalVars.varNum];
+    }
+
     void push_var_vertex_id(Graphs::vertex_t nid, Graphs::vertex_t vid) {
         varVertices[nid].push_back(vid);
     }
@@ -138,6 +146,7 @@ class SuperGraphProp {
     }
 
     Graphs::vertex_t rootVar;
+    cstring headerVarName;
     const IR::Node *ingressPortVar;
     const IR::Node *egressPortVar;
     const IR::Node *dropVar;
@@ -165,6 +174,7 @@ class SuperGraphs : public Graphs {
                 hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps,
                 hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges,
                 hvec_map<cstring, Graphs::ActionMap> *actionMaps,
+                hvec_map<cstring, cstring> *headerVarNames,
                 hvec_map<cstring, const IR::Node *> *ingressPortVars,
                 hvec_map<cstring, const IR::Node *> *egressPortVars,
                 hvec_map<cstring, const IR::Node *> *dropVars)
@@ -178,6 +188,7 @@ class SuperGraphs : public Graphs {
       procCallerMaps(procCallerMaps),
       retArgEdges(retArgEdges),
       actionMaps(actionMaps),
+      headerVarNames(headerVarNames),
       ingressPortVars(ingressPortVars),
       egressPortVars(egressPortVars),
       dropVars(dropVars) {}
@@ -203,6 +214,7 @@ class SuperGraphs : public Graphs {
     hvec_map<cstring, Graphs::ProcCallers> *procCallerMaps;
     hvec_map<cstring, std::vector<Graphs::VarEdge>> *retArgEdges;
     hvec_map<cstring, Graphs::ActionMap> *actionMaps;
+    hvec_map<cstring, cstring> *headerVarNames;
     hvec_map<cstring, const IR::Node *> *ingressPortVars;
     hvec_map<cstring, const IR::Node *> *egressPortVars;
     hvec_map<cstring, const IR::Node *> *dropVars;

@@ -19,9 +19,9 @@ class FindStatefulToKey : public IDEPass {
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs,
             hvec_map<cstring, std::vector<TabVertex>> *stateVars,
-            bool hasActToSo=false)
+            cstring analysisType)
         : IDEPass(refMap, typeMap, controlGraphsArray, graphProps, genSupergraphs),
-          stateVars(stateVars), hasActToSo(hasActToSo) {}
+          stateVars(stateVars), analysisType(analysisType) {}
     Visitor::profile_t init_apply(const IR::Node *) override;
 
  protected:
@@ -33,7 +33,7 @@ class FindStatefulToKey : public IDEPass {
 
  protected:
     hvec_map<cstring, std::vector<TabVertex>> *stateVars{};
-    bool hasActToSo;
+    cstring analysisType;
 };
 
 class StatefulToKey : public PassManager {
@@ -43,10 +43,10 @@ class StatefulToKey : public PassManager {
             std::vector<SuperGraphProp *> *graphProps,
             GenSGMode genSupergraphs,
             hvec_map<cstring, std::vector<TabVertex>> *stateVars,
-            bool hasActToSo=false) {
+            cstring analysisType) {
         stdPass = new FindStatefulToKey(refMap, typeMap,
                     controlGraphsArray, graphProps,
-                    genSupergraphs, stateVars, hasActToSo);
+                    genSupergraphs, stateVars, analysisType);
         passes.push_back(stdPass);
     }
 

@@ -18,8 +18,8 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
         auto tabTv = tab->get_tab_vertex(varVit);
         auto varInfo = (*g)[varVit];
         // Skip non-header variables
-        // TODO: consider different name for header variables instead of "hdr"
-        if (varInfo.name.startsWith("hdr") || (sgProp->ingressPortVar && sgProp->ingressPortVar->equiv(*tabTv.var))) {
+        if (varInfo.name.startsWith(sgProp->headerVarName) ||
+                (sgProp->ingressPortVar && sgProp->ingressPortVar->equiv(*tabTv.var))) {
             targetVars.push_back(tabTv);
             // on-the-fly create IFDS_FT edge
             // These edges will be removed
@@ -43,6 +43,7 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
         auto keyInfo = (*g)[keyVit];
         for (auto kv : keyInfo.useVars) {
             auto varIdx = sgProp->progVarInfo.get_var_index(kv, tableName); // Check if kv is a valid variable of the table
+            if (sgProp->progVarInfo.is_local(varIdx)) continue; // Skip local variables since they cannot be propagated to callee
             tableKeyVars[tableName].push_back(varIdx);
         }
     }
@@ -90,6 +91,7 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
             for (auto defVar : vinfo.defVars) {
                 auto defVarId = sgProp->progVarInfo.get_var_index(defVar, procName);
                 auto defVarVit = sgProp->progVarInfo[v][defVarId];
+                if (sgProp->progVarInfo.is_local(defVarId)) continue; // Skip local variables since they cannot be propagated to callee
 
                 // Found the action statement
                 // Find the match key of the caller table
@@ -97,7 +99,10 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
                 for (auto tableName : tableNames) {
                     // Create IFDS edge from <u, kv> to <v, defVar>
                     for (auto keyVarIdx : tableKeyVars[tableName]) {
+                        if (keyVarIdx == defVarId) continue;
                         auto keyVit = sgProp->progVarInfo[u][keyVarIdx];
+                        BUG_CHECK(keyVit != 0, "Key variable %1%(%2%) is out of bounds for table %3%",
+                                    sgProp->progVarInfo.get_var(keyVarIdx, tableName), keyVarIdx, tableName);
                         // Create edge from match key to action defVar
                         add_edge(keyVit, defVarVit, cstring::empty, EdgeType::IFDS);
                         tempEdges.push_back({keyVit, defVarVit});

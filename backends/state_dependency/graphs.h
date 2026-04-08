@@ -625,6 +625,7 @@ class Graphs {
     hvec_map<cstring, std::vector<VarEdge>> retArgEdges;
     hvec_map<cstring, ActionMap> actionMaps;
 
+    hvec_map<cstring, cstring> headerVarNames;               // graph_name to header var name
     hvec_map<cstring, const IR::Node *> ingressPortVars;    // graph_name to ingress port variable
     hvec_map<cstring, const IR::Node *> egressPortVars;     // graph_name to egress port variable
     hvec_map<cstring, const IR::Node *> dropVars;           // graph_name to drop variable

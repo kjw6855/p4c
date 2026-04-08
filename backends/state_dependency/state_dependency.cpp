@@ -149,7 +149,7 @@ int main(int argc, char *const argv[]) {
     P4StateDependency::SuperGraphs *sg = nullptr;
     P4StateDependency::ActParamToStateful *sdChecker = nullptr;
     P4StateDependency::StatefulToKey *pdChecker = nullptr;
-    P4StateDependency::FindHdrToStateful *hdChecker = nullptr;
+    P4StateDependency::HdrToStateful *hdChecker = nullptr;
     P4StateDependency::ParserGraphs *pgg = nullptr;
     hvec_map<cstring, std::vector<P4StateDependency::TabVertex>> stateVars;
 
@@ -174,6 +174,7 @@ int main(int argc, char *const argv[]) {
                         &cgen.procCallerMaps,
                         &cgen.retArgEdges,
                         &cgen.actionMaps,
+                        &cgen.headerVarNames,
                         &cgen.ingressPortVars,
                         &cgen.egressPortVars,
                         &cgen.dropVars);
@@ -181,6 +182,7 @@ int main(int argc, char *const argv[]) {
                 sg->gen_supergraphs();
             }
 
+            /* I. A2S2V */
             {
                 // State dependency checker
                 Util::ScopedTimer actToSoTimer("ACT->SO");
@@ -193,7 +195,7 @@ int main(int argc, char *const argv[]) {
                     auto *g = cgen.controlGraphsArray[i];
                     auto graphName = boost::get_property(*g, boost::graph_name);
                     const auto &ptsEdgeMap = sdChecker->getFoundDepEdges(graphName);
-                    stateVars[graphName] = collect_state_vars_from_dep_edges(cgen.controlGraphsArray[i],
+                    stateVars[graphName] = collect_state_vars_from_dep_edges_dst(cgen.controlGraphsArray[i],
                         sg->graphProps[i], &midEnd.refMap, &midEnd.typeMap,
                         ptsEdgeMap, true);
                     for (const auto &ve : ptsEdgeMap) {
@@ -206,17 +208,56 @@ int main(int argc, char *const argv[]) {
 
             {
                 // Packet dependency checker
-                Util::ScopedTimer soToKeyTimer("ACT->SO->KEY/HDR");
+                Util::ScopedTimer actSoToKeyTimer("ACT->SO->KEY/HDR");
                 pdChecker = new P4StateDependency::StatefulToKey(&midEnd.refMap, &midEnd.typeMap,
                         &cgen.controlGraphsArray,
                         &sg->graphProps,
                         options.genSupergraphs,
                         &stateVars,
-                        true);
+                        "A2S2V"_cs);
                 program->apply(*pdChecker);
             }
 
             stateVars.clear();
+            /* II. H2S2V */
+            {
+                Util::ScopedTimer hdrToStatefulTimer("HDR->SO");
+                hdChecker = new P4StateDependency::HdrToStateful(&midEnd.refMap, &midEnd.typeMap,
+                        &cgen.controlGraphsArray,
+                        &sg->graphProps,
+                        options.genSupergraphs);
+                program->apply(*hdChecker);
+
+                for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                    auto *g = cgen.controlGraphsArray[i];
+                    auto graphName = boost::get_property(*g, boost::graph_name);
+                    // htsEdgeMap: stateful objects -> header variables
+                    const auto &htsEdgeMap = hdChecker->getFoundDepEdges(graphName);
+                    stateVars[graphName] = collect_state_vars_from_dep_edges_src(cgen.controlGraphsArray[i],
+                        sg->graphProps[i], &midEnd.refMap, &midEnd.typeMap,
+                        htsEdgeMap, true);
+                    for (const auto &ve : htsEdgeMap) {
+                        for (const auto &dst : ve.second) {
+                            LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
+                        }
+                    }
+                }
+            }
+
+            {
+                // Packet dependency checker
+                Util::ScopedTimer hdrSoToKeyTimer("HDR->SO->KEY/HDR");
+                pdChecker = new P4StateDependency::StatefulToKey(&midEnd.refMap, &midEnd.typeMap,
+                        &cgen.controlGraphsArray,
+                        &sg->graphProps,
+                        options.genSupergraphs,
+                        &stateVars,
+                        "H2S2V"_cs);
+                program->apply(*pdChecker);
+            }
+
+            stateVars.clear();
+            /* III. SO->KEY/HDR */
             {
                 Util::ScopedTimer soToKeyTimer("SO->KEY/HDR");
                 for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
@@ -229,21 +270,18 @@ int main(int argc, char *const argv[]) {
                         &cgen.controlGraphsArray,
                         &sg->graphProps,
                         options.genSupergraphs,
-                        &stateVars);
+                        &stateVars,
+                        "S2V"_cs);
                 program->apply(*pdChecker);
-            }
-
-            {
-                Util::ScopedTimer hdrToStatefulTimer("HDR->SO");
-                hdChecker = new P4StateDependency::FindHdrToStateful(&midEnd.refMap, &midEnd.typeMap,
-                        &cgen.controlGraphsArray,
-                        &sg->graphProps,
-                        options.genSupergraphs);
-                program->apply(*hdChecker);
             }
         }
     }
 
+    /*
+     * TODO: Show the full dependency:
+     * e.g., Data Plane Dependency: Set of header types -> stateful object -> header/key
+     * e.g., Control Plane Dependency: Action parameter -> stateful object -> header/key
+     */
     {
         Util::ScopedTimer parserTimer("Parser graphs");
         LOG2("Generating parser graphs");
