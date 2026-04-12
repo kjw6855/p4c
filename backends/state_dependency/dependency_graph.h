@@ -21,11 +21,12 @@ namespace P4::P4StateDependency {
 /// provides a clean view of what depends on what.
 class DependencyGraphs {
  public:
+    using EsgId = std::pair<Graphs::vertex_t, const IR::Node *>;
+
     /// Vertex properties for the dependency graph
     struct DependencyVertex {
         cstring name;                    // Variable or node name
-        std::optional<Graphs::vertex_t> graphId = std::nullopt;        // ID of the original graph vertex this corresponds to
-        const IR::Node *node = nullptr;            // Associated IR node
+        EsgId esgId;                    // Original graph vertex and IR node this corresponds to (for traceability)
         cstring color;                   // Color for visualization
         cstring shape;                   // Shape for visualization
     };
@@ -65,8 +66,7 @@ class DependencyGraphs {
     /// @param name Variable name
     /// @param node Associated IR node (optional)
     /// @return vertex descriptor
-    vertex_t add_vertex(size_t index, std::optional<Graphs::vertex_t> nodeId,
-        const cstring &name, const IR::Node *nodePtr = nullptr);
+    vertex_t add_vertex(size_t index, EsgId esgId, const cstring &name);
 
     /// @brief Add a dependency edge from source to target
     /// @param from Source variable vertex
@@ -136,13 +136,11 @@ class DependencyGraphs {
 
 
  private:
+    using EsgToDepMap = std::unordered_map<EsgId, vertex_t>;
     std::vector<std::unique_ptr<DepGraph>> depGraphs;
 
-    /// Per-graph map from IR::Node pointer to vertex descriptor for fast lookup
-    std::vector<std::unordered_map<const IR::Node *, vertex_t>> nodeToVertexMaps;
-
-    /// Per-graph map from CFG vertex ID to dependency graph vertex descriptor
-    std::vector<std::unordered_map<Graphs::vertex_t, vertex_t>> idToVertexMaps;
+    // Per-graph map from (original graph vertex, IR node) to dependency graph vertex
+    std::vector<EsgToDepMap> esgToDepMaps;
 
  public:
     std::vector<std::vector<vertex_t>> leaves;  // Per-graph list of leaf vertices (out-degree 0)

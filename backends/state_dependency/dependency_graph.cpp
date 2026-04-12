@@ -9,31 +9,24 @@ namespace P4::P4StateDependency {
 using vertex_t = DependencyGraphs::vertex_t;
 using edge_t = DependencyGraphs::edge_t;
 
+// XXX: this value can conflict with __START__ node id
+vertex_t globalVertexId = 0;
+
 DependencyGraphs::DependencyGraphs(size_t numGraphs) {
     for (size_t i = 0; i < numGraphs; ++i) {
         depGraphs.emplace_back(std::make_unique<DepGraph>());
     }
-    nodeToVertexMaps.resize(numGraphs);
-    idToVertexMaps.resize(numGraphs);
+    esgToDepMaps.resize(numGraphs);
     leaves.resize(numGraphs);
 }
 
-vertex_t DependencyGraphs::add_vertex(size_t index, std::optional<Graphs::vertex_t> nodeId,
-                                      const cstring &name, const IR::Node *nodePtr) {
+vertex_t DependencyGraphs::add_vertex(size_t index, EsgId esgId, const cstring &name) {
     // Check if vertex with this name already exists
-    auto &idToVertexMap = idToVertexMaps[index];
-    auto &nodeToVertexMap = nodeToVertexMaps[index];
+    auto &esgToDepMap = esgToDepMaps[index];
 
-    if (nodeId.has_value()) {
-        if (idToVertexMap.find(nodeId.value()) != idToVertexMap.end() &&
-            nodeToVertexMap.find(nodePtr) != nodeToVertexMap.end()) {
-            return idToVertexMap[nodeId.value()];
-        }
-    } else {
-        auto it = nodeToVertexMap.find(nodePtr);
-        if (it != nodeToVertexMap.end()) {
-            return it->second;
-        }
+    auto it = esgToDepMap.find(esgId);
+    if (it != esgToDepMap.end()) {
+        return it->second;
     }
 
     // Create new vertex
@@ -42,19 +35,12 @@ vertex_t DependencyGraphs::add_vertex(size_t index, std::optional<Graphs::vertex
     // Set vertex properties
     DependencyVertex &vData = (*depGraphs[index])[v];
     vData.name = name;
-    vData.node = nodePtr;
+    vData.esgId = esgId;
     vData.color = "lightblue"_cs;
     vData.shape = "box"_cs;
 
     // Add to lookup maps
-    if (nodeId.has_value()) {
-        vData.graphId = nodeId.value();
-        idToVertexMap[nodeId.value()] = v;
-    }
-
-    if (nodePtr) {
-        nodeToVertexMap[nodePtr] = v;
-    }
+    esgToDepMap[esgId] = v;
 
     return v;
 }
@@ -94,12 +80,10 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
         // Get or create source vertex
         ss.str("");  // Clear the stringstream for reuse
         ss.clear();
-        ss << (*graph)[srcNode].name << "(" << srcNode << ")";
-        ss << ":" << srcVar;
+        ss << (*graph)[srcNode].name << "(" << srcNode << "):";
+        ss << srcVar;
 
-        vertex_t srcVertex = add_vertex(index, srcNode, cstring(ss), srcVar);
-        BUG_CHECK(leaves[index].empty() || std::find(leaves[index].begin(), leaves[index].end(), srcVertex) == leaves[index].end(),
-                  "Source vertex %1% cannot be a leaf", srcInfo.name);
+        vertex_t srcVertex = add_vertex(index, {srcNode, srcVar}, cstring(ss));
 
         // Process all target vertices
         for (const auto &dstVarVertex : dstVarVertices) {
@@ -108,11 +92,9 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
             // Get or create destination vertex
             ss.str("");  // Clear the stringstream for reuse
             ss.clear();
-            ss << (*graph)[dstNode].name << "(" << dstNode << ")";
-            ss << ":" << dstVar;
-
-            vertex_t dstVertex = add_vertex(index, dstNode, cstring(ss), dstVar);
-
+            ss << (*graph)[dstNode].name << "(" << dstNode << "):";
+            ss << dstVar;
+            vertex_t dstVertex = add_vertex(index, {dstNode, dstVar}, cstring(ss));
             if (hasLeaves) {
                 leaves[index].push_back(dstVertex);
             }
@@ -131,8 +113,8 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                 ss.str("");
                 ss.clear();
                 ss << "[SO] " << dstInfo.statefulObjectNode;
-                vertex_t soVertex = add_vertex(index, std::nullopt,
-                    cstring(ss), dstInfo.statefulObjectNode);
+                vertex_t soVertex = add_vertex(index, {globalVertexId, dstInfo.statefulObjectNode},
+                        cstring(ss));
                 if (hasSOFlag(dstInfo.soFlags, SOFlags::READ)) {
                     add_dependency_edge(index, soVertex, dstVertex, "read_from"_cs);
                 }
@@ -249,16 +231,13 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
 
     depGraphs[index] = std::move(pruned);
 
-    // Remap maps except for leaves
-    auto &idToVertexMap = idToVertexMaps[index];
-    auto &nodeToVertexMap = nodeToVertexMaps[index];
-    idToVertexMap.clear();
-    nodeToVertexMap.clear();
+    // Remap esgToDepMap
+    auto &esgToDepMap = esgToDepMaps[index];
+
+    esgToDepMap.clear();
     for (auto [vit, vend] = boost::vertices(*depGraphs[index]); vit != vend; ++vit) {
         const auto &vData = (*depGraphs[index])[*vit];
-        if (vData.graphId.has_value()) idToVertexMap[vData.graphId.value()] = *vit;
-        if (vData.node != nullptr) nodeToVertexMap[vData.node] = *vit;
+        esgToDepMap[vData.esgId] = *vit;
     }
 }
-
 }  // namespace P4::P4StateDependency
