@@ -70,6 +70,8 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
         return;
     }
 
+    auto prevDepEdgeMap = prevDepEdgeMaps ? (*prevDepEdgeMaps)[graphName] : IDEPass::DepEdgeMap{};
+
     tab->init_edge_func(curStateVars);
     tab->init_ide();
     if (genSupergraphs == GenSGMode::ON_DEMAND)
@@ -133,7 +135,24 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
     for (auto &de : foundDepEdges[graphName]) {
         auto &src = de.first;
         std::stringstream sstream;
-        sstream << "[SO->] " << tab->dump_tab_vertex(TabVertex{src.first, src.second}) << "\n";
+        sstream << "[SO->] " << tab->dump_tab_vertex(TabVertex{src.first, src.second});
+
+        auto prevDepEdgeMapIt = prevDepEdgeMap.find(src);
+        if (prevDepEdgeMapIt != prevDepEdgeMap.end()) {
+            bool init = true;
+            for (auto &prevDst : prevDepEdgeMapIt->second) {
+                if (init) {
+                    init = false;
+                    sstream << " ... ";
+                } else {
+                    sstream << ", ";
+                }
+                // XXX: simple heuristic not to print CFG node
+                if (prevDst.first == 0) sstream << prevDst.second;
+                else sstream << tab->dump_tab_vertex(TabVertex{prevDst.first, prevDst.second});
+            }
+        }
+        sstream << "\n";
 
         for (auto &dst : de.second) {
             auto dstInfo = (*g)[dst.first];

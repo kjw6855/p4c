@@ -19,7 +19,8 @@ Graphs::vertex_t get_vertex_id(Graphs::Graph *g, SuperGraphProp *sgProp, const T
 bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
     P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
     Graphs::vertex_t node, const IR::Node *trackedVar,
-    hvec_set<TabVertex, TabVertexHash> &stateVarSet, bool showLog) {
+    hvec_set<TabVertex, TabVertexHash> &stateVarSet,
+    IDEPass::DepEdgeMap &stateVarMap, bool showLog) {
     auto nodeInfo = (*g)[node];
     std::optional<cstring> trackedVarName;
     if (trackedVar != nullptr) {
@@ -37,6 +38,9 @@ bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
                 auto retTvVar = TabVertex{callerRet, retVar};
                 auto retTvVarInfo = (*g)[get_vertex_id(g, sgProp, retTvVar)];
                 stateVarSet.insert(retTvVar);
+                if (trackedVar != nullptr) {
+                    stateVarMap[{node, trackedVar}].push_back({callerRet, retVar});
+                }
 
                 if (showLog) {
                     if (trackedVarName.has_value()) {
@@ -57,6 +61,9 @@ bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
                     auto dTvVarInfo = (*g)[get_vertex_id(g, sgProp, dTvVar)];
 
                     stateVarSet.insert(dTvVar);
+                    if (trackedVar != nullptr) {
+                        stateVarMap[{node, trackedVar}].push_back({dit, dv});
+                    }
                     if (showLog) {
                         if (trackedVarName.has_value()) {
                             LOG2("- SO [IDX] " << nodeInfo.name << ":" << trackedVarName.value()
@@ -96,6 +103,9 @@ bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
                         auto dTvVarInfo = (*g)[get_vertex_id(g, sgProp, dTvVar)];
 
                         stateVarSet.insert(dTvVar);
+                        if (trackedVar != nullptr) {
+                            stateVarMap[{node, trackedVar}].push_back({dit, dv});
+                        }
                         if (showLog) {
                             if (trackedVarName.has_value()) {
                                 LOG2("- SO [DATA:SRC] " << nodeInfo.name << ":" << trackedVarName.value()
@@ -156,13 +166,14 @@ std::vector<const IR::Node *> find_ret_vars(SuperGraphProp *sgProp, Graphs::vert
 
 std::vector<TabVertex> collect_state_vars_from_dep_edges_dst(Graphs::Graph *g, SuperGraphProp *sgProp,
     P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-    const IDEPass::DepEdgeMap &depEdgeMap, bool showLog) {
+    const IDEPass::DepEdgeMap &depEdgeMap,
+    IDEPass::DepEdgeMap &stateVarMap, bool showLog) {
     // Store second VarVertex <> -> <>
     hvec_set<TabVertex, TabVertexHash> stateVarSet;
     for (auto ve : depEdgeMap) {
         for (auto dst : ve.second) {
             collect_state_vars_common(g, sgProp, refMap, typeMap,
-                    dst.first, dst.second, stateVarSet, showLog);
+                    dst.first, dst.second, stateVarSet, stateVarMap, showLog);
         }
     }
 
@@ -173,13 +184,14 @@ std::vector<TabVertex> collect_state_vars_from_dep_edges_dst(Graphs::Graph *g, S
 
 std::vector<TabVertex> collect_state_vars_from_dep_edges_src(Graphs::Graph *g, SuperGraphProp *sgProp,
     P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-    const IDEPass::DepEdgeMap &depEdgeMap, bool showLog) {
+    const IDEPass::DepEdgeMap &depEdgeMap,
+    IDEPass::DepEdgeMap &stateVarMap, bool showLog) {
     // Store second VarVertex <> -> <>
     hvec_set<TabVertex, TabVertexHash> stateVarSet;
     for (auto ve : depEdgeMap) {
         auto src = ve.first;
         collect_state_vars_common(g, sgProp, refMap, typeMap,
-                src.first, src.second, stateVarSet, showLog);
+                src.first, src.second, stateVarSet, stateVarMap, showLog);
     }
 
     std::vector<TabVertex> stateVarList(std::begin(stateVarSet),
@@ -187,14 +199,27 @@ std::vector<TabVertex> collect_state_vars_from_dep_edges_src(Graphs::Graph *g, S
     return stateVarList;
 }
 
+IDEPass::DepEdgeMap convert_dep_edges(const IDEPass::DepEdgeMap &curDepEdges) {
+    IDEPass::DepEdgeMap depEdgeMap;
+    for (auto &de : curDepEdges) {
+        auto src = de.first;
+        for (auto &dst : de.second) {
+            depEdgeMap[dst].push_back(src);
+        }
+    }
+    return depEdgeMap;
+}
+
+
 std::vector<TabVertex> collect_state_vars(Graphs::Graph *g, SuperGraphProp *sgProp,
     P4::ReferenceMap *refMap, P4::TypeMap *typeMap, bool showLog) {
     auto graphName = boost::get_property(*g, boost::graph_name);
     hvec_set<TabVertex, TabVertexHash> stateVarSet;
+    IDEPass::DepEdgeMap stateVarMap;
     auto vertices = boost::vertices(*g);
     for (auto &vit = vertices.first; vit != vertices.second; ++vit) {
         collect_state_vars_common(g, sgProp, refMap, typeMap,
-                *vit, nullptr, stateVarSet, showLog);
+                *vit, nullptr, stateVarSet, stateVarMap, showLog);
     }
 
     std::vector<TabVertex> stateVarList(std::begin(stateVarSet),

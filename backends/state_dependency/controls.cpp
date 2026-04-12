@@ -138,7 +138,10 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
         }
 
         auto pType = typeMap->getType(p, true);
-        if (newEntryVar != nullptr && isHeaderStruct(pType, typeMap)) {
+        // Heuristics: add first encountered header struct variable to skip metadata
+        if (newEntryVar != nullptr && isHeaderStruct(pType, typeMap) &&
+                headerVarNames.find(graphName) == headerVarNames.end()) {
+            LOG2("Header struct parameter: " << p);
             headerVarNames[graphName] = get_var_name(newEntryVar);
         }
     }
@@ -285,27 +288,31 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         if (em->originalExternType->getName().name == "register") {
             if (em->method->name.name == "read" && params.size() >= 2) {
                 // void read(out T result, in I index);
-                visit_stateful(vName, statement, {params[1]}, SOFlags::READ, {params[0]});
+                visit_stateful(vName, statement, {params[1]}, SOFlags::READ, {params[0]},
+                    em->object->getNode());
                 return false;
 
             } else if (em->method->name.name == "write" && params.size() >= 2) {
                 // void write(in I index, in T value);
-                visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE, {params[1]});
+                visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE, {params[1]},
+                    em->object->getNode());
                 return false;
             }
         } else if (em->originalExternType->getName().name == "Counter") {
             if (em->method->name.name == "count" && params.size() == 1) {
                 // No data field
-                visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE);
+                visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE, {},
+                    em->object->getNode());
                 return false;
             }
         } else if (em->originalExternType->getName().name == "Meter") {
             if (em->method->name.name == "execute") {
                 if (params.size() == 1) {
-                    visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE);
+                    visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE, {},
+                            em->object->getNode());
                 } else if (params.size() == 2) {
                     visit_stateful(vName, statement, {params[0]}, SOFlags::UPDATE,
-                            {params[1]});
+                            {params[1]}, em->object->getNode());
                 }
                 return false;
             }
@@ -317,7 +324,8 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                     std::stringstream sstream;
                     em->expr->method->dbprint(sstream);
                     auto extName = cstring(sstream);
-                    visit_call(extName, obj, VertexFlags::SO_IDX, params);
+                    visit_call(extName, obj, VertexFlags::SO_IDX, params, {},
+                            em->object->getNode());
                     return false;
                 }
             }
@@ -357,7 +365,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                         params.size());
                 // Key goes index
                 visit_stateful(vName, statement, curKeyVars,
-                        SOFlags::CREATE, {params[1]});
+                        SOFlags::CREATE, {params[1]}, nullptr);
                 return false;
             }
 
@@ -798,13 +806,14 @@ bool ControlGraphs::preorder(const IR::PathExpression *pe) {
 
 void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
         std::vector<const IR::Node *> indices, SOFlags soFlags,
-        std::vector<const IR::Node *> dataVals) {
+        std::vector<const IR::Node *> dataVals, const IR::Node *soObj) {
     VertexFlags flags = VertexFlags::STATEMENT | VertexFlags::STATEFUL;
     // Access idx first
     auto fv = add_and_connect_vertex("ACCESS "_cs + name,
             flags | VertexFlags::SO_IDX, node);
     auto &fvinfo = (*g)[fv];
     fvinfo.soFlags = soFlags;
+    fvinfo.statefulObjectNode = soObj;
 
     parents = {{fv, new EdgeUnconditional()}};
     auto oldstate = state;
@@ -820,6 +829,7 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
                 flags | VertexFlags::SO_DATA, node);
         auto &svinfo = (*g)[sv];
         svinfo.soFlags = soFlags;
+        svinfo.statefulObjectNode = soObj;
 
         cur_v = sv;
         // Whether the data is read (node writes) or written (node reads)
@@ -850,7 +860,8 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
 
 void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
                                VertexFlags flags, std::vector<const IR::Node *> args,
-                               std::vector<const IR::Node *> retArgs) {
+                               std::vector<const IR::Node *> retArgs,
+                               const IR::Node *soObj) {
     // before visit
     auto call_v = add_and_connect_vertex("CALL "_cs + name,
             VertexFlags::CALL | flags);

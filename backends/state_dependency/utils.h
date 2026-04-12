@@ -11,10 +11,13 @@ namespace P4::P4StateDependency {
     std::vector<const IR::Node *> find_ret_vars(SuperGraphProp *sgProp, Graphs::vertex_t ret_v);
     std::vector<TabVertex> collect_state_vars_from_dep_edges_dst(Graphs::Graph *g, SuperGraphProp *sgProp,
         P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-        const IDEPass::DepEdgeMap &depEdgeMap, bool showLog=false);
+        const IDEPass::DepEdgeMap &depEdgeMap,
+        IDEPass::DepEdgeMap &stateVarMap, bool showLog=false);
     std::vector<TabVertex> collect_state_vars_from_dep_edges_src(Graphs::Graph *g, SuperGraphProp *sgProp,
         P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
-        const IDEPass::DepEdgeMap &depEdgeMap, bool showLog=false);
+        const IDEPass::DepEdgeMap &depEdgeMap,
+        IDEPass::DepEdgeMap &stateVarMap, bool showLog=false);
+    IDEPass::DepEdgeMap convert_dep_edges(const IDEPass::DepEdgeMap &curDepEdges);
     std::vector<TabVertex> collect_state_vars(Graphs::Graph *g, SuperGraphProp *sgProp,
         P4::ReferenceMap *refMap, P4::TypeMap *typeMap, bool showLog=false);
 }

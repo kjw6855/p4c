@@ -28,7 +28,9 @@
 #include "controls.h"
 #include "parsers.h"
 #include "graph_visitor.h"
+#include "dependency_graph.h"
 #include "supergraphs.h"
+#include "ide_pass.h"
 #include "act_param_to_stateful.h"
 #include "stateful_to_key.h"
 #include "hdr_to_stateful.h"
@@ -151,7 +153,9 @@ int main(int argc, char *const argv[]) {
     P4StateDependency::StatefulToKey *pdChecker = nullptr;
     P4StateDependency::HdrToStateful *hdChecker = nullptr;
     P4StateDependency::ParserGraphs *pgg = nullptr;
+    // All SO_DATA
     hvec_map<cstring, std::vector<P4StateDependency::TabVertex>> stateVars;
+    hvec_map<cstring, P4StateDependency::IDEPass::DepEdgeMap> depEdgeMaps;
 
     {
         Util::ScopedTimer sdTimer("P4SD");
@@ -183,6 +187,7 @@ int main(int argc, char *const argv[]) {
             }
 
             /* I. A2S2V */
+            P4StateDependency::DependencyGraphs a2s2vGraphs(cgen.controlGraphsArray.size());
             {
                 // State dependency checker
                 Util::ScopedTimer actToSoTimer("ACT->SO");
@@ -195,9 +200,14 @@ int main(int argc, char *const argv[]) {
                     auto *g = cgen.controlGraphsArray[i];
                     auto graphName = boost::get_property(*g, boost::graph_name);
                     const auto &ptsEdgeMap = sdChecker->getFoundDepEdges(graphName);
+                    P4StateDependency::IDEPass::DepEdgeMap stateVarMap;
                     stateVars[graphName] = collect_state_vars_from_dep_edges_dst(cgen.controlGraphsArray[i],
                         sg->graphProps[i], &midEnd.refMap, &midEnd.typeMap,
-                        ptsEdgeMap, true);
+                        ptsEdgeMap, stateVarMap, true);
+                    a2s2vGraphs.add_dependencies_from_map(i, g, ptsEdgeMap);
+                    a2s2vGraphs.add_dependencies_from_map(i, g, stateVarMap);
+                    // Convert depEdges since ptsEdgeMap contains action -> SO
+                    depEdgeMaps[graphName] = P4StateDependency::convert_dep_edges(ptsEdgeMap);
                     for (const auto &ve : ptsEdgeMap) {
                         for (const auto &dst : ve.second) {
                             LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
@@ -205,6 +215,8 @@ int main(int argc, char *const argv[]) {
                     }
                 }
             }
+
+            /* TODO: while loop for SO->SO */
 
             {
                 // Packet dependency checker
@@ -214,12 +226,34 @@ int main(int argc, char *const argv[]) {
                         &sg->graphProps,
                         options.genSupergraphs,
                         &stateVars,
+                        &depEdgeMaps,
                         "A2S2V"_cs);
                 program->apply(*pdChecker);
+                for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                    auto *g = cgen.controlGraphsArray[i];
+                    auto graphName = boost::get_property(*g, boost::graph_name);
+                    a2s2vGraphs.add_dependencies_from_map(i, g,
+                        pdChecker->getFoundDepEdges(graphName), true);
+                }
+            }
+
+            {
+                Util::ScopedTimer actSoToKeyDrawTimer("ACT->SO->KEY/HDR drawing");
+                for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                    if (a2s2vGraphs.leaves[i].empty()) continue;  // Skip pruning if no leaves
+
+                    a2s2vGraphs.prune_nodes_not_reaching_leaves(i);
+                    if (a2s2vGraphs.num_vertices(i) == 0) continue;
+                    auto *g = cgen.controlGraphsArray[i];
+                    auto graphName = boost::get_property(*g, boost::graph_name);
+                    a2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_a2s2v_dep.dot"));
+                }
             }
 
             stateVars.clear();
+            depEdgeMaps.clear();
             /* II. H2S2V */
+            P4StateDependency::DependencyGraphs h2s2vGraphs(cgen.controlGraphsArray.size());
             {
                 Util::ScopedTimer hdrToStatefulTimer("HDR->SO");
                 hdChecker = new P4StateDependency::HdrToStateful(&midEnd.refMap, &midEnd.typeMap,
@@ -233,9 +267,14 @@ int main(int argc, char *const argv[]) {
                     auto graphName = boost::get_property(*g, boost::graph_name);
                     // htsEdgeMap: stateful objects -> header variables
                     const auto &htsEdgeMap = hdChecker->getFoundDepEdges(graphName);
+                    P4StateDependency::IDEPass::DepEdgeMap stateVarMap;
                     stateVars[graphName] = collect_state_vars_from_dep_edges_src(cgen.controlGraphsArray[i],
                         sg->graphProps[i], &midEnd.refMap, &midEnd.typeMap,
-                        htsEdgeMap, true);
+                        htsEdgeMap, stateVarMap, true);
+                    // Do not convert depEdges since htsEdgeMap contains stateful objects -> header variables
+                    depEdgeMaps[graphName] = htsEdgeMap;
+                    h2s2vGraphs.add_dependencies_from_map(i, g, P4StateDependency::convert_dep_edges(htsEdgeMap));
+                    h2s2vGraphs.add_dependencies_from_map(i, g, stateVarMap);
                     for (const auto &ve : htsEdgeMap) {
                         for (const auto &dst : ve.second) {
                             LOG2(P4StateDependency::Graphs::dump_var_edge(g, {ve.first, dst}));
@@ -252,11 +291,32 @@ int main(int argc, char *const argv[]) {
                         &sg->graphProps,
                         options.genSupergraphs,
                         &stateVars,
+                        &depEdgeMaps,
                         "H2S2V"_cs);
                 program->apply(*pdChecker);
+                for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                    auto *g = cgen.controlGraphsArray[i];
+                    auto graphName = boost::get_property(*g, boost::graph_name);
+                    h2s2vGraphs.add_dependencies_from_map(i, g,
+                        pdChecker->getFoundDepEdges(graphName), true);
+                }
+            }
+
+            {
+                Util::ScopedTimer hdrSoToKeyDrawTimer("HDR->SO->KEY/HDR drawing");
+                for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
+                    if (h2s2vGraphs.leaves[i].empty()) continue;  // Skip pruning if no leaves
+
+                    h2s2vGraphs.prune_nodes_not_reaching_leaves(i);
+                    if (h2s2vGraphs.num_vertices(i) == 0) continue;
+                    auto *g = cgen.controlGraphsArray[i];
+                    auto graphName = boost::get_property(*g, boost::graph_name);
+                    h2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_h2s2v_dep.dot"));
+                }
             }
 
             stateVars.clear();
+            depEdgeMaps.clear();
             /* III. SO->KEY/HDR */
             {
                 Util::ScopedTimer soToKeyTimer("SO->KEY/HDR");
@@ -271,6 +331,7 @@ int main(int argc, char *const argv[]) {
                         &sg->graphProps,
                         options.genSupergraphs,
                         &stateVars,
+                        &depEdgeMaps,
                         "S2V"_cs);
                 program->apply(*pdChecker);
             }

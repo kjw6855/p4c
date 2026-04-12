@@ -8,6 +8,7 @@ set (STATE_DEPENDENCY_SRCS
   options.cpp
   graphs.cpp
   graph_visitor.cpp
+  dependency_graph.cpp
   supergraphs.cpp
   tabulation.cpp
   ide_pass.cpp
@@ -24,6 +25,7 @@ set (STATE_DEPENDENCY_HDRS
   options.h
   graphs.h
   graph_visitor.h
+  dependency_graph.h
   supergraphs.h
   tabulation.h
   ide_pass.h

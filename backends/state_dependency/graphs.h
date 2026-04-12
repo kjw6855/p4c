@@ -571,6 +571,7 @@ class Graphs {
         VertexFlags flags;
         SOFlags soFlags;
         const IR::Node *node;
+        const IR::Node *statefulObjectNode;  // for stateful vertex, points to its stateful object
         std::vector<const IR::Node *> defVars;
         std::vector<const IR::Node *> useVars;
         cstring color = cstring::empty;

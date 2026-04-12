@@ -62,11 +62,13 @@ class ControlGraphs : public Graphs,
     void visit_stateful(const cstring &name, const IR::Node *node,
                         std::vector<const IR::Node *> indices,
                         SOFlags soFlags=SOFlags::NONE,
-                        std::vector<const IR::Node *> dataVals={});
+                        std::vector<const IR::Node *> dataVals={},
+                        const IR::Node *soObj=nullptr);
     void visit_call(const cstring &name, const IR::Node *node,
                     VertexFlags flags=VertexFlags::NONE,
                     std::vector<const IR::Node *> args={},
-                    std::vector<const IR::Node *> retArgs={});
+                    std::vector<const IR::Node *> retArgs={},
+                    const IR::Node *soObj=nullptr);
 
     const P4::ExternMethod *get_extern_method(const Visitor::Context *ctxt_);
     const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed,
