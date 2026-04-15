@@ -123,10 +123,6 @@ void FindHdrToStateful::analyze_control_graph(Tabulation *tab) {
     g = tab->g; // Init for on-the-fly edge creation
     auto *sgProp = tab->sgProp;
     auto graphName = boost::get_property(*g, boost::graph_name);
-    if (sgProp->actionParams.size() == 0) {
-        std::cout << "No action params in " << graphName << std::endl;
-        return;
-    }
 
     BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
     set_edge_func_in_graph(tab);
