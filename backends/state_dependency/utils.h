@@ -7,7 +7,7 @@
 #include "ide_pass.h"
 
 namespace P4::P4StateDependency {
-    std::vector<Graphs::vertex_t> find_next_cfg_node(Graphs::Graph *g, Graphs::vertex_t v);
+    std::vector<Graphs::vertex_t> find_next_cfg_node(Graphs::Graph *g, Graphs::vertex_t v, bool controlOnly=true);
     std::vector<const IR::Node *> find_ret_vars(SuperGraphProp *sgProp, Graphs::vertex_t ret_v);
     std::vector<TabVertex> collect_state_vars_from_dep_edges_dst(Graphs::Graph *g, SuperGraphProp *sgProp,
         P4::ReferenceMap *refMap, P4::TypeMap *typeMap,

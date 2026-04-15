@@ -534,8 +534,28 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
         em->expr->method->dbprint(sstream);
         auto vName = cstring(sstream);
 
+        // Find stateful object from arguments
+        auto obj = em->object->getNode();
+        const IR::Node *statefulObj = nullptr;
+        if (obj->is<IR::Declaration_Instance>()) {
+            auto args = obj->to<IR::Declaration_Instance>()->arguments;
+            if (args != nullptr && args->size() > 0) {
+                auto regArg = args->front();
+                if (regArg->is<IR::Argument>()) {
+                    auto regExpr = regArg->to<IR::Argument>()->expression;
+                    if (auto p = regExpr->to<IR::PathExpression>()) {
+                        auto decl = refMap->getDeclaration(p->path, true);
+                        if (decl != nullptr) {
+                            statefulObj = decl->getNode();
+                        }
+                    }
+                }
+            }
+        }
+
         VertexFlags flags = VertexFlags::ENTRY | VertexFlags::STATEFUL;
         auto start_v = add_and_connect_vertex(vName, flags, fn);
+        (*g)[start_v].statefulObjectNode = statefulObj;
         parents = {{start_v, new EdgeUnconditional()}};
 
         auto next_v = start_v;
@@ -574,7 +594,9 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
         cur_v = prev_cur_v;
         localProcFlags = oldLocalProcFlags;
 
-        auto exit_v = add_and_connect_vertex("EXIT "_cs + vName, VertexFlags::EXIT);
+        auto exit_v = add_and_connect_vertex("EXIT "_cs + vName,
+                    VertexFlags::EXIT | VertexFlags::STATEFUL);
+        (*g)[exit_v].statefulObjectNode = statefulObj;
         parents = {{exit_v, new EdgeProcedural}};
         oldstate = state;
         if (state == SKIPPING) state = NORMAL;
@@ -598,7 +620,6 @@ bool ControlGraphs::preorder(const IR::Function *fn) {
         }
         cur_v = prev_cur_v;
         state = oldstate;
-        auto obj = em->object->getNode();
         procedureGraphs[obj] = {start_v, exit_v, retVals};
         return false;
     }

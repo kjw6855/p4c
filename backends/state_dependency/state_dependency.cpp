@@ -241,11 +241,16 @@ int main(int argc, char *const argv[]) {
                 Util::ScopedTimer actSoToKeyDrawTimer("ACT->SO->KEY/HDR drawing");
                 for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
                     if (a2s2vGraphs.leaves[i].empty()) continue;  // Skip pruning if no leaves
-
-                    a2s2vGraphs.prune_nodes_not_reaching_leaves(i);
-                    if (a2s2vGraphs.num_vertices(i) == 0) continue;
                     auto *g = cgen.controlGraphsArray[i];
                     auto graphName = boost::get_property(*g, boost::graph_name);
+
+                    if (a2s2vGraphs.num_vertices(i) > 0)
+                        a2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_full_a2s2v_dep.dot"));
+                    a2s2vGraphs.merge_nodes_without_variable(i);
+                    if (a2s2vGraphs.num_vertices(i) > 0)
+                        a2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_merged_a2s2v_dep.dot"));
+                    a2s2vGraphs.prune_nodes_not_reaching_leaves(i);
+                    if (a2s2vGraphs.num_vertices(i) == 0) continue;
                     a2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_a2s2v_dep.dot"));
                 }
             }
@@ -306,11 +311,16 @@ int main(int argc, char *const argv[]) {
                 Util::ScopedTimer hdrSoToKeyDrawTimer("HDR->SO->KEY/HDR drawing");
                 for (size_t i = 0; i < cgen.controlGraphsArray.size(); i++) {
                     if (h2s2vGraphs.leaves[i].empty()) continue;  // Skip pruning if no leaves
-
-                    h2s2vGraphs.prune_nodes_not_reaching_leaves(i);
-                    if (h2s2vGraphs.num_vertices(i) == 0) continue;
                     auto *g = cgen.controlGraphsArray[i];
                     auto graphName = boost::get_property(*g, boost::graph_name);
+
+                    if (h2s2vGraphs.num_vertices(i) > 0)
+                        h2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_full_h2s2v_dep.dot"));
+                    h2s2vGraphs.merge_nodes_without_variable(i);
+                    if (h2s2vGraphs.num_vertices(i) > 0)
+                        h2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_merged_h2s2v_dep.dot"));
+                    h2s2vGraphs.prune_nodes_not_reaching_leaves(i);
+                    if (h2s2vGraphs.num_vertices(i) == 0) continue;
                     h2s2vGraphs.export_to_graphviz(i, options.graphsDir / (graphName + "_h2s2v_dep.dot"));
                 }
             }

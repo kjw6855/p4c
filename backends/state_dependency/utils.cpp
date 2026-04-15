@@ -34,7 +34,14 @@ bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
             // If it's procedure, get return value
             auto [_, callerRet] = sgProp->get_call_map(node);
             auto callerRetInfo = (*g)[callerRet];
-            for (auto retVar : find_ret_vars(sgProp, callerRet)) {
+            auto retVars = find_ret_vars(sgProp, callerRet);
+            // If no return variable is found, still add the callerRet as a state variable
+            // to cover the case where SO_DATA is updated
+            if (retVars.empty() && trackedVar != nullptr) {
+                // Store nullptr to describe no dependent dst variable
+                stateVarMap[{node, trackedVar}].push_back({callerRet, nullptr});
+            }
+            for (auto retVar : retVars) {
                 auto retTvVar = TabVertex{callerRet, retVar};
                 auto retTvVarInfo = (*g)[get_vertex_id(g, sgProp, retTvVar)];
                 stateVarSet.insert(retTvVar);
@@ -72,6 +79,11 @@ bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
                             LOG2("- SO [IDX] " << nodeInfo.name
                                 << " -> [DATA] " << dinfo.name << ":" << dTvVarInfo.name);
                         }
+                    }
+                }
+                for (auto uv : dinfo.useVars) {
+                    if (trackedVar != nullptr) {
+                        stateVarMap[{node, trackedVar}].push_back({dit, uv});
                     }
                 }
             }
@@ -143,11 +155,11 @@ bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
     return false;
 }
 
-std::vector<Graphs::vertex_t> find_next_cfg_node(Graphs::Graph *g, Graphs::vertex_t v) {
+std::vector<Graphs::vertex_t> find_next_cfg_node(Graphs::Graph *g, Graphs::vertex_t v, bool controlOnly) {
     std::vector<Graphs::vertex_t> foundNodes;
     for (auto [ei, ei_end] = boost::out_edges(v, *g); ei != ei_end; ++ei) {
         auto &edge = (*g)[*ei];
-        if (edge.type == EdgeType::CONTROL)
+        if ((controlOnly && edge.type == EdgeType::CONTROL) || (!controlOnly && edge.type != EdgeType::HAS_VAR))
             foundNodes.push_back(boost::target(*ei, *g));
     }
     return foundNodes;
@@ -190,6 +202,7 @@ std::vector<TabVertex> collect_state_vars_from_dep_edges_src(Graphs::Graph *g, S
     hvec_set<TabVertex, TabVertexHash> stateVarSet;
     for (auto ve : depEdgeMap) {
         auto src = ve.first;
+        LOG2("Processing src: " << (*g)[src.first].name);
         collect_state_vars_common(g, sgProp, refMap, typeMap,
                 src.first, src.second, stateVarSet, stateVarMap, showLog);
     }

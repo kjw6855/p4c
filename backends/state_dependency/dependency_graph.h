@@ -66,7 +66,12 @@ class DependencyGraphs {
     /// @param name Variable name
     /// @param node Associated IR node (optional)
     /// @return vertex descriptor
-    vertex_t add_vertex(size_t index, EsgId esgId, const cstring &name);
+    vertex_t add_vertex(size_t index, EsgId esgId, const cstring &name, const cstring &color = ""_cs);
+
+    /// @brief Add a vertex representing a stateful object
+    /// @param soNode IR node of the stateful object
+    /// @return vertex descriptor
+    vertex_t add_so_vertex(size_t index, const IR::Node *soNode);
 
     /// @brief Add a dependency edge from source to target
     /// @param from Source variable vertex
@@ -74,7 +79,7 @@ class DependencyGraphs {
     /// @param label Edge label
     /// @return edge descriptor
     edge_t add_dependency_edge(size_t index, vertex_t from, vertex_t to,
-        const cstring &label = "depends_on"_cs);
+                               const cstring &label = ""_cs);
 
     /// @brief Add dependencies from a DepEdgeMap
     /// @param graph The control flow graph for context
@@ -112,6 +117,10 @@ class DependencyGraphs {
     /// @param index Dependency graph index
     void prune_nodes_not_reaching_leaves(size_t index);
 
+    /// @brief Merge nodes without variables into nodes with variables
+    /// @param index Dependency graph index
+    void merge_nodes_without_variable(size_t index);
+
     class GraphAttributeSetter {
      public:
         void operator()(DepGraph &g) const {
@@ -122,6 +131,7 @@ class DependencyGraphs {
                 attrs[*vit]["label"_cs] = vinfo.name;
                 attrs[*vit]["fillcolor"_cs] = vinfo.color;
                 attrs[*vit]["shape"_cs] = vinfo.shape;
+                attrs[*vit]["style"_cs] = "filled"_cs;
             }
 
             auto edges = boost::edges(g);
