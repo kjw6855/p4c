@@ -1,0 +1,57 @@
+#ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_PNA_TARGET_H_
+#define BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_PNA_TARGET_H_
+
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+
+#include "backends/p4tools/common/lib/arch_spec.h"
+#include "ir/ir.h"
+#include "ir/solver.h"
+
+#include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
+#include "backends/p4tools/modules/symbex/core/target.h"
+#include "backends/p4tools/modules/symbex/lib/execution_state.h"
+#include "backends/p4tools/modules/symbex/targets/pna/dpdk/cmd_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/pna/dpdk/expr_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/pna/dpdk/program_info.h"
+#include "backends/p4tools/modules/symbex/targets/pna/test_backend.h"
+
+namespace P4::P4Tools::Symbex::Pna {
+
+class PnaDpdkSymbexTarget : public SymbexTarget {
+ public:
+    /// Registers this target.
+    static void make();
+
+ protected:
+    const PnaDpdkProgramInfo *produceProgramInfoImpl(
+        const CompilerResult &compilerResult,
+        const IR::Declaration_Instance *mainDecl) const override;
+
+    PnaTestBackend *getTestBackendImpl(const ProgramInfo &programInfo,
+                                       const TestBackendConfiguration &testBackendConfiguration,
+                                       SymbolicExecutor &symbex) const override;
+
+    PnaDpdkCmdStepper *getCmdStepperImpl(ExecutionState &state, AbstractSolver &solver,
+                                         const ProgramInfo &programInfo) const override;
+
+    PnaDpdkExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
+                                           const ProgramInfo &programInfo) const override;
+
+    CmdVisitor *getCmdVisitorImpl(ExecutionState &state,
+                                         const ProgramInfo &programInfo, TestCase &testCase) const override;
+
+    ExprVisitor *getExprVisitorImpl(ExecutionState &state,
+                                           const ProgramInfo &programInfo, TestCase &testCase) const override;
+
+ private:
+    PnaDpdkSymbexTarget();
+
+    [[nodiscard]] MidEnd mkMidEnd(const CompilerOptions &options) const override;
+};
+
+}  // namespace P4::P4Tools::Symbex::Pna
+
+#endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_PNA_TARGET_H_ */

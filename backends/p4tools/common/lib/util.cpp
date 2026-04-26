@@ -18,6 +18,7 @@
 #include "ir/vector.h"
 #include "lib/exceptions.h"
 #include "lib/null.h"
+#include "frontends/p4/optimizeExpressions.h"
 
 namespace P4::P4Tools {
 
@@ -114,6 +115,124 @@ const IR::Constant *Utils::getRandConstantForType(const IR::Type_Bits *type) {
     auto maxVal = IR::getMaxBvVal(type->width_bits());
     auto randInt = Utils::getRandBigInt(maxVal);
     return IR::Constant::get(type, randInt);
+}
+
+const IR::Expression *Utils::getValExpr(const std::string &strVal, size_t bitWidth) {
+    const auto *baseVar = P4::optimizeExpression(IR::Constant::get(IR::Type_Bits::get(0), 0));
+    const auto *baseVarType = IR::Type_Bits::get(bitWidth);
+
+    int baseLen = (static_cast<int>(bitWidth) - 1) / 8 + 1;
+    int valLen = std::min(baseLen, static_cast<int>(strVal.length()));
+
+    for (size_t w = 0; w < bitWidth; w += 32) {
+        int num = 0;
+        int subBitWidth = std::min(32, static_cast<int>(bitWidth) - static_cast<int>(w));
+        int shl = (subBitWidth - 1) / 8;
+        for (int i = 0; i < subBitWidth; i += 8) {
+            int baseIdx = (static_cast<int>(i) + static_cast<int>(w)) / 8;
+            int idx = baseIdx - baseLen + valLen;
+            if (idx < 0) continue;
+            num |= static_cast<int>(static_cast<unsigned char>(strVal[idx]) << (shl * 8 - i));
+        }
+        const auto *concat = new IR::Concat(
+            baseVarType, baseVar,
+            IR::Constant::get(IR::Type_Bits::get(subBitWidth), static_cast<unsigned int>(num)));
+        baseVar = P4::optimizeExpression(concat);
+    }
+
+    return baseVar;
+}
+
+big_int Utils::getVal(const std::string &strVal, size_t bitWidth) {
+    if (strVal.length() * 8 > bitWidth) bitWidth = strVal.length() * 8;
+    const auto *valExpr = Utils::getValExpr(strVal, bitWidth);
+    BUG_CHECK(valExpr->is<IR::Constant>(), "getVal: expression is not a constant");
+    return valExpr->checkedTo<IR::Constant>()->value;
+}
+
+const IR::Expression *Utils::removeUnknownVar(const IR::Expression *expr) {
+    if (const auto *symVar = expr->to<IR::SymbolicVariable>()) {
+        if (symVar->label.startsWith("pktVar")) return nullptr;
+        return expr;
+    }
+    if (const auto *binary = expr->to<IR::Operation_Binary>()) {
+        if (binary->is<IR::ArrayIndex>()) return removeUnknownVar(binary->right);
+        const auto *leftExpr = removeUnknownVar(binary->left);
+        const auto *rightExpr = removeUnknownVar(binary->right);
+        if (leftExpr != nullptr) {
+            if (rightExpr != nullptr) {
+                auto bitWidth =
+                    leftExpr->type->width_bits() + rightExpr->type->width_bits();
+                return P4::optimizeExpression(
+                    new IR::Concat(IR::Type_Bits::get(bitWidth), leftExpr, rightExpr));
+            }
+            return leftExpr;
+        }
+        return rightExpr;
+    }
+    return expr;
+}
+
+const IR::Constant *Utils::getZeroCksum(const IR::Expression *expr, int zeroLen, bool init) {
+    if (const auto *symVar = expr->to<IR::SymbolicVariable>()) {
+        if (symVar->label.startsWith("*method_checksum")) {
+            if (init) return IR::Constant::get(IR::Type_Bits::get(8), 0);
+            if (zeroLen < 64) return IR::Constant::get(IR::Type_Bits::get(16), 0);
+        }
+        return nullptr;
+    }
+    if (const auto *constVal = expr->to<IR::Constant>()) {
+        if (constVal->value == 0) {
+            auto bitWidth = constVal->type->width_bits() + zeroLen;
+            return IR::Constant::get(IR::Type_Bits::get(bitWidth), 1);
+        }
+        return nullptr;
+    }
+    if (const auto *binary = expr->to<IR::Operation_Binary>()) {
+        if (binary->is<IR::ArrayIndex>()) return getZeroCksum(binary->right, zeroLen, init);
+        auto *retVal = getZeroCksum(binary->right, zeroLen, init);
+        if (retVal == nullptr) return nullptr;
+        if (retVal->value == 0) return retVal;
+        return getZeroCksum(binary->left, retVal->type->width_bits(), false);
+    }
+    return nullptr;
+}
+
+bool Utils::isDefaultByConstraint(const IR::Expression *constraint) {
+    if (constraint->is<IR::Neq>()) return true;
+    if (const auto *expr = constraint->to<IR::LAnd>()) {
+        return Utils::isDefaultByConstraint(expr->left) &&
+               Utils::isDefaultByConstraint(expr->right);
+    }
+    if (const auto *expr = constraint->to<IR::LOr>()) {
+        return Utils::isDefaultByConstraint(expr->left) ||
+               Utils::isDefaultByConstraint(expr->right);
+    }
+    return false;
+}
+
+std::optional<bool> Utils::evalCondWithTaint(const IR::Expression *cond) {
+    if (cond->is<IR::Neq>()) {
+        return false;
+    }
+    if (const auto *val = cond->to<IR::BoolLiteral>()) {
+        return val->value;
+    }
+    if (const auto *expr = cond->to<IR::LAnd>()) {
+        auto leftCond = Utils::evalCondWithTaint(expr->left);
+        auto rightCond = Utils::evalCondWithTaint(expr->right);
+        if (leftCond.has_value() && !leftCond.value()) return false;
+        if (rightCond.has_value() && !rightCond.value()) return false;
+        return std::nullopt;
+    }
+    if (const auto *expr = cond->to<IR::LOr>()) {
+        auto leftCond = Utils::evalCondWithTaint(expr->left);
+        auto rightCond = Utils::evalCondWithTaint(expr->right);
+        if (leftCond.has_value() && leftCond.value()) return true;
+        if (rightCond.has_value() && rightCond.value()) return true;
+        return std::nullopt;
+    }
+    return std::nullopt;
 }
 
 /* =========================================================================================

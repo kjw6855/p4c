@@ -1,0 +1,119 @@
+#include "backends/p4tools/modules/symbex/targets/ebpf/target.h"
+
+#include <cstddef>
+#include <vector>
+
+#include "backends/p4tools/common/lib/util.h"
+#include "ir/ir.h"
+#include "ir/solver.h"
+#include "lib/cstring.h"
+#include "lib/error.h"
+#include "lib/exceptions.h"
+#include "lib/ordered_map.h"
+
+#include "backends/p4tools/modules/symbex/core/compiler_result.h"
+#include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
+#include "backends/p4tools/modules/symbex/core/target.h"
+#include "backends/p4tools/modules/symbex/lib/execution_state.h"
+#include "backends/p4tools/modules/symbex/options.h"
+#include "backends/p4tools/modules/symbex/targets/ebpf/cmd_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/ebpf/expr_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/ebpf/program_info.h"
+#include "backends/p4tools/modules/symbex/targets/ebpf/test_backend.h"
+
+namespace P4::P4Tools::Symbex::EBPF {
+
+/* =============================================================================================
+ *  EBPFSymbexTarget implementation
+ ============================================================================================= */
+
+EBPFSymbexTarget::EBPFSymbexTarget() : SymbexTarget("ebpf", "ebpf") {}
+
+void EBPFSymbexTarget::make() {
+    static EBPFSymbexTarget *INSTANCE = nullptr;
+    if (INSTANCE == nullptr) {
+        INSTANCE = new EBPFSymbexTarget();
+    }
+}
+
+const EBPFProgramInfo *EBPFSymbexTarget::produceProgramInfoImpl(
+    const CompilerResult &compilerResult, const IR::Declaration_Instance *mainDecl) const {
+    const auto *mainType = mainDecl->type->to<IR::Type_Specialized>();
+    if (mainType == nullptr || mainType->baseType->path->name != "ebpfFilter") {
+        error(ErrorType::ERR_INVALID,
+              "%1%: This Symbex back end only supports a 'ebpfFilter' main package. The current "
+              "type is %2%",
+              mainDecl, mainDecl->type);
+        return nullptr;
+    }
+    // The blocks in the main declaration are just the arguments in the constructor call.
+    // Convert mainDecl->arguments into a vector of blocks, represented as constructor-call
+    // expressions.
+    const auto blocks =
+        argumentsToTypeDeclarations(&compilerResult.getProgram(), mainDecl->arguments);
+
+    // We should have two arguments.
+    if (blocks.size() != 2) {
+        error(ErrorType::ERR_INVALID, "%1%: The EBPF architecture requires 2 pipes. Received %2%.",
+              mainDecl, blocks.size());
+        return nullptr;
+    }
+    ordered_map<cstring, const IR::Type_Declaration *> programmableBlocks;
+    for (size_t idx = 0; idx < blocks.size(); ++idx) {
+        const auto *declType = blocks.at(idx);
+        auto canonicalName = EBPFProgramInfo::ARCH_SPEC.getArchMember(idx)->blockName;
+        programmableBlocks.emplace(canonicalName, declType);
+    }
+
+    // TODO: We bound the max packet size. However, eBPF should be able to support jumbo sized
+    // packets. There might be a bug in the framework
+    auto &symbexOptions = SymbexOptions::get();
+    if (symbexOptions.maxPktSize > 12000) {
+        warning("Max packet size %1% larger than 12000 bits. Bounding size to 12000 bits.",
+                symbexOptions.maxPktSize);
+        symbexOptions.maxPktSize = 12000;
+    }
+
+    return new EBPFProgramInfo(*compilerResult.checkedTo<SymbexCompilerResult>(),
+                               programmableBlocks);
+}
+
+EBPFTestBackend *EBPFSymbexTarget::getTestBackendImpl(
+    const ProgramInfo &programInfo, const TestBackendConfiguration &testBackendConfiguration,
+    SymbolicExecutor &symbex) const {
+    return new EBPFTestBackend(programInfo, testBackendConfiguration, symbex);
+}
+
+EBPFCmdStepper *EBPFSymbexTarget::getCmdStepperImpl(ExecutionState &state, AbstractSolver &solver,
+                                                     const ProgramInfo &programInfo) const {
+    return new EBPFCmdStepper(state, solver, programInfo);
+}
+
+EBPFExprStepper *EBPFSymbexTarget::getExprStepperImpl(ExecutionState &state,
+                                                       AbstractSolver &solver,
+                                                       const ProgramInfo &programInfo) const {
+    return new EBPFExprStepper(state, solver, programInfo);
+}
+
+CmdVisitor *EBPFSymbexTarget::getCmdVisitorImpl(ExecutionState &state,
+                                                     const ProgramInfo &programInfo, TestCase &testCase) const {
+    // TODO
+    return nullptr;
+}
+
+ExprVisitor *EBPFSymbexTarget::getExprVisitorImpl(ExecutionState &state,
+                                                       const ProgramInfo &programInfo,
+                                                       TestCase &testCase) const {
+    // TODO
+    return nullptr;
+}
+
+MidEnd EBPFSymbexTarget::mkMidEnd(const CompilerOptions &options) const {
+    MidEnd midEnd(options);
+    midEnd.addDefaultPasses();
+
+    return midEnd;
+}
+
+}  // namespace P4::P4Tools::Symbex::EBPF

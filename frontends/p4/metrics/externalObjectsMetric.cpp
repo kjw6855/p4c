@@ -2,6 +2,8 @@
 
 namespace P4 {
 
+using namespace P4::literals;
+
 void ExternalObjectsMetricPass::postorder(const IR::Type_Extern *node) {
     externTypeNames.insert(node->name.name);
     metrics.externStructures++;

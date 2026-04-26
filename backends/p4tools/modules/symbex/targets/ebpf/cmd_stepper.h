@@ -1,0 +1,41 @@
+#ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_EBPF_CMD_STEPPER_H_
+#define BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_EBPF_CMD_STEPPER_H_
+
+#include <map>
+#include <optional>
+#include <string>
+
+#include "ir/ir.h"
+#include "ir/solver.h"
+
+#include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/small_step/cmd_stepper.h"
+#include "backends/p4tools/modules/symbex/lib/continuation.h"
+#include "backends/p4tools/modules/symbex/lib/execution_state.h"
+#include "backends/p4tools/modules/symbex/targets/ebpf/program_info.h"
+
+namespace P4::P4Tools::Symbex::EBPF {
+
+class EBPFCmdStepper : public CmdStepper {
+ protected:
+    std::string getClassName() override { return "EBPFCmdStepper"; }
+
+    const EBPFProgramInfo &getProgramInfo() const override;
+
+    void initializeTargetEnvironment(ExecutionState &nextState) const override;
+
+    std::optional<const Constraint *> startParserImpl(const IR::P4Parser *parser,
+                                                      ExecutionState &nextState) const override;
+
+    std::map<Continuation::Exception, Continuation> getExceptionHandlers(
+        const IR::P4Parser *parser, Continuation::Body normalContinuation,
+        const ExecutionState &nextState) const override;
+
+ public:
+    EBPFCmdStepper(ExecutionState &nextState, AbstractSolver &solver,
+                   const ProgramInfo &programInfo);
+};
+
+}  // namespace P4::P4Tools::Symbex::EBPF
+
+#endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_EBPF_CMD_STEPPER_H_ */

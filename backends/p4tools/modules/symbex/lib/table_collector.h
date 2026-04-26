@@ -1,0 +1,71 @@
+#ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_LIB_TABLE_COLLECTOR_H_
+#define BACKENDS_P4TOOLS_MODULES_SYMBEX_LIB_TABLE_COLLECTOR_H_
+
+#include <set>
+#include <vector>
+#include <map>
+
+#include "ir/ir.h"
+#include "ir/irutils.h"
+#include "ir/visitor.h"
+#include "lib/source_file.h"
+#include "midend/coverage.h"
+
+#include "backends/p4tools/common/lib/symbolic_env.h"
+#include "backends/p4tools/common/lib/table_utils.h"
+#include "backends/p4tools/common/core/abstract_execution_state.h"
+#include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/p4symbex.pb.h"
+#include "backends/p4tools/modules/symbex/lib/continuation.h"
+
+using symbex::TestCase;
+
+namespace P4::P4Tools::Symbex {
+
+class TableExecutionState : public AbstractExecutionState {
+ public:
+    ~TableExecutionState() override = default;
+
+    /// @see Taint::hasTaint
+    bool hasTaint(const IR::Expression *expr) const;
+
+    [[nodiscard]] TableExecutionState &clone() const override;
+
+    [[nodiscard]] const IR::Expression *get(const IR::StateVariable &var) const override;
+
+    void set(const IR::StateVariable &var, const IR::Expression *value) override;
+
+    explicit TableExecutionState(const IR::P4Program *program);
+
+};
+
+class TableCollector : public Inspector {
+    Continuation::Body body;
+    Continuation::Body tmpBody;
+    std::set<const IR::P4Table*> p4Tables;
+    std::map<cstring, P4::Coverage::CoverageSet> actionMap;
+    std::map<cstring, bool> hasProfileMap;
+    P4::Coverage::CoverageSet actionNodes;
+    bool enableDump = false;
+
+    //bool preorder(const IR::Node *node) override;
+    bool preorder(const IR::P4Control *p4control) override;
+    bool preorder(const IR::MethodCallStatement *methodCallStatement) override;
+    bool preorder(const IR::P4Table *p4table) override;
+    bool preorder(const IR::P4Action *p4action) override;
+
+ public:
+    const IR::P4Control *parentControl = nullptr;
+    explicit TableCollector();
+
+    void findP4Actions();
+    const Continuation::Body &getP4Tables() const;
+    const std::set<const IR::P4Table*> &getP4TableSet() const;
+    const P4::Coverage::CoverageSet *getActions(cstring tableName) const;
+    const P4::Coverage::CoverageSet &getActionNodes() const;
+    bool hasActionProfile(cstring tableName) const;
+};
+
+}  // namespace P4::P4Tools::Symbex
+
+#endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_LIB_TABLE_COLLECTOR_H_ */

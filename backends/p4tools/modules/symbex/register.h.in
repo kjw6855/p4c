@@ -1,0 +1,13 @@
+#ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_REGISTER_H_
+#define BACKENDS_P4TOOLS_MODULES_SYMBEX_REGISTER_H_
+
+@include_statements_var@
+
+namespace P4::P4Tools::Symbex {
+
+inline void registerSymbexTargets() {
+@symbex_targets_var@}
+
+}  // namespace P4::P4Tools::Symbex
+
+#endif  /* BACKENDS_P4TOOLS_MODULES_SYMBEX_REGISTER_H_ */

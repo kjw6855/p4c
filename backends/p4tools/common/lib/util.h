@@ -63,6 +63,33 @@ class Utils {
     /// @returns a IR::Constant with a random big integer that fits the specified @param type.
     static const IR::Constant *getRandConstantForType(const IR::Type_Bits *type);
 
+    /// Converts a raw byte string @param strVal of @param strValBitLen bits into an IR expression
+    /// by assembling up to 32-bit chunks via Concat nodes and folding with optimizeExpression.
+    static const IR::Expression *getValExpr(const std::string &strVal, size_t strValBitLen);
+
+    /// @returns the big_int value represented by the raw byte string @param strVal interpreted as
+    /// a @param bitWidth-bit unsigned integer.
+    static big_int getVal(const std::string &strVal, size_t bitWidth);
+
+    /// Removes symbolic packet variables (those with label starting with "pktVar") from an
+    /// expression tree, concatenating the remaining sub-expressions. Returns nullptr if the
+    /// entire expression is unknown.
+    static const IR::Expression *removeUnknownVar(const IR::Expression *expr);
+
+    /// Traverses @param expr to find a checksum symbolic variable (label starting with
+    /// "*method_checksum"). Returns a zero-valued constant indicating checksum position
+    /// metadata, or nullptr if none is found.
+    static const IR::Constant *getZeroCksum(const IR::Expression *expr, int zeroLen, bool init);
+
+    /// @returns true if @param constraint is composed entirely of Neq nodes (combined with
+    /// LAnd/LOr), which indicates the constraint encodes a default (wildcard) match.
+    static bool isDefaultByConstraint(const IR::Expression *constraint);
+
+    /// Evaluates a boolean condition that may contain tainted (symbolic/unknown) sub-expressions.
+    /// Returns true/false if the result can be determined despite taint, or std::nullopt if the
+    /// outcome is unknowable (tainted). Handles LAnd, LOr, BoolLiteral, and Neq nodes.
+    static std::optional<bool> evalCondWithTaint(const IR::Expression *cond);
+
     /* =========================================================================================
      *  Other.
      * ========================================================================================= */

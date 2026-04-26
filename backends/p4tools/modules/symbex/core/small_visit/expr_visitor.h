@@ -1,0 +1,242 @@
+#ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_EXPR_VISITOR_H_
+#define BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_EXPR_VISITOR_H_
+
+#include <functional>
+#include <list>
+#include <map>
+#include <optional>
+#include <utility>
+#include <vector>
+
+#include "ir/id.h"
+#include "ir/ir.h"
+#include "ir/vector.h"
+#include "lib/cstring.h"
+#include "lib/exceptions.h"
+
+#include "backends/p4tools/modules/symbex/core/extern_info.h"
+#include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/small_visit/abstract_visitor.h"
+#include "backends/p4tools/modules/symbex/lib/execution_state.h"
+
+namespace P4::P4Tools::Symbex {
+
+/// Implements small-step operational semantics for expressions.
+class ExprVisitor : public AbstractVisitor {
+    /**********************************************************************************************
+    ExternMethodImpls
+    **********************************************************************************************/
+ public:
+    /// Encapsulates a set of extern method implementations.
+    template <typename VisitorType>
+    class ExternMethodImpls {
+     public:
+        using MethodImpl =
+            std::function<void(const ExternInfo &externInfo, VisitorType &visitor)>;
+
+        std::optional<MethodImpl> find(const IR::PathExpression &externObjectRef,
+                                       const IR::ID &methodName,
+                                       const IR::Vector<IR::Argument> &args) const {
+            const IR::Type_Extern *externType = nullptr;
+            if (const auto *type = externObjectRef.type->to<IR::Type_Extern>()) {
+                externType = type;
+            } else if (const auto *specType =
+                           externObjectRef.type->to<IR::Type_SpecializedCanonical>()) {
+                CHECK_NULL(specType->substituted);
+                externType = specType->substituted->checkedTo<IR::Type_Extern>();
+            } else if (externObjectRef.path->name == IR::ID("*method")) {
+            } else {
+                BUG("Not a valid extern: %1% with member %2%. Type is %3%.", externObjectRef,
+                    methodName, externObjectRef.type->node_type_name());
+            }
+
+            cstring qualifiedMethodName = externType->name + "." + methodName;
+            auto submapIt = impls.find(qualifiedMethodName);
+            if (submapIt == impls.end()) return std::nullopt;
+            if (submapIt->second.count(args.size()) == 0) return std::nullopt;
+
+            std::optional<MethodImpl> matchingImpl;
+            for (const auto &pair : submapIt->second.at(args.size())) {
+                const auto &paramNames = pair.first;
+                const auto &methodImpl = pair.second;
+                if (matches(paramNames, args)) {
+                    BUG_CHECK(!matchingImpl, "Ambiguous extern method call: %1%",
+                              qualifiedMethodName);
+                    matchingImpl = methodImpl;
+                }
+            }
+            return matchingImpl;
+        }
+
+     private:
+        std::map<cstring,
+                 std::map<size_t, std::vector<std::pair<std::vector<cstring>, MethodImpl>>>>
+            impls;
+
+        static bool matches(const std::vector<cstring> &paramNames,
+                            const IR::Vector<IR::Argument> &args) {
+            if (paramNames.size() != args.size()) return false;
+            for (size_t idx = 0; idx < paramNames.size(); idx++) {
+                const auto &paramName = paramNames.at(idx);
+                const auto &arg = args.at(idx);
+                if (arg->name.name == nullptr) continue;
+                if (paramName != arg->name.name) return false;
+            }
+            return true;
+        }
+
+     public:
+        using ImplList = std::list<std::tuple<cstring, std::vector<cstring>, MethodImpl>>;
+
+        explicit ExternMethodImpls(const ImplList &implList) {
+            for (const auto &implSpec : implList) {
+                auto &[name, paramNames, impl] = implSpec;
+                auto &tmpImplList = impls[name][paramNames.size()];
+                for (auto &pair : tmpImplList) {
+                    BUG_CHECK(pair.first != paramNames, "Multiple implementations of %1%(%2%)",
+                              name, paramNames);
+                }
+                tmpImplList.emplace_back(paramNames, impl);
+            }
+        }
+    };
+
+    /// Definitions of internal helper functions.
+    static const ExprVisitor::ExternMethodImpls<ExprVisitor> INTERNAL_EXTERN_METHOD_IMPLS;
+
+    /// Provides implementations of all known extern methods built into P4 core.
+    static const ExprVisitor::ExternMethodImpls<ExprVisitor> CORE_EXTERN_METHOD_IMPLS;
+
+    /**********************************************************************************************
+    ExprVisitor
+    **********************************************************************************************/
+
+ private:
+    /// We delegate evaluation to the TableVisitor, which needs to access protected members.
+    friend class TableVisitor;
+
+    /// Extract utils may access some protected members of the expression visitor.
+    friend class ExtractUtils;
+
+ protected:
+    /// Contains information that is useful for externs that advance the parser cursor.
+    /// For example, advance, extract, or lookahead.
+    struct PacketCursorAdvanceInfo {
+        /// How much the parser cursor will be advanced in a successful parsing case.
+        int advanceSize;
+
+        /// The condition that needs to be satisfied to successfully advance the parser cursor.
+        const IR::Expression *advanceCond;
+
+        /// Specifies at what point the parser cursor advancement will fail.
+        int advanceFailSize;
+
+        /// The condition that needs to be satisfied for the advance/extract to be rejected.
+        const IR::Expression *advanceFailCond;
+    };
+
+    /// Calculates the conditions that need to be satisfied for a successful parser advance.
+    /// This assumes that the advance amount is known already and a compile-time constant.
+    /// Targets may override this function with custom behavior.
+    virtual PacketCursorAdvanceInfo calculateSuccessfulParserAdvance(const ExecutionState &state,
+                                                                     int advanceSize) const;
+    /// Calculates the conditions that need to be satisfied for a successful parser advance.
+    /// This assumes that the advance amount is a run-time value.
+    //// We need to pick a satisfying value assignment for a reject or advance of the parser.
+    /// Targets may override this function with custom behavior.
+    virtual PacketCursorAdvanceInfo calculateAdvanceExpression(
+        const ExecutionState &state, const IR::Expression *advanceExpr,
+        const IR::Expression *restrictions) const;
+
+    /// Iterate over the fields in @param flatFields and set the corresponding values in
+    /// @param nextState. If there is a varbit, assign the @param varbitFieldSize as size to
+    /// it. @returns the list of members and their assigned values.
+    static std::vector<std::pair<IR::StateVariable, const IR::Expression *>> setFields(
+        ExecutionState &nextState, const std::vector<IR::StateVariable> &flatFields,
+        int varBitFieldSize);
+    /// This function call is used in member expressions to cleanly resolve hit, miss, and action
+    /// run expressions. These are return values of a table.apply() call, and fairly special in P4.
+    /// We have to use this rewrite to execute the table, and then return the corresponding
+    /// values for hit, miss and action_run after that.
+    void handleHitMissActionRun(const IR::Member *member);
+
+    /// Resolve all arguments to the method call by stepping into each argument that is not yet
+    /// symbolic or a pure reference (represented as Out direction).
+    /// @returns false when an argument needs to be resolved, true otherwise.
+    bool resolveMethodCallArguments(const IR::MethodCallExpression *call);
+
+    /// Evaluates a call to an extern method. Upon return, the given result will be augmented with
+    /// the successor states resulting from evaluating the call.
+    ///
+    /// @param call the original method call expression, can be used for stepInto calls.
+    /// @param receiver a symbolic value representing the object on which the method is being
+    ///     called.
+    /// @param name the name of the method being called.
+    /// @param args the list of arguments being passed to method.
+    /// @param state the state in which the call is being made, with the call at the top of the
+    ///     current continuation body.
+    /// TODO(fruffy): Move this call out of the expression visitor. The location is confusing.
+    virtual void evalExternMethodCall(const ExternInfo &externInfo);
+    /// Evaluates a call to an extern method that only exists in the interpreter. These are helper
+    /// functions used to execute custom operations and specific control flow. They do not exist as
+    /// P4 code or call.
+    /// TODO(fruffy): Move this call out of the expression visitor. The location is confusing.
+    virtual void evalInternalExternMethodCall(const ExternInfo &externInfo);
+
+    /// Evaluates a call to an action. This usually only happens when a table is invoked.
+    /// In other cases, actions should be inlined. When the action call is evaluated, we use
+    /// symbolic variables to pass arguments across execution boundaries. These variables persist
+    /// until the end of program execution.
+    /// @param action the action declaration that is being referenced.
+    /// @param call the actual method call containing the arguments.
+    void evalActionCall(const IR::P4Action *action, const IR::MethodCallExpression *call);
+
+    /// @returns an assignment corresponding to the direction @dir that is provided. In the case
+    /// of "out", we reset. If @targetPath is the destination we will write to. If @srcPath does
+    /// not exist, we create a new symbolic variable for it.
+    /// If @param forceTaint is true, out will set the parameter to tainted.
+    // Otherwise, the target default value is chosen.
+    /// TODO: Consolidate this into the copy_in_out extern.
+    void generateCopyIn(ExecutionState &nextState, const IR::StateVariable &targetPath,
+                        const IR::StateVariable &srcPath, cstring dir, bool forceTaint) const;
+
+    /// Takes a step to reflect a "select" expression failing to match. The default implementation
+    /// raises Continuation::Exception::NoMatch.
+    virtual void stepNoMatch(std::string traceLog, const IR::Expression *condition = nullptr);
+
+ public:
+    ExprVisitor(const ExprVisitor &) = default;
+
+    ExprVisitor(ExprVisitor &&) = default;
+
+    ExprVisitor &operator=(const ExprVisitor &) = delete;
+
+    ExprVisitor &operator=(ExprVisitor &&) = delete;
+
+    ExprVisitor(ExecutionState &state, const ProgramInfo &programInfo,
+            TestCase &testCase);
+
+    bool preorder(const IR::BoolLiteral *boolLiteral) override;
+    bool preorder(const IR::Constant *constant) override;
+    bool preorder(const IR::Member *member) override;
+    bool preorder(const IR::ArrayIndex *arr) override;
+    bool preorder(const IR::MethodCallExpression *call) override;
+    bool preorder(const IR::Mux *mux) override;
+    bool preorder(const IR::PathExpression *pathExpression) override;
+
+    /// This is a special function that handles the case where structure include P4ValueSet.
+    /// Returns an updated structure, replacing P4ValueSet with a list of P4ValueSet components,
+    /// splitting the list into separate keys if possible
+    bool preorder(const IR::P4ValueSet *valueSet) override;
+    bool preorder(const IR::Operation_Binary *binary) override;
+    bool preorder(const IR::Operation_Unary *unary) override;
+    bool preorder(const IR::SelectExpression *selectExpression) override;
+    bool preorder(const IR::BaseListExpression *listExpression) override;
+    bool preorder(const IR::StructExpression *structExpression) override;
+    bool preorder(const IR::Slice *slice) override;
+    bool preorder(const IR::P4Table *table) override;
+};
+
+}  // namespace P4::P4Tools::Symbex
+
+#endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_EXPR_VISITOR_H_ */

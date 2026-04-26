@@ -1,0 +1,65 @@
+#ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_SMALL_VISIT_H_
+#define BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_SMALL_VISIT_H_
+
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <utility>
+#include <vector>
+
+#include "backends/p4tools/common/compiler/reachability.h"
+#include "ir/node.h"
+#include "midend/coverage.h"
+
+#include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/lib/execution_state.h"
+#include "backends/p4tools/modules/symbex/core/small_step/small_step.h"
+#include "backends/p4tools/modules/symbex/p4symbex.pb.h"
+
+using symbex::TestCase;
+
+namespace P4::P4Tools::Symbex {
+
+/// The main class that implements small-step operational semantics. Delegates to implementations
+/// of AbstractVisitor.
+class SmallVisitEvaluator {
+    friend class CommandVisitor;
+    friend class ConcolicExecutor;
+
+ public:
+    using Branch = SmallStepEvaluator::Branch;
+    using Result = SmallStepEvaluator::Result;
+
+    /// Specifies how many times a guard can be violated in the interpreter until it throws an
+    /// error.
+    static constexpr uint64_t MAX_GUARD_VIOLATIONS = 100;
+    bool checkTable = false;
+    bool genRuleMode = false;
+
+ private:
+    /// Target-specific information about the P4 program being evaluated.
+    const ProgramInfo &programInfo;
+
+    /// The number of times a guard was not satisfiable.
+    uint64_t violatedGuardConditions = 0;
+
+    /// Reachability engine.
+    ReachabilityEngine *reachabilityEngine = nullptr;
+
+    using RVisitEngineType = std::pair<ReachabilityResult, std::vector<Branch> *>;
+
+    static void renginePostprocessing(ReachabilityResult &result,
+                                      std::vector<Branch> *branches);
+
+    RVisitEngineType renginePreprocessing(SmallVisitEvaluator &visitor, const ExecutionState &nextState,
+                                     const IR::Node *node);
+
+ public:
+    Result step(ExecutionState &state, TestCase& testCase);
+
+    SmallVisitEvaluator(const ProgramInfo &programInfo);
+};
+
+}  // namespace P4::P4Tools::Symbex
+
+#endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_SMALL_VISIT_H_ */

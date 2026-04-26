@@ -1,0 +1,66 @@
+#ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_CMD_VISITOR_H_
+#define BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_CMD_VISITOR_H_
+
+#include <map>
+#include <optional>
+#include <vector>
+
+#include "ir/ir.h"
+#include "lib/cstring.h"
+
+#include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/small_visit/abstract_visitor.h"
+#include "backends/p4tools/modules/symbex/lib/continuation.h"
+#include "backends/p4tools/modules/symbex/lib/execution_state.h"
+
+namespace P4::P4Tools::Symbex {
+
+/// Implements small-step operational semantics for commands.
+class CmdVisitor : public AbstractVisitor {
+ public:
+    CmdVisitor(ExecutionState &state, const ProgramInfo &programInfo,
+            TestCase &testCase);
+
+    bool preorder(const IR::AssignmentStatement *assign) override;
+    bool preorder(const IR::P4Parser *p4parser) override;
+    bool preorder(const IR::P4Control *p4control) override;
+    bool preorder(const IR::EmptyStatement *empty) override;
+    bool preorder(const IR::IfStatement *ifStatement) override;
+    bool preorder(const IR::MethodCallStatement *methodCallStatement) override;
+    bool preorder(const IR::P4Program *program) override;
+    bool preorder(const IR::ParserState *parserState) override;
+    bool preorder(const IR::BlockStatement *block) override;
+    bool preorder(const IR::ExitStatement *e) override;
+    bool preorder(const IR::SwitchStatement *switchStatement) override;
+
+ protected:
+    /// This call replaces the action labels of cases in a switch statement with the corresponding
+    /// indices. We need this to match the executed action with the appropriate label.
+    IR::SwitchStatement *replaceSwitchLabels(const IR::SwitchStatement *switchStatement);
+
+    /// Initializes the given state for entry into the given parser.
+    ///
+    /// @returns constraints for associating packet data with symbolic state.
+    const Constraint *startParser(const IR::P4Parser *parser, ExecutionState &state);
+
+    /// @see startParser. Implementations can assume that the parser has been registered, and the
+    /// cursor position has been initialized.
+    virtual std::optional<const Constraint *> startParserImpl(const IR::P4Parser *parser,
+                                                              ExecutionState &state) const = 0;
+
+    /// Initializes variables and adds constraints for the program initialization, which is target
+    /// specific.
+    virtual void initializeTargetEnvironment(ExecutionState &state, TestCase &testCase) const = 0;
+
+    /// Provides exception-handler implementations for the given parser.
+    ///
+    /// @param normalContinuation is the continuation that would be executed if the parser finishes
+    ///     normally.
+    virtual std::map<Continuation::Exception, Continuation> getExceptionHandlers(
+        const IR::P4Parser *parser, Continuation::Body normalContinuation,
+        const ExecutionState &state) const = 0;
+};
+
+}  // namespace P4::P4Tools::Symbex
+
+#endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SMALL_VISIT_CMD_VISITOR_H_ */
