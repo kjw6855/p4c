@@ -38,9 +38,9 @@ static std::string hexToByteString(const std::string &hex) {
     return retStr;
 }
 
-/**
- * SYNC API
- */
+// ============================================================
+// SYNC API — kept as backup
+// ============================================================
 
 P4FuzzGuideImpl::P4FuzzGuideImpl(std::map<std::string, ConcolicExecutor*> &coverageMap,
         const ProgramInfo &programInfo, TableCollector &tableCollector,
@@ -412,6 +412,358 @@ Status P4FuzzGuideImpl::RecordSymbex(ServerContext* context,
     rep->set_allocated_test_case(newTestCase);
 
     return Status::OK;
+}
+
+// ============================================================
+// ASYNC API — Proceed implementations
+// ============================================================
+
+// Helper used by RecordSymbexData and GenRuleSymbexData to fill coverage reply fields.
+// Mirrors the tail section common to both sync RecordSymbex and GenRuleSymbex.
+static void fillCoverageReply(TestCase *newTestCase, ConcolicExecutor *stateMgr,
+                              TableCollector &tableCollector) {
+    newTestCase->set_stmt_cov_bitmap(stateMgr->getStatementBitmapStr());
+    newTestCase->set_stmt_cov_size(stateMgr->statementBitmapSize);
+    newTestCase->set_action_cov_bitmap(stateMgr->getActionBitmapStr());
+    newTestCase->set_action_cov_size(stateMgr->actionBitmapSize);
+    newTestCase->set_table_size(tableCollector.getP4Tables().size());
+
+    auto outputPacketOpt = stateMgr->getOutputPacket();
+    newTestCase->clear_expected_output_packet();
+    if (outputPacketOpt != boost::none) {
+        auto outputPacket = outputPacketOpt.get();
+        if (outputPacket.getPort() != 0) {
+            auto *output = newTestCase->add_expected_output_packet();
+            const auto *payload = outputPacket.getEvaluatedPayload();
+            const auto *payloadMask = outputPacket.getEvaluatedPayloadMask();
+            output->set_port(outputPacket.getPort());
+            output->set_packet(hexToByteString(formatHexExpr(payload, {false, true, false})));
+            output->set_packet_mask(hexToByteString(formatHexExpr(payloadMask, {false, true, false})));
+        }
+    }
+
+    newTestCase->clear_parser_states();
+    for (auto stateName : stateMgr->visitedParserStates) {
+        newTestCase->add_parser_states(stateName);
+    }
+
+    newTestCase->clear_path_cov();
+    std::set<cstring> visitedPath;
+    for (auto blockName : stateMgr->visitedPathComponents) {
+        if (visitedPath.find(blockName) != visitedPath.end())
+            continue;
+        auto *pathCov = newTestCase->add_path_cov();
+        pathCov->set_block_name(blockName);
+        big_int totalPathNum = stateMgr->totalPaths[blockName];
+        int width;
+        for (width = 0; totalPathNum != 0; width++)
+            totalPathNum >>= 1;
+        pathCov->set_path_val(hexToByteString(
+                    formatHex(stateMgr->visitedPaths[blockName], width, {false, true, false})));
+        pathCov->set_path_size(hexToByteString(
+                    formatHex(stateMgr->totalPaths[blockName], width, {false, true, false})));
+        visitedPath.insert(blockName);
+    }
+}
+
+CallData::CallStatus HelloData::Proceed(
+        std::map<std::string, ConcolicExecutor*> & /*coverageMap*/,
+        std::string & /*devId*/, TestCase & /*testCase*/, CallStatus callStatus) {
+    if (status_ == CallData::CREATE) {
+        // ok=false here means the server is shutting down — don't re-arm.
+        if (callStatus == CallData::ERROR) { delete this; return CallData::ERROR; }
+        status_ = CallData::RET;
+        reply_.set_status(1);
+        responder_.Finish(reply_, Status::OK, this);
+        return CallData::REQ;
+    }
+    // RET: Finish event delivered (ok=true) or client disconnected (ok=false).
+    // Re-arm either way so future clients can be served.
+    new HelloData(service_, cq_);
+    delete this;
+    return CallData::FINISH;
+}
+
+CallData::CallStatus GetP4NameData::Proceed(
+        std::map<std::string, ConcolicExecutor*> & /*coverageMap*/,
+        std::string & /*devId*/, TestCase & /*testCase*/, CallStatus callStatus) {
+    if (status_ == CallData::CREATE) {
+        if (callStatus == CallData::ERROR) { delete this; return CallData::ERROR; }
+        status_ = CallData::RET;
+
+        reply_.set_entity_type(request_.entity_type());
+        switch (request_.entity_type()) {
+            case 0:
+                for (const auto *table : tableCollector_.getP4TableSet()) {
+                    reply_.add_name(table->controlPlaneName());
+                }
+                break;
+
+            case 1:
+                for (const auto *table : tableCollector_.getP4TableSet()) {
+                    if (table->controlPlaneName() == request_.target() &&
+                            table->getKey() != nullptr) {
+                        for (const auto *key : table->getKey()->keyElements) {
+                            const IR::Expression *keyExpr = key->expression;
+                            const auto *keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+                            reply_.add_name(key->getAnnotation("name"_cs)->getName());
+                            reply_.add_type(key->matchType->toString());
+                            reply_.add_bit_len(keyType->width_bits());
+                        }
+                        break;
+                    }
+                }
+                break;
+
+            case 2:
+                {
+                    auto *p4TableActions = tableCollector_.getActions(request_.target());
+                    bool hasProfile = tableCollector_.hasActionProfile(request_.target());
+                    if (p4TableActions != nullptr) {
+                        for (const auto *action : *p4TableActions) {
+                            reply_.add_name(action->checkedTo<IR::P4Action>()->controlPlaneName());
+                            reply_.add_bit_len(hasProfile ? 1 : 0);
+                        }
+                    }
+                    break;
+                }
+
+            case 3:
+                for (const auto *action : tableCollector_.getActionNodes()) {
+                    const auto *p4Action = action->checkedTo<IR::P4Action>();
+                    if (p4Action->controlPlaneName() == request_.target()) {
+                        for (const auto *param : *p4Action->parameters) {
+                            const auto *paramType = param->type->checkedTo<IR::Type_Bits>();
+                            reply_.add_name(param->controlPlaneName());
+                            reply_.add_bit_len(paramType->width_bits());
+                        }
+                        break;
+                    }
+                }
+                break;
+
+            default:
+                break;
+        }
+
+        responder_.Finish(reply_, Status::OK, this);
+        return CallData::REQ;
+    }
+    new GetP4NameData(service_, cq_, tableCollector_);
+    delete this;
+    return CallData::FINISH;
+}
+
+CallData::CallStatus GetP4CoverageData::Proceed(
+        std::map<std::string, ConcolicExecutor*> &coverageMap,
+        std::string &devId, TestCase & /*testCase*/, CallStatus callStatus) {
+    if (status_ == CallData::CREATE) {
+        if (callStatus == CallData::ERROR) { delete this; return CallData::ERROR; }
+        status_ = CallData::RET;
+
+        devId = request_.device_id();
+        auto allNodes = programInfo_.getCoverableNodes();
+        std::cout << "Get P4 Coverage of device: " << devId << std::endl;
+
+        auto *newTestCase = new TestCase(request_.test_case());
+        std::string stmtBitmap, actionBitmap;
+        int stmtBitmapSize, actionBitmapSize;
+        if (coverageMap.count(devId) == 0) {
+            stmtBitmap = "";
+            stmtBitmapSize = allNodes.size();
+            actionBitmap = "";
+            actionBitmapSize = 0;
+        } else {
+            auto *stateMgr = coverageMap.at(devId);
+            stmtBitmap = stateMgr->getStatementBitmapStr();
+            stmtBitmapSize = stateMgr->statementBitmapSize;
+            actionBitmap = stateMgr->getActionBitmapStr();
+            actionBitmapSize = stateMgr->actionBitmapSize;
+        }
+
+        newTestCase->set_stmt_cov_bitmap(stmtBitmap);
+        newTestCase->set_stmt_cov_size(stmtBitmapSize);
+        newTestCase->set_action_cov_bitmap(actionBitmap);
+        newTestCase->set_action_cov_size(actionBitmapSize);
+        newTestCase->set_table_size(tableCollector_.getP4Tables().size());
+        reply_.set_allocated_test_case(newTestCase);
+
+        responder_.Finish(reply_, Status::OK, this);
+        return CallData::REQ;
+    }
+    new GetP4CoverageData(service_, cq_, programInfo_, tableCollector_);
+    delete this;
+    return CallData::FINISH;
+}
+
+CallData::CallStatus GetP4StatementData::Proceed(
+        std::map<std::string, ConcolicExecutor*> & /*coverageMap*/,
+        std::string & /*devId*/, TestCase & /*testCase*/, CallStatus callStatus) {
+    if (status_ == CallData::CREATE) {
+        if (callStatus == CallData::ERROR) { delete this; return CallData::ERROR; }
+        status_ = CallData::RET;
+
+        auto &allNodes = programInfo_.getCoverableNodes();
+        int i = 1, idx = request_.idx();
+        for (const auto *node : allNodes) {
+            if (i++ != idx)
+                continue;
+            const auto &srcInfo = node->getSourceInfo();
+            auto sourceLine = srcInfo.toPosition().sourceLine;
+            std::stringstream ss;
+            ss << srcInfo.getSourceFile() << "\\" << sourceLine << ": " << *node;
+            reply_.set_statement(ss.str());
+            break;
+        }
+
+        responder_.Finish(reply_, Status::OK, this);
+        return CallData::REQ;
+    }
+    new GetP4StatementData(service_, cq_, programInfo_, tableCollector_);
+    delete this;
+    return CallData::FINISH;
+}
+
+CallData::CallStatus RecordSymbexData::Proceed(
+        std::map<std::string, ConcolicExecutor*> &coverageMap,
+        std::string &devId, TestCase & /*testCase*/, CallStatus callStatus) {
+    if (status_ == CallData::CREATE) {
+        if (callStatus == CallData::ERROR) { delete this; return CallData::ERROR; }
+        status_ = CallData::RET;
+
+        devId = request_.device_id();
+        std::cout << "Record P4 Coverage of device: " << devId << std::endl;
+
+        auto tc = request_.test_case();
+        tc.set_unsupported(0);
+        for (auto &entity : *tc.mutable_entities()) {
+            if (!entity.has_table_entry())
+                continue;
+            entity.mutable_table_entry()->set_is_valid_entry(0);
+            entity.mutable_table_entry()->set_matched_idx(-1);
+        }
+
+        if (coverageMap.count(devId) == 0) {
+            coverageMap.insert(std::make_pair(devId,
+                        new ConcolicExecutor(programInfo_, tableCollector_, top_, refMap_, typeMap_)));
+        }
+
+        auto *stateMgr = coverageMap.at(devId);
+        Status grpcStatus = Status::OK;
+        try {
+            stateMgr->setGenRuleMode(false);
+            stateMgr->run(tc);
+
+        } catch (const Util::CompilerBug &e) {
+            std::cerr << "Internal compiler error: " << e.what() << std::endl;
+            std::cerr << "Please submit a bug report with your code." << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status::CANCELLED;
+
+        } catch (const Util::CompilationError &e) {
+            std::cerr << "Compilation error: " << e.what() << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status::CANCELLED;
+
+        } catch (SymbexUnimplemented &e) {
+            std::cerr << "Unimplemented error: " << e.what() << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status(StatusCode::UNIMPLEMENTED, "unimplemented");
+
+        } catch (const std::exception &e) {
+            std::cerr << "Internal error: " << e.what() << std::endl;
+            std::cerr << "Please submit a bug report with your code." << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status::CANCELLED;
+        }
+
+        if (grpcStatus.ok()) {
+            auto *newTestCase = new TestCase(tc);
+            fillCoverageReply(newTestCase, stateMgr, tableCollector_);
+            reply_.set_allocated_test_case(newTestCase);
+        }
+
+        responder_.Finish(reply_, grpcStatus, this);
+        return CallData::REQ;
+    }
+    // RET: re-arm only if not shutting down
+    if (!state_->shutdown_requested) {
+        new RecordSymbexData(service_, cq_, programInfo_, tableCollector_,
+                             top_, refMap_, typeMap_, state_);
+    }
+    delete this;
+    return CallData::FINISH;
+}
+
+CallData::CallStatus GenRuleSymbexData::Proceed(
+        std::map<std::string, ConcolicExecutor*> &coverageMap,
+        std::string &devId, TestCase & /*testCase*/, CallStatus callStatus) {
+    if (status_ == CallData::CREATE) {
+        if (callStatus == CallData::ERROR) { delete this; return CallData::ERROR; }
+        status_ = CallData::RET;
+
+        devId = request_.device_id();
+        std::cout << "Record P4 Coverage of device: " << devId << std::endl;
+
+        auto tc = request_.test_case();
+        tc.set_unsupported(0);
+        for (auto &entity : *tc.mutable_entities()) {
+            if (!entity.has_table_entry())
+                continue;
+            entity.mutable_table_entry()->set_is_valid_entry(0);
+            entity.mutable_table_entry()->set_matched_idx(-1);
+        }
+
+        if (coverageMap.count(devId) == 0) {
+            coverageMap.insert(std::make_pair(devId,
+                        new ConcolicExecutor(programInfo_, tableCollector_, top_, refMap_, typeMap_)));
+        }
+
+        auto *stateMgr = coverageMap.at(devId);
+        Status grpcStatus = Status::OK;
+        try {
+            stateMgr->setGenRuleMode(true);
+            stateMgr->run(tc);
+
+        } catch (const Util::CompilerBug &e) {
+            std::cerr << "Internal compiler error: " << e.what() << std::endl;
+            std::cerr << "Please submit a bug report with your code." << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status::CANCELLED;
+
+        } catch (const Util::CompilationError &e) {
+            std::cerr << "Compilation error: " << e.what() << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status::CANCELLED;
+
+        } catch (SymbexUnimplemented &e) {
+            std::cerr << "Unimplemented error: " << e.what() << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status(StatusCode::UNIMPLEMENTED, "unimplemented");
+
+        } catch (const std::exception &e) {
+            std::cerr << "Internal error: " << e.what() << std::endl;
+            std::cerr << "Please submit a bug report with your code." << std::endl;
+            state_->shutdown_requested = true;
+            grpcStatus = Status::CANCELLED;
+        }
+
+        if (grpcStatus.ok()) {
+            auto *newTestCase = new TestCase(tc);
+            fillCoverageReply(newTestCase, stateMgr, tableCollector_);
+            reply_.set_allocated_test_case(newTestCase);
+        }
+
+        responder_.Finish(reply_, grpcStatus, this);
+        return CallData::REQ;
+    }
+    // RET: re-arm only if not shutting down
+    if (!state_->shutdown_requested) {
+        new GenRuleSymbexData(service_, cq_, programInfo_, tableCollector_,
+                              top_, refMap_, typeMap_, state_);
+    }
+    delete this;
+    return CallData::FINISH;
 }
 
 } // namespace P4::P4Tools::Symbex

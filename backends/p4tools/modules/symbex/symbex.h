@@ -31,6 +31,10 @@ class Symbex : public AbstractP4cTool<SymbexOptions> {
             const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
             int grpcPort);
 
+    void runAsyncServer(const ProgramInfo *programInfo, TableCollector &tableCollector,
+            const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            int grpcPort);
+
  public:
     virtual ~Symbex() = default;
 

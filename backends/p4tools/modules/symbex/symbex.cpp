@@ -265,6 +265,55 @@ void Symbex::runServer(const ProgramInfo *programInfo, TableCollector &tableColl
     std::cout << "Shutdown server gracefully" << std::endl;
 }
 
+void Symbex::runAsyncServer(const ProgramInfo *programInfo, TableCollector &tableCollector,
+        const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+        int grpcPort) {
+    std::string server_address("0.0.0.0:");
+    server_address += std::to_string(grpcPort);
+
+    ServerState state;
+    std::map<std::string, ConcolicExecutor*> coverageMap;
+
+    P4FuzzGuide::AsyncService asyncService;
+    ServerBuilder builder;
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.RegisterService(&asyncService);
+    auto cq = builder.AddCompletionQueue();
+    server = builder.BuildAndStart();
+    std::cout << "Server listening on " << server_address << std::endl;
+
+    // Seed one handler per RPC type — all will be processed on this (main) thread,
+    // avoiding the BDW GC / TLS DTV collection issue that affects the sync thread pool.
+    new HelloData(&asyncService, cq.get());
+    new GetP4NameData(&asyncService, cq.get(), tableCollector);
+    new GetP4CoverageData(&asyncService, cq.get(), *programInfo, tableCollector);
+    new GetP4StatementData(&asyncService, cq.get(), *programInfo, tableCollector);
+    new RecordSymbexData(&asyncService, cq.get(), *programInfo, tableCollector,
+                         top, refMap, typeMap, &state);
+    new GenRuleSymbexData(&asyncService, cq.get(), *programInfo, tableCollector,
+                          top, refMap, typeMap, &state);
+
+    void *tag;
+    bool ok;
+    while (cq->Next(&tag, &ok)) {
+        std::string devId;
+        TestCase testCase;
+        static_cast<CallData*>(tag)->Proceed(coverageMap, devId, testCase,
+                                              ok ? CallData::REQ : CallData::ERROR);
+        {
+            std::lock_guard<std::mutex> lock(state.shutdown_mu);
+            if (state.shutdown_requested) break;
+        }
+    }
+
+    server->Shutdown();
+    cq->Shutdown();
+    // Drain remaining cancellation events before destroying the queue
+    while (cq->Next(&tag, &ok)) {}
+    server->Wait();
+    std::cout << "Shutdown server gracefully" << std::endl;
+}
+
 void Symbex::registerTarget() {
     // Register all available Symbex targets.
     // These are discovered by CMAKE, which fills out the register.h.in file.
@@ -316,7 +365,7 @@ int Symbex::mainImpl(const CompilerResult &compilerResult) {
                     "\\" << sourceLine << ": " << *action);
         }
 
-        runServer(programInfo, tableCollector, top,
+        runAsyncServer(programInfo, tableCollector, top,
                 &midEnd.refMap, &midEnd.typeMap, symbexOptions.grpcPort);
         return EXIT_SUCCESS;
     }

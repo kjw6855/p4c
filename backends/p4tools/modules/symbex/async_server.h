@@ -1,7 +1,6 @@
 #ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_ASYNC_SERVER_H_
 #define BACKENDS_P4TOOLS_MODULES_SYMBEX_ASYNC_SERVER_H_
 
-//#include <grpc/grpc.h>
 #include <mutex>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/server_credentials.h>
@@ -34,11 +33,14 @@ using symbex::P4StatementRequest;
 using symbex::P4StatementReply;
 using symbex::TestCase;
 
-// Define a shared state struct for communication
 struct ServerState {
     std::mutex shutdown_mu;
     bool shutdown_requested = false;
 };
+
+// ============================================================
+// SYNC API — kept as backup
+// ============================================================
 
 class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
  public:
@@ -81,9 +83,11 @@ class P4FuzzGuideImpl final : public P4FuzzGuide::Service {
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
     ServerState *state;
-
-    //std::string hexToByteString(const std::string &hex);
 };
+
+// ============================================================
+// ASYNC API
+// ============================================================
 
 class CallData {
  public:
@@ -91,16 +95,84 @@ class CallData {
 
     virtual CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
             std::string &devId, TestCase &testCase, CallStatus callStatus) = 0;
+
+    virtual ~CallData() = default;
+};
+
+class HelloData : public CallData {
+ public:
+    explicit HelloData(P4FuzzGuide::AsyncService *service, ServerCompletionQueue *cq)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE) {
+        service_->RequestHello(&ctx_, &request_, &responder_, cq_, cq_, this);
+    }
+
+    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
+
+ private:
+    P4FuzzGuide::AsyncService *service_;
+    ServerCompletionQueue *cq_;
+    ServerAsyncResponseWriter<HealthCheckResponse> responder_;
+    CallStatus status_;
+    ServerContext ctx_;
+    HealthCheckRequest request_;
+    HealthCheckResponse reply_;
+};
+
+class GetP4NameData : public CallData {
+ public:
+    explicit GetP4NameData(P4FuzzGuide::AsyncService *service, ServerCompletionQueue *cq,
+            TableCollector &tableCollector)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE),
+      tableCollector_(tableCollector) {
+        service_->RequestGetP4Name(&ctx_, &request_, &responder_, cq_, cq_, this);
+    }
+
+    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
+
+ private:
+    P4FuzzGuide::AsyncService *service_;
+    ServerCompletionQueue *cq_;
+    ServerAsyncResponseWriter<P4NameReply> responder_;
+    CallStatus status_;
+    TableCollector &tableCollector_;
+    ServerContext ctx_;
+    P4NameRequest request_;
+    P4NameReply reply_;
+};
+
+class GetP4CoverageData : public CallData {
+ public:
+    explicit GetP4CoverageData(P4FuzzGuide::AsyncService *service, ServerCompletionQueue *cq,
+            const ProgramInfo &programInfo, TableCollector &tableCollector)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE),
+      programInfo_(programInfo), tableCollector_(tableCollector) {
+        service_->RequestGetP4Coverage(&ctx_, &request_, &responder_, cq_, cq_, this);
+    }
+
+    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
+            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
+
+ private:
+    P4FuzzGuide::AsyncService *service_;
+    ServerCompletionQueue *cq_;
+    ServerAsyncResponseWriter<P4CoverageReply> responder_;
+    CallStatus status_;
+    const ProgramInfo &programInfo_;
+    TableCollector &tableCollector_;
+    ServerContext ctx_;
+    P4CoverageRequest request_;
+    P4CoverageReply reply_;
 };
 
 class GetP4StatementData : public CallData {
  public:
-    explicit GetP4StatementData(P4FuzzGuide::AsyncService *service,
-            ServerCompletionQueue *cq, const ProgramInfo &programInfo,
-            TableCollector &tableCollector)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo), tableCollector_(tableCollector) {
-        service_->RequestGetP4Statement(&ctx_, &request_, &responder_,
-                cq_, cq_, this);
+    explicit GetP4StatementData(P4FuzzGuide::AsyncService *service, ServerCompletionQueue *cq,
+            const ProgramInfo &programInfo, TableCollector &tableCollector)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE),
+      programInfo_(programInfo), tableCollector_(tableCollector) {
+        service_->RequestGetP4Statement(&ctx_, &request_, &responder_, cq_, cq_, this);
     }
 
     CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
@@ -110,47 +182,24 @@ class GetP4StatementData : public CallData {
     P4FuzzGuide::AsyncService *service_;
     ServerCompletionQueue *cq_;
     ServerAsyncResponseWriter<P4StatementReply> responder_;
-    CallStatus status_;  // The current serving state.
-    const ProgramInfo& programInfo_;
+    CallStatus status_;
+    const ProgramInfo &programInfo_;
     TableCollector &tableCollector_;
     ServerContext ctx_;
     P4StatementRequest request_;
     P4StatementReply reply_;
 };
 
-class GetP4CoverageData : public CallData {
- public:
-    explicit GetP4CoverageData(P4FuzzGuide::AsyncService *service,
-            ServerCompletionQueue *cq, const ProgramInfo &programInfo,
-            TableCollector &tableCollector)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo), tableCollector_(tableCollector) {
-        service_->RequestGetP4Coverage(&ctx_, &request_, &responder_,
-                cq_, cq_, this);
-    }
-
-    CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
-            std::string &devId, TestCase &testCase, CallStatus callStatus) override;
-
- private:
-    P4FuzzGuide::AsyncService *service_;
-    ServerCompletionQueue *cq_;
-    ServerAsyncResponseWriter<P4CoverageReply> responder_;
-    CallStatus status_;  // The current serving state.
-    const ProgramInfo& programInfo_;
-    TableCollector &tableCollector_;
-    ServerContext ctx_;
-    P4CoverageRequest request_;
-    P4CoverageReply reply_;
-};
-
 class RecordSymbexData : public CallData {
  public:
-    explicit RecordSymbexData(P4FuzzGuide::AsyncService *service,
-            ServerCompletionQueue *cq, const ProgramInfo &programInfo,
-            TableCollector &tableCollector)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE), programInfo_(programInfo), tableCollector_(tableCollector) {
-        service_->RequestRecordSymbex(&ctx_, &request_, &responder_,
-                cq_, cq_, this);
+    explicit RecordSymbexData(P4FuzzGuide::AsyncService *service, ServerCompletionQueue *cq,
+            const ProgramInfo &programInfo, TableCollector &tableCollector,
+            const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            ServerState *state)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE),
+      programInfo_(programInfo), tableCollector_(tableCollector),
+      top_(top), refMap_(refMap), typeMap_(typeMap), state_(state) {
+        service_->RequestRecordSymbex(&ctx_, &request_, &responder_, cq_, cq_, this);
     }
 
     CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
@@ -160,38 +209,49 @@ class RecordSymbexData : public CallData {
     P4FuzzGuide::AsyncService *service_;
     ServerCompletionQueue *cq_;
     ServerAsyncResponseWriter<P4CoverageReply> responder_;
-    CallStatus status_;  // The current serving state.
-    const ProgramInfo& programInfo_;
+    CallStatus status_;
+    const ProgramInfo &programInfo_;
     TableCollector &tableCollector_;
+    const IR::ToplevelBlock *top_;
+    P4::ReferenceMap *refMap_;
+    P4::TypeMap *typeMap_;
+    ServerState *state_;
     ServerContext ctx_;
     P4CoverageRequest request_;
     P4CoverageReply reply_;
 };
 
-class HelloData : public CallData {
+class GenRuleSymbexData : public CallData {
  public:
-    explicit HelloData(P4FuzzGuide::AsyncService *service,
-            ServerCompletionQueue *cq)
-    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE) {
-        service_->RequestHello(&ctx_, &request_, &responder_,
-                cq_, cq_, this);
+    explicit GenRuleSymbexData(P4FuzzGuide::AsyncService *service, ServerCompletionQueue *cq,
+            const ProgramInfo &programInfo, TableCollector &tableCollector,
+            const IR::ToplevelBlock *top, P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
+            ServerState *state)
+    : service_(service), cq_(cq), responder_(&ctx_), status_(CallData::CREATE),
+      programInfo_(programInfo), tableCollector_(tableCollector),
+      top_(top), refMap_(refMap), typeMap_(typeMap), state_(state) {
+        service_->RequestGenRuleSymbex(&ctx_, &request_, &responder_, cq_, cq_, this);
     }
 
     CallStatus Proceed(std::map<std::string, ConcolicExecutor*> &coverageMap,
             std::string &devId, TestCase &testCase, CallStatus callStatus) override;
 
-
  private:
     P4FuzzGuide::AsyncService *service_;
     ServerCompletionQueue *cq_;
-    ServerAsyncResponseWriter<HealthCheckResponse> responder_;
-    CallStatus status_;  // The current serving state.
+    ServerAsyncResponseWriter<P4CoverageReply> responder_;
+    CallStatus status_;
+    const ProgramInfo &programInfo_;
+    TableCollector &tableCollector_;
+    const IR::ToplevelBlock *top_;
+    P4::ReferenceMap *refMap_;
+    P4::TypeMap *typeMap_;
+    ServerState *state_;
     ServerContext ctx_;
-    HealthCheckRequest request_;
-    HealthCheckResponse reply_;
+    P4CoverageRequest request_;
+    P4CoverageReply reply_;
 };
 
 } // namespace P4::P4Tools::Symbex
 
 #endif /*BACKENDS_P4TOOLS_MODULES_SYMBEX_ASYNC_SERVER_H_ */
-
