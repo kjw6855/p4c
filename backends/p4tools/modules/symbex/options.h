@@ -113,6 +113,9 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Defaults to the name of the input program, if provided.
     std::optional<cstring> testBaseName;
 
+    /// Indicates whether to build a dataflow dependency graph by using state_dependency module.
+    bool stateDep = false;
+
  protected:
     bool validateOptions() const override;
 };

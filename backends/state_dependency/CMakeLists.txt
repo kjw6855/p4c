@@ -1,11 +1,11 @@
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/version.h" @ONLY)
 
-set (STATE_DEPENDENCY_SRCS
-  state_dependency.cpp
+# Analysis sources: no main(), no options — usable as a library by other tools.
+set (STATE_DEPENDENCY_LIB_SRCS
+  analysis.cpp
   controls.cpp
   parsers.cpp
-  options.cpp
   graphs.cpp
   graph_visitor.cpp
   dependency_graph.cpp
@@ -18,7 +18,8 @@ set (STATE_DEPENDENCY_SRCS
   utils.cpp
 )
 
-set (STATE_DEPENDENCY_HDRS
+set (STATE_DEPENDENCY_LIB_HDRS
+  analysis.h
   state_dependency.h
   controls.h
   parsers.h
@@ -35,8 +36,19 @@ set (STATE_DEPENDENCY_HDRS
   utils.h
 )
 
-add_executable(p4c_state_dependency ${STATE_DEPENDENCY_SRCS} ${EXTENSION_P4_14_CONV_SOURCES})
-target_link_libraries(p4c_state_dependency ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
+# Linkable library for external consumers (e.g. p4tools/symbex).
+add_library(p4csd-lib STATIC ${STATE_DEPENDENCY_LIB_SRCS})
+target_link_libraries(p4csd-lib ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
+add_dependencies(p4csd-lib ir-generated frontend)
+target_include_directories(p4csd-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Standalone binary keeps its own main() + options.
+add_executable(p4c_state_dependency
+  state_dependency.cpp
+  options.cpp
+  ${EXTENSION_P4_14_CONV_SOURCES}
+)
+target_link_libraries(p4c_state_dependency p4csd-lib ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
 add_dependencies(p4c_state_dependency ir-generated frontend)
 
 install(TARGETS p4c_state_dependency

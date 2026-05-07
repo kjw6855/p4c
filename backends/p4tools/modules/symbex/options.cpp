@@ -495,6 +495,14 @@ SymbexOptions::SymbexOptions()
             return true;
         },
         R"(Measure path)");
+
+    registerOption(
+        "--state-dep", nullptr,
+        [this](const char *) {
+            stateDep = true;
+            return true;
+        },
+        "Build a dataflow dependency graph by using the state_dependency module.");
 }
 
 bool SymbexOptions::validateOptions() const {
