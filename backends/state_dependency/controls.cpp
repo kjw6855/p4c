@@ -183,7 +183,12 @@ bool ControlGraphs::preorder(const IR::IfStatement *statement) {
     auto v = add_and_connect_vertex(cstring(sstream), VertexFlags::CONDITION, statement);
     auto prev_cur_v = cur_v;
     cur_v = v;
-    if (visitCond) visit(statement->condition);
+    if (visitCond) {
+        auto oldState = state;
+        state = READ_ONLY;
+        visit(statement->condition);
+        state = oldState;
+    }
     cur_v = prev_cur_v;
 
     Parents new_parents;
@@ -251,7 +256,13 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
         }
     }
 
-    if (instance->is<P4::ApplyMethod>()) {
+    if (instance->is<P4::ActionCall>()) {
+        auto ac = instance->to<P4::ActionCall>();
+        auto actNode = ac->action->to<IR::P4Action>();
+        auto actionName = actNode->getName();
+        visit_call(actionName, actNode, VertexFlags::ACTION);
+
+    } else if (instance->is<P4::ApplyMethod>()) {
         auto am = instance->to<P4::ApplyMethod>();
         if (auto table = am->object->to<IR::P4Table>()) {
             auto tableName = table->getName();

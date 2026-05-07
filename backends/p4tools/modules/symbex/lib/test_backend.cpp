@@ -76,6 +76,36 @@ bool TestBackEnd::run(const FinalState &state) {
             printInfo("AssertionMode: Found an input that triggers an assertion.");
         }
 
+        // If --state-dep is active, only emit tests whose execution path exercises at least
+        // one node that belongs to an a2s2v, h2s2v, or h2s2c dependency chain.
+        // If the program has no such chains, generate nothing.
+        if (symbexOptions.stateDep) {
+            const auto *sd = getProgramInfo().getCompilerResult().getStateDep();
+            if (sd == nullptr || (sd->depChainNodes.empty() && sd->depChainNodeIds.none())) {
+                return needsToTerminate(testCount);
+            }
+            const auto &visited = executionState->getVisited();
+            bool followsDep = false;
+            for (const auto *node : visited) {
+                // Fast path: exact pointer match (holds when no midend pass cloned the node).
+                if (sd->depChainNodes.count(node) != 0U) {
+                    followsDep = true;
+                    break;
+                }
+                // Fallback: clone_id match.  clone_id is preserved through any chain of
+                // Transform clones, so it is stable across independent midend runs that
+                // both start from the same post-frontend program.
+                auto cloneId = static_cast<size_t>(node->clone_id);
+                if (cloneId < sd->depChainNodeIds.size() && sd->depChainNodeIds.test(cloneId)) {
+                    followsDep = true;
+                    break;
+                }
+            }
+            if (!followsDep) {
+                return needsToTerminate(testCount);
+            }
+        }
+
         // For long-running tests periodically reset the solver state to free up memory.
         if (testCount != 0 && testCount % RESET_THRESHOLD == 0) {
             auto &solver = state.getSolver();

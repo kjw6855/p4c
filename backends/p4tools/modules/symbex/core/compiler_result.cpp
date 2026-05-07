@@ -9,12 +9,10 @@ namespace P4::P4Tools::Symbex {
 
 SymbexCompilerResult::SymbexCompilerResult(CompilerResult compilerResult,
                                              P4::Coverage::CoverageSet coverableNodes,
-                                             const NodesCallGraph *callGraph,
-                                             const P4StateDependency::StateDependencyResult *stateDepResult)
+                                             const NodesCallGraph *callGraph)
     : CompilerResult(std::move(compilerResult)),
       coverableNodes(std::move(coverableNodes)),
-      callGraph(callGraph),
-      stateDepResult(stateDepResult) {}
+      callGraph(callGraph) {}
 
 const NodesCallGraph &SymbexCompilerResult::getCallGraph() const {
     BUG_CHECK(callGraph != nullptr, "The call graph has not been initialized.");

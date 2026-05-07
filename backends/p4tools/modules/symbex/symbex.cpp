@@ -213,6 +213,16 @@ std::optional<AbstractTestList> generateTestsImpl(std::optional<std::string_view
 
     const auto *symbexCompilerResult =
         compilerResultOpt.value().get().checkedTo<SymbexCompilerResult>();
+
+    if (symbexOptions.stateDep) {
+        const auto *program = &compilerResultOpt.value().get().getProgram();
+        bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
+        auto *stateDep = new P4StateDependency::StateDependencyResult(
+            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1));
+        if (::P4::errorCount() > 0) return std::nullopt;
+        symbexCompilerResult->setStateDep(stateDep);
+    }
+
     const auto *programInfo = SymbexTarget::produceProgramInfo(*symbexCompilerResult);
     if (programInfo == nullptr || errorCount() > 0) {
         error("Symbex encountered errors during preprocessing.");
@@ -321,15 +331,27 @@ void Symbex::registerTarget() {
 }
 
 int Symbex::mainImpl(const CompilerResult &compilerResult) {
-    // Make sure the input result corresponds to the result we expect.
+    const auto &symbexOptions = SymbexOptions::get();
+
+    // Type-check early so we can inject stateDep before produceProgramInfo allocates
+    // coverage sets — this ensures the IFDS heap (freed inside runStateDependencyAnalysis
+    // via GC_gcollect_and_unmap) is returned to the OS before symbex begins.
     const auto *symbexCompilerResult = compilerResult.checkedTo<SymbexCompilerResult>();
+
+    if (symbexOptions.stateDep) {
+        const auto *program = &compilerResult.getProgram();
+        bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
+        auto *stateDep = new P4StateDependency::StateDependencyResult(
+            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1));
+        if (::P4::errorCount() > 0) return 1;
+        symbexCompilerResult->setStateDep(stateDep);
+    }
 
     const auto *programInfo = SymbexTarget::produceProgramInfo(*symbexCompilerResult);
     if (programInfo == nullptr || errorCount() > 0) {
         error("Symbex encountered errors during preprocessing.");
         return EXIT_FAILURE;
     }
-    const auto &symbexOptions = SymbexOptions::get();
 
     if (symbexOptions.interactive) {
         auto &options = P4CContext::get().options();
@@ -367,43 +389,6 @@ int Symbex::mainImpl(const CompilerResult &compilerResult) {
 
         runAsyncServer(programInfo, tableCollector, top,
                 &midEnd.refMap, &midEnd.typeMap, symbexOptions.grpcPort);
-        return EXIT_SUCCESS;
-    }
-
-    if (symbexOptions.pathSelectionPolicy == PathSelectionPolicy::TestCase) {
-        auto &options = P4CContext::get().options();
-        GraphMidEnd midEnd(options);
-        midEnd.addDebugHook(options.getDebugHook());
-        const IR::ToplevelBlock *top = nullptr;
-        const auto *program = &programInfo->getP4Program();
-        try {
-            top = midEnd.process(program);
-        } catch (const std::exception &bug) {
-            std::cerr << bug.what() << std::endl;
-            return 1;
-        }
-
-        auto tableCollector = TableCollector();
-        program->apply(tableCollector);
-        auto *concExec = new ConcolicExecutor(*programInfo, tableCollector, top,
-                &midEnd.refMap, &midEnd.typeMap);
-        TestCase *testCase = new TestCase();
-        concExec->setGenRuleMode(false);
-        int fd = open("/home/jwkim/Workspace-remote/symbex_out/latest/basic2/basic._4.proto", O_RDONLY);
-
-        if (fd < 0) {
-            std::cerr << " Error opening the file " << std::endl;
-        }
-
-        google::protobuf::io::FileInputStream fileInput(fd);
-        fileInput.SetCloseOnDelete( true );
-
-        if (!google::protobuf::TextFormat::Parse(&fileInput, testCase)) {
-            std::cerr << std::endl << "Failed to parse file!" << std::endl;
-        } else {
-            std::cerr << "Read Input File" << std::endl;
-        }
-        concExec->run(*testCase);
         return EXIT_SUCCESS;
     }
 

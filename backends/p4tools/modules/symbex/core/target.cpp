@@ -5,15 +5,12 @@
 #include "backends/p4tools/common/compiler/compiler_target.h"
 #include "backends/p4tools/common/compiler/context.h"
 #include "backends/p4tools/common/core/target.h"
-#include "backends/state_dependency/analysis.h"
-#include "frontends/p4/evaluator/evaluator.h"
 #include "ir/declaration.h"
 #include "ir/ir.h"
 #include "ir/node.h"
 #include "lib/cstring.h"
 #include "lib/enumerator.h"
 #include "lib/exceptions.h"
-#include "midend/midEndLast.h"
 
 #include "backends/p4tools/modules/symbex/core/compiler_result.h"
 #include "backends/p4tools/modules/symbex/core/program_info.h"
@@ -83,11 +80,8 @@ CompilerResultOrError SymbexTarget::runCompilerImpl(const CompilerOptions &optio
         return std::nullopt;
     }
 
-    // Inline midend to capture refMap/typeMap for optional state_dependency analysis.
-    auto midEnd = mkMidEnd(options);
-    midEnd.addPasses({new P4::MidEndLast()});
-    midEnd.addDebugHook(options.getDebugHook(), true);
-    program = program->apply(midEnd);
+    // Run the full midend (required by pna/ebpf targets that rely on this base implementation).
+    program = runMidEnd(options, program);
     if (program == nullptr) {
         return std::nullopt;
     }
@@ -104,22 +98,7 @@ CompilerResultOrError SymbexTarget::runCompilerImpl(const CompilerOptions &optio
     auto coverage = P4::Coverage::CollectNodes(SymbexOptions::get().coverageOptions);
     program->apply(coverage);
 
-    // Run state dependency analysis if --state-dep is enabled.
-    P4StateDependency::StateDependencyResult *stateDep = nullptr;
-    if (SymbexOptions::get().stateDep) {
-        auto *evaluator = new P4::EvaluatorPass(midEnd.getRefMap(), midEnd.getTypeMap());
-        program->apply(*evaluator);
-        const auto *toplevel = evaluator->getToplevelBlock();
-        if (toplevel != nullptr) {
-            stateDep = new P4StateDependency::StateDependencyResult(
-                P4StateDependency::runStateDependencyAnalysis(
-                    program, midEnd.getRefMap(), midEnd.getTypeMap(), toplevel,
-                    cstring(spec.archName)));
-        }
-    }
-
-    return {*new SymbexCompilerResult(CompilerResult(*program), coverage.getCoverableNodes(), dcg,
-                                      stateDep)};
+    return {*new SymbexCompilerResult(CompilerResult(*program), coverage.getCoverableNodes(), dcg)};
 }
 
 ICompileContext *SymbexTarget::makeContext() const {

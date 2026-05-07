@@ -2,6 +2,10 @@
 
 #include <boost/graph/graph_traits.hpp>
 
+#ifdef ENABLE_GC
+#include <gc/gc.h>
+#endif
+
 #include "backends/state_dependency/act_param_to_stateful.h"
 #include "backends/state_dependency/controls.h"
 #include "backends/state_dependency/dependency_graph.h"
@@ -10,6 +14,10 @@
 #include "backends/state_dependency/stateful_to_key.h"
 #include "backends/state_dependency/supergraphs.h"
 #include "backends/state_dependency/utils.h"
+#include "frontends/p4/evaluator/evaluator.h"
+#include "frontends/p4/removeParameters.h"
+#include "frontends/p4/typeChecking/typeChecker.h"
+#include "ir/pass_manager.h"
 #include "lib/hvec_map.h"
 #include "lib/log.h"
 #include "lib/timer.h"
@@ -111,8 +119,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     stateVars.clear();
     depEdgeMaps.clear();
 
-    /* II. H2S2V: header variable → stateful object → packet field */
+    /* II. H2S2(V/C) */
+    /* II-1. H2S2V: header variable → stateful object → packet field */
     auto *h2s2vGraphs = new DependencyGraphs(numGraphs);
+    auto *h2s2cGraphs = new DependencyGraphs(numGraphs);
     auto *hdChecker = new HdrToStateful(refMap, typeMap,
             &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL);
     {
@@ -126,8 +136,11 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             stateVars[graphName] = collect_state_vars_from_dep_edges_src(
                     g, sg.graphProps[i], refMap, typeMap, htsEdgeMap, stateVarMap, true);
             depEdgeMaps[graphName] = htsEdgeMap;
-            h2s2vGraphs->add_dependencies_from_map(i, g, convert_dep_edges(htsEdgeMap));
+            auto sthEdgeMap = convert_dep_edges(htsEdgeMap);
+            h2s2vGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
             h2s2vGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            h2s2cGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
+            h2s2cGraphs->add_dependencies_from_map(i, g, stateVarMap);
             for (const auto &ve : htsEdgeMap)
                 for (const auto &dst : ve.second)
                     LOG2(Graphs::dump_var_edge(g, {ve.first, dst}));
@@ -164,7 +177,39 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     }
     result.h2s2vGraphs = h2s2vGraphs;
 
-    /* III. S2V: stateful object → key/header (binary-only; only runs when graphsDir is set) */
+    /* II-2. H2S2C: header variable → stateful object → conditions */
+    {
+        Util::ScopedTimer hdrSoToCondTimer("HDR->SO->COND");
+        StatefulToCond h2s2cPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "H2S2C"_cs);
+        program->apply(h2s2cPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            h2s2cGraphs->add_dependencies_from_map(i, g,
+                    h2s2cPdChecker.getFoundDepEdges(graphName), true);
+        }
+    }
+    {
+        Util::ScopedTimer hdrSoToCondDrawTimer("HDR->SO->COND drawing");
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (h2s2cGraphs->leaves[i].empty()) continue;
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            if (!graphsDir.empty() && h2s2cGraphs->num_vertices(i) > 0)
+                h2s2cGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_h2s2c_dep.dot"));
+            h2s2cGraphs->merge_nodes_without_variable(i);
+            if (!graphsDir.empty() && h2s2cGraphs->num_vertices(i) > 0)
+                h2s2cGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_h2s2c_dep.dot"));
+            h2s2cGraphs->prune_nodes_not_reaching_leaves(i);
+            if (!graphsDir.empty() && h2s2cGraphs->num_vertices(i) > 0)
+                h2s2cGraphs->export_to_graphviz(i, graphsDir / (graphName + "_h2s2c_dep.dot"));
+        }
+    }
+    result.h2s2cGraphs = h2s2cGraphs;
+
+    /* IV. S2V: stateful object → key/header (binary-only; only runs when graphsDir is set) */
     StatefulToKey *s2vChecker = nullptr;
     if (!graphsDir.empty()) {
         stateVars.clear();
@@ -183,8 +228,37 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
 
+    // Collect IR nodes of CFG vertices participating in any dep chain before CFG cleanup.
+    // Populate both depChainNodes (pointer) and depChainNodeIds (clone_id bitset).
+    // clone_id is stable across independent Transform runs on the same source program:
+    // Node(const Node &other) always copies other.clone_id, so the clone_id traces back
+    // to the original node regardless of how many midend passes cloned it.
+    auto gatherDepChainNodes = [&](DependencyGraphs *depG) {
+        if (!depG) return;
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (depG->leaves[i].empty()) continue;
+            auto *cfg = cgen.controlGraphsArray[i];
+            const auto &dg = depG->get_graph(i);
+            for (auto [vit, vend] = boost::vertices(dg); vit != vend; ++vit) {
+                auto cfgVtx = dg[*vit].esgId.first;
+                if (cfgVtx >= boost::num_vertices(*cfg)) continue;
+                const auto *irNode = (*cfg)[cfgVtx].node;
+                if (irNode == nullptr) continue;
+                result.depChainNodes.insert(irNode);
+                auto cloneId = static_cast<size_t>(irNode->clone_id);
+                if (cloneId >= result.depChainNodeIds.size())
+                    result.depChainNodeIds.resize(cloneId + 1, false);
+                result.depChainNodeIds.set(cloneId);
+            }
+        }
+    };
+    gatherDepChainNodes(a2s2vGraphs);
+    gatherDepChainNodes(h2s2vGraphs);
+    gatherDepChainNodes(h2s2cGraphs);
+
     // In binary mode, return objects the caller needs for CFG visualization.
-    // In library mode, clean up and leave these null.
+    // In library mode, free everything and return the OS the IFDS heap pages so the
+    // caller's working set (e.g. symbex solver) starts with a clean RSS.
     if (!graphsDir.empty()) {
         result.cfgGraphs = cgenRaw;
         result.sdChecker = sdChecker;
@@ -194,10 +268,61 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         delete cgenRaw;
         delete sdChecker;
         delete hdChecker;
-        // s2vChecker is null in library mode
+        // s2vChecker is null in library mode.
+        // Free IFDS dep-graphs; callers only need depChainNodes / depChainNodeIds.
+        delete a2s2vGraphs;  result.a2s2vGraphs = nullptr;
+        delete h2s2vGraphs;  result.h2s2vGraphs = nullptr;
+        delete h2s2cGraphs;  result.h2s2cGraphs = nullptr;
+#ifdef ENABLE_GC
+        // Return freed IFDS pages to the OS before the caller starts allocating.
+        GC_gcollect_and_unmap();
+#endif
     }
 
     return result;
+}
+
+StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
+                                                  cstring arch,
+                                                  bool isv1,
+                                                  std::filesystem::path graphsDir) {
+    Util::ScopedTimer sdPrepTimer("P4SD-prep");
+
+    P4::ReferenceMap refMap;
+    P4::TypeMap typeMap;
+    refMap.setIsV1(isv1);
+    IR::ToplevelBlock *toplevel = nullptr;
+
+    // Prep pipeline:
+    //   1. TypeChecking         — populate refMap/typeMap so RAP's internal FindActionParameters
+    //                             can resolve action invocations correctly.
+    //   2. RemoveActionParameters — aligns clone_ids with any target midend that also runs RAP;
+    //                             calls ClearTypeMap internally, leaving typeMap stale.
+    //   3. TypeChecking         — rebuild typeMap on the post-RAP program before EvaluatorPass.
+    //   4. EvaluatorPass        — capture toplevel with a valid typeMap (needed to evaluate
+    //                             constructor arguments in the package hierarchy).
+    //
+    // A2S2V note: after RAP, action-parameter declarations are gone, so sgProp->actionParams
+    // is empty and ActParamToStateful returns early with no results.  That is intentional —
+    // A2S2V for post-RAP IR requires updating ActParamToStateful to recognise the local-
+    // variable initialisation pattern that RAP introduces.
+    {
+        auto *evaluator = new P4::EvaluatorPass(&refMap, &typeMap);
+        PassManager prep;
+        prep.setName("P4SD-prep");
+        prep.addPasses({
+            new P4::TypeChecking(&refMap, &typeMap, true),
+            new P4::RemoveActionParameters(&typeMap),
+            new P4::TypeChecking(&refMap, &typeMap, true),
+            evaluator,
+            [&toplevel, evaluator]() { toplevel = evaluator->getToplevelBlock(); },
+        });
+        program = program->apply(prep);
+    }
+    if (program == nullptr || toplevel == nullptr || ::P4::errorCount() > 0)
+        return {};
+
+    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir);
 }
 
 }  // namespace P4::P4StateDependency

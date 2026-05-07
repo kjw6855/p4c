@@ -500,9 +500,15 @@ SymbexOptions::SymbexOptions()
         "--state-dep", nullptr,
         [this](const char *) {
             stateDep = true;
+            // Statement and action coverage must be tracked so the dep-chain
+            // filter in the test backend can match visited nodes.
+            coverageOptions.coverStatements = true;
+            coverageOptions.coverActions = true;
             return true;
         },
-        "Build a dataflow dependency graph by using the state_dependency module.");
+        "Build a dataflow dependency graph by using the state_dependency module."
+        " Only test cases that exercise an a2s2v or h2s2v dependency chain are emitted;"
+        " if no such chains exist in the program, no tests are generated.");
 }
 
 bool SymbexOptions::validateOptions() const {

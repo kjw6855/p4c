@@ -17,13 +17,18 @@ class SymbexCompilerResult : public CompilerResult {
     /// The call graph of the analyzed P4 program, if flag --dcg is set.
     const NodesCallGraph *callGraph;
 
-    const P4StateDependency::StateDependencyResult *stateDepResult = nullptr;
+    mutable const P4StateDependency::StateDependencyResult *stateDepResult = nullptr;
 
  public:
     explicit SymbexCompilerResult(CompilerResult compilerResult,
                                    P4::Coverage::CoverageSet coverableNodes,
-                                   const NodesCallGraph *callGraph = nullptr,
-                                   const P4StateDependency::StateDependencyResult *stateDepResult = nullptr);
+                                   const NodesCallGraph *callGraph = nullptr);
+
+    /// Inject the state-dependency result after construction.
+    /// Called by mainImpl / generateTestsImpl before symbex starts.
+    void setStateDep(const P4StateDependency::StateDependencyResult *sd) const {
+        stateDepResult = sd;
+    }
 
     /// @returns the call graph of the analyzed P4 program, if flag --dcg is set.
     /// If this function is called when the call graph is not set, if will throw an exception.
