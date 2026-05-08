@@ -156,11 +156,50 @@ int main(int argc, char *const argv[]) {
         }
     }
 
-    /*
-     * TODO: Show the full dependency:
-     * e.g., Data Plane Dependency: Set of header types -> stateful object -> header/key
-     * e.g., Control Plane Dependency: Action parameter -> stateful object -> header/key
-     */
+    // Print per-control-block and total dependency chain counts.
+    if (sdResult.cfgGraphs &&
+            (sdResult.h2s2vGraphs || sdResult.h2s2cGraphs || sdResult.hdChecker)) {
+        const auto &cfgArr = sdResult.cfgGraphs->controlGraphsArray;
+        const size_t numGraphs = cfgArr.size();
+
+        // Case 1: H2S2V reads of registers that are NOT written by header data in the dep graph
+        //         (SO vertices with no incoming "write_to" edge → their reachable leaves).
+        // Case 2: Distinct DATA-write sources (non-SO vertices with outgoing "write_to" to SO)
+        //         that can reach at least one leaf in H2S2V or H2S2C.
+        // Case 3: Same as case 2 but restricted to H2S2C (SO value reaches a condition leaf).
+        size_t noWriteReadTotal = 0;
+        size_t dataWriteTotal = 0;
+        size_t dataWriteToCondTotal = 0;
+
+        std::cout << "\n================ State Dependency Counts ================\n";
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto graphName = cstring(boost::get_property(*cfgArr[i], boost::graph_name));
+
+            size_t noWriteRead = sdResult.h2s2vGraphs
+                    ? sdResult.h2s2vGraphs->count_nowrite_so_leaves(i) : 0;
+            size_t dataWriteToValue = sdResult.h2s2vGraphs
+                    ? sdResult.h2s2vGraphs->count_data_write_sources_reaching_leaves(i) : 0;
+            size_t dataWriteToCond = sdResult.h2s2cGraphs
+                    ? sdResult.h2s2cGraphs->count_data_write_sources_reaching_leaves(i) : 0;
+            size_t dataWrite = dataWriteToValue + dataWriteToCond;
+
+            if (noWriteRead == 0 && dataWrite == 0 && dataWriteToCond == 0) continue;
+
+            std::cout << "  [" << graphName << "]\n"
+                      << "    (1) H2S2V non-write SO reads:     " << noWriteRead << "\n"
+                      << "    (2) H->SO DATA writes (V + C):    " << dataWrite << "\n"
+                      << "    (3) H2S2C DATA writes to cond:    " << dataWriteToCond << "\n";
+            noWriteReadTotal += noWriteRead;
+            dataWriteTotal += dataWrite;
+            dataWriteToCondTotal += dataWriteToCond;
+        }
+        std::cout << "  --- Total ---\n"
+                  << "    (1) non-write SO reads:     " << noWriteReadTotal << "\n"
+                  << "    (2) DATA writes (V + C):    " << dataWriteTotal << "\n"
+                  << "    (3) DATA writes to cond:    " << dataWriteToCondTotal << "\n"
+                  << "=========================================================\n\n";
+    }
+
     {
         Util::ScopedTimer parserTimer("Parser graphs");
         LOG2("Generating parser graphs");

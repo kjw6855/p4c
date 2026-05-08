@@ -1,6 +1,8 @@
 #include "dependency_graph.h"
 
 #include <deque>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "graphs.h"
 #include "lib/nullstream.h"
@@ -54,7 +56,9 @@ vertex_t DependencyGraphs::add_so_vertex(size_t index, const IR::Node *soNode) {
     } else {
         ss << "[SO] " << soNode;
     }
-    return add_vertex(index, {globalVertexId, soNode}, cstring(ss), "lightblue"_cs);
+    vertex_t v = add_vertex(index, {globalVertexId, soNode}, cstring(ss), "lightblue"_cs);
+    (*depGraphs[index])[v].isSO = true;
+    return v;
 }
 
 edge_t DependencyGraphs::add_dependency_edge(size_t index, vertex_t from, vertex_t to,
@@ -192,7 +196,17 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                     }
                 }
             } else {
-                add_dependency_edge(index, srcVertex, dstVertex, "depends_on"_cs);
+                cstring edgeLabel = "depends_on"_cs;
+                if (hasFlag(dstInfo.flags, VertexFlags::SO_IDX))
+                    edgeLabel = "idx"_cs;
+                else if (hasFlag(dstInfo.flags, VertexFlags::SO_DATA)) {
+                    if (hasFlag(srcInfo.flags, VertexFlags::SO_IDX)) {
+                        edgeLabel = ""_cs;
+                    } else {
+                        edgeLabel = "data"_cs;
+                    }
+                }
+                add_dependency_edge(index, srcVertex, dstVertex, edgeLabel);
             }
 
             if (hasFlag(srcInfo.flags, VertexFlags::SO_IDX) &&
@@ -292,7 +306,7 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
     if (vertexCount == 0) return;
 
     // Keep every node that can reach at least one leaf (node with out-degree 0).
-    std::vector<bool> keep(vertexCount, false);
+    std::unordered_set<vertex_t> keep;
     std::deque<vertex_t> work;
 
     for (auto vit : leaves[index]) {
@@ -300,7 +314,7 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
         BUG_CHECK(boost::out_degree(vit, g) == 0,
                   "Expected leaf vertex %1% to have out-degree %2%",
                   leafInfo.name, boost::out_degree(vit, g));
-        keep[vit] = true;
+        keep.insert(vit);
         work.push_back(vit);
     }
 
@@ -309,38 +323,29 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
         work.pop_front();
         for (auto [eit, eend] = boost::in_edges(v, g); eit != eend; ++eit) {
             auto pred = boost::source(*eit, g);
-            if (!keep[pred]) {
-                keep[pred] = true;
+            if (!keep.count(pred)) {
+                keep.insert(pred);
                 work.push_back(pred);
             }
         }
     }
 
-    bool allKept = true;
-    for (bool k : keep) {
-        if (!k) {
-            allKept = false;
-            break;
-        }
-    }
-    if (allKept) return;
+    if (keep.size() == vertexCount) return;
 
     auto pruned = std::make_unique<DepGraph>();
     auto oldVAttrs = boost::get(boost::vertex_attribute, g);
     auto newVAttrs = boost::get(boost::vertex_attribute, *pruned);
 
-    std::vector<vertex_t> remap(vertexCount, vertex_t());
-    std::vector<bool> remapped(vertexCount, false);
+    std::unordered_map<vertex_t, vertex_t> remap;
 
     for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
         auto ov = *vit;
-        if (!keep[ov]) continue;
+        if (!keep.count(ov)) continue;
 
         auto nv = boost::add_vertex(*pruned);
         (*pruned)[nv] = g[ov];
         newVAttrs[nv] = oldVAttrs[ov];
         remap[ov] = nv;
-        remapped[ov] = true;
     }
 
     auto oldEAttrs = boost::get(boost::edge_attribute, g);
@@ -349,7 +354,7 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
         auto e = *eit;
         auto os = boost::source(e, g);
         auto ot = boost::target(e, g);
-        if (!remapped[os] || !remapped[ot]) continue;
+        if (!remap.count(os) || !remap.count(ot)) continue;
 
         auto [ne, inserted] = boost::add_edge(remap[os], remap[ot], *pruned);
         BUG_CHECK(inserted, "Failed to copy dependency edge during pruning");
@@ -358,6 +363,11 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
     }
 
     depGraphs[index] = std::move(pruned);
+
+    for (auto &lv : leaves[index]) {
+        BUG_CHECK(remap.count(lv), "Leaf vertex not found in pruned graph");
+        lv = remap[lv];
+    }
 
     // Remap esgToDepMap
     auto &esgToDepMap = esgToDepMaps[index];
@@ -368,4 +378,70 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
         esgToDepMap[vData.esgId] = *vit;
     }
 }
+
+size_t DependencyGraphs::count_data_write_sources_reaching_leaves(size_t index) const {
+    const auto &g = *depGraphs[index];
+    if (boost::num_vertices(g) == 0 || leaves[index].empty()) return 0;
+
+    // Backward reachability from all leaves.
+    std::unordered_set<vertex_t> reachable;
+    std::deque<vertex_t> work(leaves[index].begin(), leaves[index].end());
+    for (auto v : leaves[index]) reachable.insert(v);
+    while (!work.empty()) {
+        auto v = work.front(); work.pop_front();
+        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+            auto pred = boost::source(*ei, g);
+            if (!reachable.count(pred)) { reachable.insert(pred); work.push_back(pred); }
+        }
+    }
+
+    // Count non-SO vertices with an outgoing "write_to" edge to an SO vertex
+    // that are themselves backward-reachable from a leaf.
+    size_t count = 0;
+    for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
+        auto v = *vit;
+        if (g[v].isSO || !reachable.count(v)) continue;
+        for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+            auto tgt = boost::target(*ei, g);
+            if (g[*ei].label == "write_to"_cs && g[tgt].isSO) { ++count; break; }
+        }
+    }
+    return count;
+}
+
+size_t DependencyGraphs::count_nowrite_so_leaves(size_t index) const {
+    const auto &g = *depGraphs[index];
+    if (boost::num_vertices(g) == 0 || leaves[index].empty()) return 0;
+
+    // Collect [SO] vertices with NO incoming "write_to" edge.
+    std::vector<vertex_t> noWriteSOs;
+    for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
+        auto v = *vit;
+        if (!g[v].isSO) continue;
+        bool hasWrite = false;
+        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+            if (g[*ei].label == "write_to"_cs) { hasWrite = true; break; }
+        }
+        if (!hasWrite) noWriteSOs.push_back(v);
+    }
+    if (noWriteSOs.empty()) return 0;
+
+    // Forward BFS from those SOs; count distinct leaves reachable.
+    std::unordered_set<vertex_t> visited;
+    std::deque<vertex_t> work(noWriteSOs.begin(), noWriteSOs.end());
+    for (auto v : noWriteSOs) visited.insert(v);
+    while (!work.empty()) {
+        auto v = work.front(); work.pop_front();
+        for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+            auto tgt = boost::target(*ei, g);
+            if (!visited.count(tgt)) { visited.insert(tgt); work.push_back(tgt); }
+        }
+    }
+
+    size_t count = 0;
+    for (auto lv : leaves[index])
+        if (visited.count(lv)) ++count;
+    return count;
+}
+
 }  // namespace P4::P4StateDependency

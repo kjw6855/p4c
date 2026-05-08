@@ -29,6 +29,7 @@ class DependencyGraphs {
         EsgId esgId;                    // Original graph vertex and IR node this corresponds to (for traceability)
         cstring color;                   // Color for visualization
         cstring shape;                   // Shape for visualization
+        bool isSO = false;               // True for [SO] stateful-object vertices
     };
 
     /// Edge properties for the dependency graph
@@ -116,6 +117,14 @@ class DependencyGraphs {
     /// @brief Remove nodes that cannot reach any leaf (out-degree 0) node.
     /// @param index Dependency graph index
     void prune_nodes_not_reaching_leaves(size_t index);
+
+    /// Count non-SO vertices that have an outgoing "write_to" edge to an [SO] vertex
+    /// AND can reach at least one leaf.  Used for case-2 / case-3 counting.
+    size_t count_data_write_sources_reaching_leaves(size_t index) const;
+
+    /// Count leaves reachable (forward) from [SO] vertices that have NO incoming
+    /// "write_to" edge.  Used for case-1 counting (reads of non-written registers).
+    size_t count_nowrite_so_leaves(size_t index) const;
 
     /// @brief Merge nodes without variables into nodes with variables
     /// @param index Dependency graph index
