@@ -453,7 +453,7 @@ DependencyGraphs::get_data_write_so_chains(size_t index,
     BUG_CHECK(!writeSources.empty(), "Expected at least one write source for data-write SOs");
     if (writeSourceCount) *writeSourceCount = writeSources.size();
 
-    // Collect distinct read-destination vertices from writeSO
+    // Collect distinct read-destination vertices from writeSO (pure read_from only).
     std::map<vertex_t, std::unordered_set<vertex_t>> readDestinations;
     for (auto [so, _] : writeSources) {
         for (auto [ei, ee] = boost::out_edges(so, g); ei != ee; ++ei) {
@@ -466,64 +466,104 @@ DependencyGraphs::get_data_write_so_chains(size_t index,
 
     // Get SO chain for each (writeSO, so, readDst) pair
     for (auto [so, sources] : writeSources) {
-        // Different readDst can lead to different chains
-        for (auto readDst : readDestinations[so]) {
-            BUG_CHECK(!sources.count(readDst),
-                    "Read destination vertices should not overlap with write source vertices");
-            std::unordered_set<vertex_t> readVtx;
-            std::deque<vertex_t> work;
-            // 1. Non-SO backward BFS from each read vertex until hitting root
-            work.push_back(readDst);
-            while (!work.empty()) {
-                auto v = work.front(); work.pop_front();
+        // 1. Collect paths for each write source through backward BFS.
+        std::map<vertex_t, std::unordered_set<vertex_t>> writeVtx;
+        std::map<vertex_t, vertex_t> updateReadDstToWriteSrc; // for detecting update SOs with same read/write vertex
+        for (auto src : sources) {
+            std::deque<vertex_t> bwWork;
+            writeVtx[src].insert(src);
+            bwWork.push_back(src);
+            while (!bwWork.empty()) {
+                auto v = bwWork.front(); bwWork.pop_front();
                 for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
-                    auto src = boost::source(*ei, g);
-                    if (g[*ei].label != "read_from"_cs && !g[src].isSO && !readVtx.count(src)) {
-                        readVtx.insert(src);
-                        work.push_back(src);
+                    auto tgt = boost::source(*ei, g);
+                    if (writeVtx.count(tgt)) continue;
+
+                    // don't cross update-read edge to keep the chain pure
+                    if (g[*ei].label == "read_from"_cs && tgt == so) {
+                        updateReadDstToWriteSrc[v] = src;
+                        continue;
                     }
+
+                    writeVtx[src].insert(tgt);
+                    bwWork.push_back(tgt);
                 }
             }
+        }
 
-            // 2. add SO and everything forward-reachable from it to readVtx.
-            readVtx.insert(so);
-            work.push_back(so);
-            while (!work.empty()) {
-                auto v = work.front(); work.pop_front();
-                for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+        // 2. Collect paths for each read destination through backward and forward BFS
+        for (auto readDst : readDestinations[so]) {
+            // 1) If readDst is for update, create a single-execution path
+            if (updateReadDstToWriteSrc.count(readDst)) {
+                // Add write-only path for update
+                auto writeSrc = updateReadDstToWriteSrc[readDst];
+                bool hasUpdatePath = false;
+                for (auto [ei, ee] = boost::out_edges(writeSrc, g); ei != ee; ++ei) {
                     auto tgt = boost::target(*ei, g);
-                    if (!readVtx.count(tgt)) { readVtx.insert(tgt); work.push_back(tgt); }
+                    if (tgt == so && g[*ei].label == "write_to"_cs) continue;
+                    hasUpdatePath = true;
+                    break;
                 }
-            }
+                // Skip if there is no further path
+                if (!hasUpdatePath) continue;
 
-            // 3. For each write source, backward BFS until hitting roots. Collect visited vertices as writeVtx.
-            for (auto src : sources) {
-                BUG_CHECK(readVtx.size() > 0 && !readVtx.count(src),
-                        "non-empty readVertices should not contain write source vertices");
-
-                // Write side: {so} + backward BFS until hitting roots
-                std::unordered_set<vertex_t> writeVtx;
-                std::deque<vertex_t> bwWork;
-                writeVtx.insert(src);
-                bwWork.push_back(src);
-                bool isSinglePath = true;
-                while (!bwWork.empty()) {
-                    auto v = bwWork.front(); bwWork.pop_front();
-                    for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
-                        auto tgt = boost::source(*ei, g);
-                        if (!writeVtx.count(tgt)) {
-                            writeVtx.insert(tgt);
-                            bwWork.push_back(tgt);
-                            if (readVtx.count(tgt)) {
-                                // Two-path detected: one path from src to so via tgt,
-                                // another path from src to so via readVtx.
-                                isSinglePath = false;
-                            }
+                // Forward BFS from writeSrc
+                std::deque<vertex_t> fwWork;
+                std::unordered_set<vertex_t> writeLocalVtx;
+                writeLocalVtx.insert(writeVtx[writeSrc].begin(), writeVtx[writeSrc].end());
+                fwWork.push_back(writeSrc);
+                while (!fwWork.empty()) {
+                    auto v = fwWork.front(); fwWork.pop_front();
+                    for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+                        auto tgt = boost::target(*ei, g);
+                        if (g[*ei].label == "write_to"_cs && tgt == so) {
+                            // skip crossing update-read edge to keep the chain pure
+                            continue;
                         }
+                        if (writeLocalVtx.count(tgt)) continue;
+                        writeLocalVtx.insert(tgt);
+                        fwWork.push_back(tgt);
                     }
                 }
                 chains.push_back({so, g[so].name, g[so].esgId.second,
-                                std::move(writeVtx), readVtx, isSinglePath});
+                                std::move(writeLocalVtx), std::unordered_set<vertex_t>(), true});
+
+            // 2) Otherwise, create a multi-execution path: pure read x write paths
+            } else {
+                std::unordered_set<vertex_t> readVtx; // for detecting single-path vs multi-path read SOs
+                std::deque<vertex_t> work;
+                // 1. Non-SO backward BFS from readDst to collect its context.
+                work.push_back(readDst);
+                while (!work.empty()) {
+                    auto v = work.front(); work.pop_front();
+                    for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                        auto src = boost::source(*ei, g);
+                        if (g[*ei].label != "read_from"_cs && !g[src].isSO && !readVtx.count(src)) {
+                            readVtx.insert(src);
+                            work.push_back(src);
+                        }
+                    }
+                }
+
+                // 2. Forward BFS from SO: collect the full read side, but skip update-read
+                //    destinations so the update action's body stays on the write side only.
+                readVtx.insert(readDst);
+                // start from readDst for the specific read path
+                work.push_back(readDst);
+                while (!work.empty()) {
+                    auto v = work.front(); work.pop_front();
+                    for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+                        auto tgt = boost::target(*ei, g);
+                        if (!readVtx.count(tgt)) { readVtx.insert(tgt); work.push_back(tgt); }
+                    }
+                }
+
+                // 3. For each write source, backward BFS to build writeVtx.
+                for (auto src : sources) {
+                    chains.push_back({so, g[so].name, g[so].esgId.second,
+                                    writeVtx[src], std::move(readVtx), false});
+                }
+
             }
         }
     }
@@ -573,14 +613,9 @@ DependencyGraphs::add_chain_satellites(size_t index) {
             writeSats[v] = addSat(v, "tomato"_cs, chainId);
 
         readSats[chain.soVertex] = addSat(chain.soVertex,
-            chain.isSinglePath ? "tomato"_cs : "tomato:gold"_cs, chainId);
+            chain.readVertices.size() ? "tomato:gold"_cs : "tomato"_cs, chainId);
         for (auto v : chain.readVertices)
-            if (v != chain.soVertex) {
-                if (chain.isSinglePath)
-                    readSats[v] = addSat(v, "tomato"_cs, chainId);
-                else
-                    readSats[v] = addSat(v, "gold"_cs, chainId);
-            }
+            if (v != chain.soVertex) readSats[v] = addSat(v, "gold"_cs, chainId);
 
         // Collect edges to mirror before modifying the graph — adding edges while
         // iterating boost::edges() invalidates vecS iterators.

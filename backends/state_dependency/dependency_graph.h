@@ -3,6 +3,7 @@
 
 #include <memory>
 
+#include <boost/dynamic_bitset.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graphviz.hpp>
 
@@ -136,20 +137,36 @@ class DependencyGraphs {
 
     /// Per-register dependency chain: write-side and read-side vertices separated.
     /// One SOChain per SO vertex that has at least one incoming "write_to" edge.
-    /// isSinglePath is always true by construction: the pruned dep graph only retains SO
-    /// vertices whose downstream path reaches a leaf, meaning write and read/use both occur
-    /// in the same P4 pipeline execution.
+    ///
+    /// isUpdate: true when the SO's write source is the same action instance as its read
+    /// destination (i.e. the action atomically reads-modifies-writes the register).
+    /// Chains with isUpdate=true come in two flavours emitted separately:
+    ///   1. readVertices == {soVertex} only  →  single-update test (1 execution).
+    ///   2. readVertices has downstream pure readers  →  update-then-read (≥2 executions).
+    /// writeVertices covers both the non-update write path and the update action itself;
+    /// callers do not need to distinguish them from the write side.
     struct SOChain {
         vertex_t soVertex;
         cstring soName;
         const IR::Node *soNode;
-        /// Vertices whose "write_to" edge points directly to this SO.
+        /// Vertices on the write side: the EXIT node that writes to this SO plus its full
+        /// backward-reachable context (including the update action body when isUpdate=true).
         std::unordered_set<vertex_t> writeVertices;
-        /// {soVertex} plus all vertices forward-reachable from it (the read/use side).
+        /// {soVertex} plus all vertices forward-reachable via pure "read_from" edges.
+        /// For single-update chains this is {soVertex} only.
         std::unordered_set<vertex_t> readVertices;
-        /// Two-path detection. Currently, this only detects the presence of duplicated
-        /// vertices in the readVertices and writeVertices sets.
-        bool isSinglePath = true;
+        /// True when the same action instance both reads and writes this SO.
+        bool isUpdate = false;
+
+        /// Chain index assigned by analysis.cpp after graph resolution.
+        size_t id = 0;
+
+        /// IR-node sets resolved from writeVertices/readVertices by analysis.cpp.
+        /// Empty until resolveSOChainNodes() fills them in.
+        std::unordered_set<const IR::Node *> writeNodes;
+        boost::dynamic_bitset<> writeNodeIds;
+        std::unordered_set<const IR::Node *> readNodes;
+        boost::dynamic_bitset<> readNodeIds;
     };
 
     /// Return all vertices in data-write chains (paths that contain at least one

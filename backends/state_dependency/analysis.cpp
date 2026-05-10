@@ -197,8 +197,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     }
 
     // Merge and prune dep graphs before chain extraction.
-    // prune_nodes_not_reaching_leaves must run before any category analysis to ensure
-    // the isSinglePath invariant (every write-SO chain's downstream reaches a leaf).
+    // prune_nodes_not_reaching_leaves must run before any category analysis.
     // Full/merged exports are emitted here when graphsDir is set (before pruning removes nodes).
     for (size_t i = 0; i < numGraphs; i++) {
         auto *g = cgen.controlGraphsArray[i];
@@ -279,14 +278,9 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
 
-    // Helper: convert a SOChain's vertex sets into IR-node sets and build a DepChain.
-    auto buildDepChain = [&](DependencyGraphs *depG, size_t i,
-            const DependencyGraphs::SOChain &sc, size_t chainId) -> DepChain {
-        DepChain dc;
-        dc.id = chainId;
-        dc.soName = sc.soName;
-        dc.soNode = sc.soNode;
-        dc.isSinglePath = sc.isSinglePath;
+    // Helper: populate IR-node sets in a SOChain by resolving its vertex sets through the CFG.
+    auto resolveSOChainNodes = [&](DependencyGraphs *depG, size_t i,
+            DependencyGraphs::SOChain &sc) {
         auto *cfg = cgen.controlGraphsArray[i];
         const auto &dg = depG->get_graph(i);
         auto addNodes = [&](const std::unordered_set<DependencyGraphs::vertex_t> &vtxSet,
@@ -303,22 +297,21 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                 nodeIds.set(cloneId);
             }
         };
-        addNodes(sc.writeVertices, dc.writeNodes, dc.writeNodeIds);
-        addNodes(sc.readVertices, dc.readNodes, dc.readNodeIds);
-        return dc;
+        addNodes(sc.writeVertices, sc.writeNodes, sc.writeNodeIds);
+        addNodes(sc.readVertices, sc.readNodes, sc.readNodeIds);
     };
 
-    // Helper: merge all IR nodes in a DepChain's write+read sets into a flat node set.
-    auto accumulateChain = [](const DepChain &dc,
+    // Helper: merge all IR nodes in a SOChain's write+read sets into a flat node set.
+    auto accumulateChain = [](const DependencyGraphs::SOChain &sc,
             std::unordered_set<const IR::Node *> &nodes,
             boost::dynamic_bitset<> &nodeIds) {
-        for (const auto *n : dc.writeNodes) {
+        for (const auto *n : sc.writeNodes) {
             nodes.insert(n);
             auto cid = static_cast<size_t>(n->clone_id);
             if (cid >= nodeIds.size()) nodeIds.resize(cid + 1, false);
             nodeIds.set(cid);
         }
-        for (const auto *n : dc.readNodes) {
+        for (const auto *n : sc.readNodes) {
             nodes.insert(n);
             auto cid = static_cast<size_t>(n->clone_id);
             if (cid >= nodeIds.size()) nodeIds.resize(cid + 1, false);
@@ -326,17 +319,18 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     };
 
-    // Category 2 (data writes): per-chain DepChain + flat union.
+    // Category 2 (data writes): per-chain SOChain + flat union.
     // H2S2V + H2S2C chains where header data is written into a register.
     size_t chainId = 0;
     for (DependencyGraphs *depG : {h2s2vGraphs, h2s2cGraphs}) {
         if (!depG) continue;
         for (size_t i = 0; i < numGraphs; i++) {
             if (depG->leaves[i].empty()) continue;
-            for (const auto &sc : depG->get_data_write_so_chains(i, nullptr)) {
-                const auto &dc = result.dataWriteChains.emplace_back(
-                    buildDepChain(depG, i, sc, chainId++));
-                accumulateChain(dc, result.dataWriteNodes, result.dataWriteNodeIds);
+            for (auto sc : depG->get_data_write_so_chains(i, nullptr)) {
+                sc.id = chainId++;
+                resolveSOChainNodes(depG, i, sc);
+                const auto &stored = result.dataWriteChains.emplace_back(std::move(sc));
+                accumulateChain(stored, result.dataWriteNodes, result.dataWriteNodeIds);
             }
         }
     }
@@ -346,10 +340,11 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     if (h2s2cGraphs) {
         for (size_t i = 0; i < numGraphs; i++) {
             if (h2s2cGraphs->leaves[i].empty()) continue;
-            for (const auto &sc : h2s2cGraphs->get_data_write_so_chains(i, nullptr)) {
-                const auto &dc = result.dataWriteCondChains.emplace_back(
-                    buildDepChain(h2s2cGraphs, i, sc, chainId++));
-                accumulateChain(dc, result.dataWriteCondNodes, result.dataWriteCondNodeIds);
+            for (auto sc : h2s2cGraphs->get_data_write_so_chains(i, nullptr)) {
+                sc.id = chainId++;
+                resolveSOChainNodes(h2s2cGraphs, i, sc);
+                const auto &stored = result.dataWriteCondChains.emplace_back(std::move(sc));
+                accumulateChain(stored, result.dataWriteCondNodes, result.dataWriteCondNodeIds);
             }
         }
     }

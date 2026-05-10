@@ -20,31 +20,6 @@
 
 namespace P4::P4StateDependency {
 
-/// A single write→register→read dependency chain associated with one stateful object.
-///
-/// Each chain groups the write-side IR nodes (the statements that write header data into
-/// the SO) and the read-side IR nodes (the SO itself plus all statements that use its
-/// value downstream toward a leaf).  A test path is valid for this chain only when it
-/// visits nodes from BOTH sides.
-///
-/// isSinglePath is always true by construction: the pruned dep graph only retains SO
-/// vertices whose value reaches a leaf in the current execution, so every data-write chain
-/// has write and read on the same P4 pipeline execution.  Two-path reads (register read
-/// from a value written by a prior packet) are represented in the noWriteRead category.
-struct DepChain {
-    size_t id = 0;
-    cstring soName;
-    const IR::Node *soNode = nullptr;
-
-    std::unordered_set<const IR::Node *> writeNodes;
-    boost::dynamic_bitset<> writeNodeIds;
-
-    std::unordered_set<const IR::Node *> readNodes;
-    boost::dynamic_bitset<> readNodeIds;
-
-    bool isSinglePath = true;
-};
-
 struct StateDependencyResult {
     /// H2S2V: header variable → stateful object → packet field.
     /// Heap-allocated; caller takes ownership. Null if no deps found.
@@ -95,7 +70,7 @@ struct StateDependencyResult {
 
     /// Per-register chains for category 2.  A test path is valid only when it visits
     /// nodes from BOTH the write side AND the read side of the same chain.
-    std::vector<DepChain> dataWriteChains;
+    std::vector<DependencyGraphs::SOChain> dataWriteChains;
 
     /// Names of stateful objects (registers) that appear as write targets in category-2 chains.
     /// Used by the test backend to emit register-initialization preambles when
@@ -107,7 +82,7 @@ struct StateDependencyResult {
     boost::dynamic_bitset<> dataWriteCondNodeIds;
 
     /// Per-register chains for category 3 (H2S2C only).
-    std::vector<DepChain> dataWriteCondChains;
+    std::vector<DependencyGraphs::SOChain> dataWriteCondChains;
 };
 
 /// Run the full state-dependency analysis (A2S2V and H2S2V) on a compiled P4 program.
