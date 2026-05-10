@@ -50,7 +50,7 @@ class STF : public TestFramework {
 
     /// Produce an STF test.
     void writeTestToFile(const TestSpec *spec, cstring selectedBranches, size_t testId,
-                         float currentCoverage) override;
+                         float currentCoverage, unsigned char *testCoverage, int mapSize) override;
 
  private:
     /// Emits a test case.

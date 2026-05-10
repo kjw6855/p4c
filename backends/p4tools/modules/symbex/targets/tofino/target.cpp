@@ -214,6 +214,18 @@ Tofino1ExprStepper *Tofino_TnaSymbexTarget::getExprStepperImpl(
     return new Tofino1ExprStepper(state, solver, programInfo);
 }
 
+CmdVisitor *Tofino_TnaSymbexTarget::getCmdVisitorImpl(ExecutionState & /*state*/,
+                                                       const ProgramInfo & /*programInfo*/,
+                                                       TestCase & /*testCase*/) const {
+    return nullptr;
+}
+
+ExprVisitor *Tofino_TnaSymbexTarget::getExprVisitorImpl(ExecutionState & /*state*/,
+                                                         const ProgramInfo & /*programInfo*/,
+                                                         TestCase & /*testCase*/) const {
+    return nullptr;
+}
+
 /* =============================================================================================
  *  JBay_T2naSymbexTarget implementation
  * ============================================================================================= */
@@ -301,6 +313,18 @@ JBayExprStepper *JBay_T2naSymbexTarget::getExprStepperImpl(ExecutionState &state
                                                             AbstractSolver &solver,
                                                             const ProgramInfo &programInfo) const {
     return new JBayExprStepper(state, solver, programInfo);
+}
+
+CmdVisitor *JBay_T2naSymbexTarget::getCmdVisitorImpl(ExecutionState & /*state*/,
+                                                      const ProgramInfo & /*programInfo*/,
+                                                      TestCase & /*testCase*/) const {
+    return nullptr;
+}
+
+ExprVisitor *JBay_T2naSymbexTarget::getExprVisitorImpl(ExecutionState & /*state*/,
+                                                        const ProgramInfo & /*programInfo*/,
+                                                        TestCase & /*testCase*/) const {
+    return nullptr;
 }
 
 }  // namespace P4::P4Tools::Symbex::Tofino

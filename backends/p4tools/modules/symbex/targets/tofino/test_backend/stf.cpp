@@ -292,7 +292,7 @@ void STF::emitTestcase(const TestSpec *testSpec, cstring selectedBranches, size_
 }
 
 void STF::writeTestToFile(const TestSpec *testSpec, cstring selectedBranches, size_t testId,
-                          float currentCoverage) {
+                          float currentCoverage, unsigned char * /*testCoverage*/, int /*mapSize*/) {
     std::string testCase = getTestCaseTemplate();
     emitTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
 }

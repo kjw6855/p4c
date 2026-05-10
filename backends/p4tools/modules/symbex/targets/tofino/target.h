@@ -83,6 +83,12 @@ class Tofino_TnaSymbexTarget : public AbstractTofinoSymbexTarget {
     Tofino1ExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                            const ProgramInfo &programInfo) const override;
 
+    CmdVisitor *getCmdVisitorImpl(ExecutionState &state, const ProgramInfo &programInfo,
+                                  TestCase &testCase) const override;
+
+    ExprVisitor *getExprVisitorImpl(ExecutionState &state, const ProgramInfo &programInfo,
+                                    TestCase &testCase) const override;
+
  private:
     Tofino_TnaSymbexTarget();
 };
@@ -102,6 +108,12 @@ class JBay_T2naSymbexTarget : public AbstractTofinoSymbexTarget {
 
     JBayExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
                                         const ProgramInfo &programInfo) const override;
+
+    CmdVisitor *getCmdVisitorImpl(ExecutionState &state, const ProgramInfo &programInfo,
+                                  TestCase &testCase) const override;
+
+    ExprVisitor *getExprVisitorImpl(ExecutionState &state, const ProgramInfo &programInfo,
+                                    TestCase &testCase) const override;
 
  private:
     JBay_T2naSymbexTarget();
