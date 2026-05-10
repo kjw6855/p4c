@@ -23,6 +23,12 @@ class DependencyGraphs {
  public:
     using EsgId = std::pair<Graphs::vertex_t, const IR::Node *>;
 
+    enum class DepEdgeType {
+        DEPENDS_ON,
+        SATELITE,
+        CHAIN_PATH,
+    };
+
     /// Vertex properties for the dependency graph
     struct DependencyVertex {
         cstring name;                    // Variable or node name
@@ -30,12 +36,15 @@ class DependencyGraphs {
         cstring color;                   // Color for visualization
         cstring shape;                   // Shape for visualization
         bool isSO = false;               // True for [SO] stateful-object vertices
+        bool isSatellite = false;        // True for satellite circle nodes (category markers)
     };
 
     /// Edge properties for the dependency graph
     struct DependencyEdge {
+        DepEdgeType type;                // Type of dependency edge
         cstring label;                   // Edge label (e.g., "depends_on")
         cstring style;                   // Edge style for visualization
+        cstring color;                   // Edge color (empty = default black)
     };
 
     /// Graph types used for representation
@@ -118,13 +127,52 @@ class DependencyGraphs {
     /// @param index Dependency graph index
     void prune_nodes_not_reaching_leaves(size_t index);
 
-    /// Count non-SO vertices that have an outgoing "write_to" edge to an [SO] vertex
-    /// AND can reach at least one leaf.  Used for case-2 / case-3 counting.
-    size_t count_data_write_sources_reaching_leaves(size_t index) const;
+    /// Return all vertices forward-reachable from [SO] vertices that have NO incoming
+    /// "write_to" edge (category 1: reads of non-written registers).
+    /// If @p leafCount is non-null it is set to the number of distinct leaves in the
+    /// returned set (equivalent to the old count_nowrite_so_leaves).
+    std::unordered_set<vertex_t> get_nowrite_so_vertices(
+        size_t index, size_t *leafCount = nullptr) const;
 
-    /// Count leaves reachable (forward) from [SO] vertices that have NO incoming
-    /// "write_to" edge.  Used for case-1 counting (reads of non-written registers).
-    size_t count_nowrite_so_leaves(size_t index) const;
+    /// Per-register dependency chain: write-side and read-side vertices separated.
+    /// One SOChain per SO vertex that has at least one incoming "write_to" edge.
+    /// isSinglePath is always true by construction: the pruned dep graph only retains SO
+    /// vertices whose downstream path reaches a leaf, meaning write and read/use both occur
+    /// in the same P4 pipeline execution.
+    struct SOChain {
+        vertex_t soVertex;
+        cstring soName;
+        const IR::Node *soNode;
+        /// Vertices whose "write_to" edge points directly to this SO.
+        std::unordered_set<vertex_t> writeVertices;
+        /// {soVertex} plus all vertices forward-reachable from it (the read/use side).
+        std::unordered_set<vertex_t> readVertices;
+        /// Two-path detection. Currently, this only detects the presence of duplicated
+        /// vertices in the readVertices and writeVertices sets.
+        bool isSinglePath = true;
+    };
+
+    /// Return all vertices in data-write chains (paths that contain at least one
+    /// non-SO → SO "write_to" edge, category 2/3).
+    /// If @p soNames is non-null it is populated with the name of every written SO.
+    /// If @p writeSourceCount is non-null it is set to the number of distinct non-SO
+    /// vertices that have a direct "write_to" edge to an SO vertex (equivalent to the
+    /// old count_data_write_sources_reaching_leaves).
+    std::vector<SOChain> get_data_write_so_chains(
+        size_t index,
+        std::unordered_set<cstring> *soNames = nullptr,
+        size_t *writeSourceCount = nullptr) const;
+
+    /// @brief Add a small satellite circle node beside every vertex in each chain category.
+    /// For each (vertex, chain) pair a circle node is added with the chain ID as its label
+    /// and a color matching the vertex's role.  An edge from vertex → satellite carries
+    /// the same chain ID label.
+    /// @return (original_vertex, satellite_vertex) pairs for rank=same injection.
+    std::vector<std::pair<vertex_t, vertex_t>> add_chain_satellites(size_t index);
+
+    /// @brief Inject {rank=same; orig; sat;} directives into an already-written DOT file.
+    static void inject_rank_groups(const std::filesystem::path &filepath,
+                                   const std::vector<std::pair<vertex_t, vertex_t>> &pairs);
 
     /// @brief Merge nodes without variables into nodes with variables
     /// @param index Dependency graph index
@@ -141,6 +189,12 @@ class DependencyGraphs {
                 attrs[*vit]["fillcolor"_cs] = vinfo.color;
                 attrs[*vit]["shape"_cs] = vinfo.shape;
                 attrs[*vit]["style"_cs] = "filled"_cs;
+                if (vinfo.isSatellite) {
+                    attrs[*vit]["fixedsize"_cs] = "true"_cs;
+                    attrs[*vit]["width"_cs] = "0.3"_cs;
+                    attrs[*vit]["height"_cs] = "0.3"_cs;
+                    attrs[*vit]["fontsize"_cs] = "10"_cs;
+                }
             }
 
             auto edges = boost::edges(g);
@@ -149,6 +203,10 @@ class DependencyGraphs {
                 auto attrs = boost::get(boost::edge_attribute, g);
                 attrs[*eit]["label"_cs] = einfo.label;
                 attrs[*eit]["style"_cs] = einfo.style;
+                if (!einfo.color.isNullOrEmpty()) {
+                    attrs[*eit]["color"_cs] = einfo.color;
+                    attrs[*eit]["fontcolor"_cs] = einfo.color;
+                }
             }
         }
     };

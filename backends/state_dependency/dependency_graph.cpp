@@ -1,6 +1,7 @@
 #include "dependency_graph.h"
 
 #include <deque>
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -78,6 +79,7 @@ edge_t DependencyGraphs::add_dependency_edge(size_t index, vertex_t from, vertex
     DependencyEdge &eData = (*depGraphs[index])[newEdge];
     eData.label = label;
     eData.style = "solid"_cs;
+    eData.type = DepEdgeType::DEPENDS_ON;
 
     return newEdge;
 }
@@ -379,41 +381,13 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
     }
 }
 
-size_t DependencyGraphs::count_data_write_sources_reaching_leaves(size_t index) const {
+std::unordered_set<DependencyGraphs::vertex_t>
+DependencyGraphs::get_nowrite_so_vertices(size_t index, size_t *leafCount) const {
     const auto &g = *depGraphs[index];
-    if (boost::num_vertices(g) == 0 || leaves[index].empty()) return 0;
+    std::unordered_set<vertex_t> result;
+    if (boost::num_vertices(g) == 0) return result;
 
-    // Backward reachability from all leaves.
-    std::unordered_set<vertex_t> reachable;
-    std::deque<vertex_t> work(leaves[index].begin(), leaves[index].end());
-    for (auto v : leaves[index]) reachable.insert(v);
-    while (!work.empty()) {
-        auto v = work.front(); work.pop_front();
-        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
-            auto pred = boost::source(*ei, g);
-            if (!reachable.count(pred)) { reachable.insert(pred); work.push_back(pred); }
-        }
-    }
-
-    // Count non-SO vertices with an outgoing "write_to" edge to an SO vertex
-    // that are themselves backward-reachable from a leaf.
-    size_t count = 0;
-    for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
-        auto v = *vit;
-        if (g[v].isSO || !reachable.count(v)) continue;
-        for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
-            auto tgt = boost::target(*ei, g);
-            if (g[*ei].label == "write_to"_cs && g[tgt].isSO) { ++count; break; }
-        }
-    }
-    return count;
-}
-
-size_t DependencyGraphs::count_nowrite_so_leaves(size_t index) const {
-    const auto &g = *depGraphs[index];
-    if (boost::num_vertices(g) == 0 || leaves[index].empty()) return 0;
-
-    // Collect [SO] vertices with NO incoming "write_to" edge.
+    // Collect SO vertices with no incoming "write_to" edge.
     std::vector<vertex_t> noWriteSOs;
     for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
         auto v = *vit;
@@ -424,24 +398,248 @@ size_t DependencyGraphs::count_nowrite_so_leaves(size_t index) const {
         }
         if (!hasWrite) noWriteSOs.push_back(v);
     }
-    if (noWriteSOs.empty()) return 0;
+    if (noWriteSOs.empty()) return result;
 
-    // Forward BFS from those SOs; count distinct leaves reachable.
-    std::unordered_set<vertex_t> visited;
+    // Forward BFS from those SOs — collect every reachable vertex.
     std::deque<vertex_t> work(noWriteSOs.begin(), noWriteSOs.end());
-    for (auto v : noWriteSOs) visited.insert(v);
+    for (auto v : noWriteSOs) result.insert(v);
     while (!work.empty()) {
         auto v = work.front(); work.pop_front();
         for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
             auto tgt = boost::target(*ei, g);
-            if (!visited.count(tgt)) { visited.insert(tgt); work.push_back(tgt); }
+            if (!result.count(tgt)) { result.insert(tgt); work.push_back(tgt); }
         }
     }
 
-    size_t count = 0;
-    for (auto lv : leaves[index])
-        if (visited.count(lv)) ++count;
-    return count;
+    if (leafCount) {
+        *leafCount = 0;
+        for (auto lv : leaves[index])
+            if (result.count(lv)) ++(*leafCount);
+    }
+    return result;
+}
+
+std::vector<DependencyGraphs::SOChain>
+DependencyGraphs::get_data_write_so_chains(size_t index,
+                                          std::unordered_set<cstring> *soNames,
+                                          size_t *writeSourceCount) const {
+    const auto &g = *depGraphs[index];
+    std::vector<SOChain> chains;
+    if (boost::num_vertices(g) == 0 || leaves[index].empty()) return chains;
+
+    // Find SO vertices with at least one incoming "write_to" edge.
+    std::vector<vertex_t> writeSOs;
+    for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
+        auto v = *vit;
+        if (!g[v].isSO) continue;
+        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+            if (g[*ei].label == "write_to"_cs) {
+                writeSOs.push_back(v);
+                if (soNames) soNames->insert(g[v].name);
+                break;
+            }
+        }
+    }
+    if (writeSOs.empty()) return chains;
+
+    // Collect distinct write-source vertices (direct non-SO predecessors via write_to).
+    std::map<vertex_t, std::unordered_set<vertex_t>> writeSources;
+    for (auto so : writeSOs) {
+        for (auto [ei, ee] = boost::in_edges(so, g); ei != ee; ++ei) {
+            if (g[*ei].label == "write_to"_cs)
+                writeSources[so].insert(boost::source(*ei, g));
+        }
+    }
+    BUG_CHECK(!writeSources.empty(), "Expected at least one write source for data-write SOs");
+    if (writeSourceCount) *writeSourceCount = writeSources.size();
+
+    // Collect distinct read-destination vertices from writeSO
+    std::map<vertex_t, std::unordered_set<vertex_t>> readDestinations;
+    for (auto [so, _] : writeSources) {
+        for (auto [ei, ee] = boost::out_edges(so, g); ei != ee; ++ei) {
+            if (g[*ei].label == "read_from"_cs) {
+                auto tgt = boost::target(*ei, g);
+                readDestinations[so].insert(tgt);
+            }
+        }
+    }
+
+    // Get SO chain for each (writeSO, so, readDst) pair
+    for (auto [so, sources] : writeSources) {
+        // Different readDst can lead to different chains
+        for (auto readDst : readDestinations[so]) {
+            BUG_CHECK(!sources.count(readDst),
+                    "Read destination vertices should not overlap with write source vertices");
+            std::unordered_set<vertex_t> readVtx;
+            std::deque<vertex_t> work;
+            // 1. Non-SO backward BFS from each read vertex until hitting root
+            work.push_back(readDst);
+            while (!work.empty()) {
+                auto v = work.front(); work.pop_front();
+                for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                    auto src = boost::source(*ei, g);
+                    if (g[*ei].label != "read_from"_cs && !g[src].isSO && !readVtx.count(src)) {
+                        readVtx.insert(src);
+                        work.push_back(src);
+                    }
+                }
+            }
+
+            // 2. add SO and everything forward-reachable from it to readVtx.
+            readVtx.insert(so);
+            work.push_back(so);
+            while (!work.empty()) {
+                auto v = work.front(); work.pop_front();
+                for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+                    auto tgt = boost::target(*ei, g);
+                    if (!readVtx.count(tgt)) { readVtx.insert(tgt); work.push_back(tgt); }
+                }
+            }
+
+            // 3. For each write source, backward BFS until hitting roots. Collect visited vertices as writeVtx.
+            for (auto src : sources) {
+                BUG_CHECK(readVtx.size() > 0 && !readVtx.count(src),
+                        "non-empty readVertices should not contain write source vertices");
+
+                // Write side: {so} + backward BFS until hitting roots
+                std::unordered_set<vertex_t> writeVtx;
+                std::deque<vertex_t> bwWork;
+                writeVtx.insert(src);
+                bwWork.push_back(src);
+                bool isSinglePath = true;
+                while (!bwWork.empty()) {
+                    auto v = bwWork.front(); bwWork.pop_front();
+                    for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                        auto tgt = boost::source(*ei, g);
+                        if (!writeVtx.count(tgt)) {
+                            writeVtx.insert(tgt);
+                            bwWork.push_back(tgt);
+                            if (readVtx.count(tgt)) {
+                                // Two-path detected: one path from src to so via tgt,
+                                // another path from src to so via readVtx.
+                                isSinglePath = false;
+                            }
+                        }
+                    }
+                }
+                chains.push_back({so, g[so].name, g[so].esgId.second,
+                                std::move(writeVtx), readVtx, isSinglePath});
+            }
+        }
+    }
+
+    return chains;
+}
+
+std::vector<std::pair<DependencyGraphs::vertex_t, DependencyGraphs::vertex_t>>
+DependencyGraphs::add_chain_satellites(size_t index) {
+    auto &g = *depGraphs[index];
+    std::vector<std::pair<vertex_t, vertex_t>> rankPairs;
+
+    int chainId = 1;
+
+    // Helper: add a satellite circle node next to vertex v.
+    auto addSat = [&](vertex_t v, const cstring &col, int chainId) -> vertex_t {
+        vertex_t sat = boost::add_vertex(g);
+        g[sat].name = cstring::to_cstring(chainId);
+        g[sat].shape = "circle"_cs;
+        g[sat].color = col;
+        g[sat].isSatellite = true;
+        auto [e, ok] = boost::add_edge(v, sat, g);
+        if (ok) {
+            g[e].label = ""_cs;
+            g[e].style = "dashed"_cs;
+            g[e].color = "grey"_cs;
+            g[e].type = DepEdgeType::SATELITE;
+        }
+        rankPairs.emplace_back(v, sat);
+        return sat;
+    };
+
+    // Chain 1: nowrite reads
+    auto nowriteSet = get_nowrite_so_vertices(index);
+    if (!nowriteSet.empty()) {
+        // TODO: check node color
+        for (auto v : nowriteSet)
+            addSat(v, "lightyellow"_cs, chainId);
+        ++chainId;
+    }
+
+    // Chains 2+: per write-SO chains
+    for (const auto &chain : get_data_write_so_chains(index, nullptr)) {
+        std::map<vertex_t, vertex_t> writeSats;  // for satelite edges
+        std::map<vertex_t, vertex_t> readSats;   // for satelite edges
+        for (auto v : chain.writeVertices)
+            writeSats[v] = addSat(v, "tomato"_cs, chainId);
+
+        readSats[chain.soVertex] = addSat(chain.soVertex,
+            chain.isSinglePath ? "tomato"_cs : "tomato:gold"_cs, chainId);
+        for (auto v : chain.readVertices)
+            if (v != chain.soVertex) {
+                if (chain.isSinglePath)
+                    readSats[v] = addSat(v, "tomato"_cs, chainId);
+                else
+                    readSats[v] = addSat(v, "gold"_cs, chainId);
+            }
+
+        // Collect edges to mirror before modifying the graph — adding edges while
+        // iterating boost::edges() invalidates vecS iterators.
+        std::vector<std::pair<vertex_t, vertex_t>> chainEdges;
+        for (auto [ei, ee] = boost::edges(g); ei != ee; ++ei) {
+            if (g[*ei].type != DepEdgeType::DEPENDS_ON) continue;
+            auto src = boost::source(*ei, g);
+            auto tgt = boost::target(*ei, g);
+            if (writeSats.count(src) && writeSats.count(tgt))
+                chainEdges.emplace_back(writeSats[src], writeSats[tgt]);
+            if (readSats.count(src) && readSats.count(tgt))
+                chainEdges.emplace_back(readSats[src], readSats[tgt]);
+            // Add writeSats -> soVertex
+            if (writeSats.count(src) && tgt == chain.soVertex)
+                chainEdges.emplace_back(writeSats[src], readSats[chain.soVertex]);
+        }
+        for (auto [src, tgt] : chainEdges) {
+            auto [e, ok] = boost::add_edge(src, tgt, g);
+            if (ok) {
+                g[e].label = cstring::to_cstring(chainId);
+                g[e].style = ""_cs;
+                g[e].color = ""_cs;
+                g[e].type = DepEdgeType::CHAIN_PATH;
+            }
+        }
+        ++chainId;
+    }
+
+    return rankPairs;
+}
+
+void DependencyGraphs::inject_rank_groups(
+        const std::filesystem::path &filepath,
+        const std::vector<std::pair<vertex_t, vertex_t>> &pairs) {
+    if (pairs.empty()) return;
+
+    std::ifstream in(filepath.string());
+    if (!in.is_open()) return;
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(in, line)) lines.push_back(line);
+    in.close();
+
+    // Find last closing brace and insert rank directives before it.
+    int insertPos = -1;
+    for (int i = static_cast<int>(lines.size()) - 1; i >= 0; --i) {
+        if (lines[i].find('}') != std::string::npos) { insertPos = i; break; }
+    }
+    if (insertPos == -1) return;
+
+    for (const auto &[orig, sat] : pairs) {
+        lines.insert(lines.begin() + insertPos,
+            "    {rank=same; " + std::to_string(orig) + "; " + std::to_string(sat) + ";}");
+        ++insertPos;  // keep subsequent insertions after already-inserted lines
+    }
+
+    std::ofstream out(filepath.string());
+    for (const auto &l : lines) out << l << "\n";
 }
 
 }  // namespace P4::P4StateDependency

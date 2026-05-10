@@ -20,6 +20,31 @@
 
 namespace P4::P4StateDependency {
 
+/// A single write→register→read dependency chain associated with one stateful object.
+///
+/// Each chain groups the write-side IR nodes (the statements that write header data into
+/// the SO) and the read-side IR nodes (the SO itself plus all statements that use its
+/// value downstream toward a leaf).  A test path is valid for this chain only when it
+/// visits nodes from BOTH sides.
+///
+/// isSinglePath is always true by construction: the pruned dep graph only retains SO
+/// vertices whose value reaches a leaf in the current execution, so every data-write chain
+/// has write and read on the same P4 pipeline execution.  Two-path reads (register read
+/// from a value written by a prior packet) are represented in the noWriteRead category.
+struct DepChain {
+    size_t id = 0;
+    cstring soName;
+    const IR::Node *soNode = nullptr;
+
+    std::unordered_set<const IR::Node *> writeNodes;
+    boost::dynamic_bitset<> writeNodeIds;
+
+    std::unordered_set<const IR::Node *> readNodes;
+    boost::dynamic_bitset<> readNodeIds;
+
+    bool isSinglePath = true;
+};
+
 struct StateDependencyResult {
     /// H2S2V: header variable → stateful object → packet field.
     /// Heap-allocated; caller takes ownership. Null if no deps found.
@@ -55,6 +80,34 @@ struct StateDependencyResult {
     /// so it stays consistent even when the target's midend creates independent clones of
     /// the same source nodes.  Used when pointer identity cannot be guaranteed.
     boost::dynamic_bitset<> depChainNodeIds;
+
+    // ---- Per-category node sets (subsets of depChainNodes) ----
+
+    /// Category 1 (--state-dep-read): H2S2V nodes reachable from SO vertices that have
+    /// no incoming "write_to" edge (the SO is read without being written in this chain).
+    std::unordered_set<const IR::Node *> noWriteReadNodes;
+    boost::dynamic_bitset<> noWriteReadNodeIds;
+
+    /// Category 2 (--state-dep-write): flat union of all data-write chain nodes
+    /// (H2S2V + H2S2C).  Used for the quick "any chain at all?" guard.
+    std::unordered_set<const IR::Node *> dataWriteNodes;
+    boost::dynamic_bitset<> dataWriteNodeIds;
+
+    /// Per-register chains for category 2.  A test path is valid only when it visits
+    /// nodes from BOTH the write side AND the read side of the same chain.
+    std::vector<DepChain> dataWriteChains;
+
+    /// Names of stateful objects (registers) that appear as write targets in category-2 chains.
+    /// Used by the test backend to emit register-initialization preambles when
+    /// --state-dep-reg-init is set.
+    std::unordered_set<cstring> dataWriteSONames;
+
+    /// Category 3 (--state-dep-cond): flat union of all H2S2C data-write chain nodes.
+    std::unordered_set<const IR::Node *> dataWriteCondNodes;
+    boost::dynamic_bitset<> dataWriteCondNodeIds;
+
+    /// Per-register chains for category 3 (H2S2C only).
+    std::vector<DepChain> dataWriteCondChains;
 };
 
 /// Run the full state-dependency analysis (A2S2V and H2S2V) on a compiled P4 program.

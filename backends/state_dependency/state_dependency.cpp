@@ -175,12 +175,15 @@ int main(int argc, char *const argv[]) {
         for (size_t i = 0; i < numGraphs; i++) {
             auto graphName = cstring(boost::get_property(*cfgArr[i], boost::graph_name));
 
-            size_t noWriteRead = sdResult.h2s2vGraphs
-                    ? sdResult.h2s2vGraphs->count_nowrite_so_leaves(i) : 0;
-            size_t dataWriteToValue = sdResult.h2s2vGraphs
-                    ? sdResult.h2s2vGraphs->count_data_write_sources_reaching_leaves(i) : 0;
-            size_t dataWriteToCond = sdResult.h2s2cGraphs
-                    ? sdResult.h2s2cGraphs->count_data_write_sources_reaching_leaves(i) : 0;
+            size_t noWriteRead = 0;
+            if (sdResult.h2s2vGraphs)
+                sdResult.h2s2vGraphs->get_nowrite_so_vertices(i, &noWriteRead);
+            size_t dataWriteToValue = 0;
+            if (sdResult.h2s2vGraphs)
+                sdResult.h2s2vGraphs->get_data_write_so_chains(i, nullptr, &dataWriteToValue);
+            size_t dataWriteToCond = 0;
+            if (sdResult.h2s2cGraphs)
+                sdResult.h2s2cGraphs->get_data_write_so_chains(i, nullptr, &dataWriteToCond);
             size_t dataWrite = dataWriteToValue + dataWriteToCond;
 
             if (noWriteRead == 0 && dataWrite == 0 && dataWriteToCond == 0) continue;
