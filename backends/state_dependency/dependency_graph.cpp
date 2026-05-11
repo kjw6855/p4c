@@ -381,11 +381,11 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
     }
 }
 
-std::unordered_set<DependencyGraphs::vertex_t>
-DependencyGraphs::get_nowrite_so_vertices(size_t index, size_t *leafCount) const {
+std::vector<DependencyGraphs::SOChain>
+DependencyGraphs::get_nowrite_so_vertices(size_t index, Graphs::Graph *esg) const {
     const auto &g = *depGraphs[index];
-    std::unordered_set<vertex_t> result;
-    if (boost::num_vertices(g) == 0) return result;
+    std::vector<SOChain> chains;
+    if (boost::num_vertices(g) == 0 || leaves[index].empty()) return chains;
 
     // Collect SO vertices with no incoming "write_to" edge.
     std::vector<vertex_t> noWriteSOs;
@@ -398,31 +398,59 @@ DependencyGraphs::get_nowrite_so_vertices(size_t index, size_t *leafCount) const
         }
         if (!hasWrite) noWriteSOs.push_back(v);
     }
-    if (noWriteSOs.empty()) return result;
+    if (noWriteSOs.empty()) return chains;
 
-    // Forward BFS from those SOs — collect every reachable vertex.
-    std::deque<vertex_t> work(noWriteSOs.begin(), noWriteSOs.end());
-    for (auto v : noWriteSOs) result.insert(v);
-    while (!work.empty()) {
-        auto v = work.front(); work.pop_front();
-        for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
-            auto tgt = boost::target(*ei, g);
-            if (!result.count(tgt)) { result.insert(tgt); work.push_back(tgt); }
+    // Find read_from non-write SO vertices
+    std::map<vertex_t, std::unordered_set<vertex_t>> readDestinations;
+    for (auto so : noWriteSOs) {
+        for (auto [ei, ee] = boost::out_edges(so, g); ei != ee; ++ei) {
+            if (g[*ei].label == "read_from"_cs)
+                readDestinations[so].insert(boost::target(*ei, g));
         }
     }
 
-    if (leafCount) {
-        *leafCount = 0;
-        for (auto lv : leaves[index])
-            if (result.count(lv)) ++(*leafCount);
+    size_t chainId = 0;
+    for (auto [so, readDsts] : readDestinations) {
+        for (auto readDst : readDsts) {
+            std::unordered_set<vertex_t> readVtx;
+            std::deque<vertex_t> work;
+
+            // Run backward BFS from readDst
+            readVtx.insert(readDst);
+            work.push_back(readDst);
+            while (!work.empty()) {
+                auto v = work.front(); work.pop_front();
+                if (v == so) continue; // Don't cross read_from edge back to SO
+                if (!readVtx.count(v)) {
+                    readVtx.insert(v);
+                    work.push_back(v);
+                }
+            }
+
+            // Run forward BFS from readDst
+            work.push_back(readDst);
+            while (!work.empty()) {
+                auto v = work.front(); work.pop_front();
+                for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+                    auto tgt = boost::target(*ei, g);
+                    if (!readVtx.count(tgt)) {
+                        readVtx.insert(tgt);
+                        work.push_back(tgt);
+                    }
+                }
+            }
+            chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                     so, g[so].name, g[so].esgId.second,
+                                     std::unordered_set<vertex_t>(),
+                                     std::move(readVtx), false, chainId++));
+        }
     }
-    return result;
+    return chains;
 }
 
 std::vector<DependencyGraphs::SOChain>
-DependencyGraphs::get_data_write_so_chains(size_t index,
-                                          std::unordered_set<cstring> *soNames,
-                                          size_t *writeSourceCount) const {
+DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
+                                          std::unordered_set<cstring> *soNames) const {
     const auto &g = *depGraphs[index];
     std::vector<SOChain> chains;
     if (boost::num_vertices(g) == 0 || leaves[index].empty()) return chains;
@@ -451,7 +479,6 @@ DependencyGraphs::get_data_write_so_chains(size_t index,
         }
     }
     BUG_CHECK(!writeSources.empty(), "Expected at least one write source for data-write SOs");
-    if (writeSourceCount) *writeSourceCount = writeSources.size();
 
     // Collect distinct read-destination vertices from writeSO (pure read_from only).
     std::map<vertex_t, std::unordered_set<vertex_t>> readDestinations;
@@ -464,6 +491,7 @@ DependencyGraphs::get_data_write_so_chains(size_t index,
         }
     }
 
+    size_t chainId = 0;
     // Get SO chain for each (writeSO, so, readDst) pair
     for (auto [so, sources] : writeSources) {
         // 1. Collect paths for each write source through backward BFS.
@@ -492,6 +520,7 @@ DependencyGraphs::get_data_write_so_chains(size_t index,
         }
 
         // 2. Collect paths for each read destination through backward and forward BFS
+        std::map<vertex_t, std::unordered_set<vertex_t>> readVtxCache;
         for (auto readDst : readDestinations[so]) {
             // 1) If readDst is for update, create a single-execution path
             if (updateReadDstToWriteSrc.count(readDst)) {
@@ -525,43 +554,52 @@ DependencyGraphs::get_data_write_so_chains(size_t index,
                         fwWork.push_back(tgt);
                     }
                 }
-                chains.push_back({so, g[so].name, g[so].esgId.second,
-                                std::move(writeLocalVtx), std::unordered_set<vertex_t>(), true});
+                chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                         so, g[so].name, g[so].esgId.second,
+                                         std::move(writeLocalVtx),
+                                         std::unordered_set<vertex_t>(), true, chainId++));
 
             // 2) Otherwise, create a multi-execution path: pure read x write paths
             } else {
                 std::unordered_set<vertex_t> readVtx; // for detecting single-path vs multi-path read SOs
-                std::deque<vertex_t> work;
-                // 1. Non-SO backward BFS from readDst to collect its context.
-                work.push_back(readDst);
-                while (!work.empty()) {
-                    auto v = work.front(); work.pop_front();
-                    for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
-                        auto src = boost::source(*ei, g);
-                        if (g[*ei].label != "read_from"_cs && !g[src].isSO && !readVtx.count(src)) {
-                            readVtx.insert(src);
-                            work.push_back(src);
+                if (readVtxCache.count(readDst)) {
+                    readVtx = readVtxCache[readDst];
+                } else {
+                    std::deque<vertex_t> work;
+                    // 1. Non-SO backward BFS from readDst to collect its context.
+                    work.push_back(readDst);
+                    while (!work.empty()) {
+                        auto v = work.front(); work.pop_front();
+                        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                            auto src = boost::source(*ei, g);
+                            if (g[*ei].label != "read_from"_cs && !g[src].isSO && !readVtx.count(src)) {
+                                readVtx.insert(src);
+                                work.push_back(src);
+                            }
                         }
                     }
-                }
 
-                // 2. Forward BFS from SO: collect the full read side, but skip update-read
-                //    destinations so the update action's body stays on the write side only.
-                readVtx.insert(readDst);
-                // start from readDst for the specific read path
-                work.push_back(readDst);
-                while (!work.empty()) {
-                    auto v = work.front(); work.pop_front();
-                    for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
-                        auto tgt = boost::target(*ei, g);
-                        if (!readVtx.count(tgt)) { readVtx.insert(tgt); work.push_back(tgt); }
+                    // 2. Forward BFS from SO: collect the full read side, but skip update-read
+                    //    destinations so the update action's body stays on the write side only.
+                    readVtx.insert(readDst);
+                    // start from readDst for the specific read path
+                    work.push_back(readDst);
+                    while (!work.empty()) {
+                        auto v = work.front(); work.pop_front();
+                        for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+                            auto tgt = boost::target(*ei, g);
+                            if (!readVtx.count(tgt)) { readVtx.insert(tgt); work.push_back(tgt); }
+                        }
                     }
+                    readVtxCache[readDst] = readVtx;
                 }
 
                 // 3. For each write source, backward BFS to build writeVtx.
                 for (auto src : sources) {
-                    chains.push_back({so, g[so].name, g[so].esgId.second,
-                                    writeVtx[src], std::move(readVtx), false});
+                    chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                             so, g[so].name, g[so].esgId.second,
+                                             writeVtx[src], readVtx,
+                                             false, chainId++));
                 }
 
             }
@@ -572,14 +610,12 @@ DependencyGraphs::get_data_write_so_chains(size_t index,
 }
 
 std::vector<std::pair<DependencyGraphs::vertex_t, DependencyGraphs::vertex_t>>
-DependencyGraphs::add_chain_satellites(size_t index) {
+DependencyGraphs::add_chain_satellites(size_t index, Graphs::Graph *esg) {
     auto &g = *depGraphs[index];
     std::vector<std::pair<vertex_t, vertex_t>> rankPairs;
 
-    int chainId = 1;
-
     // Helper: add a satellite circle node next to vertex v.
-    auto addSat = [&](vertex_t v, const cstring &col, int chainId) -> vertex_t {
+    auto addSat = [&](vertex_t v, const cstring &col, size_t chainId) -> vertex_t {
         vertex_t sat = boost::add_vertex(g);
         g[sat].name = cstring::to_cstring(chainId);
         g[sat].shape = "circle"_cs;
@@ -597,25 +633,24 @@ DependencyGraphs::add_chain_satellites(size_t index) {
     };
 
     // Chain 1: nowrite reads
-    auto nowriteSet = get_nowrite_so_vertices(index);
-    if (!nowriteSet.empty()) {
-        // TODO: check node color
-        for (auto v : nowriteSet)
-            addSat(v, "lightyellow"_cs, chainId);
-        ++chainId;
+    auto nowriteChains = get_nowrite_so_vertices(index, esg);
+    for (const auto &chain : nowriteChains) {
+        for (auto v : chain.readVertices)
+            addSat(v, "green"_cs, chain.id + 1);
     }
 
     // Chains 2+: per write-SO chains
-    for (const auto &chain : get_data_write_so_chains(index, nullptr)) {
+    for (const auto &chain : get_data_write_so_chains(index, esg, nullptr)) {
+        auto sateliteId = chain.id + 1; // start from 1 since 0 is for nowrite chains
         std::map<vertex_t, vertex_t> writeSats;  // for satelite edges
         std::map<vertex_t, vertex_t> readSats;   // for satelite edges
         for (auto v : chain.writeVertices)
-            writeSats[v] = addSat(v, "tomato"_cs, chainId);
+            writeSats[v] = addSat(v, "tomato"_cs, sateliteId);
 
         readSats[chain.soVertex] = addSat(chain.soVertex,
-            chain.readVertices.size() ? "tomato:gold"_cs : "tomato"_cs, chainId);
+            chain.readVertices.size() ? "tomato:gold"_cs : "tomato"_cs, sateliteId);
         for (auto v : chain.readVertices)
-            if (v != chain.soVertex) readSats[v] = addSat(v, "gold"_cs, chainId);
+            if (v != chain.soVertex) readSats[v] = addSat(v, "gold"_cs, sateliteId);
 
         // Collect edges to mirror before modifying the graph — adding edges while
         // iterating boost::edges() invalidates vecS iterators.
@@ -635,13 +670,12 @@ DependencyGraphs::add_chain_satellites(size_t index) {
         for (auto [src, tgt] : chainEdges) {
             auto [e, ok] = boost::add_edge(src, tgt, g);
             if (ok) {
-                g[e].label = cstring::to_cstring(chainId);
+                g[e].label = ""_cs;
                 g[e].style = ""_cs;
                 g[e].color = ""_cs;
                 g[e].type = DepEdgeType::CHAIN_PATH;
             }
         }
-        ++chainId;
     }
 
     return rankPairs;

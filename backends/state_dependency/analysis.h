@@ -44,45 +44,9 @@ struct StateDependencyResult {
     StatefulToKey *s2vChecker = nullptr;
     StatefulToCond *h2s2cChecker = nullptr;
 
-    /// IR nodes (IR::Statement, IR::P4Action, etc.) of CFG vertices that participate in
-    /// at least one a2s2v or h2s2v dependency chain, populated before CFG cleanup.
-    /// Empty means no dependency chains were found in the program.
-    /// Used by the symbex test backend to filter test cases when --state-dep is active.
-    std::unordered_set<const IR::Node *> depChainNodes;
-
-    /// Stable fallback identity set for dep-chain nodes, indexed by IR::Node::clone_id.
-    /// clone_id traces back through any chain of Transform clones to the original node's id,
-    /// so it stays consistent even when the target's midend creates independent clones of
-    /// the same source nodes.  Used when pointer identity cannot be guaranteed.
-    boost::dynamic_bitset<> depChainNodeIds;
-
-    // ---- Per-category node sets (subsets of depChainNodes) ----
-
-    /// Category 1 (--state-dep-read): H2S2V nodes reachable from SO vertices that have
-    /// no incoming "write_to" edge (the SO is read without being written in this chain).
-    std::unordered_set<const IR::Node *> noWriteReadNodes;
-    boost::dynamic_bitset<> noWriteReadNodeIds;
-
-    /// Category 2 (--state-dep-write): flat union of all data-write chain nodes
-    /// (H2S2V + H2S2C).  Used for the quick "any chain at all?" guard.
-    std::unordered_set<const IR::Node *> dataWriteNodes;
-    boost::dynamic_bitset<> dataWriteNodeIds;
-
-    /// Per-register chains for category 2.  A test path is valid only when it visits
-    /// nodes from BOTH the write side AND the read side of the same chain.
-    std::vector<DependencyGraphs::SOChain> dataWriteChains;
-
-    /// Names of stateful objects (registers) that appear as write targets in category-2 chains.
-    /// Used by the test backend to emit register-initialization preambles when
-    /// --state-dep-reg-init is set.
-    std::unordered_set<cstring> dataWriteSONames;
-
-    /// Category 3 (--state-dep-cond): flat union of all H2S2C data-write chain nodes.
-    std::unordered_set<const IR::Node *> dataWriteCondNodes;
-    boost::dynamic_bitset<> dataWriteCondNodeIds;
-
-    /// Per-register chains for category 3 (H2S2C only).
-    std::vector<DependencyGraphs::SOChain> dataWriteCondChains;
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> noWriteReadChains;
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteValueChains;
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteCondChains;
 };
 
 /// Run the full state-dependency analysis (A2S2V and H2S2V) on a compiled P4 program.

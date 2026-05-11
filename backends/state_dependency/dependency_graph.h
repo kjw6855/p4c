@@ -128,13 +128,6 @@ class DependencyGraphs {
     /// @param index Dependency graph index
     void prune_nodes_not_reaching_leaves(size_t index);
 
-    /// Return all vertices forward-reachable from [SO] vertices that have NO incoming
-    /// "write_to" edge (category 1: reads of non-written registers).
-    /// If @p leafCount is non-null it is set to the number of distinct leaves in the
-    /// returned set (equivalent to the old count_nowrite_so_leaves).
-    std::unordered_set<vertex_t> get_nowrite_so_vertices(
-        size_t index, size_t *leafCount = nullptr) const;
-
     /// Per-register dependency chain: write-side and read-side vertices separated.
     /// One SOChain per SO vertex that has at least one incoming "write_to" edge.
     ///
@@ -163,29 +156,60 @@ class DependencyGraphs {
 
         /// IR-node sets resolved from writeVertices/readVertices by analysis.cpp.
         /// Empty until resolveSOChainNodes() fills them in.
-        std::unordered_set<const IR::Node *> writeNodes;
+        std::map<vertex_t, const IR::Node *> writeNodes;
         boost::dynamic_bitset<> writeNodeIds;
-        std::unordered_set<const IR::Node *> readNodes;
+        std::map<vertex_t, const IR::Node *> readNodes;
         boost::dynamic_bitset<> readNodeIds;
+
+        SOChain(DepGraph *depG, Graphs::Graph *esg,
+                vertex_t soVertex, cstring soName, const IR::Node *soNode,
+                std::unordered_set<vertex_t> writeVertices,
+                std::unordered_set<vertex_t> readVertices,
+                bool isUpdate, size_t id)
+            : soVertex(soVertex), soName(soName), soNode(soNode),
+              writeVertices(std::move(writeVertices)),
+              readVertices(std::move(readVertices)), isUpdate(isUpdate), id(id) {
+            for (auto v : this->writeVertices) {
+                auto esgVtx = (*depG)[v].esgId.first;
+                if (esgVtx >= boost::num_vertices(*esg)) continue;
+                const auto *irNode = (*esg)[esgVtx].node;
+                if (irNode == nullptr) continue;
+                writeNodes.emplace(v, irNode);
+                auto cloneId = static_cast<size_t>(irNode->clone_id);
+                if (cloneId >= writeNodeIds.size()) writeNodeIds.resize(cloneId + 1, false);
+                writeNodeIds.set(cloneId);
+            }
+            for (auto v : this->readVertices) {
+                auto esgVtx = (*depG)[v].esgId.first;
+                if (esgVtx >= boost::num_vertices(*esg)) continue;
+                const auto *irNode = (*esg)[esgVtx].node;
+                if (irNode == nullptr) continue;
+                readNodes.emplace(v, irNode);
+                auto cloneId = static_cast<size_t>(irNode->clone_id);
+                if (cloneId >= readNodeIds.size()) readNodeIds.resize(cloneId + 1, false);
+                readNodeIds.set(cloneId);
+            }
+        };
     };
+
+    /// Return all vertices forward-reachable from [SO] vertices that have NO incoming
+    /// "write_to" edge (category 1: reads of non-written registers).
+    std::vector<SOChain> get_nowrite_so_vertices(
+        size_t index, Graphs::Graph *esg) const;
 
     /// Return all vertices in data-write chains (paths that contain at least one
     /// non-SO → SO "write_to" edge, category 2/3).
     /// If @p soNames is non-null it is populated with the name of every written SO.
-    /// If @p writeSourceCount is non-null it is set to the number of distinct non-SO
-    /// vertices that have a direct "write_to" edge to an SO vertex (equivalent to the
-    /// old count_data_write_sources_reaching_leaves).
     std::vector<SOChain> get_data_write_so_chains(
-        size_t index,
-        std::unordered_set<cstring> *soNames = nullptr,
-        size_t *writeSourceCount = nullptr) const;
+        size_t index, Graphs::Graph *esg,
+        std::unordered_set<cstring> *soNames = nullptr) const;
 
     /// @brief Add a small satellite circle node beside every vertex in each chain category.
     /// For each (vertex, chain) pair a circle node is added with the chain ID as its label
     /// and a color matching the vertex's role.  An edge from vertex → satellite carries
     /// the same chain ID label.
     /// @return (original_vertex, satellite_vertex) pairs for rank=same injection.
-    std::vector<std::pair<vertex_t, vertex_t>> add_chain_satellites(size_t index);
+    std::vector<std::pair<vertex_t, vertex_t>> add_chain_satellites(size_t index, Graphs::Graph *esg);
 
     /// @brief Inject {rank=same; orig; sat;} directives into an already-written DOT file.
     static void inject_rank_groups(const std::filesystem::path &filepath,

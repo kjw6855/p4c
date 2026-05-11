@@ -221,131 +221,22 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
 
-    // Collect IR nodes of CFG vertices participating in any dep chain before CFG cleanup.
-    // Populate both depChainNodes (pointer) and depChainNodeIds (clone_id bitset).
-    // clone_id is stable across independent Transform runs on the same source program:
-    // Node(const Node &other) always copies other.clone_id, so the clone_id traces back
-    // to the original node regardless of how many midend passes cloned it.
-    auto gatherDepChainNodes = [&](DependencyGraphs *depG) {
-        if (!depG) return;
-        for (size_t i = 0; i < numGraphs; i++) {
-            if (depG->leaves[i].empty()) continue;
-            auto *cfg = cgen.controlGraphsArray[i];
-            const auto &dg = depG->get_graph(i);
-            for (auto [vit, vend] = boost::vertices(dg); vit != vend; ++vit) {
-                auto cfgVtx = dg[*vit].esgId.first;
-                if (cfgVtx >= boost::num_vertices(*cfg)) continue;
-                const auto *irNode = (*cfg)[cfgVtx].node;
-                if (irNode == nullptr) continue;
-                result.depChainNodes.insert(irNode);
-                auto cloneId = static_cast<size_t>(irNode->clone_id);
-                if (cloneId >= result.depChainNodeIds.size())
-                    result.depChainNodeIds.resize(cloneId + 1, false);
-                result.depChainNodeIds.set(cloneId);
-            }
-        }
-    };
-    gatherDepChainNodes(a2s2vGraphs);
-    gatherDepChainNodes(h2s2vGraphs);
-    gatherDepChainNodes(h2s2cGraphs);
-
-    // Helper: convert a per-graph vertex set from a DependencyGraphs into IR nodes.
-    auto addNodesFromVertexSet = [&](DependencyGraphs *depG, size_t i,
-            const std::unordered_set<DependencyGraphs::vertex_t> &vtxSet,
-            std::unordered_set<const IR::Node *> &nodes,
-            boost::dynamic_bitset<> &nodeIds) {
-        auto *cfg = cgen.controlGraphsArray[i];
-        const auto &dg = depG->get_graph(i);
-        for (auto v : vtxSet) {
-            auto cfgVtx = dg[v].esgId.first;
-            if (cfgVtx >= boost::num_vertices(*cfg)) continue;
-            const auto *irNode = (*cfg)[cfgVtx].node;
-            if (irNode == nullptr) continue;
-            nodes.insert(irNode);
-            auto cloneId = static_cast<size_t>(irNode->clone_id);
-            if (cloneId >= nodeIds.size()) nodeIds.resize(cloneId + 1, false);
-            nodeIds.set(cloneId);
-        }
-    };
-
     // Category 1 (nowrite SO reads): H2S2V vertices forward-reachable from SOs with no write_to.
     if (h2s2vGraphs) {
         for (size_t i = 0; i < numGraphs; i++) {
             if (h2s2vGraphs->leaves[i].empty()) continue;
-            auto vtxSet = h2s2vGraphs->get_nowrite_so_vertices(i);
-            addNodesFromVertexSet(h2s2vGraphs, i, vtxSet,
-                result.noWriteReadNodes, result.noWriteReadNodeIds);
+            auto *esg = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            result.noWriteReadChains[graphName] = h2s2vGraphs->get_nowrite_so_vertices(i, esg);
+            result.dataWriteValueChains[graphName] = h2s2vGraphs->get_data_write_so_chains(i, esg);
         }
     }
-
-    // Helper: populate IR-node sets in a SOChain by resolving its vertex sets through the CFG.
-    auto resolveSOChainNodes = [&](DependencyGraphs *depG, size_t i,
-            DependencyGraphs::SOChain &sc) {
-        auto *cfg = cgen.controlGraphsArray[i];
-        const auto &dg = depG->get_graph(i);
-        auto addNodes = [&](const std::unordered_set<DependencyGraphs::vertex_t> &vtxSet,
-                std::unordered_set<const IR::Node *> &nodes,
-                boost::dynamic_bitset<> &nodeIds) {
-            for (auto v : vtxSet) {
-                auto cfgVtx = dg[v].esgId.first;
-                if (cfgVtx >= boost::num_vertices(*cfg)) continue;
-                const auto *irNode = (*cfg)[cfgVtx].node;
-                if (irNode == nullptr) continue;
-                nodes.insert(irNode);
-                auto cloneId = static_cast<size_t>(irNode->clone_id);
-                if (cloneId >= nodeIds.size()) nodeIds.resize(cloneId + 1, false);
-                nodeIds.set(cloneId);
-            }
-        };
-        addNodes(sc.writeVertices, sc.writeNodes, sc.writeNodeIds);
-        addNodes(sc.readVertices, sc.readNodes, sc.readNodeIds);
-    };
-
-    // Helper: merge all IR nodes in a SOChain's write+read sets into a flat node set.
-    auto accumulateChain = [](const DependencyGraphs::SOChain &sc,
-            std::unordered_set<const IR::Node *> &nodes,
-            boost::dynamic_bitset<> &nodeIds) {
-        for (const auto *n : sc.writeNodes) {
-            nodes.insert(n);
-            auto cid = static_cast<size_t>(n->clone_id);
-            if (cid >= nodeIds.size()) nodeIds.resize(cid + 1, false);
-            nodeIds.set(cid);
-        }
-        for (const auto *n : sc.readNodes) {
-            nodes.insert(n);
-            auto cid = static_cast<size_t>(n->clone_id);
-            if (cid >= nodeIds.size()) nodeIds.resize(cid + 1, false);
-            nodeIds.set(cid);
-        }
-    };
-
-    // Category 2 (data writes): per-chain SOChain + flat union.
-    // H2S2V + H2S2C chains where header data is written into a register.
-    size_t chainId = 0;
-    for (DependencyGraphs *depG : {h2s2vGraphs, h2s2cGraphs}) {
-        if (!depG) continue;
-        for (size_t i = 0; i < numGraphs; i++) {
-            if (depG->leaves[i].empty()) continue;
-            for (auto sc : depG->get_data_write_so_chains(i, nullptr)) {
-                sc.id = chainId++;
-                resolveSOChainNodes(depG, i, sc);
-                const auto &stored = result.dataWriteChains.emplace_back(std::move(sc));
-                accumulateChain(stored, result.dataWriteNodes, result.dataWriteNodeIds);
-            }
-        }
-    }
-
-    // Category 3 (data write to cond): H2S2C chains only.
-    chainId = 0;
     if (h2s2cGraphs) {
         for (size_t i = 0; i < numGraphs; i++) {
             if (h2s2cGraphs->leaves[i].empty()) continue;
-            for (auto sc : h2s2cGraphs->get_data_write_so_chains(i, nullptr)) {
-                sc.id = chainId++;
-                resolveSOChainNodes(h2s2cGraphs, i, sc);
-                const auto &stored = result.dataWriteCondChains.emplace_back(std::move(sc));
-                accumulateChain(stored, result.dataWriteCondNodes, result.dataWriteCondNodeIds);
-            }
+            auto *esg = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            result.dataWriteCondChains[graphName] = h2s2cGraphs->get_data_write_so_chains(i, esg);
         }
     }
 
@@ -356,13 +247,13 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             auto graphName = cstring(boost::get_property(*g, boost::graph_name));
             if (!h2s2vGraphs->leaves[i].empty() && h2s2vGraphs->num_vertices(i) > 0) {
                 auto dotPath = graphsDir / (graphName + "_h2s2v_dep.dot");
-                auto rankPairs = h2s2vGraphs->add_chain_satellites(i);
+                auto rankPairs = h2s2vGraphs->add_chain_satellites(i, g);
                 h2s2vGraphs->export_to_graphviz(i, dotPath);
                 DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
             }
             if (!h2s2cGraphs->leaves[i].empty() && h2s2cGraphs->num_vertices(i) > 0) {
                 auto dotPath = graphsDir / (graphName + "_h2s2c_dep.dot");
-                auto rankPairs = h2s2cGraphs->add_chain_satellites(i);
+                auto rankPairs = h2s2cGraphs->add_chain_satellites(i, g);
                 h2s2cGraphs->export_to_graphviz(i, dotPath);
                 DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
             }
