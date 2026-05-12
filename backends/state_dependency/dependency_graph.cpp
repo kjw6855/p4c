@@ -420,10 +420,13 @@ DependencyGraphs::get_nowrite_so_vertices(size_t index, Graphs::Graph *esg) cons
             work.push_back(readDst);
             while (!work.empty()) {
                 auto v = work.front(); work.pop_front();
-                if (v == so) continue; // Don't cross read_from edge back to SO
-                if (!readVtx.count(v)) {
-                    readVtx.insert(v);
-                    work.push_back(v);
+                for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                    auto src = boost::source(*ei, g);
+                    if (src == so) continue; // Don't cross read_from edge back to SO
+                    if (!readVtx.count(src)) {
+                        readVtx.insert(src);
+                        work.push_back(src);
+                    }
                 }
             }
 
@@ -635,8 +638,28 @@ DependencyGraphs::add_chain_satellites(size_t index, Graphs::Graph *esg) {
     // Chain 1: nowrite reads
     auto nowriteChains = get_nowrite_so_vertices(index, esg);
     for (const auto &chain : nowriteChains) {
+        std::map<vertex_t, vertex_t> sateliteVertices;
+        sateliteVertices.insert({chain.soVertex, addSat(chain.soVertex, "green"_cs, chain.id + 1)});
         for (auto v : chain.readVertices)
-            addSat(v, "green"_cs, chain.id + 1);
+            sateliteVertices.insert({v, addSat(v, "green"_cs, chain.id + 1)});
+
+        std::vector<std::pair<vertex_t, vertex_t>> chainEdges;
+        for (auto [ei, ee] = boost::edges(g); ei != ee; ++ei) {
+            if (g[*ei].type != DepEdgeType::DEPENDS_ON) continue;
+            auto src = boost::source(*ei, g);
+            auto tgt = boost::target(*ei, g);
+            if (sateliteVertices.count(src) && sateliteVertices.count(tgt))
+                chainEdges.emplace_back(sateliteVertices[src], sateliteVertices[tgt]);
+        }
+        for (auto [src, tgt] : chainEdges) {
+            auto [e, ok] = boost::add_edge(src, tgt, g);
+            if (ok) {
+                g[e].label = ""_cs;
+                g[e].style = ""_cs;
+                g[e].color = ""_cs;
+                g[e].type = DepEdgeType::CHAIN_PATH;
+            }
+        }
     }
 
     // Chains 2+: per write-SO chains
