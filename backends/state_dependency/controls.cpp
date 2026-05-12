@@ -146,6 +146,12 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
         }
     }
 
+    for (auto *decl : cont->controlLocals) {
+        if (auto *dv = decl->to<IR::Declaration_Variable>()) {
+            add_variable_in_vertex(dv, start_v, false);
+        }
+    }
+
     visit(cont->body);
 
     parents.insert(parents.end(), return_parents.begin(), return_parents.end());
@@ -871,7 +877,7 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
                 if (auto *mem = data->to<IR::Member>()) {
                     add_variables(mem, getContext(), true);
                 } else {
-                    visit(data, "data", 2);
+                    visit(data, "data", 1);
                 }
             }
         } else if (hasSOFlag(soFlags, SOFlags::READ)) {
@@ -880,7 +886,7 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
                 if (auto *mem = data->to<IR::Member>()) {
                     add_variables(mem, getContext(), false);
                 } else {
-                    visit(data, "data", 1);
+                    visit(data, "data", 2);
                 }
             }
         }
@@ -1013,12 +1019,17 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
         auto *decl = refMap->getDeclaration(pe->path, false);
         if (decl != nullptr) {
             // Find the declared variable
-            if (decl->is<IR::Parameter>())
-                newVar = add_variable_in_vertex(decl->to<IR::Parameter>(),
-                        cur_v.value(), isUsed);
-            else if (decl->is<IR::Declaration_Variable>())
-                newVar = add_local_variable_in_vertex(decl->to<IR::Declaration_Variable>(),
-                        cur_v.value(), isUsed);
+            if (auto *param = decl->to<IR::Parameter>()) {
+                newVar = add_variable_in_vertex(param, cur_v.value(), isUsed);
+            } else if (auto *dv = decl->to<IR::Declaration_Variable>()) {
+                // Check if global variable
+                auto &gvarset = graphVars[graphName];
+                bool isGlobal = std::any_of(gvarset.begin(), gvarset.end(),
+                        [dv](const IR::Node *v) { return v->equiv(*dv); });
+                newVar = isGlobal
+                    ? add_variable_in_vertex(dv, cur_v.value(), isUsed)
+                    : add_local_variable_in_vertex(dv, cur_v.value(), isUsed);
+            }
         }
     } else if (auto *me = e->to<IR::Member>()) {
         // Check if it's egress_port ("standard_metadata.egress_port")

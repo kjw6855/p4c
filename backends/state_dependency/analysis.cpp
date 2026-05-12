@@ -104,6 +104,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             if (a2s2vGraphs->leaves[i].empty()) continue;
             auto *g = cgen.controlGraphsArray[i];
             auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2vGraphs->add_so_constant_edges(i, g);
             if (!graphsDir.empty() && a2s2vGraphs->num_vertices(i) > 0)
                 a2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_a2s2v_dep.dot"));
             a2s2vGraphs->merge_nodes_without_variable(i);
@@ -204,6 +205,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         auto graphName = cstring(boost::get_property(*g, boost::graph_name));
 
         if (!h2s2vGraphs->leaves[i].empty()) {
+            h2s2vGraphs->add_so_constant_edges(i, g);
             if (!graphsDir.empty() && h2s2vGraphs->num_vertices(i) > 0)
                 h2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_h2s2v_dep.dot"));
             h2s2vGraphs->merge_nodes_without_variable(i);
@@ -212,6 +214,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             h2s2vGraphs->prune_nodes_not_reaching_leaves(i);
         }
         if (!h2s2cGraphs->leaves[i].empty()) {
+            h2s2cGraphs->add_so_constant_edges(i, g);
             if (!graphsDir.empty() && h2s2cGraphs->num_vertices(i) > 0)
                 h2s2cGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_h2s2c_dep.dot"));
             h2s2cGraphs->merge_nodes_without_variable(i);

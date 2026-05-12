@@ -111,6 +111,9 @@ class DependencyGraphs {
     /// @return DOT format string
     std::string export_to_graphviz_string(size_t index) const;
 
+    /// @brief Add additional edges from constant writes to stateful objects
+    void add_so_constant_edges(size_t index, Graphs::Graph *esg);
+
     /// @brief Set vertex attributes for visualization
     /// @param v Vertex descriptor
     /// @param color Color name or hex code

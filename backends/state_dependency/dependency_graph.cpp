@@ -211,14 +211,13 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                 add_dependency_edge(index, srcVertex, dstVertex, edgeLabel);
             }
 
-            if (hasFlag(srcInfo.flags, VertexFlags::SO_IDX) &&
-                    hasFlag(dstInfo.flags, VertexFlags::SO_DATA) &&
+            if (hasFlag(dstInfo.flags, VertexFlags::SO_DATA) &&
                     dstInfo.statefulObjectNode != nullptr) {
                 BUG_CHECK(!hasLeaves,
                     "Unexpected leaf vertex for stateful object data dependency: %1%",
                     dstInfo.statefulObjectNode);
-                    // Find its stateful object
-                    vertex_t soVertex = add_so_vertex(index, dstInfo.statefulObjectNode);
+                // Find its stateful object
+                vertex_t soVertex = add_so_vertex(index, dstInfo.statefulObjectNode);
                 if (hasSOFlag(dstInfo.soFlags, SOFlags::READ)) {
                     add_dependency_edge(index, soVertex, dstVertex, "read_from"_cs);
                 }
@@ -260,6 +259,26 @@ size_t DependencyGraphs::num_vertices(size_t index) const {
 
 size_t DependencyGraphs::num_edges(size_t index) const {
     return boost::num_edges(*depGraphs[index]);
+}
+
+void DependencyGraphs::add_so_constant_edges(size_t index, Graphs::Graph *esg) {
+    auto &g = *depGraphs[index];
+    for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
+        auto &vInfo = g[*vit];
+
+        const auto &esgNode = vInfo.esgId.first;
+        const auto &esgInfo = (*esg)[esgNode];
+        // SO_IDX UPDATE node without any edges
+        if (!hasFlag(esgInfo.flags, VertexFlags::SO_IDX)) continue;
+        if (!hasSOFlag(esgInfo.soFlags, SOFlags::UPDATE)) continue;
+        // Skip if there is any edge (e.g., from IDX to DATA)
+        auto [eit, eend] = boost::out_edges(*vit, g);
+        if (eit != eend) continue;
+
+        // Add static write edge from vertex to its stateful object
+        vertex_t soVertex = add_so_vertex(index, esgInfo.statefulObjectNode);
+        add_dependency_edge(index, *vit, soVertex, "constant"_cs);
+    }
 }
 
 void DependencyGraphs::merge_nodes_without_variable(size_t index) {
@@ -394,7 +413,10 @@ DependencyGraphs::get_nowrite_so_vertices(size_t index, Graphs::Graph *esg) cons
         if (!g[v].isSO) continue;
         bool hasWrite = false;
         for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
-            if (g[*ei].label == "write_to"_cs) { hasWrite = true; break; }
+            if (g[*ei].label == "write_to"_cs || g[*ei].label == "constant"_cs) {
+                hasWrite = true;
+                break;
+            }
         }
         if (!hasWrite) noWriteSOs.push_back(v);
     }
