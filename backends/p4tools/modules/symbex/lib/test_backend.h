@@ -11,6 +11,7 @@
 #include "ir/ir.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/state_dependency_track.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/lib/final_state.h"
@@ -92,6 +93,20 @@ class TestBackEnd {
         bool packetIsDropped = false;
     };
 
+    /// Result of processing a single phase (one packet execution) without writing output.
+    struct PhaseResult {
+        /// The created test specification for this phase.
+        const TestSpec *testSpec;
+        /// Whether the packet was dropped during this phase.
+        bool packetIsDropped;
+    };
+
+    /// Resolves concolic variables, produces TestInfo, and creates a TestSpec for one phase
+    /// without writing any output or incrementing the test counter.
+    /// Returns std::nullopt if the phase should be skipped (e.g. tainted output port,
+    /// failed concolic resolution).
+    [[nodiscard]] virtual std::optional<PhaseResult> processPhase(const FinalState &state);
+
     /// @returns the test specification which is consumed by the test back ends.
     virtual const TestSpec *createTestSpec(const ExecutionState *executionState,
                                            const Model *finalModel, const TestInfo &testInfo) = 0;
@@ -115,6 +130,12 @@ class TestBackEnd {
 
     /// The callback that is executed by the symbolic executor.
     virtual bool run(const FinalState &state);
+
+    /// Callback for the three-phase tampering scenario.
+    /// The default implementation emits three independent test cases by calling run() for
+    /// each phase; target backends can override this to emit a single TamperingTestSpec
+    /// that bundles all three packet pairs with one shared set of table entries.
+    virtual bool runTampering(const TamperingFinalState &state);
 
     /// Returns test count.
     [[nodiscard]] int64_t getTestCount() const;

@@ -399,4 +399,207 @@ AbstractTestReferenceOrError Protobuf::produceTest(const TestSpec *testSpec,
     return new ProtobufTest(inja::render(getTestCaseTemplate(), dataJson));
 }
 
+std::string Protobuf::getTamperingTestCaseTemplate() {
+    static std::string TEST_CASE(
+        R"""(
+# proto-file: p4symbex.proto
+# proto-message: TamperingTestCase
+# A P4TestGen-generated tampering test case for {{test_name}}.p4
+metadata: "symbex seed: {{ default(seed, "none") }}"
+metadata: "Date generated: {{timestamp}}"
+## if length(selected_branches) > 0
+metadata: "{{selected_branches}}"
+## endif
+metadata: "Current node coverage: {{coverage}}"
+metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=read tampered"
+
+## for trace_item in trace
+traces: '{{trace_item}}'
+## endfor
+
+# Phase 1: read original register value
+input_packet {
+  packet: "{{phase1_send.pkt}}"
+  port: {{phase1_send.ig_port}}
+}
+## if phase1_verify
+expected_output_packet {
+  packet: "{{phase1_verify.exp_pkt}}"
+  port: {{phase1_verify.eg_port}}
+  packet_mask: "{{phase1_verify.ignore_mask}}"
+}
+## endif
+
+# Phase 2: write tampered register value
+input_packet {
+  packet: "{{phase2_send.pkt}}"
+  port: {{phase2_send.ig_port}}
+}
+## if phase2_verify
+expected_output_packet {
+  packet: "{{phase2_verify.exp_pkt}}"
+  port: {{phase2_verify.eg_port}}
+  packet_mask: "{{phase2_verify.ignore_mask}}"
+}
+## endif
+
+# Phase 3: read tampered register value
+input_packet {
+  packet: "{{phase3_send.pkt}}"
+  port: {{phase3_send.ig_port}}
+}
+## if phase3_verify
+expected_output_packet {
+  packet: "{{phase3_verify.exp_pkt}}"
+  port: {{phase3_verify.eg_port}}
+  packet_mask: "{{phase3_verify.ignore_mask}}"
+}
+## endif
+
+## if control_plane
+## for table in control_plane.tables
+## for rule in table.rules
+# Table {{table.table_name}}
+entities {
+  table_entry {
+    table_id: {{table.id}}
+    table_name: "{{table.table_name}}"
+## if rule.rules.needs_priority
+    priority: {{rule.priority}}
+## endif
+## for r in rule.rules.single_exact_matches
+    match {
+      field_id: {{r.id}}
+      field_name: "{{r.field_name}}"
+      exact {
+        value: "{{r.value}}"
+      }
+    }
+## endfor
+## for r in rule.rules.optional_matches
+    match {
+      field_id: {{r.id}}
+      field_name: "{{r.field_name}}"
+      optional {
+        value: "{{r.value}}"
+      }
+    }
+## endfor
+## for r in rule.rules.range_matches
+    match {
+      field_id: {{r.id}}
+      field_name: "{{r.field_name}}"
+      range {
+        low: "{{r.lo}}"
+        high: "{{r.hi}}"
+      }
+    }
+## endfor
+## for r in rule.rules.ternary_matches
+    match {
+      field_id: {{r.id}}
+      field_name: "{{r.field_name}}"
+      ternary {
+        value: "{{r.value}}"
+        mask: "{{r.mask}}"
+      }
+    }
+## endfor
+## for r in rule.rules.lpm_matches
+    match {
+      field_id: {{r.id}}
+      field_name: "{{r.field_name}}"
+      lpm {
+        value: "{{r.value}}"
+        prefix_len: {{r.prefix_len}}
+      }
+    }
+## endfor
+    action {
+## if existsIn(table, "has_ap")
+      action_profile_action_set {
+        action_profile_actions {
+          action {
+            action_id: {{rule.action_id}}
+            action_name: "{{rule.action_name}}"
+## for act_param in rule.rules.act_args
+            params {
+              param_id: {{act_param.id}}
+              param_name: "{{act_param.param}}"
+              value: "{{act_param.value}}"
+            }
+## endfor
+          }
+        }
+      }
+## else
+      action {
+        action_id: {{rule.action_id}}
+        action_name: "{{rule.action_name}}"
+## for act_param in rule.rules.act_args
+        params {
+          param_id: {{act_param.id}}
+          param_name: "{{act_param.param}}"
+          value: "{{act_param.value}}"
+        }
+## endfor
+      }
+## endif
+    }
+## endfor
+  }
+}
+## endfor
+## endif
+)""");
+    return TEST_CASE;
+}
+
+inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
+                                               cstring selectedBranches, size_t testId,
+                                               float currentCoverage) const {
+    inja::json dataJson;
+    if (selectedBranches != nullptr) {
+        dataJson["selected_branches"] = selectedBranches.c_str();
+    }
+
+    auto optSeed = getTestBackendConfiguration().seed;
+    if (optSeed.has_value()) {
+        dataJson["seed"] = optSeed.value();
+    }
+    dataJson["test_name"] = getTestBackendConfiguration().testBaseName;
+    dataJson["test_id"] = testId;
+    // Trace and control plane entries come from phase 1 (shared).
+    dataJson["trace"] = getTrace(testSpec->spec1);
+    dataJson["control_plane"] = getControlPlane(testSpec->spec1);
+    dataJson["timestamp"] = Utils::getTimeStamp();
+    std::stringstream coverageStr;
+    coverageStr << std::setprecision(2) << currentCoverage;
+    dataJson["coverage"] = coverageStr.str();
+
+    dataJson["phase1_send"] = getSend(testSpec->spec1);
+    dataJson["phase1_verify"] = getExpectedPacket(testSpec->spec1);
+    dataJson["phase2_send"] = getSend(testSpec->spec2);
+    dataJson["phase2_verify"] = getExpectedPacket(testSpec->spec2);
+    dataJson["phase3_send"] = getSend(testSpec->spec3);
+    dataJson["phase3_verify"] = getExpectedPacket(testSpec->spec3);
+
+    return dataJson;
+}
+
+void Protobuf::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBranches,
+                                size_t testId, float currentCoverage) {
+    inja::json dataJson = produceTamperingTestCase(testSpec, selectedBranches, testId, currentCoverage);
+    LOG5("Protobuf tampering test back end: emitting testcase:" << std::setw(4) << dataJson);
+
+    auto optBasePath = getTestBackendConfiguration().fileBasePath;
+    BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
+    auto incrementedbasePath = optBasePath.value();
+    incrementedbasePath.concat("_" + std::to_string(testId));
+    incrementedbasePath.replace_extension(".txtpb");
+    auto protobufFileStream = std::ofstream(incrementedbasePath);
+    inja::render_to(protobufFileStream, getTamperingTestCaseTemplate(), dataJson);
+    protobufFileStream.flush();
+}
+
 }  // namespace P4::P4Tools::Symbex::Bmv2

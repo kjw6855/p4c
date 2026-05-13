@@ -76,36 +76,6 @@ bool TestBackEnd::run(const FinalState &state) {
             printInfo("AssertionMode: Found an input that triggers an assertion.");
         }
 
-        // If --state-dep is active, only emit tests whose execution path exercises at least
-        // one node that belongs to an a2s2v, h2s2v, or h2s2c dependency chain.
-        // If the program has no such chains, generate nothing.
-        if (symbexOptions.stateDep) {
-            const auto *sd = getProgramInfo().getCompilerResult().getStateDep();
-            if (sd == nullptr || (sd->depChainNodes.empty() && sd->depChainNodeIds.none())) {
-                return needsToTerminate(testCount);
-            }
-            const auto &visited = executionState->getVisited();
-            bool followsDep = false;
-            for (const auto *node : visited) {
-                // Fast path: exact pointer match (holds when no midend pass cloned the node).
-                if (sd->depChainNodes.count(node) != 0U) {
-                    followsDep = true;
-                    break;
-                }
-                // Fallback: clone_id match.  clone_id is preserved through any chain of
-                // Transform clones, so it is stable across independent midend runs that
-                // both start from the same post-frontend program.
-                auto cloneId = static_cast<size_t>(node->clone_id);
-                if (cloneId < sd->depChainNodeIds.size() && sd->depChainNodeIds.test(cloneId)) {
-                    followsDep = true;
-                    break;
-                }
-            }
-            if (!followsDep) {
-                return needsToTerminate(testCount);
-            }
-        }
-
         // For long-running tests periodically reset the solver state to free up memory.
         if (testCount != 0 && testCount % RESET_THRESHOLD == 0) {
             auto &solver = state.getSolver();
@@ -321,6 +291,84 @@ bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const
     printTraces("=======================================");
 
     return false;
+}
+
+std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(const FinalState &state) {
+    const auto *executionState = state.getExecutionState();
+    const auto *outputPacketExpr = executionState->getPacketBuffer();
+    const auto *outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
+    const auto *programTraces = state.getTraces();
+
+    auto concolicResolver = ConcolicResolver(state.getFinalModel(), *executionState,
+                                             *getProgramInfo().getConcolicMethodImpls());
+    outputPacketExpr->apply(concolicResolver);
+    outputPortExpr->apply(concolicResolver);
+    for (const auto *assert : executionState->getPathConstraint()) {
+        CHECK_NULL(assert);
+        assert->apply(concolicResolver);
+    }
+    const ConcolicVariableMap *resolvedConcolicVariables =
+        concolicResolver.getResolvedConcolicVariables();
+    auto concolicOptState = state.computeConcolicState(*resolvedConcolicVariables);
+    if (!concolicOptState.has_value()) {
+        return std::nullopt;
+    }
+    auto &replacedState = concolicOptState.value().get();
+    executionState = replacedState.getExecutionState();
+    outputPacketExpr = executionState->getPacketBuffer();
+    const auto &finalModel = replacedState.getFinalModel();
+    outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
+
+    if (Taint::hasTaint(outputPortExpr)) {
+        return std::nullopt;
+    }
+
+    auto testInfo = produceTestInfo(executionState, &finalModel, outputPacketExpr,
+                                    outputPortExpr, programTraces);
+    const auto *testSpec = createTestSpec(executionState, &finalModel, testInfo);
+    return PhaseResult{testSpec, testInfo.packetIsDropped};
+}
+
+bool TestBackEnd::runTampering(const TamperingFinalState &state) {
+    auto res1 = processPhase(state.phase1);
+    if (!res1.has_value()) {
+        testCount++;
+        return needsToTerminate(testCount);
+    }
+
+    auto res2 = processPhase(state.phase2);
+    if (!res2.has_value()) {
+        testCount++;
+        return needsToTerminate(testCount);
+    }
+
+    auto res3 = processPhase(state.phase3);
+    if (!res3.has_value()) {
+        testCount++;
+        return needsToTerminate(testCount);
+    }
+
+    TamperingTestSpec tamperingSpec(res1->testSpec, res2->testSpec, res3->testSpec,
+                                    state.readPathHasExit);
+
+    // Build selected-branches string from the symbolic executor.
+    std::stringstream selectedBranches;
+    const auto &symbexOptions = SymbexOptions::get();
+    if (symbexOptions.trackBranches) {
+        const auto *executionState = state.phase1.getExecutionState();
+        symbex.printCurrentTraceAndBranches(selectedBranches,
+                                            *executionState);
+    }
+
+    testCount++;
+    printInfo("============ Tampering Test %1% ============", testCount);
+
+    Util::withTimer("backend", [this, &tamperingSpec, &selectedBranches] {
+        testWriter->writeTestToFile(&tamperingSpec, selectedBranches, testCount, coverage);
+    });
+
+    printTraces("============ End Tampering Test %1% ============\n", testCount);
+    return needsToTerminate(testCount);
 }
 
 int64_t TestBackEnd::getTestCount() const { return testCount; }

@@ -30,6 +30,10 @@ class PTF : public Bmv2TestFramework {
     void writeTestToFile(const TestSpec *spec, cstring selectedBranches, size_t testId,
                          float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
+    /// Produce a three-phase tampering PTF test (appended to the same .py file).
+    void writeTestToFile(const TamperingTestSpec *spec, cstring selectedBranches, size_t testId,
+                         float currentCoverage) override;
+
  private:
     /// Has the preamble been generated already?
     bool preambleEmitted = false;
@@ -51,6 +55,13 @@ class PTF : public Bmv2TestFramework {
 
     /// @returns the inja test case template as a string.
     static std::string getTestCaseTemplate();
+
+    /// @returns the inja template for a three-phase tampering test class.
+    static std::string getTamperingTestCaseTemplate();
+
+    /// Renders and appends a three-phase tampering test to the PTF file.
+    void emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selectedBranches,
+                               size_t testId, const std::string &testCase, float currentCoverage);
 
     inja::json getExpectedPacket(const TestSpec *testSpec) const override;
 

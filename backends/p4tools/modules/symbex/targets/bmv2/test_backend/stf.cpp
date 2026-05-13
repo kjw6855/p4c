@@ -249,4 +249,100 @@ void STF::writeTestToFile(const TestSpec *testSpec, cstring selectedBranches, si
     emitTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
 }
 
+std::string STF::getTamperingTestCaseTemplate() {
+    static std::string TEST_CASE(
+        R"""(# symbex seed: {{ default(seed, "none") }}
+# Date generated: {{timestamp}}
+## if length(selected_branches) > 0
+    # {{selected_branches}}
+## endif
+# Current node coverage: {{coverage}}
+# Tampering test: phase1=read original, phase2=write tampered, phase3=read tampered
+# Traces (phase 1)
+## for trace_item in trace
+# {{trace_item}}
+##endfor
+
+## if control_plane
+## for table in control_plane.tables
+# Table {{table.table_name}}
+## if existsIn(table, "default_override")
+setdefault "{{table.table_name}}" "{{table.default_override.action_name}}"({% for a in table.default_override.act_args %}"{{a.param}}":{{a.value}}{% if not loop.is_last %},{% endif %}{% endfor %})
+## else
+## for rule in table.rules
+add "{{table.table_name}}" {% if rule.rules.needs_priority %}{{rule.priority}} {% endif %}{% for r in rule.rules.matches %}"{{r.field_name}}":{{r.value}} {% endfor %}"{{rule.action_name}}"({% for a in rule.rules.act_args %}"{{a.param}}":{{a.value}}{% if not loop.is_last %},{% endif %}{% endfor %})
+## endfor
+## endif
+
+## endfor
+## endif
+
+# Phase 1: read original register value
+packet {{phase1_send.ig_port}} {{phase1_send.pkt}}
+## if phase1_verify
+expect {{phase1_verify.eg_port}} {{phase1_verify.exp_pkt}}$
+## endif
+
+# Phase 2: write tampered register value
+packet {{phase2_send.ig_port}} {{phase2_send.pkt}}
+## if phase2_verify
+expect {{phase2_verify.eg_port}} {{phase2_verify.exp_pkt}}$
+## endif
+
+# Phase 3: read tampered register value
+packet {{phase3_send.ig_port}} {{phase3_send.pkt}}
+## if phase3_verify
+expect {{phase3_verify.eg_port}} {{phase3_verify.exp_pkt}}$
+## endif
+
+)""");
+    return TEST_CASE;
+}
+
+void STF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selectedBranches,
+                                 size_t testId, const std::string &testCase,
+                                 float currentCoverage) {
+    inja::json dataJson;
+    if (selectedBranches != nullptr) {
+        dataJson["selected_branches"] = selectedBranches.c_str();
+    }
+    auto optSeed = getTestBackendConfiguration().seed;
+    if (optSeed.has_value()) {
+        dataJson["seed"] = optSeed.value();
+    }
+
+    dataJson["test_id"] = testId;
+    // Table entries and trace come from phase 1 (shared across all phases).
+    dataJson["trace"] = getTrace(testSpec->spec1);
+    dataJson["control_plane"] = getControlPlane(testSpec->spec1);
+    dataJson["timestamp"] = Utils::getTimeStamp();
+    std::stringstream coverageStr;
+    coverageStr << std::setprecision(2) << currentCoverage;
+    dataJson["coverage"] = coverageStr.str();
+
+    dataJson["phase1_send"] = getSend(testSpec->spec1);
+    dataJson["phase1_verify"] = getExpectedPacket(testSpec->spec1);
+    dataJson["phase2_send"] = getSend(testSpec->spec2);
+    dataJson["phase2_verify"] = getExpectedPacket(testSpec->spec2);
+    dataJson["phase3_send"] = getSend(testSpec->spec3);
+    dataJson["phase3_verify"] = getExpectedPacket(testSpec->spec3);
+
+    LOG5("STF tampering test back end: emitting testcase:" << std::setw(4) << dataJson);
+
+    auto optBasePath = getTestBackendConfiguration().fileBasePath;
+    BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
+    auto incrementedbasePath = optBasePath.value();
+    incrementedbasePath.concat("_" + std::to_string(testId));
+    incrementedbasePath.replace_extension(".stf");
+    auto stfFileStream = std::ofstream(incrementedbasePath);
+    inja::render_to(stfFileStream, testCase, dataJson);
+    stfFileStream.flush();
+}
+
+void STF::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBranches,
+                           size_t testId, float currentCoverage) {
+    std::string testCase = getTamperingTestCaseTemplate();
+    emitTamperingTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
+}
+
 }  // namespace P4::P4Tools::Symbex::Bmv2

@@ -185,6 +185,12 @@ class TestFramework {
     virtual void writeTestToFile(const TestSpec *spec, cstring selectedBranches, size_t testIdx,
                                  float currentCoverage, unsigned char* testCoverage, int mapSize) = 0;
 
+    /// Writes a three-phase tampering test case to a file.
+    /// The default implementation emits three individual test files (one per phase).
+    /// Target backends can override this to emit a single file with three packet pairs.
+    virtual void writeTestToFile(const TamperingTestSpec *spec, cstring selectedBranches,
+                                 size_t testIdx, float currentCoverage);
+
     /// The method used to return the test case. This method is optional to each test framework.
     /// @param spec the testcase specification to be outputted.
     /// @param selectedBranches string describing branches selected for this testcase.

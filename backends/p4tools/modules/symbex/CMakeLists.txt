@@ -66,6 +66,7 @@ set(
   core/symbolic_executor/selected_branches.cpp
   core/symbolic_executor/random_backtrack.cpp
   core/symbolic_executor/greedy_node_cov.cpp
+  core/symbolic_executor/state_dependency_track.cpp
   core/symbolic_executor/symbolic_executor.cpp
   core/concolic_executor/concolic_executor.cpp
   core/target.cpp

@@ -33,6 +33,7 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/random_backtrack.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/selected_branches.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/state_dependency_track.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/core/concolic_executor/concolic_executor.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
@@ -91,6 +92,21 @@ SymbolicExecutor *pickExecutionEngine(const SymbexOptions &symbexOptions,
         std::string selectedBranchesStr = symbexOptions.selectedBranches;
         return new SelectedBranches(solver, programInfo, selectedBranchesStr);
     }
+    if (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering ||
+        pathSelectionPolicy == PathSelectionPolicy::StateDependencyAlteringPath) {
+        const auto *stateDep = programInfo.getCompilerResult().getStateDep();
+        if (stateDep == nullptr) {
+            error(
+                "State-dependency path selection policies require --state-dependency. "
+                "Falling back to depth-first search.");
+            return new DepthFirstSearch(solver, programInfo);
+        }
+        StateDependencyPolicy sdPolicy =
+            (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
+                ? StateDependencyPolicy::Tampering
+                : StateDependencyPolicy::AlteringPath;
+        return new StateDependencyTracker(solver, programInfo, *stateDep, sdPolicy);
+    }
     return new DepthFirstSearch(solver, programInfo);
 }
 
@@ -131,11 +147,18 @@ std::optional<AbstractTestList> generateAndCollectAbstractTests(
     auto *testBackend =
         SymbexTarget::getTestBackend(programInfo, testBackendConfiguration, *symbolicExecutor);
 
-    // Define how to handle the final state for each test. This is target defined.
-    // We delegate execution to the symbolic executor.
-    symbolicExecutor->run([testBackend](auto &&finalState) {
-        return testBackend->run(std::forward<decltype(finalState)>(finalState));
-    });
+    // For the Tampering policy, use the three-phase entry point so that the test backend
+    // receives all three related packet pairs as a unit.
+    auto *tracker = dynamic_cast<StateDependencyTracker *>(symbolicExecutor);
+    if (tracker != nullptr && tracker->getPolicy() == StateDependencyPolicy::Tampering) {
+        tracker->runTampering([testBackend](const TamperingFinalState &ts) {
+            return testBackend->runTampering(ts);
+        });
+    } else {
+        symbolicExecutor->run([testBackend](auto &&finalState) {
+            return testBackend->run(std::forward<decltype(finalState)>(finalState));
+        });
+    }
     auto result = postProcess(symbexOptions, *testBackend);
     if (result != EXIT_SUCCESS) {
         return std::nullopt;
@@ -179,11 +202,18 @@ int generateAndWriteAbstractTests(const SymbexOptions &symbexOptions,
     auto *testBackend =
         SymbexTarget::getTestBackend(programInfo, testBackendConfiguration, *symbolicExecutor);
 
-    // Define how to handle the final state for each test. This is target defined.
-    // We delegate execution to the symbolic executor.
-    symbolicExecutor->run([testBackend](auto &&finalState) {
-        return testBackend->run(std::forward<decltype(finalState)>(finalState));
-    });
+    // For the Tampering policy, use the three-phase entry point so that the test backend
+    // receives all three related packet pairs as a unit.
+    auto *tracker = dynamic_cast<StateDependencyTracker *>(symbolicExecutor);
+    if (tracker != nullptr && tracker->getPolicy() == StateDependencyPolicy::Tampering) {
+        tracker->runTampering([testBackend](const TamperingFinalState &ts) {
+            return testBackend->runTampering(ts);
+        });
+    } else {
+        symbolicExecutor->run([testBackend](auto &&finalState) {
+            return testBackend->run(std::forward<decltype(finalState)>(finalState));
+        });
+    }
     return postProcess(symbexOptions, *testBackend);
 }
 

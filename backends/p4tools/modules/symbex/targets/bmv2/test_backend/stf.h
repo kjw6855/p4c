@@ -23,6 +23,10 @@ class STF : public Bmv2TestFramework {
     void writeTestToFile(const TestSpec *spec, cstring selectedBranches, size_t testId,
                          float currentCoverage, unsigned char* testCoverage, int mapSize) override;
 
+    /// Produce a three-phase tampering STF test (single file, three packet pairs).
+    void writeTestToFile(const TamperingTestSpec *spec, cstring selectedBranches, size_t testId,
+                         float currentCoverage) override;
+
  private:
     /// Emits a test case.
     /// @param testId specifies the test name.
@@ -34,6 +38,13 @@ class STF : public Bmv2TestFramework {
 
     /// @returns the inja test case template as a string.
     static std::string getTestCaseTemplate();
+
+    /// @returns the inja template for a three-phase tampering test.
+    static std::string getTamperingTestCaseTemplate();
+
+    /// Renders and writes a three-phase tampering test file.
+    void emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selectedBranches,
+                               size_t testId, const std::string &testCase, float currentCoverage);
 
     inja::json getExpectedPacket(const TestSpec *testSpec) const override;
 

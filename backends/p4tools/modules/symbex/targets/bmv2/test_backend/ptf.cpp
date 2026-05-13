@@ -311,4 +311,156 @@ void PTF::writeTestToFile(const TestSpec *testSpec, cstring selectedBranches, si
     emitTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
 }
 
+std::string PTF::getTamperingTestCaseTemplate() {
+    static std::string TEST_CASE(
+        R"""(
+class TamperingTest{{test_id}}(AbstractTest):
+    '''
+    Date generated: {{timestamp}}
+    Current node coverage: {{coverage}}
+## if length(selected_branches) > 0
+    Selected branches: {{selected_branches}}
+## endif
+    Tampering test: phase1=read original, phase2=write tampered, phase3=read tampered
+    Trace:
+## for trace_item in trace
+    {{trace_item}}
+##endfor
+    '''
+
+    def setupCtrlPlane(self):
+        # Simple noop that is always called as filler.
+        pass
+## if control_plane
+## for table in control_plane.tables
+## for rule in table.rules
+        self.table_add(
+            ('{{table.table_name}}',
+            [
+## for r in rule.rules.single_exact_matches
+                self.Exact('{{r.field_name}}', {{r.value}}),
+## endfor
+## for r in rule.rules.optional_matches
+                self.Optional('{{r.field_name}}', {{r.value}}, {{r.use_exact}}),
+## endfor
+## for r in rule.rules.range_matches
+                self.Range('{{r.field_name}}', {{r.lo}}, {{r.hi}}),
+## endfor
+## for r in rule.rules.ternary_matches
+                self.Ternary('{{r.field_name}}', {{r.value}}, {{r.mask}}),
+## endfor
+## for r in rule.rules.lpm_matches
+                self.Lpm('{{r.field_name}}', {{r.value}}, {{r.prefix_len}}),
+## endfor
+            ]),
+            ('{{rule.action_name}}',
+            [
+## for act_param in rule.rules.act_args
+                ('{{act_param.param}}', {{act_param.value}}),
+## endfor
+            ])
+            , {% if rule.rules.needs_priority %}{{rule.priority}}{% else %}None{% endif %}
+            {% if existsIn(table, "has_ap") %}, {"oneshot": True}{% endif %}
+        )
+## endfor
+## endfor
+## endif
+
+    @bt.autocleanup
+    def runTestImpl(self):
+        self.setupCtrlPlane()
+        # Phase 1: read original register value
+        bt.testutils.log.info("Tampering Phase 1: read original value ...")
+        ig_port = {{phase1_send.ig_port}}
+        pkt = b'{{phase1_send.pkt}}'
+        ptfutils.send_packet(self, ig_port, pkt)
+## if phase1_verify
+        exp_pkt = Mask(b'{{phase1_verify.exp_pkt}}')
+## for ignore_mask in phase1_verify.ignore_masks
+        exp_pkt.set_do_not_care({{ignore_mask.0}}, {{ignore_mask.1}})
+## endfor
+        ptfutils.verify_packet(self, exp_pkt, {{phase1_verify.eg_port}})
+## else
+        ptfutils.verify_no_other_packets(self, self.device_id, timeout=self.packet_wait_time)
+## endif
+        # Phase 2: write tampered register value
+        bt.testutils.log.info("Tampering Phase 2: write tampered value ...")
+        ig_port = {{phase2_send.ig_port}}
+        pkt = b'{{phase2_send.pkt}}'
+        ptfutils.send_packet(self, ig_port, pkt)
+## if phase2_verify
+        exp_pkt = Mask(b'{{phase2_verify.exp_pkt}}')
+## for ignore_mask in phase2_verify.ignore_masks
+        exp_pkt.set_do_not_care({{ignore_mask.0}}, {{ignore_mask.1}})
+## endfor
+        ptfutils.verify_packet(self, exp_pkt, {{phase2_verify.eg_port}})
+## else
+        ptfutils.verify_no_other_packets(self, self.device_id, timeout=self.packet_wait_time)
+## endif
+        # Phase 3: read tampered register value
+        bt.testutils.log.info("Tampering Phase 3: read tampered value ...")
+        ig_port = {{phase3_send.ig_port}}
+        pkt = b'{{phase3_send.pkt}}'
+        ptfutils.send_packet(self, ig_port, pkt)
+## if phase3_verify
+        exp_pkt = Mask(b'{{phase3_verify.exp_pkt}}')
+## for ignore_mask in phase3_verify.ignore_masks
+        exp_pkt.set_do_not_care({{ignore_mask.0}}, {{ignore_mask.1}})
+## endfor
+        ptfutils.verify_packet(self, exp_pkt, {{phase3_verify.eg_port}})
+## else
+        ptfutils.verify_no_other_packets(self, self.device_id, timeout=self.packet_wait_time)
+## endif
+
+    def runTest(self):
+        self.runTestImpl()
+
+)""");
+    return TEST_CASE;
+}
+
+void PTF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selectedBranches,
+                                 size_t testId, const std::string &testCase,
+                                 float currentCoverage) {
+    inja::json dataJson;
+    if (selectedBranches != nullptr) {
+        dataJson["selected_branches"] = selectedBranches.c_str();
+    }
+
+    dataJson["test_id"] = testId;
+    // Trace and control plane entries come from phase 1 (shared across all phases).
+    dataJson["trace"] = getTrace(testSpec->spec1);
+    dataJson["control_plane"] = getControlPlane(testSpec->spec1);
+    dataJson["timestamp"] = Utils::getTimeStamp();
+    std::stringstream coverageStr;
+    coverageStr << std::setprecision(2) << currentCoverage;
+    dataJson["coverage"] = coverageStr.str();
+
+    dataJson["phase1_send"] = getSend(testSpec->spec1);
+    dataJson["phase1_verify"] = getExpectedPacket(testSpec->spec1);
+    dataJson["phase2_send"] = getSend(testSpec->spec2);
+    dataJson["phase2_verify"] = getExpectedPacket(testSpec->spec2);
+    dataJson["phase3_send"] = getSend(testSpec->spec3);
+    dataJson["phase3_verify"] = getExpectedPacket(testSpec->spec3);
+
+    LOG5("PTF tampering backend: emitting testcase:" << std::setw(4) << dataJson);
+
+    if (!preambleEmitted) {
+        BUG_CHECK(getTestBackendConfiguration().fileBasePath.has_value(), "Base path is not set.");
+        auto ptfFile = getTestBackendConfiguration().fileBasePath.value();
+        ptfFile.replace_extension(".py");
+        ptfFileStream = std::ofstream(ptfFile);
+        emitPreamble();
+        preambleEmitted = true;
+    }
+    inja::render_to(ptfFileStream, testCase, dataJson);
+    ptfFileStream.flush();
+}
+
+void PTF::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBranches,
+                           size_t testId, float currentCoverage) {
+    std::string testCase = getTamperingTestCaseTemplate();
+    emitTamperingTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
+}
+
 }  // namespace P4::P4Tools::Symbex::Bmv2

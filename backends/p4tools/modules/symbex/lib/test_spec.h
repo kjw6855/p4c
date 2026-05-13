@@ -293,6 +293,34 @@ class TableConfig : public TestObject {
  * Test Specification
  * ========================================================================================= */
 
+class TestSpec;  // forward declaration for TamperingTestSpec
+
+/// Test specification for the three-packet tampering scenario.
+/// Bundles three independent TestSpec objects (one per phase) together with a flag that
+/// indicates whether the read phases must produce an output packet (i.e., the SOChain's
+/// read vertices include __EXIT__ leaves, meaning the packet is not dropped).
+///
+/// Execution order on the same set of table entries (taken from spec1):
+///   spec1 — Phase 1: reads the original register value
+///   spec2 — Phase 2: writes the tampered register value
+///   spec3 — Phase 3: reads the changed register value
+class TamperingTestSpec {
+ public:
+    /// Full test spec for Phase 1 (read original value).
+    const TestSpec *spec1;
+    /// Full test spec for Phase 2 (write tampered value).
+    const TestSpec *spec2;
+    /// Full test spec for Phase 3 (read tampered value).
+    const TestSpec *spec3;
+
+    /// True when the SOChain's readVertices include __EXIT__ leaves, meaning the read
+    /// phases are expected to emit an output packet (i.e., packet is not dropped).
+    bool readPathHasExit;
+
+    TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, const TestSpec *s3, bool hasExit)
+        : spec1(s1), spec2(s2), spec3(s3), readPathHasExit(hasExit) {}
+};
+
 class TestSpec {
  private:
     /// The input packet of the test.
