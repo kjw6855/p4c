@@ -94,6 +94,16 @@ void FindStatefulToCond::analyze_control_graph(Tabulation *tab) {
 
         for (auto &dst : de.second) {
             auto dstInfo = (*g)[dst.first];
+            // Skip CONDITION/SWITCH vertices inside RegisterAction local procedures.
+            auto dstProcName = sgProp->procOf[dst.first];
+            if (dstProcName != mainProcName) {
+                auto srcOfIt = sgProp->srcOf.find(dstProcName);
+                if (srcOfIt != sgProp->srcOf.end()) {
+                    if (hasFlag((*g)[srcOfIt->second].flags, VertexFlags::STATEFUL))
+                        continue;
+                }
+            }
+
             if (hasFlag(dstInfo.flags, VertexFlags::CONDITION)) {
                 sstream << "  [->COND] "
                     << tab->dump_tab_var_name(TabVertex{dst.first, dst.second})
