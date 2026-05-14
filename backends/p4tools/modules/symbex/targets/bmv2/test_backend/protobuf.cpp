@@ -316,9 +316,9 @@ entities {
       }
 ## endif
     }
-## endfor
   }
 }
+## endfor
 ## endfor
 ## endif
 )""");
@@ -546,9 +546,9 @@ entities {
       }
 ## endif
     }
-## endfor
   }
 }
+## endfor
 ## endfor
 ## endif
 )""");
@@ -569,9 +569,61 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     }
     dataJson["test_name"] = getTestBackendConfiguration().testBaseName;
     dataJson["test_id"] = testId;
-    // Trace and control plane entries come from phase 1 (shared).
     dataJson["trace"] = getTrace(testSpec->spec1);
-    dataJson["control_plane"] = getControlPlane(testSpec->spec1);
+
+    // Build a merged control-plane JSON that includes table entries from both Phase 1
+    // (read-action entries) and Phase 2 (write-action entries), preserving P4Runtime IDs.
+    {
+        inja::json controlPlaneJson = inja::json::object();
+        // tableName → ordered vector of (TableConfig*, TableRule*) pairs to preserve rule order
+        std::map<cstring, std::pair<const TableConfig *, std::vector<const TableRule *>>>
+            mergedByTable;
+        auto collectRules = [&](const TestSpec *spec) {
+            for (const auto &[name, obj] : spec->getTestObjectCategory("tables"_cs)) {
+                const auto *cfg = obj->checkedTo<TableConfig>();
+                auto &entry = mergedByTable[name];
+                if (entry.first == nullptr) entry.first = cfg;
+                for (const auto &rule : *cfg->getRules()) {
+                    entry.second.push_back(&rule);
+                }
+            }
+        };
+        collectRules(testSpec->spec1);
+        collectRules(testSpec->spec2);
+
+        if (!mergedByTable.empty()) {
+            controlPlaneJson["tables"] = inja::json::array();
+            for (const auto &[tableName, entry] : mergedByTable) {
+                const auto *refCfg = entry.first;
+                const auto &rules = entry.second;
+                inja::json tblJson;
+                tblJson["table_name"] = tableName;
+                const auto *table = refCfg->getTable();
+                auto tableId = p4InfoMaps.lookUpP4RuntimeId(table->controlPlaneName());
+                BUG_CHECK(tableId, "Id not present for table %1%. Can not generate test.", table);
+                tblJson["id"] = tableId.value();
+                tblJson["rules"] = inja::json::array();
+                for (const auto *tblRule : rules) {
+                    inja::json rule;
+                    const auto *actionCall = tblRule->getActionCall();
+                    const auto *actionDecl = actionCall->getAction();
+                    cstring actionName = actionDecl->controlPlaneName();
+                    rule["action_name"] = actionCall->getActionName().c_str();
+                    auto actionId = p4InfoMaps.lookUpP4RuntimeId(actionName);
+                    BUG_CHECK(actionId, "Id not present for action %1%. Can not generate test.",
+                              actionDecl);
+                    rule["action_id"] = actionId.value();
+                    rule["rules"] = getControlPlaneForTable(tableName, actionName,
+                                                            *tblRule->getMatches(),
+                                                            *actionCall->getArgs());
+                    rule["priority"] = tblRule->getPriority();
+                    tblJson["rules"].push_back(rule);
+                }
+                controlPlaneJson["tables"].push_back(tblJson);
+            }
+        }
+        dataJson["control_plane"] = controlPlaneJson;
+    }
     dataJson["timestamp"] = Utils::getTimeStamp();
     std::stringstream coverageStr;
     coverageStr << std::setprecision(2) << currentCoverage;

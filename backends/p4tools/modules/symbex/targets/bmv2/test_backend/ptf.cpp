@@ -428,9 +428,43 @@ void PTF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selec
     }
 
     dataJson["test_id"] = testId;
-    // Trace and control plane entries come from phase 1 (shared across all phases).
     dataJson["trace"] = getTrace(testSpec->spec1);
-    dataJson["control_plane"] = getControlPlane(testSpec->spec1);
+
+    // Build a merged control-plane JSON that includes table entries from both Phase 1
+    // (read-action entries) and Phase 2 (write-action entries).
+    {
+        auto cpJson = inja::json::object();
+        std::map<cstring, std::vector<const TableRule *>> mergedRules;
+        auto collectRules = [&](const TestSpec *spec) {
+            for (const auto &[name, obj] : spec->getTestObjectCategory("tables"_cs)) {
+                const auto *cfg = obj->checkedTo<TableConfig>();
+                for (const auto &rule : *cfg->getRules()) {
+                    mergedRules[name].push_back(&rule);
+                }
+            }
+        };
+        collectRules(testSpec->spec1);
+        collectRules(testSpec->spec2);
+
+        if (!mergedRules.empty()) {
+            cpJson["tables"] = inja::json::array();
+            for (const auto &[name, rules] : mergedRules) {
+                inja::json tblJson;
+                tblJson["table_name"] = name;
+                tblJson["rules"] = inja::json::array();
+                for (const auto *rule : rules) {
+                    inja::json ruleJson;
+                    ruleJson["action_name"] = rule->getActionCall()->getActionName().c_str();
+                    ruleJson["rules"] = getControlPlaneForTable(
+                        *rule->getMatches(), *rule->getActionCall()->getArgs());
+                    ruleJson["priority"] = rule->getPriority();
+                    tblJson["rules"].push_back(ruleJson);
+                }
+                cpJson["tables"].push_back(tblJson);
+            }
+        }
+        dataJson["control_plane"] = cpJson;
+    }
     dataJson["timestamp"] = Utils::getTimeStamp();
     std::stringstream coverageStr;
     coverageStr << std::setprecision(2) << currentCoverage;

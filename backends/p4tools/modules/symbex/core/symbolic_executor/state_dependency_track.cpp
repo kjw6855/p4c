@@ -10,13 +10,66 @@
 #include "lib/error.h"
 #include "lib/timer.h"
 
+#include "backends/p4tools/common/control_plane/symbolic_variables.h"
+
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/lib/logging.h"
+#include "backends/p4tools/modules/symbex/lib/test_spec.h"
 #include "backends/p4tools/modules/symbex/options.h"
 
 namespace P4::P4Tools::Symbex {
+
+struct PhaseConditions {
+    int inputPort = -1;
+    int outputPort = -1;
+    // tableName → keyName → concrete key value (Exact match only)
+    std::map<cstring, std::map<cstring, const IR::Constant *>> tableKeyMap;
+
+    bool operator==(const PhaseConditions &other) const {
+        if (inputPort != other.inputPort || outputPort != other.outputPort) return false;
+        if (tableKeyMap.size() != other.tableKeyMap.size()) return false;
+        for (const auto &[tblName, keyMap] : tableKeyMap) {
+            // TODO: check validity of table rules
+            auto it = other.tableKeyMap.find(tblName);
+            if (it == other.tableKeyMap.end()) return false;
+            const auto &otherKeyMap = it->second;
+            if (keyMap.size() != otherKeyMap.size()) return false;
+            for (const auto &[keyName, concreteVal] : keyMap) {
+                auto kit = otherKeyMap.find(keyName);
+                if (kit == otherKeyMap.end()) return false;
+                if (concreteVal->value != kit->second->value) return false;
+            }
+        }
+        return true;
+    }
+};
+
+// Build a PhaseConditions from a terminal FinalState, extracting concrete port values and
+// all Exact-match table key concrete values from the evaluated tableconfigs test objects.
+static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramInfo &programInfo) {
+    PhaseConditions cond;
+    const auto &model = fs.getFinalModel();
+    const auto *es = fs.getExecutionState();
+    cond.inputPort  = IR::getIntFromLiteral(
+        model.evaluate(es->get(programInfo.getTargetInputPortVar()),  true));
+    cond.outputPort = IR::getIntFromLiteral(
+        model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true));
+    for (const auto &[tblName, tblObj] : es->getTestObjectCategory("tableconfigs"_cs)) {
+        const auto *evaluated = tblObj->evaluate(model, /*doComplete=*/true);
+        const auto *cfg = evaluated->to<TableConfig>();
+        if (cfg == nullptr) continue;
+        for (const auto &rule : *cfg->getRules()) {
+            for (const auto &[keyName, match] : *rule.getMatches()) {
+                const auto *exact = match->to<Exact>();
+                if (exact == nullptr) continue;
+                cond.tableKeyMap[tblName][keyName] = exact->getEvaluatedValue();
+            }
+        }
+    }
+    return cond;
+}
 
 StateDependencyTracker::StateDependencyTracker(
     AbstractSolver &solver, const ProgramInfo &programInfo,
@@ -163,17 +216,6 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
         return {ip, op};
     };
 
-    // Helper: deduplicate a port pair into a vector, return its index
-    auto deduplicatePortPair = [](std::vector<std::pair<int,int>> &vec,
-                                   std::pair<int,int> pair) -> size_t {
-        auto it = std::find(vec.begin(), vec.end(), pair);
-        if (it == vec.end()) {
-            vec.push_back(pair);
-            return vec.size() - 1;
-        }
-        return static_cast<size_t>(std::distance(vec.begin(), it));
-    };
-
     auto chains = collectChains();
 
     for (const auto &[chainName, chainList] : chains) {
@@ -208,23 +250,31 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 continue;
             }
 
-            // Build dedup port-pair set and per-state index into it
-            std::vector<std::pair<int, int>> phase1PortPairs;
-            std::map<size_t, size_t> phase1StateToPortPair;
+            // Build deduplicated PhaseConditions (port pair + table key values) for Phase 1.
+            std::vector<PhaseConditions> phase1Conditions;
+            std::map<size_t, size_t> phase1StateToCondition;
             const IR::Expression *inputPortSymExpr = nullptr;
 
             for (size_t i = 0; i < phase1States.size(); ++i) {
                 const auto *fs1 = phase1States[i];
                 inputPortSymExpr = fs1->getExecutionState()->get(programInfo.getTargetInputPortVar());
-                auto [ip, op] = getPortPair(fs1);
-                BUG_CHECK(ip >= 0, "Phase 1 invalid input port %1%",  ip);
-                BUG_CHECK(op >= 0, "Phase 1 invalid output port %1%", op);
-                BUG_CHECK(ip != op, "Phase 1 identical input/output ports %1%", ip);
+                auto cond = buildPhaseCondition(*fs1, programInfo);
+                BUG_CHECK(cond.inputPort >= 0,  "Phase 1 invalid input port %1%",  cond.inputPort);
+                BUG_CHECK(cond.outputPort >= 0, "Phase 1 invalid output port %1%", cond.outputPort);
+                BUG_CHECK(cond.inputPort != cond.outputPort,
+                          "Phase 1 identical input/output ports %1%", cond.inputPort);
 
-                size_t idx = deduplicatePortPair(phase1PortPairs, {ip, op});
-                if (idx == phase1PortPairs.size() - 1)  // newly inserted
-                    printInfo("[Tampering] Phase 1 chose input_port=%1% output_port=%2%", ip, op);
-                phase1StateToPortPair[i] = idx;
+                auto it = std::find(phase1Conditions.begin(), phase1Conditions.end(), cond);
+                size_t idx;
+                if (it == phase1Conditions.end()) {
+                    idx = phase1Conditions.size();
+                    phase1Conditions.push_back(cond);
+                    printInfo("[Tampering] Phase 1 chose input_port=%1% output_port=%2%",
+                              cond.inputPort, cond.outputPort);
+                } else {
+                    idx = static_cast<size_t>(std::distance(phase1Conditions.begin(), it));
+                }
+                phase1StateToCondition[i] = idx;
             }
 
             // ---- Phase 2: write tampered value ----
@@ -239,19 +289,30 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
                           node->getSourceInfo().toPositionString());
 
-            // Store phase2States per phase1 port pairs
+            // Store phase2States per phase1 condition bucket
             std::map<size_t, std::vector<const FinalState *>> phase2StateMap;
             size_t phase2StateNum = 0;
 
-            for (size_t i = 0; i < phase1PortPairs.size(); ++i) {
-                auto [ip1, op1] = phase1PortPairs[i];
+            for (size_t i = 0; i < phase1Conditions.size(); ++i) {
+                const auto &cond1 = phase1Conditions[i];
                 ScopedSymbexOpts guard(/*outputPacketOnly=*/false);
                 auto &phase2Init = initState.clone();
                 // Constrain Phase 2's input port to differ from Phase 1's input AND output
                 phase2Init.pushPathConstraint(
-                    new IR::Neq(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, ip1)));
+                    new IR::Neq(inputPortSymExpr,
+                                IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
                 phase2Init.pushPathConstraint(
-                    new IR::Neq(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, op1)));
+                    new IR::Neq(inputPortSymExpr,
+                                IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
+                // Constrain Phase 2's table match keys to differ from Phase 1's, so the two
+                // phases produce compatible (non-conflicting) table entries that can coexist.
+                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+                    for (const auto &[keyName, concreteVal] : keyMap) {
+                        const auto *ctrlPlaneKey =
+                            ControlPlaneState::getTableKey(tblName, keyName, concreteVal->type);
+                        phase2Init.pushPathConstraint(new IR::Neq(ctrlPlaneKey, concreteVal));
+                    }
+                }
                 runPhase(phase2Init, phase2StateMap[i]);
                 phase2StateNum += phase2StateMap[i].size();
             }
@@ -260,22 +321,22 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 continue;
             }
 
-            // Log Phase 2 port pairs (deduplicated per Phase-1 pair bucket)
-            for (size_t i = 0; i < phase1PortPairs.size(); ++i) {
-                auto [ip1, op1] = phase1PortPairs[i];
+            // Log Phase 2 port pairs (deduplicated per Phase-1 condition bucket)
+            for (size_t i = 0; i < phase1Conditions.size(); ++i) {
+                const auto &cond1 = phase1Conditions[i];
                 for (const auto *fs2 : phase2StateMap[i]) {
                     auto portPair = getPortPair(fs2);
                     printInfo("[Tampering] Phase 2 chose input_port=%1% output_port=%2% from Phase 1 ports %3%/%4%",
-                                portPair.first, portPair.second, ip1, op1);
+                                portPair.first, portPair.second, cond1.inputPort, cond1.outputPort);
                 }
             }
 
             // ---- Phase 3: read tampered value ----
             for (size_t i = 0; i < phase1States.size(); ++i) {
                 const auto *fs1 = phase1States[i];
-                auto [ip1, op1] = phase1PortPairs[phase1StateToPortPair[i]];
+                const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
 
-                for (const auto *fs2 : phase2StateMap[phase1StateToPortPair[i]]) {
+                for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
                     auto &phase3Init = initState.clone();
 
                     // Seed Phase 3 with Phase 2's concrete register values
@@ -286,7 +347,17 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                     }
                     // Constrain Phase 3 to reuse Phase 1's input port
                     phase3Init.pushPathConstraint(
-                        new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, ip1)));
+                        new IR::Equ(inputPortSymExpr,
+                                    IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
+                    // Constrain Phase 3 table match keys to equal Phase 1's, ensuring it
+                    // exercises the same read-action entry rather than generating a new one.
+                    for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+                        for (const auto &[keyName, concreteVal] : keyMap) {
+                            const auto *ctrlPlaneKey =
+                                ControlPlaneState::getTableKey(tblName, keyName, concreteVal->type);
+                            phase3Init.pushPathConstraint(new IR::Equ(ctrlPlaneKey, concreteVal));
+                        }
+                    }
 
                     std::vector<const FinalState *> phase3States;
                     currentPhase = TamperingPhase::Phase3_Read;
@@ -310,7 +381,8 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                     for (const auto *fs3 : phase3States) {
                         auto [ip3, op3] = getPortPair(fs3);
                         TamperingFinalState ts{*fs1, *fs2, *fs3, hasExit,
-                                               ip1, op1, ip2, op2, ip3, op3};
+                                               cond1.inputPort, cond1.outputPort,
+                                               ip2, op2, ip3, op3};
                         if (callBack(ts)) return;
                     }
                 }
