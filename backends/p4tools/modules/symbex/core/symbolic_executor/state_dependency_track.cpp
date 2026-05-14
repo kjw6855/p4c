@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "ir/ir.h"
+#include "ir/irutils.h"
 #include "ir/solver.h"
 #include "lib/error.h"
 #include "lib/timer.h"
@@ -133,50 +134,100 @@ void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
     runTamperingScenario(callBack, initState);
 }
 
+// RAII helper — saves/restores SymbexOptions fields around a phase run
+struct ScopedSymbexOpts {
+    bool savedOutputPacketOnly;
+    bool savedDistinctIOPorts;
+    ScopedSymbexOpts(bool setOutputPacketOnly) {
+        auto &opts = SymbexOptions::get();
+        savedOutputPacketOnly = opts.outputPacketOnly;
+        savedDistinctIOPorts  = opts.distinctIOPorts;
+        opts.outputPacketOnly = setOutputPacketOnly;
+        opts.distinctIOPorts  = true;
+    }
+    ~ScopedSymbexOpts() {
+        auto &opts = SymbexOptions::get();
+        opts.outputPacketOnly = savedOutputPacketOnly;
+        opts.distinctIOPorts  = savedDistinctIOPorts;
+    }
+};
+
 void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callBack,
                                                    const ExecutionState &initState) {
+    // Helper: extract concrete (input, output) port pair from a final state
+    auto getPortPair = [&](const FinalState *fs) -> std::pair<int, int> {
+        const auto &model = fs->getFinalModel();
+        const auto *es = fs->getExecutionState();
+        int ip = IR::getIntFromLiteral(model.evaluate(es->get(programInfo.getTargetInputPortVar()),  true));
+        int op = IR::getIntFromLiteral(model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true));
+        return {ip, op};
+    };
+
+    // Helper: deduplicate a port pair into a vector, return its index
+    auto deduplicatePortPair = [](std::vector<std::pair<int,int>> &vec,
+                                   std::pair<int,int> pair) -> size_t {
+        auto it = std::find(vec.begin(), vec.end(), pair);
+        if (it == vec.end()) {
+            vec.push_back(pair);
+            return vec.size() - 1;
+        }
+        return static_cast<size_t>(std::distance(vec.begin(), it));
+    };
+
     auto chains = collectChains();
 
     for (const auto &[chainName, chainList] : chains) {
         for (const auto *chain : chainList) {
             currentChain = chain;
             currentChainName = chainName;
+            printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
+                      chainName, chain->id, chain->soName);
 
-            printInfo(
-                "============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
-                chainName, chain->id, chain->soName);
+            bool hasExit = chainHasExitLeaf(*chain);
 
             // ---- Phase 1: read original register value ----
-            phase1States.clear();
             currentPhase = TamperingPhase::Phase1_Read;
             currentRequiredNodes = buildRequiredNodes(*chain);
             if (currentRequiredNodes.empty()) {
                 warning("[Tampering] Chain id=%1% has no readNodes; skipping.", chain->id);
                 continue;
-            } else {
-                for (const auto *node : currentRequiredNodes) {
-                    printInfo("  [%1%] %2% %3%",
-                                node->node_type_name(), node,
-                                node->getSourceInfo().toPositionString());
-                }
             }
             printInfo("[Tampering] Phase 1 (Read) — %1% required nodes", currentRequiredNodes.size());
+            for (const auto *node : currentRequiredNodes)
+                printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
+                          node->getSourceInfo().toPositionString());
+
+            std::vector<const FinalState *> phase1States;
             {
-                // When the chain's read path includes EXIT leaves, only accept terminal
-                // states that produce an output packet — same semantics as --output-packet-only.
-                auto &opts = SymbexOptions::get();
-                bool savedOutputPacketOnly = opts.outputPacketOnly;
-                if (chainHasExitLeaf(*chain)) opts.outputPacketOnly = true;
-                runPhase(initState, phase1States);
-                opts.outputPacketOnly = savedOutputPacketOnly;
+                ScopedSymbexOpts guard(hasExit);
+                auto &phase1Init = initState.clone();
+                runPhase(phase1Init, phase1States);
             }
             if (phase1States.empty()) {
                 warning("[Tampering] Phase 1 found no terminal state for chain id=%1%.", chain->id);
                 continue;
             }
 
+            // Build dedup port-pair set and per-state index into it
+            std::vector<std::pair<int, int>> phase1PortPairs;
+            std::map<size_t, size_t> phase1StateToPortPair;
+            const IR::Expression *inputPortSymExpr = nullptr;
+
+            for (size_t i = 0; i < phase1States.size(); ++i) {
+                const auto *fs1 = phase1States[i];
+                inputPortSymExpr = fs1->getExecutionState()->get(programInfo.getTargetInputPortVar());
+                auto [ip, op] = getPortPair(fs1);
+                BUG_CHECK(ip >= 0, "Phase 1 invalid input port %1%",  ip);
+                BUG_CHECK(op >= 0, "Phase 1 invalid output port %1%", op);
+                BUG_CHECK(ip != op, "Phase 1 identical input/output ports %1%", ip);
+
+                size_t idx = deduplicatePortPair(phase1PortPairs, {ip, op});
+                if (idx == phase1PortPairs.size() - 1)  // newly inserted
+                    printInfo("[Tampering] Phase 1 chose input_port=%1% output_port=%2%", ip, op);
+                phase1StateToPortPair[i] = idx;
+            }
+
             // ---- Phase 2: write tampered value ----
-            phase2States.clear();
             currentPhase = TamperingPhase::Phase2_Write;
             currentRequiredNodes = buildRequiredNodes(*chain);
             if (currentRequiredNodes.empty()) {
@@ -184,51 +235,82 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 continue;
             }
             printInfo("[Tampering] Phase 2 (Write) — %1% required nodes", currentRequiredNodes.size());
-            runPhase(initState, phase2States);
-            if (phase2States.empty()) {
+            for (const auto *node : currentRequiredNodes)
+                printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
+                          node->getSourceInfo().toPositionString());
+
+            // Store phase2States per phase1 port pairs
+            std::map<size_t, std::vector<const FinalState *>> phase2StateMap;
+            size_t phase2StateNum = 0;
+
+            for (size_t i = 0; i < phase1PortPairs.size(); ++i) {
+                auto [ip1, op1] = phase1PortPairs[i];
+                ScopedSymbexOpts guard(/*outputPacketOnly=*/false);
+                auto &phase2Init = initState.clone();
+                // Constrain Phase 2's input port to differ from Phase 1's input AND output
+                phase2Init.pushPathConstraint(
+                    new IR::Neq(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, ip1)));
+                phase2Init.pushPathConstraint(
+                    new IR::Neq(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, op1)));
+                runPhase(phase2Init, phase2StateMap[i]);
+                phase2StateNum += phase2StateMap[i].size();
+            }
+            if (phase2StateNum == 0) {
                 warning("[Tampering] Phase 2 found no terminal state for chain id=%1%.", chain->id);
                 continue;
             }
 
+            // Log Phase 2 port pairs (deduplicated per Phase-1 pair bucket)
+            for (size_t i = 0; i < phase1PortPairs.size(); ++i) {
+                auto [ip1, op1] = phase1PortPairs[i];
+                for (const auto *fs2 : phase2StateMap[i]) {
+                    auto portPair = getPortPair(fs2);
+                    printInfo("[Tampering] Phase 2 chose input_port=%1% output_port=%2% from Phase 1 ports %3%/%4%",
+                                portPair.first, portPair.second, ip1, op1);
+                }
+            }
+
             // ---- Phase 3: read tampered value ----
-            // Build a fresh initial state with the register pre-set to Phase 2's written value.
-            // This reuses the same execution path as Phase 1 but starts with the tampered
-            // register, so the output packet reflects the changed value.
-            for (const auto *fs2 : phase2States) {
-                auto &phase3Init = initState.clone();
+            for (size_t i = 0; i < phase1States.size(); ++i) {
+                const auto *fs1 = phase1States[i];
+                auto [ip1, op1] = phase1PortPairs[phase1StateToPortPair[i]];
 
-                // Copy Phase 2's evaluated (concrete) register test objects into the Phase 3
-                // initial state so the symbex engine sees the tampered value from the start.
-                const auto &p2Registers =
-                    fs2->getExecutionState()->getTestObjectCategory("register_values"_cs);
-                for (const auto &[regName, regObj] : p2Registers) {
-                    const auto *evaluated = regObj->evaluate(fs2->getFinalModel(), /*doComplete=*/true);
-                    phase3Init.addTestObject("register_values"_cs, regName, evaluated);
-                }
+                for (const auto *fs2 : phase2StateMap[phase1StateToPortPair[i]]) {
+                    auto &phase3Init = initState.clone();
 
-                std::vector<const FinalState *> phase3States;
-                currentPhase = TamperingPhase::Phase3_Read;
-                currentRequiredNodes = buildRequiredNodes(*chain);  // = readNodes
-                printInfo("[Tampering] Phase 3 (ReadTampered) — %1% required nodes",
-                          currentRequiredNodes.size());
-                {
-                    auto &opts = SymbexOptions::get();
-                    bool savedOutputPacketOnly = opts.outputPacketOnly;
-                    if (chainHasExitLeaf(*chain)) opts.outputPacketOnly = true;
-                    runPhase(phase3Init, phase3States);
-                    opts.outputPacketOnly = savedOutputPacketOnly;
-                }
+                    // Seed Phase 3 with Phase 2's concrete register values
+                    for (const auto &[regName, regObj] :
+                             fs2->getExecutionState()->getTestObjectCategory("register_values"_cs)) {
+                        phase3Init.addTestObject("register_values"_cs, regName,
+                                                 regObj->evaluate(fs2->getFinalModel(), /*doComplete=*/true));
+                    }
+                    // Constrain Phase 3 to reuse Phase 1's input port
+                    phase3Init.pushPathConstraint(
+                        new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, ip1)));
 
-                if (phase3States.empty()) {
-                    warning("[Tampering] Phase 3 found no terminal state for chain id=%1%.", chain->id);
-                    continue;
-                }
+                    std::vector<const FinalState *> phase3States;
+                    currentPhase = TamperingPhase::Phase3_Read;
+                    currentRequiredNodes = buildRequiredNodes(*chain);
+                    printInfo("[Tampering] Phase 3 (ReadTampered) — %1% required nodes",
+                              currentRequiredNodes.size());
+                    for (const auto *node : currentRequiredNodes)
+                        printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
+                                node->getSourceInfo().toPositionString());
+                    {
+                        // Phase 3 may show differnt output ports from Phase 1
+                        ScopedSymbexOpts guard(/*outputPacketOnly=*/false);
+                        runPhase(phase3Init, phase3States);
+                    }
+                    if (phase3States.empty()) {
+                        warning("[Tampering] Phase 3 found no terminal state for chain id=%1%.", chain->id);
+                        continue;
+                    }
 
-                // Emit one triple per (phase1, phase2, phase3) combination.
-                bool hasExit = chainHasExitLeaf(*chain);
-                for (const auto *fs1 : phase1States) {
+                    auto [ip2, op2] = getPortPair(fs2);
                     for (const auto *fs3 : phase3States) {
-                        TamperingFinalState ts{*fs1, *fs2, *fs3, hasExit};
+                        auto [ip3, op3] = getPortPair(fs3);
+                        TamperingFinalState ts{*fs1, *fs2, *fs3, hasExit,
+                                               ip1, op1, ip2, op2, ip3, op3};
                         if (callBack(ts)) return;
                     }
                 }
@@ -241,21 +323,38 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 // Single-phase DFS helper
 // ---------------------------------------------------------------------------
 
-void StateDependencyTracker::runPhase(const ExecutionState &initState,
+void StateDependencyTracker::runPhase(ExecutionState &phaseInit,
                                        std::vector<const FinalState *> &out) {
     unexploredBranches.clear();
-    // Use an inner callback that saves terminal states instead of forwarding them out.
-    // When outputPacketOnly is set (possibly temporarily by runTamperingScenario for read phases),
-    // reject dropped-packet terminal states and continue exploring — same semantics as run().
-    runImpl([&out](const FinalState &fs) -> bool {
+    // phaseInit is a caller-owned clone. The caller is responsible for pushing any
+    // Z3 path constraints (e.g., port equality/exclusion from Phase 1's symbolic
+    // variable) before calling this function.
+    runImpl([&out, this](const FinalState &fs) -> bool {
         const auto *es = fs.getExecutionState();
-        if (SymbexOptions::get().outputPacketOnly &&
+        const auto &opts = SymbexOptions::get();
+
+        if (opts.outputPacketOnly &&
             (es->getPacketBufferSize() <= 0 || es->getProperty<bool>("drop"_cs))) {
-            return false;  // reject; keep backtracking
+            return false;
         }
-        out.push_back(new FinalState(fs));  // copy-construct to heap for cross-phase lifetime
-        return out.size() >= 1;             // stop after the first accepted result
-    }, initState.clone());
+
+        // distinctIOPorts: always a terminal-state check because the output port is
+        // assigned during execution (not a free initial symbolic variable).
+        if (opts.distinctIOPorts) {
+            const auto &model = fs.getFinalModel();
+            const auto *ipVal =
+                model.evaluate(es->get(programInfo.getTargetInputPortVar()), true);
+            auto inputPort = IR::getIntFromLiteral(ipVal);
+            const auto *opVal =
+                model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true);
+            if (inputPort == IR::getIntFromLiteral(opVal)) {
+                return false;
+            }
+        }
+
+        out.push_back(new FinalState(fs));
+        return out.size() >= 1;
+    }, phaseInit);
 }
 
 // ---------------------------------------------------------------------------

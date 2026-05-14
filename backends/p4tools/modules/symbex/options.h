@@ -80,6 +80,9 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Enforces the test generation of tests with mandatory dropped packet.
     bool droppedPacketOnly = false;
 
+    /// Require that the input port differ from the output port in generated terminal states.
+    bool distinctIOPorts = false;
+
     bool interactive = true;
 
     /// Add conditions defined in assert/assume to the path conditions.

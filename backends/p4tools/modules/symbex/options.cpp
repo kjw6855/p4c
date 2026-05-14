@@ -316,6 +316,14 @@ SymbexOptions::SymbexOptions()
         "Produced tests must have a dropped packet as outcome.");
 
     registerOption(
+        "--distinct-io-ports", nullptr,
+        [this](const char *) {
+            distinctIOPorts = true;
+            return true;
+        },
+        "Require that the input port differ from the output port in generated terminal states.");
+
+    registerOption(
         "--path-selection", "pathSelectionPolicy",
         [this](const char *arg) {
             using Symbex::PathSelectionPolicy;

@@ -56,8 +56,13 @@ class FinalState {
     /// variables in this final state may have been added in post, e.g., the payload size. If the
     /// concolic variables do not recompute these variables, the model will simply copy these
     /// variables over manually to the newly generated model.
+    ///
+    /// @param extraConstraints optional additional IR::Equ assertions added to the solver
+    /// before checkSat. Used to pin specific symbolic variables (e.g. port overrides) so
+    /// that the freshly computed Z3 model is guaranteed to satisfy them.
     [[nodiscard]] std::optional<std::reference_wrapper<const FinalState>> computeConcolicState(
-        const ConcolicVariableMap &resolvedConcolicVariables) const;
+        const ConcolicVariableMap &resolvedConcolicVariables,
+        const std::vector<const IR::Expression *> &extraConstraints = {}) const;
 
     /// @returns the model after it was augmented by completions from the symbolic environment.
     [[nodiscard]] const Model &getFinalModel() const;

@@ -33,11 +33,22 @@ enum class TamperingPhase {
 ///
 /// readPathHasExit is true when the SOChain's read vertices include __EXIT__ leaves,
 /// meaning the read phases must produce an output packet (packet is not dropped).
+///
+/// The phaseN{Input,Output}Port fields are concrete port values extracted from each
+/// phase's original final model in runTamperingScenario. They are passed to
+/// processPhase() as overrides because computeConcolicState() re-solves and may
+/// assign different (but equally valid) concrete values for the port variables.
 struct TamperingFinalState {
     const FinalState &phase1;
     const FinalState &phase2;
     const FinalState &phase3;
     bool readPathHasExit = false;
+    int phase1InputPort = -1;
+    int phase1OutputPort = -1;
+    int phase2InputPort = -1;
+    int phase2OutputPort = -1;
+    int phase3InputPort = -1;
+    int phase3OutputPort = -1;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -95,10 +106,6 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// DFS backtrack stack for the current chain exploration.
     std::vector<Branch> unexploredBranches;
 
-    /// Accumulated terminal states for Phase 1 and Phase 2 (Tampering only).
-    std::vector<const FinalState *> phase1States;
-    std::vector<const FinalState *> phase2States;
-
     /// Returns a flat list of SOChain pointers selected by the policy.
     std::map<cstring, std::vector<const P4StateDependency::DependencyGraphs::SOChain *>>
     collectChains() const;
@@ -108,9 +115,10 @@ class StateDependencyTracker : public SymbolicExecutor {
     P4::Coverage::CoverageSet buildRequiredNodes(
         const P4StateDependency::DependencyGraphs::SOChain &chain) const;
 
-    /// Runs a single-phase DFS from initState, saving each terminal FinalState into out.
+    /// Runs a single-phase DFS from phaseInit (a caller-owned clone with any required path
+    /// constraints already pushed), saving each terminal FinalState into out.
     /// Stops after the first accepted result.
-    void runPhase(const ExecutionState &initState, std::vector<const FinalState *> &out);
+    void runPhase(ExecutionState &phaseInit, std::vector<const FinalState *> &out);
 
     /// Orchestrates Phase 1 → Phase 2 → Phase 3 for every SOChain and fires callBack.
     void runTamperingScenario(const TamperingCallback &callBack, const ExecutionState &initState);

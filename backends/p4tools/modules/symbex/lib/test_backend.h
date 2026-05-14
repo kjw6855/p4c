@@ -105,7 +105,15 @@ class TestBackEnd {
     /// without writing any output or incrementing the test counter.
     /// Returns std::nullopt if the phase should be skipped (e.g. tainted output port,
     /// failed concolic resolution).
-    [[nodiscard]] virtual std::optional<PhaseResult> processPhase(const FinalState &state);
+    ///
+    /// When overrideInputPort / overrideOutputPort are set, those concrete values replace
+    /// whatever the re-solved model evaluates for the port variables. This is necessary for
+    /// the tampering scenario because computeConcolicState() re-solves and may pick different
+    /// (but equally valid) concrete port values than the ones computed in runTamperingScenario.
+    [[nodiscard]] virtual std::optional<PhaseResult> processPhase(
+        const FinalState &state,
+        std::optional<int> overrideInputPort = std::nullopt,
+        std::optional<int> overrideOutputPort = std::nullopt);
 
     /// @returns the test specification which is consumed by the test back ends.
     virtual const TestSpec *createTestSpec(const ExecutionState *executionState,

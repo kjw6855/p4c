@@ -64,9 +64,10 @@ Model &FinalState::processModel(const ExecutionState &finalState, Model &model, 
 }
 
 std::optional<std::reference_wrapper<const FinalState>> FinalState::computeConcolicState(
-    const ConcolicVariableMap &resolvedConcolicVariables) const {
-    // If there are no new concolic variables, there is nothing to do.
-    if (resolvedConcolicVariables.empty()) {
+    const ConcolicVariableMap &resolvedConcolicVariables,
+    const std::vector<const IR::Expression *> &extraConstraints) const {
+    // If there are no new concolic variables and no extra constraints, there is nothing to do.
+    if (resolvedConcolicVariables.empty() && extraConstraints.empty()) {
         return *this;
     }
     std::vector<const Constraint *> asserts = state.get().getPathConstraint();
@@ -87,6 +88,12 @@ std::optional<std::reference_wrapper<const FinalState>> FinalState::computeConco
         pathConstraint = state.get().getSymbolicEnv().subst(pathConstraint);
         pathConstraint = P4::optimizeExpression(pathConstraint);
         asserts.push_back(pathConstraint);
+    }
+    // Append caller-supplied equality constraints (e.g. port pin-downs from
+    // runTamperingScenario). These are added after concolic assignments so Z3
+    // sees a fully-determined model for the pinned variables.
+    for (const auto *extra : extraConstraints) {
+        asserts.push_back(extra);
     }
     auto solverResult = solver.get().checkSat(asserts);
     if (!solverResult) {

@@ -293,7 +293,9 @@ bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const
     return false;
 }
 
-std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(const FinalState &state) {
+std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
+    const FinalState &state, std::optional<int> overrideInputPort,
+    std::optional<int> overrideOutputPort) {
     const auto *executionState = state.getExecutionState();
     const auto *outputPacketExpr = executionState->getPacketBuffer();
     const auto *outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
@@ -309,7 +311,24 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(const FinalSta
     }
     const ConcolicVariableMap *resolvedConcolicVariables =
         concolicResolver.getResolvedConcolicVariables();
-    auto concolicOptState = state.computeConcolicState(*resolvedConcolicVariables);
+
+    // Build IR::Equ constraints to pin the port values detected in runTamperingScenario.
+    // These are passed to computeConcolicState() so Z3 incorporates them into checkSat —
+    // the fresh model it produces is therefore guaranteed to satisfy them. This works for
+    // any port expression shape (bare SymbolicVariable, action parameter, complex slice,
+    // etc.) because Z3 solves the full expression, not just individual symbolic leaves.
+    std::vector<const IR::Expression *> portConstraints;
+    if (overrideInputPort.has_value()) {
+        const auto *portExpr = executionState->get(getProgramInfo().getTargetInputPortVar());
+        portConstraints.push_back(
+            new IR::Equ(portExpr, IR::Constant::get(portExpr->type, *overrideInputPort)));
+    }
+    if (overrideOutputPort.has_value()) {
+        portConstraints.push_back(
+            new IR::Equ(outputPortExpr, IR::Constant::get(outputPortExpr->type, *overrideOutputPort)));
+    }
+
+    auto concolicOptState = state.computeConcolicState(*resolvedConcolicVariables, portConstraints);
     if (!concolicOptState.has_value()) {
         return std::nullopt;
     }
@@ -330,19 +349,30 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(const FinalSta
 }
 
 bool TestBackEnd::runTampering(const TamperingFinalState &state) {
-    auto res1 = processPhase(state.phase1);
+    // Pass the pre-computed concrete port numbers as overrides. computeConcolicState()
+    // re-solves the SMT model and may assign different (but satisfying) port values;
+    // the ports from runTamperingScenario are the ones that satisfy the cross-phase
+    // constraints (input1==input3, input2 != input1, input2 != output1, etc.).
+    std::optional<int> p1in  = (state.phase1InputPort  >= 0) ? std::optional<int>(state.phase1InputPort)  : std::nullopt;
+    std::optional<int> p1out = (state.phase1OutputPort >= 0) ? std::optional<int>(state.phase1OutputPort) : std::nullopt;
+    std::optional<int> p2in  = (state.phase2InputPort  >= 0) ? std::optional<int>(state.phase2InputPort)  : std::nullopt;
+    std::optional<int> p2out = (state.phase2OutputPort >= 0) ? std::optional<int>(state.phase2OutputPort) : std::nullopt;
+    std::optional<int> p3in  = (state.phase3InputPort  >= 0) ? std::optional<int>(state.phase3InputPort)  : std::nullopt;
+    std::optional<int> p3out = (state.phase3OutputPort >= 0) ? std::optional<int>(state.phase3OutputPort) : std::nullopt;
+
+    auto res1 = processPhase(state.phase1, p1in, p1out);
     if (!res1.has_value()) {
         testCount++;
         return needsToTerminate(testCount);
     }
 
-    auto res2 = processPhase(state.phase2);
+    auto res2 = processPhase(state.phase2, p2in, p2out);
     if (!res2.has_value()) {
         testCount++;
         return needsToTerminate(testCount);
     }
 
-    auto res3 = processPhase(state.phase3);
+    auto res3 = processPhase(state.phase3, p3in, p3out);
     if (!res3.has_value()) {
         testCount++;
         return needsToTerminate(testCount);
