@@ -195,7 +195,7 @@ class DependencyGraphs {
         };
     };
 
-    /// Return all vertices forward-reachable from [SO] vertices that have NO incoming
+    /// Return all vertices forward-reachable from SO vertices that have NO incoming
     /// "write_to" edge (category 1: reads of non-written registers).
     std::vector<SOChain> get_nowrite_so_vertices(
         size_t index, Graphs::Graph *esg) const;

@@ -53,9 +53,11 @@ vertex_t DependencyGraphs::add_vertex(size_t index, EsgId esgId, const cstring &
 vertex_t DependencyGraphs::add_so_vertex(size_t index, const IR::Node *soNode) {
     std::stringstream ss;
     if (soNode->is<IR::Declaration_Instance>()) {
-        ss << "[SO] " << soNode->to<IR::Declaration_Instance>()->name.name;
+        // Use controlPlaneName() so the label matches the key used in the test-object store
+        // (e.g. "ingress.roundRegister" from the @name annotation, not just "roundRegister").
+        ss << soNode->to<IR::Declaration_Instance>()->controlPlaneName();
     } else {
-        ss << "[SO] " << soNode;
+        ss << soNode;
     }
     vertex_t v = add_vertex(index, {globalVertexId, soNode}, cstring(ss), "lightblue"_cs);
     (*depGraphs[index])[v].isSO = true;
