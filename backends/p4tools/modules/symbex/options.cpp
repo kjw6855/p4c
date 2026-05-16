@@ -8,6 +8,8 @@
 #include <string>
 #include <utility>
 
+#include "lib/big_int_util.h"
+
 #include "backends/p4tools/common/compiler/context.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/options.h"
@@ -521,6 +523,28 @@ SymbexOptions::SymbexOptions()
         "Build a dataflow dependency graph by using the state_dependency module."
         " Only test cases that exercise an a2s2v or h2s2v dependency chain are emitted;"
         " if no such chains exist in the program, no tests are generated.");
+
+    registerOption(
+        "--state-tamper-value", "value",
+        [this](const char *arg) {
+            try {
+                if (cstring(arg).startsWith("0x"_cs)) {
+                    // Convert hex string to decimal string because cvtInt only accepts decimal or 0x-prefixed hex.
+                    auto hexStr = std::string(arg).substr(2);
+                    stateTamperValue = Util::cvtInt(hexStr.c_str(), 16);
+                } else {
+                    stateTamperValue = Util::cvtInt(arg, 10);
+                }
+            } catch (...) {
+                error("Invalid value '%1%' for --state-tamper-value. "
+                      "Expected decimal or 0x-prefixed hex integer.", arg);
+                return false;
+            }
+            return true;
+        },
+        "Attacker-chosen register value for the tampering scenario. "
+        "Phase 2 writes this exact value to the register instead of a random one. "
+        "Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).");
 }
 
 bool SymbexOptions::validateOptions() const {

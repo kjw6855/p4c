@@ -339,11 +339,48 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
                     auto &phase3Init = initState.clone();
 
-                    // Seed Phase 3 with Phase 2's concrete register values
+                    // Seed Phase 3 with attacker-chosen register values derived from Phase 2.
+                    // Only the register corresponding to the current SOChain is tampered;
+                    // other registers (if any) are left at whatever value Phase 2 produced.
+                    //
+                    // add_so_vertex() stores controlPlaneName() in soName (e.g.
+                    // "ingress.roundRegister"), so extractSoRegName() gives exactly the
+                    // key used in "registervalues"_cs test objects ("ingress.roundRegister").
+                    //
+                    // withAttackerValues() is called on the *unevaluated* register object so
+                    // that symbolic write expressions are still available to build constraints.
+                    // It returns (a) the register seeded with random concrete values for Phase 3
+                    // and (b) IR::Equ constraints passed to processPhase(phase2) so that
+                    // computeConcolicState() re-solves Phase 2 with a consistent input packet.
+                    std::map<cstring, const TestObject *> attackerRegValues;
+                    std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
+                        phase2ModelOverrides;
                     for (const auto &[regName, regObj] :
-                             fs2->getExecutionState()->getTestObjectCategory("register_values"_cs)) {
-                        phase3Init.addTestObject("register_values"_cs, regName,
-                                                 regObj->evaluate(fs2->getFinalModel(), /*doComplete=*/true));
+                             fs2->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
+                        if (regName != chain->soName) continue;
+                        auto [attackerValue, overrides] =
+                            regObj->withAttackerValues(fs2->getFinalModel(),
+                                                       SymbexOptions::get().stateTamperValue);
+                        phase3Init.addTestObject("registervalues"_cs, regName, attackerValue);
+                        attackerRegValues[regName] = attackerValue;
+                        phase2ModelOverrides.insert(phase2ModelOverrides.end(),
+                                                    overrides.begin(), overrides.end());
+                        for (const auto &[symVar, val] : overrides) {
+                            printInfo("[Tampering] Phase 2 register override: "
+                                      "register='%1%' symVar='%2%' value=0x%3%",
+                                      regName, symVar->label,
+                                      val->value.str(0, std::ios_base::hex));
+                        }
+                        if (overrides.empty()) {
+                            printInfo("[Tampering] Phase 3 register '%1%': "
+                                      "no symbolic var found — value not injectable into Phase 2 packet",
+                                      regName);
+                        }
+                    }
+                    if (attackerRegValues.empty()) {
+                        warning("[Tampering] No register matching '%1%' found in Phase 2 state "
+                                "for chain id=%2%; skipping.", chain->soName, chain->id);
+                        continue;
                     }
                     // Constrain Phase 3 to reuse Phase 1's input port
                     phase3Init.pushPathConstraint(
@@ -368,7 +405,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                         printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
                                 node->getSourceInfo().toPositionString());
                     {
-                        // Phase 3 may show differnt output ports from Phase 1
+                        // Phase 3 may show different output ports from Phase 1
                         ScopedSymbexOpts guard(/*outputPacketOnly=*/false);
                         runPhase(phase3Init, phase3States);
                     }
@@ -382,7 +419,8 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                         auto [ip3, op3] = getPortPair(fs3);
                         TamperingFinalState ts{*fs1, *fs2, *fs3, hasExit,
                                                cond1.inputPort, cond1.outputPort,
-                                               ip2, op2, ip3, op3};
+                                               ip2, op2, ip3, op3,
+                                               attackerRegValues, phase2ModelOverrides};
                         if (callBack(ts)) return;
                     }
                 }

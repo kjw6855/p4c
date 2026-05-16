@@ -110,10 +110,16 @@ class TestBackEnd {
     /// whatever the re-solved model evaluates for the port variables. This is necessary for
     /// the tampering scenario because computeConcolicState() re-solves and may pick different
     /// (but equally valid) concrete port values than the ones computed in runTamperingScenario.
+    ///
+    /// modelOverrides are (SymbolicVariable → Constant) pairs applied via Model::set() AFTER
+    /// computeConcolicState(). For Phase 2, these inject attacker-chosen register values into
+    /// the model so the emitted input packet shows the tampered field value.
     [[nodiscard]] virtual std::optional<PhaseResult> processPhase(
         const FinalState &state,
         std::optional<int> overrideInputPort = std::nullopt,
-        std::optional<int> overrideOutputPort = std::nullopt);
+        std::optional<int> overrideOutputPort = std::nullopt,
+        const std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
+            &modelOverrides = {});
 
     /// @returns the test specification which is consumed by the test back ends.
     virtual const TestSpec *createTestSpec(const ExecutionState *executionState,

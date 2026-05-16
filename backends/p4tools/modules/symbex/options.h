@@ -7,6 +7,8 @@
 #include <set>
 #include <string>
 
+#include "lib/big_int.h"
+
 #include "backends/p4tools/common/options.h"
 #include "lib/cstring.h"
 #include "midend/coverage.h"
@@ -118,6 +120,11 @@ class SymbexOptions : public AbstractP4cToolOptions {
 
     /// Indicates whether to build a dataflow dependency graph by using state_dependency module.
     bool stateDep = false;
+
+    /// Attacker-chosen register value for the tampering scenario (--state-tamper-value).
+    /// If set, Phase 2 writes this exact value to the register instead of a random one.
+    /// Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).
+    std::optional<big_int> stateTamperValue = std::nullopt;
 
  protected:
     bool validateOptions() const override;

@@ -295,7 +295,9 @@ bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const
 
 std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
     const FinalState &state, std::optional<int> overrideInputPort,
-    std::optional<int> overrideOutputPort) {
+    std::optional<int> overrideOutputPort,
+    const std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
+        &modelOverrides) {
     const auto *executionState = state.getExecutionState();
     const auto *outputPacketExpr = executionState->getPacketBuffer();
     const auto *outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
@@ -314,9 +316,7 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
 
     // Build IR::Equ constraints to pin the port values detected in runTamperingScenario.
     // These are passed to computeConcolicState() so Z3 incorporates them into checkSat —
-    // the fresh model it produces is therefore guaranteed to satisfy them. This works for
-    // any port expression shape (bare SymbolicVariable, action parameter, complex slice,
-    // etc.) because Z3 solves the full expression, not just individual symbolic leaves.
+    // the fresh model it produces is therefore guaranteed to satisfy them.
     std::vector<const IR::Expression *> portConstraints;
     if (overrideInputPort.has_value()) {
         const auto *portExpr = executionState->get(getProgramInfo().getTargetInputPortVar());
@@ -342,9 +342,21 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
         return std::nullopt;
     }
 
-    auto testInfo = produceTestInfo(executionState, &finalModel, outputPacketExpr,
+    // Apply direct model overrides (attacker-chosen register values for Phase 2).
+    // Model::set() overwrites existing entries so these take priority over Z3's assignment.
+    const Model *effectiveModel = &finalModel;
+    std::optional<Model> overriddenModel;
+    if (!modelOverrides.empty()) {
+        overriddenModel.emplace(finalModel);
+        for (const auto &[var, val] : modelOverrides) {
+            overriddenModel->set(var, val);
+        }
+        effectiveModel = &overriddenModel.value();
+    }
+
+    auto testInfo = produceTestInfo(executionState, effectiveModel, outputPacketExpr,
                                     outputPortExpr, programTraces);
-    const auto *testSpec = createTestSpec(executionState, &finalModel, testInfo);
+    const auto *testSpec = createTestSpec(executionState, effectiveModel, testInfo);
     return PhaseResult{testSpec, testInfo.packetIsDropped};
 }
 
@@ -366,7 +378,7 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
         return needsToTerminate(testCount);
     }
 
-    auto res2 = processPhase(state.phase2, p2in, p2out);
+    auto res2 = processPhase(state.phase2, p2in, p2out, state.phase2ModelOverrides);
     if (!res2.has_value()) {
         testCount++;
         return needsToTerminate(testCount);

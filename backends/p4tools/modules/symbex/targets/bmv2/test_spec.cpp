@@ -1,6 +1,14 @@
 #include "backends/p4tools/modules/symbex/targets/bmv2/test_spec.h"
 
+#include <random>
+
+#include <boost/random/mersenne_twister.hpp>
+#include <boost/random/uniform_int_distribution.hpp>
+
 #include "backends/p4tools/common/lib/model.h"
+#include "backends/p4tools/common/lib/util.h"
+#include "ir/ir.h"
+#include "ir/irutils.h"
 #include "lib/exceptions.h"
 
 #include "backends/p4tools/modules/symbex/lib/test_spec.h"
@@ -103,6 +111,42 @@ const Bmv2V1ModelRegisterValue *Bmv2V1ModelRegisterValue::evaluate(const Model &
                                              evaluatedCond->getEvaluatedValue());
     }
     return evaluatedRegisterValue;
+}
+
+AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
+    const Model &model, std::optional<big_int> fixedValue) const {
+    auto *randReg = new Bmv2V1ModelRegisterValue(getInitialValue());
+    std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
+    for (const auto &cond : indexConditions) {
+        // Concretize the index so Phase 3's register seed has a concrete write key.
+        const auto *concreteIdx =
+            model.evaluate(cond.getIndex(), /*doComplete=*/true)->checkedTo<IR::Constant>();
+        // The symbolic write expression — typically a packet symbolic variable (pktvar_N).
+        const auto *symVal = cond.getValue();
+        // Evaluate to get the concrete type/width.
+        const auto *concreteVal =
+            model.evaluate(symVal, /*doComplete=*/true)->checkedTo<IR::Constant>();
+        // Use the caller-supplied fixed value, or generate a random one.
+        // Use a local PRNG seeded from std::random_device so this is independent of the
+        // global Utils::rng — no seed flag required, no effect on subsequent executions.
+        const auto *attackerVal = [&]() -> const IR::Constant * {
+            if (fixedValue.has_value()) {
+                return IR::Constant::get(concreteVal->type, *fixedValue);
+            }
+            const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
+            big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
+            boost::random::mt19937 localRng(std::random_device{}());
+            boost::random::uniform_int_distribution<big_int> dist(0, maxVal);
+            return IR::Constant::get(bitsType, dist(localRng));
+        }();
+        randReg->writeToIndex(concreteIdx, attackerVal);
+        // Record a direct model override so processPhase() can inject attackerVal into Phase 2's
+        // model via Model::set(), making the emitted input packet show the attacker-chosen value.
+        if (const auto *symVar = symVal->to<IR::SymbolicVariable>()) {
+            modelOverrides.emplace_back(symVar, attackerVal);
+        }
+    }
+    return {randReg, modelOverrides};
 }
 
 /* =========================================================================================

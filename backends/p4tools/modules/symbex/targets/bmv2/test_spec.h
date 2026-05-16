@@ -115,6 +115,15 @@ class Bmv2V1ModelRegisterValue : public IndexMap {
     [[nodiscard]] const Bmv2V1ModelRegisterValue *evaluate(const Model &model,
                                                            bool doComplete) const override;
 
+    /// Returns a copy of this register with each symbolic write value replaced by an
+    /// attacker-chosen constant (random unless fixedValue is provided), together with
+    /// model overrides that pin each symbolic write expression to its chosen value.
+    /// Must be called on the unevaluated register object (pre-evaluate()), so that
+    /// cond.getValue() still holds the original symbolic expression.
+    [[nodiscard]] AttackerControlResult withAttackerValues(
+        const Model &model,
+        std::optional<big_int> fixedValue = std::nullopt) const override;
+
     DECLARE_TYPEINFO(Bmv2V1ModelRegisterValue, IndexMap);
 };
 

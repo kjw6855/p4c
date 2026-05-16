@@ -2,15 +2,19 @@
 #define BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SYMBOLIC_EXECUTOR_STATE_DEPENDENCY_TRACK_H_
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <vector>
 
+#include "ir/ir.h"
+#include "lib/cstring.h"
 #include "midend/coverage.h"
 
 #include "backends/state_dependency/analysis.h"
 #include "backends/state_dependency/dependency_graph.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/lib/final_state.h"
+#include "backends/p4tools/modules/symbex/lib/test_object.h"
 
 namespace P4::P4Tools::Symbex {
 
@@ -49,6 +53,14 @@ struct TamperingFinalState {
     int phase2OutputPort = -1;
     int phase3InputPort = -1;
     int phase3OutputPort = -1;
+    /// Attacker-chosen register values (random by default) generated during Phase 3 seeding.
+    /// Maps register control-plane name → evaluated TestObject with random concrete values.
+    /// Populated by runTamperingScenario(); available to test writers for consistent output.
+    std::map<cstring, const TestObject *> attackerRegisterValues;
+    /// Direct model overrides for Phase 2: each (SymbolicVariable, Constant) pair is applied
+    /// via Model::set() after computeConcolicState() so that the emitted Phase 2 input packet
+    /// shows the attacker-chosen value in the field that is written to the register.
+    std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> phase2ModelOverrides;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -106,7 +118,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// DFS backtrack stack for the current chain exploration.
     std::vector<Branch> unexploredBranches;
 
-    /// Returns a flat list of SOChain pointers selected by the policy.
+    /// Returns a flat list of SOChain pointers selected by the policy, grouped by chain category.
     std::map<cstring, std::vector<const P4StateDependency::DependencyGraphs::SOChain *>>
     collectChains() const;
 
