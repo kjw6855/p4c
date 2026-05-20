@@ -706,7 +706,8 @@ const ExprVisitor::ExternMethodImpls<Bmv2V1ModelExprVisitor>
              }
              // TODO: Find a better way to model a trace of this event.
              std::stringstream registerStream;
-             registerStream << "RegisterRead: Index ";
+             registerStream << "RegisterRead[" << externInstance->controlPlaneName()
+                            << "]: Index ";
              index->dbprint(registerStream);
              registerStream << " into field ";
              readOutput->dbprint(registerStream);

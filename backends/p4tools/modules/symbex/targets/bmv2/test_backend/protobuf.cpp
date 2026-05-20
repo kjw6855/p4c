@@ -459,7 +459,7 @@ expected_output_packet {
 ## if control_plane
 ## for table in control_plane.tables
 ## for rule in table.rules
-# Table {{table.table_name}}
+# Table {{table.table_name}} (Phase {{rule.phase}})
 entities {
   table_entry {
     table_id: {{table.id}}
@@ -576,20 +576,20 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     {
         inja::json controlPlaneJson = inja::json::object();
         // tableName → ordered vector of (TableConfig*, TableRule*) pairs to preserve rule order
-        std::map<cstring, std::pair<const TableConfig *, std::vector<const TableRule *>>>
+        std::map<cstring, std::pair<const TableConfig *, std::vector<std::pair<int, const TableRule *>>>>
             mergedByTable;
-        auto collectRules = [&](const TestSpec *spec) {
+        auto collectRules = [&](const TestSpec *spec, int phaseId) {
             for (const auto &[name, obj] : spec->getTestObjectCategory("tables"_cs)) {
                 const auto *cfg = obj->checkedTo<TableConfig>();
                 auto &entry = mergedByTable[name];
                 if (entry.first == nullptr) entry.first = cfg;
                 for (const auto &rule : *cfg->getRules()) {
-                    entry.second.push_back(&rule);
+                    entry.second.push_back({phaseId, &rule});
                 }
             }
         };
-        collectRules(testSpec->spec1);
-        collectRules(testSpec->spec2);
+        collectRules(testSpec->spec1, 1);
+        collectRules(testSpec->spec2, 2);
 
         if (!mergedByTable.empty()) {
             controlPlaneJson["tables"] = inja::json::array();
@@ -603,8 +603,9 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
                 BUG_CHECK(tableId, "Id not present for table %1%. Can not generate test.", table);
                 tblJson["id"] = tableId.value();
                 tblJson["rules"] = inja::json::array();
-                for (const auto *tblRule : rules) {
+                for (const auto &[phaseId, tblRule] : rules) {
                     inja::json rule;
+                    rule["phase"] = phaseId;
                     const auto *actionCall = tblRule->getActionCall();
                     const auto *actionDecl = actionCall->getAction();
                     cstring actionName = actionDecl->controlPlaneName();
