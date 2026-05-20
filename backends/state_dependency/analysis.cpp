@@ -111,6 +111,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             if (!graphsDir.empty() && a2s2vGraphs->num_vertices(i) > 0)
                 a2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_a2s2v_dep.dot"));
             a2s2vGraphs->prune_nodes_not_reaching_leaves(i);
+            a2s2vGraphs->prune_call_nodes_without_return(i, g);
             if (!graphsDir.empty() && a2s2vGraphs->num_vertices(i) > 0)
                 a2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_a2s2v_dep.dot"));
         }
@@ -212,6 +213,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             if (!graphsDir.empty() && h2s2vGraphs->num_vertices(i) > 0)
                 h2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_h2s2v_dep.dot"));
             h2s2vGraphs->prune_nodes_not_reaching_leaves(i);
+            h2s2vGraphs->prune_call_nodes_without_return(i, g);
         }
         if (!h2s2cGraphs->leaves[i].empty()) {
             h2s2cGraphs->add_so_constant_edges(i, g);
@@ -221,6 +223,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             if (!graphsDir.empty() && h2s2cGraphs->num_vertices(i) > 0)
                 h2s2cGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_h2s2c_dep.dot"));
             h2s2cGraphs->prune_nodes_not_reaching_leaves(i);
+            h2s2cGraphs->prune_call_nodes_without_return(i, g);
         }
     }
 

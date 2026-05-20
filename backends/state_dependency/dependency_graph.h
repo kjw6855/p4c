@@ -28,6 +28,7 @@ class DependencyGraphs {
         DEPENDS_ON,
         SATELITE,
         CHAIN_PATH,
+        CALL_TO_RET,
     };
 
     /// Vertex properties for the dependency graph
@@ -90,7 +91,8 @@ class DependencyGraphs {
     /// @param label Edge label
     /// @return edge descriptor
     edge_t add_dependency_edge(size_t index, vertex_t from, vertex_t to,
-                               const cstring &label = ""_cs);
+                               const cstring &label = ""_cs,
+                               DepEdgeType type = DepEdgeType::DEPENDS_ON);
 
     /// @brief Add dependencies from a DepEdgeMap
     /// @param graph The control flow graph for context
@@ -130,6 +132,10 @@ class DependencyGraphs {
     /// @brief Remove nodes that cannot reach any leaf (out-degree 0) node.
     /// @param index Dependency graph index
     void prune_nodes_not_reaching_leaves(size_t index);
+
+    /// @brief Remove CALL vertices that do not have their corresponding CALL_TO_RET edge
+    /// @param index Dependency graph index
+    void prune_call_nodes_without_return(size_t index, Graphs::Graph *esg);
 
     /// Per-register dependency chain: write-side and read-side vertices separated.
     /// One SOChain per SO vertex that has at least one incoming "write_to" edge.
@@ -262,6 +268,8 @@ class DependencyGraphs {
 
     // Per-graph map from (original graph vertex, IR node) to dependency graph vertex
     std::vector<EsgToDepMap> esgToDepMaps;
+
+    void prune_and_remap(size_t index, std::unordered_set<vertex_t> &keep);
 
  public:
     std::vector<std::vector<vertex_t>> leaves;  // Per-graph list of leaf vertices (out-degree 0)

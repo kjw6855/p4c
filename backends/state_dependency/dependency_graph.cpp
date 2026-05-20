@@ -65,7 +65,8 @@ vertex_t DependencyGraphs::add_so_vertex(size_t index, const IR::Node *soNode) {
 }
 
 edge_t DependencyGraphs::add_dependency_edge(size_t index, vertex_t from, vertex_t to,
-                                             const cstring &label) {
+                                             const cstring &label,
+                                             DepEdgeType type) {
     // Check if edge already exists
     auto [e, exists] = boost::edge(from, to, *depGraphs[index]);
     if (exists) {
@@ -81,7 +82,7 @@ edge_t DependencyGraphs::add_dependency_edge(size_t index, vertex_t from, vertex
     DependencyEdge &eData = (*depGraphs[index])[newEdge];
     eData.label = label;
     eData.style = "solid"_cs;
-    eData.type = DepEdgeType::DEPENDS_ON;
+    eData.type = type;
 
     return newEdge;
 }
@@ -151,11 +152,16 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                             // Don't create CALL-RET edge
                             if (curVertex != srcVertex) {
                                 add_dependency_edge(index, curVertex, dstVertex, ""_cs);
+                            } else {
+                                add_dependency_edge(index, srcVertex, dstVertex,
+                                    "call_to_return"_cs, DepEdgeType::CALL_TO_RET);
                             }
                             break;
                         } else if (endOfSearch) {
-                            // Don't create edge for nodes after finding dstNode
-                            break;
+                            // dstNode is in nextCfgNodes but not yet reached; skip adding
+                            // this node to BFS so we don't expand past the procedure boundary,
+                            // but keep iterating to reach dstNode.
+                            continue;
                         }
 
                         const auto dEsgInfo = (*graph)[dEsgit];
@@ -171,9 +177,27 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                             // TODO: find variable for better visualization
                             dVertex = add_vertex(index, {dEsgit, nullptr}, cstring(ss));
 
-                            // Check if this node updates the stateful object
-                            if (std::find(dEsgInfo.defVars.begin(), dEsgInfo.defVars.end(), regVar)
-                                    != dEsgInfo.defVars.end()) {
+                            // Check if this node updates the stateful object.
+                            // defVar may be a member expression (e.g. val.field = x), so walk
+                            // the IR::Member chain to the root PathExpression and compare names.
+                            auto isRegVarOrMember = [&](const IR::Node *defVar) -> bool {
+                                if (regVar == nullptr) return false;
+                                const IR::Node *cur = defVar;
+                                while (cur != nullptr) {
+                                    if (cur == regVar) return true;
+                                    if (const auto *mem = cur->to<IR::Member>()) {
+                                        cur = mem->expr;
+                                    } else if (const auto *pe = cur->to<IR::PathExpression>()) {
+                                        const auto *decl = regVar->to<IR::IDeclaration>();
+                                        return decl && pe->path->name == decl->getName();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                return false;
+                            };
+                            if (std::any_of(dEsgInfo.defVars.begin(), dEsgInfo.defVars.end(),
+                                            isRegVarOrMember)) {
                                 hasUpdate = true;
                             }
                             q.push(dVertex);
@@ -354,7 +378,38 @@ void DependencyGraphs::prune_nodes_not_reaching_leaves(size_t index) {
     }
 
     if (keep.size() == vertexCount) return;
+    prune_and_remap(index, keep);
+}
 
+void DependencyGraphs::prune_call_nodes_without_return(size_t index, Graphs::Graph *esg) {
+    auto &g = *depGraphs[index];
+    const auto vertexCount = boost::num_vertices(g);
+    if (vertexCount == 0) return;
+    std::unordered_set<vertex_t> keep;
+    for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
+        auto &vInfo = g[*vit];
+        const auto &esgInfo = (*esg)[vInfo.esgId.first];
+        if (!hasFlag(esgInfo.flags, VertexFlags::CALL)) {
+            keep.insert(*vit);
+            continue;
+        }
+
+        bool hasRetEdge = false;
+        for (auto [eit, eend] = boost::out_edges(*vit, g); eit != eend; ++eit) {
+            if (g[*eit].type == DepEdgeType::CALL_TO_RET) {
+                hasRetEdge = true;
+                break;
+            }
+        }
+        if (hasRetEdge) keep.insert(*vit);
+    }
+
+    if (keep.size() == vertexCount) return;
+    prune_and_remap(index, keep);
+}
+
+void DependencyGraphs::prune_and_remap(size_t index, std::unordered_set<vertex_t> &keep) {
+    auto &g = *depGraphs[index];
     auto pruned = std::make_unique<DepGraph>();
     auto oldVAttrs = boost::get(boost::vertex_attribute, g);
     auto newVAttrs = boost::get(boost::vertex_attribute, *pruned);
@@ -546,8 +601,127 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
             }
         }
 
-        // 2. Collect paths for each read destination through backward and forward BFS
-        std::map<vertex_t, std::unordered_set<vertex_t>> readVtxCache;
+        // Helper: split a write-vertex set into per-call-site subsets.
+        // When vtx contains >1 CALL vertices (vertices with a CALL_TO_RET out-edge),
+        // returns one subset per CALL vertex: procBody (EXIT..ENTRY, shared) plus
+        // that CALL vertex and its caller-side backward context within vtx.
+        // Returns {vtx} unchanged when there are 0 or 1 CALL vertices.
+        auto splitBySite = [&](const std::unordered_set<vertex_t> &vtx, vertex_t start)
+            -> std::vector<std::unordered_set<vertex_t>> {
+            std::vector<vertex_t> callVerts;
+            for (auto v : vtx) {
+                for (auto [eo, eoe] = boost::out_edges(v, g); eo != eoe; ++eo) {
+                    if (g[*eo].type == DepEdgeType::CALL_TO_RET) {
+                        callVerts.push_back(v);
+                        break;
+                    }
+                }
+            }
+            if (callVerts.size() <= 1) return {vtx};
+
+            std::unordered_set<vertex_t> callVertSet(callVerts.begin(), callVerts.end());
+
+            // Procedure body: backward BFS from start within vtx, stopping at CALL vertices.
+            std::unordered_set<vertex_t> procBody;
+            std::deque<vertex_t> work;
+            procBody.insert(start);
+            work.push_back(start);
+            while (!work.empty()) {
+                auto v = work.front(); work.pop_front();
+                for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                    auto pred = boost::source(*ei, g);
+                    if (!vtx.count(pred) || procBody.count(pred) || callVertSet.count(pred))
+                        continue;
+                    procBody.insert(pred);
+                    work.push_back(pred);
+                }
+            }
+
+            // One write-vertex set per CALL vertex: procBody + callV + its backward context.
+            std::vector<std::unordered_set<vertex_t>> result;
+            for (auto callV : callVerts) {
+                auto perSite = procBody;
+                perSite.insert(callV);
+                std::deque<vertex_t> callWork;
+                callWork.push_back(callV);
+                while (!callWork.empty()) {
+                    auto v = callWork.front(); callWork.pop_front();
+                    for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                        auto pred = boost::source(*ei, g);
+                        // Stop at the procedure body and at other call-site vertices so that
+                        // e.g. CALL₁'s context doesn't bleed into CALL₂'s chain when the
+                        // CALL_TO_RET edge on RETURN₁ reaches CALL₁ during CALL₂'s BFS.
+                        if (!vtx.count(pred) || perSite.count(pred) || callVertSet.count(pred)) continue;
+                        perSite.insert(pred);
+                        callWork.push_back(pred);
+                    }
+                }
+                result.push_back(std::move(perSite));
+            }
+            return result;
+        };
+
+        // Helper: split a read-vertex set into per-call-site subsets.
+        // Symmetric to splitBySite but uses forward BFS from start (the ENTRY vertex)
+        // to discover the shared procedure body, then backward BFS per CALL vertex for
+        // its caller-side context.  Returns {vtx} when there are 0 or 1 CALL vertices.
+        auto splitReadBySite = [&](const std::unordered_set<vertex_t> &vtx, vertex_t start)
+            -> std::vector<std::unordered_set<vertex_t>> {
+            // Procedure body = forward BFS from start within vtx.
+            std::unordered_set<vertex_t> procBody;
+            std::deque<vertex_t> work;
+            procBody.insert(start);
+            work.push_back(start);
+            while (!work.empty()) {
+                auto v = work.front(); work.pop_front();
+                for (auto [eo, eoe] = boost::out_edges(v, g); eo != eoe; ++eo) {
+                    auto tgt = boost::target(*eo, g);
+                    if (vtx.count(tgt) && !procBody.count(tgt)) {
+                        procBody.insert(tgt);
+                        work.push_back(tgt);
+                    }
+                }
+            }
+
+            // CALL vertices are outside the procedure body.
+            std::vector<vertex_t> callVerts;
+            std::unordered_set<vertex_t> callVertSet;
+            for (auto v : vtx) {
+                if (procBody.count(v)) continue;
+                for (auto [eo, eoe] = boost::out_edges(v, g); eo != eoe; ++eo) {
+                    if (g[*eo].type == DepEdgeType::CALL_TO_RET) {
+                        callVerts.push_back(v);
+                        callVertSet.insert(v);
+                        break;
+                    }
+                }
+            }
+            if (callVerts.size() <= 1) return {vtx};
+
+            // One read-vertex set per CALL vertex: procBody + callV + its backward context.
+            std::vector<std::unordered_set<vertex_t>> result;
+            for (auto callV : callVerts) {
+                auto perSite = procBody;
+                perSite.insert(callV);
+                std::deque<vertex_t> callWork;
+                callWork.push_back(callV);
+                while (!callWork.empty()) {
+                    auto v = callWork.front(); callWork.pop_front();
+                    for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                        auto pred = boost::source(*ei, g);
+                        if (!vtx.count(pred) || perSite.count(pred) || callVertSet.count(pred)) continue;
+                        perSite.insert(pred);
+                        callWork.push_back(pred);
+                    }
+                }
+                result.push_back(std::move(perSite));
+            }
+            return result;
+        };
+
+        // 2. Collect paths for each read destination through backward and forward BFS.
+        //    Cache the already-split per-site sets so the BFS runs only once per readDst.
+        std::map<vertex_t, std::vector<std::unordered_set<vertex_t>>> readSitesCache;
         for (auto readDst : readDestinations[so]) {
             // 1) If readDst is for update, create a single-execution path
             if (updateReadDstToWriteSrc.count(readDst)) {
@@ -581,17 +755,17 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                         fwWork.push_back(tgt);
                     }
                 }
-                chains.push_back(SOChain(depGraphs[index].get(), esg,
-                                         so, g[so].name, g[so].esgId.second,
-                                         std::move(writeLocalVtx),
-                                         std::unordered_set<vertex_t>(), true, chainId++));
+                for (auto &perSite : splitBySite(writeLocalVtx, writeSrc)) {
+                    chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                             so, g[so].name, g[so].esgId.second,
+                                             std::move(perSite),
+                                             std::unordered_set<vertex_t>(), true, chainId++));
+                }
 
             // 2) Otherwise, create a multi-execution path: pure read x write paths
             } else {
-                std::unordered_set<vertex_t> readVtx; // for detecting single-path vs multi-path read SOs
-                if (readVtxCache.count(readDst)) {
-                    readVtx = readVtxCache[readDst];
-                } else {
+                if (!readSitesCache.count(readDst)) {
+                    std::unordered_set<vertex_t> readVtx;
                     std::deque<vertex_t> work;
                     // 1. Non-SO backward BFS from readDst to collect its context.
                     work.push_back(readDst);
@@ -606,10 +780,9 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                         }
                     }
 
-                    // 2. Forward BFS from SO: collect the full read side, but skip update-read
-                    //    destinations so the update action's body stays on the write side only.
+                    // 2. Forward BFS from readDst: collect the full read side, but skip
+                    //    update-read destinations so the update body stays on write side only.
                     readVtx.insert(readDst);
-                    // start from readDst for the specific read path
                     work.push_back(readDst);
                     while (!work.empty()) {
                         auto v = work.front(); work.pop_front();
@@ -618,17 +791,21 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                             if (!readVtx.count(tgt)) { readVtx.insert(tgt); work.push_back(tgt); }
                         }
                     }
-                    readVtxCache[readDst] = readVtx;
+                    readSitesCache[readDst] = splitReadBySite(readVtx, readDst);
                 }
+                const auto &readSites = readSitesCache[readDst];
 
-                // 3. For each write source, backward BFS to build writeVtx.
+                // 3. Emit one chain per (write call site × read call site) combination.
                 for (auto src : sources) {
-                    chains.push_back(SOChain(depGraphs[index].get(), esg,
-                                             so, g[so].name, g[so].esgId.second,
-                                             writeVtx[src], readVtx,
-                                             false, chainId++));
+                    for (auto &perSiteW : splitBySite(writeVtx[src], src)) {
+                        for (const auto &perSiteR : readSites) {
+                            chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                                     so, g[so].name, g[so].esgId.second,
+                                                     perSiteW, perSiteR,
+                                                     false, chainId++));
+                        }
+                    }
                 }
-
             }
         }
     }
