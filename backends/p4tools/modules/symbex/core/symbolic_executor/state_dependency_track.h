@@ -69,7 +69,7 @@ using TamperingCallback = std::function<bool(const TamperingFinalState &)>;
 /// vector is emitted only when a terminal path covers ALL required nodes.
 ///
 /// Policy variants map to different chain sources and node sets:
-///   - Tampering    : dataWriteValueChains + dataWriteCondChains
+///   - Tampering    : dataWriteKeyChains
 ///                    Three-phase execution per chain:
 ///                      Phase 1 → readNodes  (read original value)
 ///                      Phase 2 → writeNodes (write tampered value)

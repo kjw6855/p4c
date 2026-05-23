@@ -164,35 +164,40 @@ int main(int argc, char *const argv[]) {
 
         // Case 1: H2S2V reads of registers that are NOT written by header data in the dep graph
         //         (SO vertices with no incoming "write_to" edge → their reachable leaves).
-        // Case 2: Distinct DATA-write sources (non-SO vertices with outgoing "write_to" to SO)
-        //         that can reach at least one leaf in H2S2V or H2S2C.
-        // Case 3: Same as case 2 but restricted to H2S2C (SO value reaches a condition leaf).
+        // Case 2: DATA-write chains whose sink is a match key (VertexFlags::KEY).
+        // Case 3: DATA-write chains whose sink is a header/port field (non-KEY).
+        // Case 4: Same as case 2/3 but restricted to H2S2C (SO value reaches a condition leaf).
         size_t noWriteReadTotal = 0;
-        size_t dataWriteTotal = 0;
+        size_t dataWriteToKeyTotal = 0;
+        size_t dataWriteToHdrTotal = 0;
         size_t dataWriteToCondTotal = 0;
 
         std::cout << "\n================ State Dependency Counts ================\n";
         for (size_t i = 0; i < numGraphs; i++) {
             auto graphName = cstring(boost::get_property(*cfgArr[i], boost::graph_name));
             size_t noWriteRead = sdResult.noWriteReadChains[graphName].size();
-            size_t dataWriteToValue = sdResult.dataWriteValueChains[graphName].size();
+            size_t dataWriteToKey = sdResult.dataWriteKeyChains[graphName].size();
+            size_t dataWriteToHdr = sdResult.dataWriteHeaderChains[graphName].size();
             size_t dataWriteToCond = sdResult.dataWriteCondChains[graphName].size();
-            size_t dataWrite = dataWriteToValue + dataWriteToCond;
+            size_t dataWrite = dataWriteToKey + dataWriteToHdr + dataWriteToCond;
 
-            if (noWriteRead == 0 && dataWrite == 0 && dataWriteToCond == 0) continue;
+            if (noWriteRead == 0 && dataWrite == 0) continue;
 
             std::cout << "  [" << graphName << "]\n"
                       << "    (1) H2S2V non-write SO reads:     " << noWriteRead << "\n"
-                      << "    (2) H->SO DATA writes (V + C):    " << dataWrite << "\n"
-                      << "    (3) H2S2C DATA writes to cond:    " << dataWriteToCond << "\n";
+                      << "    (2) H->SO DATA writes to key:     " << dataWriteToKey << "\n"
+                      << "    (3) H->SO DATA writes to header:  " << dataWriteToHdr << "\n"
+                      << "    (4) H2S2C DATA writes to cond:    " << dataWriteToCond << "\n";
             noWriteReadTotal += noWriteRead;
-            dataWriteTotal += dataWrite;
+            dataWriteToKeyTotal += dataWriteToKey;
+            dataWriteToHdrTotal += dataWriteToHdr;
             dataWriteToCondTotal += dataWriteToCond;
         }
         std::cout << "  --- Total ---\n"
                   << "    (1) non-write SO reads:     " << noWriteReadTotal << "\n"
-                  << "    (2) DATA writes (V + C):    " << dataWriteTotal << "\n"
-                  << "    (3) DATA writes to cond:    " << dataWriteToCondTotal << "\n"
+                  << "    (2) DATA writes to key:     " << dataWriteToKeyTotal << "\n"
+                  << "    (3) DATA writes to header:  " << dataWriteToHdrTotal << "\n"
+                  << "    (4) DATA writes to cond:    " << dataWriteToCondTotal << "\n"
                   << "=========================================================\n\n";
     }
 

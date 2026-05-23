@@ -151,6 +151,13 @@ class DependencyGraphs {
         vertex_t soVertex;
         cstring soName;
         const IR::Node *soNode;
+        /// Dep-graph vertex info of the chain's sink (the KEY or header leaf).
+        /// For non-update chains: taken from the leaf dep vertex (out_degree 0) in readVertices.
+        /// For update-only chains: taken from the leaf dep vertex in the forward expansion of
+        /// writeVertices (vertex reachable beyond the write_to edge, i.e. not in backward BFS
+        /// context). esgId.first is the ESG vertex; check (*esg)[esgId.first].flags for KEY.
+        /// Default-initialized (esgId.second == nullptr) when no sink vertex is found.
+        DependencyVertex sinkNode;
         /// Vertices on the write side: the EXIT node that writes to this SO plus its full
         /// backward-reachable context (including the update action body when isUpdate=true).
         std::unordered_set<vertex_t> writeVertices;
@@ -174,8 +181,9 @@ class DependencyGraphs {
                 vertex_t soVertex, cstring soName, const IR::Node *soNode,
                 std::unordered_set<vertex_t> writeVertices,
                 std::unordered_set<vertex_t> readVertices,
-                bool isUpdate, size_t id)
-            : soVertex(soVertex), soName(soName), soNode(soNode),
+                bool isUpdate, size_t id,
+                DependencyVertex sinkNode)
+            : soVertex(soVertex), soName(soName), soNode(soNode), sinkNode(sinkNode),
               writeVertices(std::move(writeVertices)),
               readVertices(std::move(readVertices)), isUpdate(isUpdate), id(id) {
             for (auto v : this->writeVertices) {

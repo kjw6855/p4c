@@ -236,7 +236,20 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             auto *esg = cgen.controlGraphsArray[i];
             auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
             result.noWriteReadChains[graphName] = h2s2vGraphs->get_nowrite_so_vertices(i, esg);
-            result.dataWriteValueChains[graphName] = h2s2vGraphs->get_data_write_so_chains(i, esg);
+
+            // Split data-write chains by sink type using the sinkNode baked in at creation.
+            // sinkNode.esgId.first is the ESG vertex of the dep-graph leaf; check its flags
+            // for VertexFlags::KEY to distinguish key chains from header/port chains.
+            for (auto &chain : h2s2vGraphs->get_data_write_so_chains(i, esg)) {
+                auto esgVtx = chain.sinkNode.esgId.first;
+                bool isKey = (chain.sinkNode.esgId.second != nullptr &&
+                              esgVtx < boost::num_vertices(*esg) &&
+                              hasFlag((*esg)[esgVtx].flags, VertexFlags::KEY));
+                if (isKey)
+                    result.dataWriteKeyChains[graphName].push_back(std::move(chain));
+                else
+                    result.dataWriteHeaderChains[graphName].push_back(std::move(chain));
+            }
         }
     }
     if (h2s2cGraphs) {
@@ -334,7 +347,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     if (program == nullptr || toplevel == nullptr || ::P4::errorCount() > 0)
         return {};
 
-    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir);
+    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir, false);
 }
 
 }  // namespace P4::P4StateDependency

@@ -521,10 +521,16 @@ DependencyGraphs::get_nowrite_so_vertices(size_t index, Graphs::Graph *esg) cons
                     }
                 }
             }
+            DependencyVertex sinkDV;
+            for (auto v : readVtx) {
+                if (g[v].isSO) continue;
+                if (boost::out_degree(v, g) == 0) { sinkDV = g[v]; break; }
+            }
             chains.push_back(SOChain(depGraphs[index].get(), esg,
                                      so, g[so].name, g[so].esgId.second,
                                      std::unordered_set<vertex_t>(),
-                                     std::move(readVtx), false, chainId++));
+                                     std::move(readVtx), false, chainId++,
+                                     sinkDV));
         }
     }
     return chains;
@@ -572,6 +578,19 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
             }
         }
     }
+
+    // Helper: find the first leaf dep vertex (out_degree 0, non-SO) in a vertex set
+    // and return its DependencyVertex (for sinkNode). Returns default if none found.
+    auto findSinkDV = [&](const std::unordered_set<vertex_t> &vtxSet,
+                          const std::unordered_set<vertex_t> *skipSet = nullptr) -> DependencyVertex {
+        for (auto v : vtxSet) {
+            if (skipSet && skipSet->count(v)) continue;
+            if (g[v].isSO) continue;
+            if (boost::out_degree(v, g) == 0)
+                return g[v];
+        }
+        return {};
+    };
 
     size_t chainId = 0;
     // Get SO chain for each (writeSO, so, readDst) pair
@@ -755,11 +774,14 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                         fwWork.push_back(tgt);
                     }
                 }
+                // Sink: first leaf in the forward expansion (not in the backward BFS context).
+                DependencyVertex updateSinkDV = findSinkDV(writeLocalVtx, &writeVtx[writeSrc]);
                 for (auto &perSite : splitBySite(writeLocalVtx, writeSrc)) {
                     chains.push_back(SOChain(depGraphs[index].get(), esg,
                                              so, g[so].name, g[so].esgId.second,
                                              std::move(perSite),
-                                             std::unordered_set<vertex_t>(), true, chainId++));
+                                             std::unordered_set<vertex_t>(), true, chainId++,
+                                             updateSinkDV));
                 }
 
             // 2) Otherwise, create a multi-execution path: pure read x write paths
@@ -799,10 +821,11 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                 for (auto src : sources) {
                     for (auto &perSiteW : splitBySite(writeVtx[src], src)) {
                         for (const auto &perSiteR : readSites) {
+                            DependencyVertex sinkDV = findSinkDV(perSiteR);
                             chains.push_back(SOChain(depGraphs[index].get(), esg,
                                                      so, g[so].name, g[so].esgId.second,
                                                      perSiteW, perSiteR,
-                                                     false, chainId++));
+                                                     false, chainId++, sinkDV));
                         }
                     }
                 }

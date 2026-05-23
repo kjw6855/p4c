@@ -44,8 +44,14 @@ struct StateDependencyResult {
     StatefulToKey *s2vChecker = nullptr;
     StatefulToCond *h2s2cChecker = nullptr;
 
+    // Chains without write
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> noWriteReadChains;
-    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteValueChains;
+    // Chains with data write to header value
+    // Currently, symbex doesn't generate test case for this chain type
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteHeaderChains;
+    // Chains with data write to matche key
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteKeyChains;
+    // Chains with data write to condition
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteCondChains;
 };
 

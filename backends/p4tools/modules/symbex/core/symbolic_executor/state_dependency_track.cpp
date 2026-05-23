@@ -89,8 +89,7 @@ StateDependencyTracker::collectChains() const {
 
     switch (policy) {
         case StateDependencyPolicy::Tampering:
-            addChains(sdResult.dataWriteValueChains, "Write Value"_cs);
-            addChains(sdResult.dataWriteCondChains, "Write Condition"_cs);
+            addChains(sdResult.dataWriteKeyChains, "Write Key"_cs);
             break;
         case StateDependencyPolicy::AlteringPath:
             addChains(sdResult.dataWriteCondChains, "Write Condition"_cs);
