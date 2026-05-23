@@ -296,29 +296,36 @@ class TableConfig : public TestObject {
 class TestSpec;  // forward declaration for TamperingTestSpec
 
 /// Test specification for the three-packet tampering scenario.
-/// Bundles three independent TestSpec objects (one per phase) together with a flag that
+/// Bundles two symbex TestSpec objects (Phase 1 and Phase 2) together with a flag that
 /// indicates whether the read phases must produce an output packet (i.e., the SOChain's
 /// read vertices include __EXIT__ leaves, meaning the packet is not dropped).
+/// Phase 3 is purely dynamic: the test script replays Phase 1's input packet after
+/// Phase 2 has written the attacker-chosen value to the register.
 ///
 /// Execution order on the same set of table entries (taken from spec1):
 ///   spec1 — Phase 1: reads the original register value
 ///   spec2 — Phase 2: writes the tampered register value
-///   spec3 — Phase 3: reads the changed register value
+///   (Phase 3 dynamic: replays spec1's input; deviation from spec1's output = tampering confirmed)
 class TamperingTestSpec {
  public:
     /// Full test spec for Phase 1 (read original value).
     const TestSpec *spec1;
     /// Full test spec for Phase 2 (write tampered value).
     const TestSpec *spec2;
-    /// Full test spec for Phase 3 (read tampered value).
-    const TestSpec *spec3;
 
     /// True when the SOChain's readVertices include __EXIT__ leaves, meaning the read
     /// phases are expected to emit an output packet (i.e., packet is not dropped).
     bool readPathHasExit;
 
-    TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, const TestSpec *s3, bool hasExit)
-        : spec1(s1), spec2(s2), spec3(s3), readPathHasExit(hasExit) {}
+    /// Attacker-chosen register values from Phase 2 (register name → concrete TestObject).
+    /// Used to emit affected_register fields in the test output so the test script can
+    /// verify the register was written with the expected value after Phase 2.
+    std::map<cstring, const TestObject *> attackerRegisterValues;
+
+    TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, bool hasExit,
+                      std::map<cstring, const TestObject *> attackerRegVals = {})
+        : spec1(s1), spec2(s2), readPathHasExit(hasExit),
+          attackerRegisterValues(std::move(attackerRegVals)) {}
 };
 
 class TestSpec {

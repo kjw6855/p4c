@@ -31,7 +31,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::TypeMap *typeMap,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
-                                                  std::filesystem::path graphsDir) {
+                                                  std::filesystem::path graphsDir,
+                                                  bool onlyHdrToStateToKey) {
     Util::ScopedTimer sdTimer("P4SD");
     StateDependencyResult result;
 
@@ -89,7 +90,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         Util::ScopedTimer actSoToKeyTimer("ACT->SO->KEY/HDR");
         StatefulToKey a2s2vPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
-                &stateVars, &depEdgeMaps, "A2S2V"_cs);
+                &stateVars, &depEdgeMaps, "A2S2V"_cs, false);
         program->apply(a2s2vPdChecker);
         for (size_t i = 0; i < numGraphs; i++) {
             auto *g = cgen.controlGraphsArray[i];
@@ -152,7 +153,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         Util::ScopedTimer hdrSoToKeyTimer("HDR->SO->KEY/HDR");
         StatefulToKey h2s2vPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
-                &stateVars, &depEdgeMaps, "H2S2V"_cs);
+                &stateVars, &depEdgeMaps, "H2S2V"_cs,
+                onlyHdrToStateToKey);
         program->apply(h2s2vPdChecker);
         for (size_t i = 0; i < numGraphs; i++) {
             auto *g = cgen.controlGraphsArray[i];
@@ -193,7 +195,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             }
             s2vChecker = new StatefulToKey(refMap, typeMap,
                     &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
-                    &stateVars, &depEdgeMaps, "S2V"_cs);
+                    &stateVars, &depEdgeMaps, "S2V"_cs, false);
             program->apply(*s2vChecker);
         }
     }

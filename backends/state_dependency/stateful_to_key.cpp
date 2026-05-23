@@ -104,7 +104,7 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
         if (hasFlag(vinfo.flags, VertexFlags::KEY)) {
             collect_all_dep_edges(tab, *vit);
         }
-        if (hasFlag(vinfo.flags, VertexFlags::EXIT) && sgProp->procOf[*vit] == mainProcName) {
+        if (!onlyToKey && hasFlag(vinfo.flags, VertexFlags::EXIT) && sgProp->procOf[*vit] == mainProcName) {
             collect_all_dep_edge_to_hdr(tab, *vit);
         }
     }

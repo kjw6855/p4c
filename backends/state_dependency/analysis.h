@@ -67,7 +67,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::TypeMap *typeMap,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
-                                                  std::filesystem::path graphsDir = {});
+                                                  std::filesystem::path graphsDir = {},
+                                                  bool onlyHdrToStateToKey = true);
 
 /// Convenience overload: builds its own lightweight midend
 /// (TypeChecking → EvaluatorPass → IFDS analysis → RemoveActionParameters → TypeChecking)

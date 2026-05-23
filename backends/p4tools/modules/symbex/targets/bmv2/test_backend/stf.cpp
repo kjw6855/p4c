@@ -257,7 +257,7 @@ std::string STF::getTamperingTestCaseTemplate() {
     # {{selected_branches}}
 ## endif
 # Current node coverage: {{coverage}}
-# Tampering test: phase1=read original, phase2=write tampered, phase3=read tampered
+# Tampering test: phase1=read original, phase2=write tampered, phase3=dynamic (same as phase1)
 # Traces (phase 1)
 ## for trace_item in trace
 # {{trace_item}}
@@ -360,8 +360,9 @@ void STF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selec
     dataJson["phase1_verify"] = getExpectedPacket(testSpec->spec1);
     dataJson["phase2_send"] = getSend(testSpec->spec2);
     dataJson["phase2_verify"] = getExpectedPacket(testSpec->spec2);
-    dataJson["phase3_send"] = getSend(testSpec->spec3);
-    dataJson["phase3_verify"] = getExpectedPacket(testSpec->spec3);
+    // Phase 3 replays Phase 1's input; no expected output (dynamic deviation check).
+    dataJson["phase3_send"] = getSend(testSpec->spec1);
+    dataJson["phase3_verify"] = false;
 
     LOG5("STF tampering test back end: emitting testcase:" << std::setw(4) << dataJson);
 

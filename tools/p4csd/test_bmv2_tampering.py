@@ -407,12 +407,16 @@ class TamperCase:
     phases: List[Phase]
     entities: List[p4runtime_pb2.Entity]
     path: str
+    affected_registers: List[dict] = field(default_factory=list)
 
 
 _BLOCK_RE = re.compile(r"^(\w+)\s*\{\s*$")
 _PACKET_RE = re.compile(r'packet:\s*"((?:[^"\\]|\\.)*)"')
 _MASK_RE = re.compile(r'packet_mask:\s*"((?:[^"\\]|\\.)*)"')
 _PORT_RE = re.compile(r"port:\s*(\d+)")
+_REG_NAME_RE = re.compile(r'register_name:\s*"([^"]*)"')
+_REG_IDX_RE = re.compile(r'\bindex:\s*(\d+)')
+_REG_VAL_RE = re.compile(r'attacker_value:\s*"((?:[^"\\]|\\.)*)"')
 
 
 def _decode_escaped(s: str) -> bytes:
@@ -493,6 +497,7 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
     text = path.read_text()
     phases: List[Phase] = []
     entities: List[p4runtime_pb2.Entity] = []
+    affected_registers: List[dict] = []
     current: Optional[Phase] = None
 
     for header, body in _iter_top_level_blocks(text):
@@ -535,6 +540,18 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
                 i += 1
             te_body = body[start:i - 1]
             entities.append(_entity_from_block(te_body))
+        elif header == "affected_register":
+            name_m = _REG_NAME_RE.search(body)
+            idx_m = _REG_IDX_RE.search(body)
+            val_m = _REG_VAL_RE.search(body)
+            if name_m and idx_m and val_m:
+                val_bytes = _decode_escaped(val_m.group(1))
+                val_int = int.from_bytes(val_bytes, "big") if val_bytes else 0
+                affected_registers.append({
+                    "name": name_m.group(1),
+                    "index": int(idx_m.group(1)),
+                    "attacker_value": val_int,
+                })
         # ignore unknown headers (e.g. metadata/traces at top level are not blocks)
 
     if current is not None:
@@ -543,7 +560,8 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
     while len(phases) < 3:
         # Tolerate malformed files — pad with empty phases that will FAIL noisily.
         phases.append(Phase(in_packet=b"", in_port=0))
-    return TamperCase(phases=phases[:3], entities=entities, path=str(path))
+    return TamperCase(phases=phases[:3], entities=entities, path=str(path),
+                      affected_registers=affected_registers)
 
 
 # --------------------------------------------------------------------------- #
@@ -786,9 +804,10 @@ def _sudo_sendp(packet: bytes, iface: str) -> None:
 
 
 class PacketTester:
-    def __init__(self, phase_timeout: float, capture_dir: Path):
+    def __init__(self, phase_timeout: float, capture_dir: Path, thrift_client=None):
         self.phase_timeout = phase_timeout
         self.capture_dir = capture_dir
+        self.thrift_client = thrift_client
         self.capture_dir.mkdir(parents=True, exist_ok=True)
 
     def _run_phase(self, phase: Phase, strict: bool, label: str) -> Tuple[bool, str]:
@@ -859,17 +878,84 @@ class PacketTester:
             return False, f"matched on port {exp_port} but {len(on_exp)} packets seen there (want 1)"
         return True, ""
 
+    def _verify_attacker_registers(self, affected_registers: List[dict]) -> Tuple[bool, str]:
+        """Verify that Phase 2 wrote the attacker-chosen value to the register via Thrift."""
+        if self.thrift_client is None or not self.thrift_client.is_alive():
+            return True, ""
+        for reg in affected_registers:
+            try:
+                vals = self.thrift_client.read_all(reg["name"])
+                idx, expected = reg["index"], reg["attacker_value"]
+                actual = vals[idx] if idx < len(vals) else None
+                if actual != expected:
+                    return False, (
+                        f"register {reg['name']}[{idx}]="
+                        f"{'None' if actual is None else hex(actual)}, "
+                        f"expected {hex(expected)}"
+                    )
+            except Exception as ex:
+                log.debug("register verify failed for %s: %s", reg["name"], ex)
+        return True, ""
+
+    def _observe_phase(self, phase: Phase, reference: Phase, label: str) -> Tuple[bool, str]:
+        """Send Phase 3 packet and compare output to Phase 1 reference.
+
+        Returns (True, reason) if output differs from Phase 1 (tampering effective),
+        or (False, reason) if output matches Phase 1 (false positive).
+        """
+        in_iface = PORT_TO_HOST_IFACE.get(phase.in_port)
+        if in_iface is None:
+            return False, f"input port {phase.in_port} not mapped"
+        sniff_ifaces = [i for i in ALL_HOST_IFACES if i != in_iface]
+        pcaps = {i: self.capture_dir / f"{label}_{i}.pcap" for i in sniff_ifaces}
+        for p in pcaps.values():
+            p.unlink(missing_ok=True)
+        dumps = {i: _start_tcpdump(i, pcaps[i]) for i in sniff_ifaces}
+        try:
+            time.sleep(0.4)
+            log.debug("phase %s: sendp on %s (len=%d)", label, in_iface, len(phase.in_packet))
+            _sudo_sendp(phase.in_packet, in_iface)
+            time.sleep(self.phase_timeout)
+        finally:
+            for iface, p in dumps.items():
+                _stop_tcpdump(p, pcaps[iface])
+        captured = {i: _read_pcap_bytes(pcaps[i]) for i in sniff_ifaces}
+        iface_to_port = {v: k for k, v in PORT_TO_HOST_IFACE.items()}
+        by_port = {iface_to_port[i]: pkts for i, pkts in captured.items()}
+        observed_port = next((p for p, pkts in by_port.items() if pkts), None)
+        observed_pkt = by_port[observed_port][0] if observed_port is not None else None
+        ref_port, ref_pkt = reference.exp_port, reference.exp_packet
+        ref_mask = reference.exp_mask or (b"\xFF" * len(ref_pkt) if ref_pkt else b"")
+        if observed_port != ref_port:
+            return True, f"output port changed: {ref_port} → {observed_port}"
+        if ref_pkt is not None and observed_pkt is not None:
+            if not _masked_eq(observed_pkt, ref_pkt, ref_mask):
+                return True, f"packet bytes differ on port {observed_port}"
+            return False, "no deviation from phase1 (false positive)"
+        if (observed_pkt is None) != (ref_pkt is None):
+            return True, f"drop state changed (phase1 forwarded={ref_pkt is not None})"
+        return False, "no deviation from phase1 (false positive)"
+
     def run(self, case: TamperCase, label: str) -> Tuple[bool, str]:
-        # Phase 1 strict
+        # Phase 1: strict — confirm read path and baseline output
         ok, reason = self._run_phase(case.phases[0], strict=True, label=f"{label}_p1")
         if not ok:
             return False, f"phase1: {reason}"
-        # Phase 2 lenient (write packet)
+        # Phase 2: lenient — write attacker value to register
         self._run_phase(case.phases[1], strict=False, label=f"{label}_p2")
-        # Phase 3 strict
-        ok, reason = self._run_phase(case.phases[2], strict=True, label=f"{label}_p3")
-        if not ok:
-            return False, f"phase3: {reason}"
+        # After Phase 2: verify register was written with attacker-chosen value
+        if case.affected_registers:
+            ok, reason = self._verify_attacker_registers(case.affected_registers)
+            if not ok:
+                return False, f"phase2_reg_check: {reason}"
+        # Phase 3: dynamic — replay Phase 1's packet; detect deviation from Phase 1 output.
+        # Deviation = tampering effective (true positive).
+        # No deviation = tampering had no observable effect (false positive).
+        deviated, reason = self._observe_phase(
+            case.phases[2], reference=case.phases[0], label=f"{label}_p3"
+        )
+        if not deviated:
+            return False, f"phase3_no_deviation: {reason}"
         return True, ""
 
 
@@ -938,7 +1024,7 @@ def do_testing(spec: TargetSpec, json_path: Path, p4info_path: Path,
             try:
                 client.set_fwd_pipe_config(str(p4info_path), str(json_path))
                 p4info = load_p4info(client)
-                tester = PacketTester(args.phase_timeout, capture_dir)
+                tester = PacketTester(args.phase_timeout, capture_dir, thrift_client=thrift_client)
                 total = len(txtpb_files)
                 all_regs = get_registers(client, p4info, thrift_client=thrift_client)
                 if len(all_regs) == 0:

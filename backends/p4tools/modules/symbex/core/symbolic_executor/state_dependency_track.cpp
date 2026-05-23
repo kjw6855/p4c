@@ -125,43 +125,6 @@ P4::Coverage::CoverageSet StateDependencyTracker::buildRequiredNodes(
 }
 
 // ---------------------------------------------------------------------------
-// Non-tampering single-chain DFS (original behaviour)
-// ---------------------------------------------------------------------------
-
-void StateDependencyTracker::run(const Callback &callBack) {
-    auto chains = collectChains();
-    if (chains.empty()) {
-        warning("State-dependency analysis produced no chains for the selected policy.");
-        return;
-    }
-
-    auto &initState = ExecutionState::create(&programInfo.getP4Program());
-
-    if (policy == StateDependencyPolicy::Tampering) {
-        // Delegate to the three-phase scenario; bridge each triple to the legacy
-        // single-FinalState callback by emitting Phase 3 as the representative result.
-        runTamperingScenario([&callBack](const TamperingFinalState &ts) -> bool {
-            return callBack(ts.phase3);
-        }, initState);
-        return;
-    }
-
-    for (const auto &[chainName, chainList] : chains) {
-        for (const auto *chain : chainList) {
-            currentChain = chain;
-            currentChainName = chainName;
-            currentRequiredNodes = buildRequiredNodes(*chain);
-            if (currentRequiredNodes.empty()) continue;
-
-            unexploredBranches.clear();
-            printInfo("============ Chain (%1%) id=%2% SO=%3% ============",
-                chainName, chain->id, chain->soName);
-            runImpl(callBack, initState.clone());
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // EXIT-leaf detection
 // ---------------------------------------------------------------------------
 
@@ -219,13 +182,25 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
     auto chains = collectChains();
 
     for (const auto &[chainName, chainList] : chains) {
-        for (const auto *chain : chainList) {
+        for (auto it = chainList.rbegin(); it != chainList.rend(); ++it) {
+            const auto *chain = *it;
             currentChain = chain;
             currentChainName = chainName;
             printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
                       chainName, chain->id, chain->soName);
 
             bool hasExit = chainHasExitLeaf(*chain);
+
+            // Reset the incremental Z3 solver state between chains.  After the previous
+            // chain's Phase-2 DFS + processPhase() callback, p4Assertions contains that
+            // chain's complex write-path constraints (NEQ port/table conditions plus concolic
+            // assignments).  If left in place, Z3's accumulated heuristics (VSIDS scores,
+            // learned clauses) from the write-path exploration degrade solver performance for
+            // this chain's Phase-1 read-path queries, causing branches to be incorrectly
+            // pruned as unsatisfiable and leaving the DFS with no terminal state.
+            // checkSat({}) pops all outstanding assertions, resetting p4Assertions /
+            // checkpoints / declaredVarsById to empty so Phase 1 starts from a clean slate.
+            solver.checkSat({});
 
             // ---- Phase 1: read original register value ----
             currentPhase = TamperingPhase::Phase1_Read;
@@ -331,27 +306,18 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 }
             }
 
-            // ---- Phase 3: read tampered value ----
+            // ---- Phase 3: dynamic (no symbex — test script replays Phase 1's packet) ----
             for (size_t i = 0; i < phase1States.size(); ++i) {
                 const auto *fs1 = phase1States[i];
                 const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
 
                 for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
-                    auto &phase3Init = initState.clone();
-
-                    // Seed Phase 3 with attacker-chosen register values derived from Phase 2.
-                    // Only the register corresponding to the current SOChain is tampered;
-                    // other registers (if any) are left at whatever value Phase 2 produced.
-                    //
-                    // add_so_vertex() stores controlPlaneName() in soName (e.g.
-                    // "ingress.roundRegister"), so extractSoRegName() gives exactly the
-                    // key used in "registervalues"_cs test objects ("ingress.roundRegister").
-                    //
+                    // Derive attacker-chosen register values from Phase 2.
                     // withAttackerValues() is called on the *unevaluated* register object so
                     // that symbolic write expressions are still available to build constraints.
-                    // It returns (a) the register seeded with random concrete values for Phase 3
-                    // and (b) IR::Equ constraints passed to processPhase(phase2) so that
-                    // computeConcolicState() re-solves Phase 2 with a consistent input packet.
+                    // It returns (a) the register seeded with concrete attacker-chosen values
+                    // and (b) model overrides applied to processPhase(phase2) so the emitted
+                    // Phase 2 input packet shows the attacker-chosen value.
                     std::map<cstring, const TestObject *> attackerRegValues;
                     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
                         phase2ModelOverrides;
@@ -361,7 +327,6 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                         auto [attackerValue, overrides] =
                             regObj->withAttackerValues(fs2->getFinalModel(),
                                                        SymbexOptions::get().stateTamperValue);
-                        phase3Init.addTestObject("registervalues"_cs, regName, attackerValue);
                         attackerRegValues[regName] = attackerValue;
                         phase2ModelOverrides.insert(phase2ModelOverrides.end(),
                                                     overrides.begin(), overrides.end());
@@ -382,47 +347,14 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                                 "for chain id=%2%; skipping.", chain->soName, chain->id);
                         continue;
                     }
-                    // Constrain Phase 3 to reuse Phase 1's input port
-                    phase3Init.pushPathConstraint(
-                        new IR::Equ(inputPortSymExpr,
-                                    IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
-                    // Constrain Phase 3 table match keys to equal Phase 1's, ensuring it
-                    // exercises the same read-action entry rather than generating a new one.
-                    for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
-                        for (const auto &[keyName, concreteVal] : keyMap) {
-                            const auto *ctrlPlaneKey =
-                                ControlPlaneState::getTableKey(tblName, keyName, concreteVal->type);
-                            phase3Init.pushPathConstraint(new IR::Equ(ctrlPlaneKey, concreteVal));
-                        }
-                    }
-
-                    std::vector<const FinalState *> phase3States;
-                    currentPhase = TamperingPhase::Phase3_Read;
-                    currentRequiredNodes = buildRequiredNodes(*chain);
-                    printInfo("[Tampering] Phase 3 (ReadTampered) — %1% required nodes",
-                              currentRequiredNodes.size());
-                    for (const auto *node : currentRequiredNodes)
-                        printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
-                                node->getSourceInfo().toPositionString());
-                    {
-                        // Phase 3 may show different output ports from Phase 1
-                        ScopedSymbexOpts guard(/*outputPacketOnly=*/false);
-                        runPhase(phase3Init, phase3States);
-                    }
-                    if (phase3States.empty()) {
-                        warning("[Tampering] Phase 3 found no terminal state for chain id=%1%.", chain->id);
-                        continue;
-                    }
-
                     auto [ip2, op2] = getPortPair(fs2);
-                    for (const auto *fs3 : phase3States) {
-                        auto [ip3, op3] = getPortPair(fs3);
-                        TamperingFinalState ts{*fs1, *fs2, *fs3, hasExit,
-                                               cond1.inputPort, cond1.outputPort,
-                                               ip2, op2, ip3, op3,
-                                               attackerRegValues, phase2ModelOverrides};
-                        if (callBack(ts)) return;
-                    }
+                    // Phase 3 is purely dynamic: the test script replays Phase 1's packet after
+                    // Phase 2 writes the attacker-chosen value to the register.
+                    TamperingFinalState ts{*fs1, *fs2, hasExit,
+                                           cond1.inputPort, cond1.outputPort,
+                                           ip2, op2,
+                                           attackerRegValues, phase2ModelOverrides};
+                    if (callBack(ts)) return;
                 }
             }
         }

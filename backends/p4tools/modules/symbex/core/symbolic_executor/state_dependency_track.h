@@ -30,10 +30,10 @@ enum class TamperingPhase {
     Phase3_Read,   ///< Third packet: read changed value (register pre-set from Phase 2).
 };
 
-/// Bundles the three terminal FinalStates that together form one tampering test case:
+/// Bundles the two symbex FinalStates that form one tampering test case:
 ///   phase1 — packet that reads the original register value
 ///   phase2 — packet that writes the tampered value
-///   phase3 — packet that reads the tampered value (register pre-initialized from phase2)
+///   (Phase 3 is purely dynamic: the test script replays Phase 1's packet after Phase 2.)
 ///
 /// readPathHasExit is true when the SOChain's read vertices include __EXIT__ leaves,
 /// meaning the read phases must produce an output packet (packet is not dropped).
@@ -45,17 +45,14 @@ enum class TamperingPhase {
 struct TamperingFinalState {
     const FinalState &phase1;
     const FinalState &phase2;
-    const FinalState &phase3;
     bool readPathHasExit = false;
     int phase1InputPort = -1;
     int phase1OutputPort = -1;
     int phase2InputPort = -1;
     int phase2OutputPort = -1;
-    int phase3InputPort = -1;
-    int phase3OutputPort = -1;
-    /// Attacker-chosen register values (random by default) generated during Phase 3 seeding.
-    /// Maps register control-plane name → evaluated TestObject with random concrete values.
-    /// Populated by runTamperingScenario(); available to test writers for consistent output.
+    /// Attacker-chosen register values (random by default) generated from Phase 2.
+    /// Maps register control-plane name → evaluated TestObject with concrete values.
+    /// Populated by runTamperingScenario(); emitted as affected_register fields in test output.
     std::map<cstring, const TestObject *> attackerRegisterValues;
     /// Direct model overrides for Phase 2: each (SymbolicVariable, Constant) pair is applied
     /// via Model::set() after computeConcolicState() so that the emitted Phase 2 input packet
@@ -83,11 +80,6 @@ class StateDependencyTracker : public SymbolicExecutor {
     StateDependencyTracker(AbstractSolver &solver, const ProgramInfo &programInfo,
                            const P4StateDependency::StateDependencyResult &sdResult,
                            StateDependencyPolicy policy);
-
-    /// Entry point. For Tampering, runs three phases per chain and invokes the outer
-    /// callback once per (phase1, phase2, phase3) triple via runTampering().
-    /// For other policies, runs a single DFS per chain as before.
-    void run(const Callback &callBack) override;
 
     /// Guided DFS targeting currentRequiredNodes for a single chain.
     void runImpl(const Callback &callBack, ExecutionStateReference executionState) override;

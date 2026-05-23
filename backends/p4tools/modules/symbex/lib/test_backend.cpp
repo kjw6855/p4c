@@ -369,8 +369,6 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     std::optional<int> p1out = (state.phase1OutputPort >= 0) ? std::optional<int>(state.phase1OutputPort) : std::nullopt;
     std::optional<int> p2in  = (state.phase2InputPort  >= 0) ? std::optional<int>(state.phase2InputPort)  : std::nullopt;
     std::optional<int> p2out = (state.phase2OutputPort >= 0) ? std::optional<int>(state.phase2OutputPort) : std::nullopt;
-    std::optional<int> p3in  = (state.phase3InputPort  >= 0) ? std::optional<int>(state.phase3InputPort)  : std::nullopt;
-    std::optional<int> p3out = (state.phase3OutputPort >= 0) ? std::optional<int>(state.phase3OutputPort) : std::nullopt;
 
     auto res1 = processPhase(state.phase1, p1in, p1out);
     if (!res1.has_value()) {
@@ -384,14 +382,10 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
         return needsToTerminate(testCount);
     }
 
-    auto res3 = processPhase(state.phase3, p3in, p3out);
-    if (!res3.has_value()) {
-        testCount++;
-        return needsToTerminate(testCount);
-    }
-
-    TamperingTestSpec tamperingSpec(res1->testSpec, res2->testSpec, res3->testSpec,
-                                    state.readPathHasExit);
+    // Phase 3 is purely dynamic: the test script replays Phase 1's packet after Phase 2
+    // writes the attacker-chosen value. No symbex is run for Phase 3.
+    TamperingTestSpec tamperingSpec(res1->testSpec, res2->testSpec,
+                                    state.readPathHasExit, state.attackerRegisterValues);
 
     // Build selected-branches string from the symbolic executor.
     std::stringstream selectedBranches;

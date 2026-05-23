@@ -411,7 +411,7 @@ metadata: "Date generated: {{timestamp}}"
 metadata: "{{selected_branches}}"
 ## endif
 metadata: "Current node coverage: {{coverage}}"
-metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=read tampered"
+metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=dynamic (same as phase1)"
 
 ## for trace_item in trace
 traces: '{{trace_item}}'
@@ -443,7 +443,7 @@ expected_output_packet {
 }
 ## endif
 
-# Phase 3: read tampered register value
+# Phase 3: replay Phase 1 input — dynamic deviation check only
 input_packet {
   packet: "{{phase3_send.pkt}}"
   port: {{phase3_send.ig_port}}
@@ -455,6 +455,14 @@ expected_output_packet {
   packet_mask: "{{phase3_verify.ignore_mask}}"
 }
 ## endif
+
+## for reg in affected_registers
+affected_register {
+  register_name: "{{reg.name}}"
+  index: {{reg.index}}
+  attacker_value: "{{reg.value}}"
+}
+## endfor
 
 ## if control_plane
 ## for table in control_plane.tables
@@ -634,8 +642,25 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     dataJson["phase1_verify"] = getExpectedPacket(testSpec->spec1);
     dataJson["phase2_send"] = getSend(testSpec->spec2);
     dataJson["phase2_verify"] = getExpectedPacket(testSpec->spec2);
-    dataJson["phase3_send"] = getSend(testSpec->spec3);
-    dataJson["phase3_verify"] = getExpectedPacket(testSpec->spec3);
+    // Phase 3 replays Phase 1's input packet; expected output is determined dynamically.
+    dataJson["phase3_send"] = getSend(testSpec->spec1);
+    dataJson["phase3_verify"] = false;
+
+    // Emit affected_register entries for each attacker-chosen write in Phase 2.
+    inja::json affectedRegsJson = inja::json::array();
+    for (const auto &[regName, regObj] : testSpec->attackerRegisterValues) {
+        const auto *regVal = regObj->checkedTo<Bmv2V1ModelRegisterValue>();
+        for (const auto &cond : regVal->getIndexConditions()) {
+            const auto *idxConst = cond.getIndex()->checkedTo<IR::Constant>();
+            const auto *valConst = cond.getValue()->checkedTo<IR::Constant>();
+            inja::json j;
+            j["name"] = regName.c_str();
+            j["index"] = static_cast<int64_t>(static_cast<long long>(idxConst->value));
+            j["value"] = formatHexExpressionWithSeparators(*valConst);
+            affectedRegsJson.push_back(j);
+        }
+    }
+    dataJson["affected_registers"] = affectedRegsJson;
 
     return dataJson;
 }

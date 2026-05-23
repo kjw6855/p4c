@@ -165,6 +165,13 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             },
             "Use to generate json output of fullGraph.");
     registerOption(
+            "--hdrToStateToValue", nullptr,
+            [this](const char *) {
+            onlyHdrToStateToKey = false;
+            return true;
+            },
+            "Use to generate graph with edges from headers to stateful objects to all values.");
+    registerOption(
             "--showVar", "varVis",
             [this](const char *arg) {
 

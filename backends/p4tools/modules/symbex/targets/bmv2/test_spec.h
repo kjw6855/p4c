@@ -92,6 +92,11 @@ class IndexMap : public TestObject {
     /// Return the "writes" to this index map as a
     [[nodiscard]] std::map<big_int, std::pair<int, const IR::Constant *>> unravelMap() const;
 
+    /// @returns the list of index-value pairs written to this index map.
+    [[nodiscard]] const std::vector<IndexExpression> &getIndexConditions() const {
+        return indexConditions;
+    }
+
     DECLARE_TYPEINFO(IndexMap, TestObject);
 };
 

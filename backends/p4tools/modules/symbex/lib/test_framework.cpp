@@ -20,7 +20,8 @@ void TestFramework::writeTestToFile(const TamperingTestSpec *spec, cstring selec
     // Default: write each phase as a separate test file using the single-spec overload.
     writeTestToFile(spec->spec1, selectedBranches, testIdx * 3 - 2, currentCoverage, nullptr, 0);
     writeTestToFile(spec->spec2, selectedBranches, testIdx * 3 - 1, currentCoverage, nullptr, 0);
-    writeTestToFile(spec->spec3, selectedBranches, testIdx * 3, currentCoverage, nullptr, 0);
+    // Phase 3 replays Phase 1's input packet (dynamic — no symbex output for phase 3).
+    writeTestToFile(spec->spec1, selectedBranches, testIdx * 3, currentCoverage, nullptr, 0);
 }
 
 AbstractTestReferenceOrError TestFramework::produceTest(const TestSpec * /*spec*/,
