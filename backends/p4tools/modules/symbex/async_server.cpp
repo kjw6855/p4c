@@ -61,14 +61,14 @@ void P4FuzzGuideImpl::requestShutdown() {
     state->shutdown_requested = true;
 }
 
-Status P4FuzzGuideImpl::Hello(ServerContext* context,
-        const HealthCheckRequest* req,
+Status P4FuzzGuideImpl::Hello(ServerContext* /* context */,
+        const HealthCheckRequest* /* req */,
         HealthCheckResponse* rep) {
     rep->set_status(1);
     return Status::OK;
 }
 
-Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
+Status P4FuzzGuideImpl::GetP4Name(ServerContext* /* context */,
         const P4NameRequest *req,
         P4NameReply *rep) {
 
@@ -138,7 +138,7 @@ Status P4FuzzGuideImpl::GetP4Name(ServerContext *context,
     return Status::OK;
 }
 
-Status P4FuzzGuideImpl::GetP4Statement(ServerContext* context,
+Status P4FuzzGuideImpl::GetP4Statement(ServerContext* /* context */,
         const P4StatementRequest* req,
         P4StatementReply* rep) {
 
@@ -160,7 +160,7 @@ Status P4FuzzGuideImpl::GetP4Statement(ServerContext* context,
     return Status::OK;
 }
 
-Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
+Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* /* context */,
         const P4CoverageRequest* req,
         P4CoverageReply* rep) {
 
@@ -196,7 +196,7 @@ Status P4FuzzGuideImpl::GetP4Coverage(ServerContext* context,
     return Status::OK;
 }
 
-Status P4FuzzGuideImpl::GenRuleSymbex(ServerContext* context,
+Status P4FuzzGuideImpl::GenRuleSymbex(ServerContext* /* context */,
         const P4CoverageRequest* req,
         P4CoverageReply* rep) {
 
@@ -305,7 +305,7 @@ Status P4FuzzGuideImpl::GenRuleSymbex(ServerContext* context,
     return Status::OK;
 }
 
-Status P4FuzzGuideImpl::RecordSymbex(ServerContext* context,
+Status P4FuzzGuideImpl::RecordSymbex(ServerContext* /* context */,
         const P4CoverageRequest* req,
         P4CoverageReply* rep) {
 
