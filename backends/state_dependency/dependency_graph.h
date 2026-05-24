@@ -226,7 +226,8 @@ class DependencyGraphs {
     /// and a color matching the vertex's role.  An edge from vertex → satellite carries
     /// the same chain ID label.
     /// @return (original_vertex, satellite_vertex) pairs for rank=same injection.
-    std::vector<std::pair<vertex_t, vertex_t>> add_chain_satellites(size_t index, Graphs::Graph *esg);
+    std::vector<std::pair<vertex_t, vertex_t>> add_chain_satellites(size_t index,
+        const std::vector<SOChain> &readChains, const std::vector<SOChain> &writeChains);
 
     /// @brief Inject {rank=same; orig; sat;} directives into an already-written DOT file.
     static void inject_rank_groups(const std::filesystem::path &filepath,

@@ -16,6 +16,77 @@ using edge_t = DependencyGraphs::edge_t;
 // XXX: this value can conflict with __START__ node id
 vertex_t globalVertexId = 0;
 
+// Helper: if a vertex set contains multiple RETURN vertices (dep-graph
+// vertices with incoming CALL_TO_RET edges), keep only one RETURN that is
+// connected to a CALL vertex present in the same vertex set. If none of the
+// RETURN vertices has its CALL inside the set, keep the first RETURN and drop
+// the rest. When dropping RETURNs, also drop vertices that are only reachable
+// from those removed RETURNs, but keep downstream vertices reachable from the
+// retained RETURN.
+static void keep_one_return_connected(const DependencyGraphs::DepGraph &g,
+                                     std::unordered_set<vertex_t> &vtx) {
+    std::vector<vertex_t> retVerts;
+    for (auto v : vtx) {
+        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+            if (g[*ei].type == DependencyGraphs::DepEdgeType::CALL_TO_RET) {
+                retVerts.push_back(v);
+                break;
+            }
+        }
+    }
+    if (retVerts.size() <= 1) return;
+
+    // Prefer a RETURN whose CALL predecessor is inside the same vertex set.
+    bool found = false;
+    vertex_t chosen = retVerts.front();
+    for (auto r : retVerts) {
+        for (auto [ei, ee] = boost::in_edges(r, g); ei != ee; ++ei) {
+            if (g[*ei].type != DependencyGraphs::DepEdgeType::CALL_TO_RET) continue;
+            auto callV = boost::source(*ei, g);
+            if (vtx.count(callV)) { chosen = r; found = true; break; }
+        }
+        if (found) break;
+    }
+
+    std::unordered_set<vertex_t> keepReachable;
+    std::deque<vertex_t> work;
+    keepReachable.insert(chosen);
+    work.push_back(chosen);
+
+    while (!work.empty()) {
+        auto v = work.front();
+        work.pop_front();
+        for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+            auto succ = boost::target(*ei, g);
+            if (vtx.count(succ) && keepReachable.insert(succ).second) {
+                work.push_back(succ);
+            }
+        }
+    }
+
+    std::unordered_set<vertex_t> doomed;
+    for (auto r : retVerts) {
+        if (r == chosen) continue;
+
+        std::deque<vertex_t> dropWork;
+        if (doomed.insert(r).second) dropWork.push_back(r);
+
+        while (!dropWork.empty()) {
+            auto v = dropWork.front();
+            dropWork.pop_front();
+
+            for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
+                auto succ = boost::target(*ei, g);
+                if (vtx.count(succ) && !keepReachable.count(succ) && doomed.insert(succ).second) {
+                    dropWork.push_back(succ);
+                }
+            }
+        }
+    }
+
+    for (auto v : doomed) vtx.erase(v);
+}
+
 DependencyGraphs::DependencyGraphs(size_t numGraphs) {
     for (size_t i = 0; i < numGraphs; ++i) {
         depGraphs.emplace_back(std::make_unique<DepGraph>());
@@ -521,16 +592,20 @@ DependencyGraphs::get_nowrite_so_vertices(size_t index, Graphs::Graph *esg) cons
                     }
                 }
             }
-            DependencyVertex sinkDV;
+            // If multiple RETURN vertices are present, keep only the one
+            // connected to a CALL vertex inside this read-vertex set.
+            keep_one_return_connected(g, readVtx);
+
             for (auto v : readVtx) {
                 if (g[v].isSO) continue;
-                if (boost::out_degree(v, g) == 0) { sinkDV = g[v]; break; }
+                if (boost::out_degree(v, g) == 0) {
+                    chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                            so, g[so].name, g[so].esgId.second,
+                                            std::unordered_set<vertex_t>(),
+                                            readVtx, false, chainId++,
+                                            g[v]));
+                }
             }
-            chains.push_back(SOChain(depGraphs[index].get(), esg,
-                                     so, g[so].name, g[so].esgId.second,
-                                     std::unordered_set<vertex_t>(),
-                                     std::move(readVtx), false, chainId++,
-                                     sinkDV));
         }
     }
     return chains;
@@ -581,18 +656,43 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
 
     // Helper: find the first leaf dep vertex (out_degree 0, non-SO) in a vertex set
     // and return its DependencyVertex (for sinkNode). Returns default if none found.
-    auto findSinkDV = [&](const std::unordered_set<vertex_t> &vtxSet,
-                          const std::unordered_set<vertex_t> *skipSet = nullptr) -> DependencyVertex {
+    auto findSinkDVs = [&](const std::unordered_set<vertex_t> &vtxSet,
+                          const std::unordered_set<vertex_t> *skipSet = nullptr)
+                          -> std::vector<DependencyVertex> {
+        std::vector<DependencyVertex> sinkDVs;
         for (auto v : vtxSet) {
             if (skipSet && skipSet->count(v)) continue;
             if (g[v].isSO) continue;
-            if (boost::out_degree(v, g) == 0)
-                return g[v];
+            if (boost::out_degree(v, g) == 0) {
+                sinkDVs.push_back(g[v]);
+            }
         }
-        return {};
+        return sinkDVs;
     };
 
     size_t chainId = 0;
+    auto filter_vertices_for_sink = [&](const std::unordered_set<vertex_t> &vtx,
+                                        const DependencyVertex &selectedSink,
+                                        const std::vector<DependencyVertex> &allSinks)
+                                        -> std::unordered_set<vertex_t> {
+        if (allSinks.size() <= 1) return vtx;
+        std::unordered_set<vertex_t> filtered;
+        filtered.reserve(vtx.size());
+        for (auto v : vtx) {
+            const auto &vertexInfo = g[v];
+            bool keep = true;
+            for (const auto &sink : allSinks) {
+                if (sink.esgId == selectedSink.esgId) continue;
+                if (vertexInfo.esgId == sink.esgId) {
+                    keep = false;
+                    break;
+                }
+            }
+            if (keep) filtered.insert(v);
+        }
+        return filtered;
+    };
+
     // Get SO chain for each (writeSO, so, readDst) pair
     for (auto [so, sources] : writeSources) {
         // 1. Collect paths for each write source through backward BFS.
@@ -774,14 +874,19 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                         fwWork.push_back(tgt);
                     }
                 }
+                // Clean up unreachable RETURNs in the write-side vertex set.
+                keep_one_return_connected(g, writeLocalVtx);
                 // Sink: first leaf in the forward expansion (not in the backward BFS context).
-                DependencyVertex updateSinkDV = findSinkDV(writeLocalVtx, &writeVtx[writeSrc]);
+                std::vector<DependencyVertex> updateSinkDVs = findSinkDVs(writeLocalVtx, &writeVtx[writeSrc]);
                 for (auto &perSite : splitBySite(writeLocalVtx, writeSrc)) {
-                    chains.push_back(SOChain(depGraphs[index].get(), esg,
-                                             so, g[so].name, g[so].esgId.second,
-                                             std::move(perSite),
-                                             std::unordered_set<vertex_t>(), true, chainId++,
-                                             updateSinkDV));
+                    for (const auto &sinkDV : updateSinkDVs) {
+                        auto writeVertices = filter_vertices_for_sink(perSite, sinkDV, updateSinkDVs);
+                        chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                                 so, g[so].name, g[so].esgId.second,
+                                                 std::move(writeVertices),
+                                                 std::unordered_set<vertex_t>(), true, chainId++,
+                                                 sinkDV));
+                    }
                 }
 
             // 2) Otherwise, create a multi-execution path: pure read x write paths
@@ -814,6 +919,11 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                         }
                     }
                     readSitesCache[readDst] = splitReadBySite(readVtx, readDst);
+
+                    // Clean up unreachable RETURNs in read path.
+                    for (auto &perSiteR : readSitesCache[readDst]) {
+                        keep_one_return_connected(g, perSiteR);
+                    }
                 }
                 const auto &readSites = readSitesCache[readDst];
 
@@ -821,11 +931,19 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                 for (auto src : sources) {
                     for (auto &perSiteW : splitBySite(writeVtx[src], src)) {
                         for (const auto &perSiteR : readSites) {
-                            DependencyVertex sinkDV = findSinkDV(perSiteR);
-                            chains.push_back(SOChain(depGraphs[index].get(), esg,
-                                                     so, g[so].name, g[so].esgId.second,
-                                                     perSiteW, perSiteR,
-                                                     false, chainId++, sinkDV));
+                            // Clean up unreachable RETURNs in write path.
+                            keep_one_return_connected(g, perSiteW);
+
+                            std::vector<DependencyVertex> sinkDVs = findSinkDVs(perSiteR);
+                            for (const auto &sinkDV : sinkDVs) {
+                                auto writeVertices = filter_vertices_for_sink(perSiteW, sinkDV, sinkDVs);
+                                auto readVertices = filter_vertices_for_sink(perSiteR, sinkDV, sinkDVs);
+                                chains.push_back(SOChain(depGraphs[index].get(), esg,
+                                                         so, g[so].name, g[so].esgId.second,
+                                                         std::move(writeVertices),
+                                                         std::move(readVertices),
+                                                         false, chainId++, sinkDV));
+                            }
                         }
                     }
                 }
@@ -837,7 +955,9 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
 }
 
 std::vector<std::pair<DependencyGraphs::vertex_t, DependencyGraphs::vertex_t>>
-DependencyGraphs::add_chain_satellites(size_t index, Graphs::Graph *esg) {
+DependencyGraphs::add_chain_satellites(size_t index,
+                                       const std::vector<SOChain> &readChains,
+                                       const std::vector<SOChain> &writeChains) {
     auto &g = *depGraphs[index];
     std::vector<std::pair<vertex_t, vertex_t>> rankPairs;
 
@@ -860,8 +980,7 @@ DependencyGraphs::add_chain_satellites(size_t index, Graphs::Graph *esg) {
     };
 
     // Chain 1: nowrite reads
-    auto nowriteChains = get_nowrite_so_vertices(index, esg);
-    for (const auto &chain : nowriteChains) {
+    for (const auto &chain : readChains) {
         std::map<vertex_t, vertex_t> sateliteVertices;
         sateliteVertices.insert({chain.soVertex, addSat(chain.soVertex, "green"_cs, chain.id + 1)});
         for (auto v : chain.readVertices)
@@ -887,7 +1006,7 @@ DependencyGraphs::add_chain_satellites(size_t index, Graphs::Graph *esg) {
     }
 
     // Chains 2+: per write-SO chains
-    for (const auto &chain : get_data_write_so_chains(index, esg, nullptr)) {
+    for (const auto &chain : writeChains) {
         auto sateliteId = chain.id + 1; // start from 1 since 0 is for nowrite chains
         std::map<vertex_t, vertex_t> writeSats;  // for satelite edges
         std::map<vertex_t, vertex_t> readSats;   // for satelite edges

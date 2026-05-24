@@ -268,13 +268,20 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             auto graphName = cstring(boost::get_property(*g, boost::graph_name));
             if (!h2s2vGraphs->leaves[i].empty() && h2s2vGraphs->num_vertices(i) > 0) {
                 auto dotPath = graphsDir / (graphName + "_h2s2v_dep.dot");
-                auto rankPairs = h2s2vGraphs->add_chain_satellites(i, g);
+                auto writeChains = result.dataWriteKeyChains[graphName];
+                writeChains.insert(writeChains.end(),
+                     result.dataWriteHeaderChains[graphName].begin(),
+                     result.dataWriteHeaderChains[graphName].end());
+                auto rankPairs = h2s2vGraphs->add_chain_satellites(i,
+                    result.noWriteReadChains[graphName],
+                    writeChains);
                 h2s2vGraphs->export_to_graphviz(i, dotPath);
                 DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
             }
             if (!h2s2cGraphs->leaves[i].empty() && h2s2cGraphs->num_vertices(i) > 0) {
                 auto dotPath = graphsDir / (graphName + "_h2s2c_dep.dot");
-                auto rankPairs = h2s2cGraphs->add_chain_satellites(i, g);
+                auto rankPairs = h2s2cGraphs->add_chain_satellites(i, {},
+                    result.dataWriteCondChains[graphName]);
                 h2s2cGraphs->export_to_graphviz(i, dotPath);
                 DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
             }
