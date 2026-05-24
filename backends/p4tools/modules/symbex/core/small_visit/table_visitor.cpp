@@ -1326,6 +1326,7 @@ bool TableVisitor::eval() {
         if (resolveTableKeys()) {
             return false;
         }
+        visitor->state.markVisited(table);
         // Gather the list of executable actions. This does not include default actions, for example.
         const auto tableActionList = TableUtils::buildTableActionList(*table);
 

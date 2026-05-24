@@ -127,7 +127,8 @@ class Bmv2V1ModelRegisterValue : public IndexMap {
     /// cond.getValue() still holds the original symbolic expression.
     [[nodiscard]] AttackerControlResult withAttackerValues(
         const Model &model,
-        std::optional<big_int> fixedValue = std::nullopt) const override;
+        std::optional<big_int> fixedValue = std::nullopt,
+        const std::vector<big_int> &forbiddenValues = {}) const override;
 
     DECLARE_TYPEINFO(Bmv2V1ModelRegisterValue, IndexMap);
 };

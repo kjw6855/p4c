@@ -58,6 +58,12 @@ struct TamperingFinalState {
     /// via Model::set() after computeConcolicState() so that the emitted Phase 2 input packet
     /// shows the attacker-chosen value in the field that is written to the register.
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> phase2ModelOverrides;
+    /// Per-register sink-table information for Key-sink chains. Maps register
+    /// control-plane name → comma-separated list of Phase-1 sink-table control-plane
+    /// names whose installed keys must MISS when Phase 3 replays Phase 1's input.
+    /// Empty (or register not in map) for non-Key-sink chains. Emitted as
+    /// `sink_table` + `hit_phase=1` + `miss_phase=3` metadata on affected_register.
+    std::map<cstring, cstring> attackerRegisterSinkTables;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -136,6 +142,18 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// whose potentialNodes or already-visited nodes intersect currentRequiredNodes.
     /// Falls back to random selection when no matching branch is found.
     std::optional<ExecutionStateReference> pickSuccessor(StepResult successors);
+
+    /// Maps each table's control-plane name to its IR::P4Table*.
+    /// Built once per execution; used by allCovered to resolve IR::Key required nodes
+    /// (which are never markVisited'd) to their owning table (which is markVisited'd).
+    std::unordered_map<cstring, const IR::P4Table *> tableByName_;
+
+    /// Builds tableByName_ by traversing the P4 program once.
+    void buildTableByNameMap();
+
+    /// Returns true if the table with the given control-plane name was visited.
+    bool isTableVisited(cstring controlPlaneName,
+                        const P4::Coverage::CoverageSet &visited) const;
 };
 
 }  // namespace P4::P4Tools::Symbex

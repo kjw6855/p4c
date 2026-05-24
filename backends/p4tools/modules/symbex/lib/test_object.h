@@ -53,16 +53,25 @@ class TestObject : public ICastable {
     /// via Model::set() AFTER computeConcolicState() so that the input packet emitted for
     /// Phase 2 shows the attacker-chosen value in the written field.
     ///
-    /// @param model       Phase 2's DFS model, used to evaluate symbolic indices and determine
-    ///                    the concrete type/width of each written value.
-    /// @param fixedValue  If set, use this exact value for every write instead of generating
-    ///                    a random one.  Corresponds to --state-tamper-value on the CLI.
+    /// @param model            Phase 2's DFS model, used to evaluate symbolic indices and
+    ///                         determine the concrete type/width of each written value.
+    /// @param fixedValue       If set, use this exact value for every write instead of
+    ///                         generating a random one.  Corresponds to --state-tamper-value
+    ///                         on the CLI.  When the fixed value collides with one of
+    ///                         @forbiddenValues, callers warn loud and continue using the
+    ///                         user-supplied value verbatim (intent preservation).
+    /// @param forbiddenValues  Values the attacker MUST NOT pick (because doing so would
+    ///                         preserve the sink-table HIT property the user wants violated
+    ///                         in Phase 3).  When non-empty, random picks loop until they
+    ///                         avoid this set.
     ///
     /// Default: no-op — returns this with empty model overrides.
     [[nodiscard]] virtual AttackerControlResult withAttackerValues(
-        const Model &model, std::optional<big_int> fixedValue = std::nullopt) const {
+        const Model &model, std::optional<big_int> fixedValue = std::nullopt,
+        const std::vector<big_int> &forbiddenValues = {}) const {
         (void)model;
         (void)fixedValue;
+        (void)forbiddenValues;
         return {this, {}};
     }
 

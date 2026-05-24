@@ -114,9 +114,14 @@ const Bmv2V1ModelRegisterValue *Bmv2V1ModelRegisterValue::evaluate(const Model &
 }
 
 AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
-    const Model &model, std::optional<big_int> fixedValue) const {
+    const Model &model, std::optional<big_int> fixedValue,
+    const std::vector<big_int> &forbiddenValues) const {
     auto *randReg = new Bmv2V1ModelRegisterValue(getInitialValue());
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
+    auto isForbidden = [&](const big_int &v) {
+        return std::find(forbiddenValues.begin(), forbiddenValues.end(), v) !=
+               forbiddenValues.end();
+    };
     for (const auto &cond : indexConditions) {
         // Concretize the index so Phase 3's register seed has a concrete write key.
         const auto *concreteIdx =
@@ -127,16 +132,36 @@ AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
         const auto *concreteVal =
             model.evaluate(symVal, /*doComplete=*/true)->checkedTo<IR::Constant>();
         // Use the caller-supplied fixed value, or generate a random one.
-        // Use a local PRNG seeded from std::random_device so this is independent of the
-        // global Utils::rng — no seed flag required, no effect on subsequent executions.
+        // For Key-sink chains the attacker must avoid Phase 1's installed key values so
+        // that the same packet input misses the sink table in Phase 3 — that's the
+        // forbiddenValues set. We fail loud if the user-supplied --state-tamper-value
+        // collides with that set: the user explicitly asked for that specific value, and
+        // a silent change would mask intent.
         const auto *attackerVal = [&]() -> const IR::Constant * {
             if (fixedValue.has_value()) {
+                if (isForbidden(*fixedValue)) {
+                    ::P4::warning(
+                        "[Tampering] --state-tamper-value 0x%1% collides with a Phase-1 "
+                        "table-key value (HIT would be preserved in Phase 3). Using it "
+                        "anyway since the value was explicitly requested.",
+                        fixedValue->str(0, std::ios_base::hex));
+                }
                 return IR::Constant::get(concreteVal->type, *fixedValue);
             }
             const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
             big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
             boost::random::mt19937 localRng(std::random_device{}());
             boost::random::uniform_int_distribution<big_int> dist(0, maxVal);
+            // Retry loop: avoid landing on a forbidden value. Bounded to prevent
+            // pathological loops when the forbidden set covers most of the type range.
+            for (int attempt = 0; attempt < 64; ++attempt) {
+                big_int candidate = dist(localRng);
+                if (!isForbidden(candidate)) {
+                    return IR::Constant::get(bitsType, candidate);
+                }
+            }
+            // Fallback: pick the value-space's max+1 mod range — better to emit a
+            // potentially-colliding value than to loop forever.
             return IR::Constant::get(bitsType, dist(localRng));
         }();
         randReg->writeToIndex(concreteIdx, attackerVal);

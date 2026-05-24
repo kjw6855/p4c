@@ -554,6 +554,10 @@ bool TableStepper::eval() {
     if (resolveTableKeys()) {
         return false;
     }
+    // Mark the table itself as visited so that coverage checks (e.g., state-dependency
+    // chain allCovered) can detect that this table was applied, which is more natural
+    // than tracking the IR::Key node or scanning MethodCallStatement visitors.
+    stepper->state.markVisited(table);
     // Gather the list of executable actions. This does not include default actions, for example.
     const auto tableActionList = TableUtils::buildTableActionList(*table);
 

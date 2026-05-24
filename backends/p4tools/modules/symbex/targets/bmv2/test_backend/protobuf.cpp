@@ -461,6 +461,11 @@ affected_register {
   register_name: "{{reg.name}}"
   index: {{reg.index}}
   attacker_value: "{{reg.value}}"
+## if existsIn(reg, "sink_table")
+  sink_table: "{{reg.sink_table}}"
+  hit_phase: 1
+  miss_phase: 3
+## endif
 }
 ## endfor
 
@@ -650,6 +655,13 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     inja::json affectedRegsJson = inja::json::array();
     for (const auto &[regName, regObj] : testSpec->attackerRegisterValues) {
         const auto *regVal = regObj->checkedTo<Bmv2V1ModelRegisterValue>();
+        // sink_table metadata is populated only for Key-sink chains; absent for
+        // chains whose sink is a header field or condition.
+        cstring sinkTableList = ""_cs;
+        auto sinkIt = testSpec->attackerRegisterSinkTables.find(regName);
+        if (sinkIt != testSpec->attackerRegisterSinkTables.end()) {
+            sinkTableList = sinkIt->second;
+        }
         for (const auto &cond : regVal->getIndexConditions()) {
             const auto *idxConst = cond.getIndex()->checkedTo<IR::Constant>();
             const auto *valConst = cond.getValue()->checkedTo<IR::Constant>();
@@ -657,6 +669,9 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
             j["name"] = regName.c_str();
             j["index"] = static_cast<int64_t>(static_cast<long long>(idxConst->value));
             j["value"] = formatHexExpressionWithSeparators(*valConst);
+            if (!sinkTableList.isNullOrEmpty()) {
+                j["sink_table"] = sinkTableList.c_str();
+            }
             affectedRegsJson.push_back(j);
         }
     }

@@ -322,10 +322,18 @@ class TamperingTestSpec {
     /// verify the register was written with the expected value after Phase 2.
     std::map<cstring, const TestObject *> attackerRegisterValues;
 
+    /// Per-register sink-table info for Key-sink chains. Maps register name →
+    /// comma-separated Phase-1 sink-table names. The test harness uses this list to
+    /// enforce the Phase-1 HIT / Phase-3 MISS property on the named sink table(s).
+    /// Empty (or register absent) for non-Key-sink chains.
+    std::map<cstring, cstring> attackerRegisterSinkTables;
+
     TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, bool hasExit,
-                      std::map<cstring, const TestObject *> attackerRegVals = {})
+                      std::map<cstring, const TestObject *> attackerRegVals = {},
+                      std::map<cstring, cstring> attackerRegSinkTables = {})
         : spec1(s1), spec2(s2), readPathHasExit(hasExit),
-          attackerRegisterValues(std::move(attackerRegVals)) {}
+          attackerRegisterValues(std::move(attackerRegVals)),
+          attackerRegisterSinkTables(std::move(attackerRegSinkTables)) {}
 };
 
 class TestSpec {

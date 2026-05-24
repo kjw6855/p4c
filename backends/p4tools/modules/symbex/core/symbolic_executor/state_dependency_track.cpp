@@ -13,6 +13,7 @@
 #include "backends/p4tools/common/control_plane/symbolic_variables.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/lib/logging.h"
@@ -124,15 +125,28 @@ P4::Coverage::CoverageSet StateDependencyTracker::buildRequiredNodes(
 }
 
 // ---------------------------------------------------------------------------
-// EXIT-leaf detection
+// Key → Table mapping helpers
 // ---------------------------------------------------------------------------
 
-bool StateDependencyTracker::chainHasExitLeaf(
-    const P4StateDependency::DependencyGraphs::SOChain &chain) {
-    // readNodes only contains entries with non-null IR nodes (EXIT vertices are skipped
-    // during SOChain construction because their ESG node pointer is nullptr).
-    // If readVertices is larger, some vertices were EXIT/ENTRY nodes.
-    return chain.readVertices.size() > chain.readNodes.size();
+void StateDependencyTracker::buildTableByNameMap() {
+    // Walk every P4Table and record controlPlaneName() → IR::P4Table*.
+    struct Collector : Inspector {
+        std::unordered_map<cstring, const IR::P4Table *> &out;
+        explicit Collector(std::unordered_map<cstring, const IR::P4Table *> &o) : out(o) {}
+        bool preorder(const IR::P4Table *tbl) override {
+            out.emplace(tbl->controlPlaneName(), tbl);
+            return true;
+        }
+    } col(tableByName_);
+    programInfo.getP4Program().apply(col);
+}
+
+bool StateDependencyTracker::isTableVisited(
+        cstring controlPlaneName, const P4::Coverage::CoverageSet &visited) const {
+    auto it = tableByName_.find(controlPlaneName);
+    if (it == tableByName_.end()) return false;
+    // TableStepper::eval() calls markVisited(table) so a direct pointer lookup suffices.
+    return visited.count(it->second) > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,26 +163,42 @@ void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
     runTamperingScenario(callBack, initState);
 }
 
-// RAII helper — saves/restores SymbexOptions fields around a phase run
+// RAII helper — saves/restores SymbexOptions fields around a phase run.
+// If sinkTableName is non-empty, temporarily adds it to skippedControlPlaneEntities
+// so the table produces no synthesized entries (only its default action) during this phase.
+// evalTableConstEntries() returns "always-miss" (true) when the table has no constant
+// entries, so addDefaultAction takes the default unconditionally — no entry is emitted.
 struct ScopedSymbexOpts {
     bool savedOutputPacketOnly;
     bool savedDistinctIOPorts;
-    ScopedSymbexOpts(bool setOutputPacketOnly) {
+    cstring sinkTableName_ = ""_cs;
+    ScopedSymbexOpts(bool setOutputPacketOnly, cstring sinkTableName = ""_cs) {
         auto &opts = SymbexOptions::get();
         savedOutputPacketOnly = opts.outputPacketOnly;
         savedDistinctIOPorts  = opts.distinctIOPorts;
         opts.outputPacketOnly = setOutputPacketOnly;
         opts.distinctIOPorts  = true;
+        sinkTableName_ = sinkTableName;
+        if (!sinkTableName_.isNullOrEmpty()) {
+            opts.skippedControlPlaneEntities.insert(sinkTableName_);
+        }
     }
     ~ScopedSymbexOpts() {
         auto &opts = SymbexOptions::get();
         opts.outputPacketOnly = savedOutputPacketOnly;
         opts.distinctIOPorts  = savedDistinctIOPorts;
+        if (!sinkTableName_.isNullOrEmpty()) {
+            opts.skippedControlPlaneEntities.erase(sinkTableName_);
+        }
     }
 };
 
 void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callBack,
                                                    const ExecutionState &initState) {
+    // Build the controlPlanName → IR::P4Table* map once for this execution so that
+    // allCovered can check whether a table's apply() was visited in visitedNodes.
+    buildTableByNameMap();
+
     // Helper: extract concrete (input, output) port pair from a final state
     auto getPortPair = [&](const FinalState *fs) -> std::pair<int, int> {
         const auto &model = fs->getFinalModel();
@@ -181,14 +211,11 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
     auto chains = collectChains();
 
     for (const auto &[chainName, chainList] : chains) {
-        for (auto it = chainList.rbegin(); it != chainList.rend(); ++it) {
-            const auto *chain = *it;
+        for (const auto *chain : chainList) {
             currentChain = chain;
             currentChainName = chainName;
             printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
                       chainName, chain->id, chain->soName);
-
-            bool hasExit = chainHasExitLeaf(*chain);
 
             // Reset the incremental Z3 solver state between chains.  After the previous
             // chain's Phase-2 DFS + processPhase() callback, p4Assertions contains that
@@ -215,9 +242,32 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 
             std::vector<const FinalState *> phase1States;
             {
-                ScopedSymbexOpts guard(hasExit);
+                // TODO: Expected output packet can be unchanged or drop-to-fwd
+                ScopedSymbexOpts guard(true);
                 auto &phase1Init = initState.clone();
                 runPhase(phase1Init, phase1States);
+            }
+            // Keep only Phase 1 states where the sink table HIT.
+            // evalTableControlEntries sets tableHitVar to a concrete true/false in each
+            // branch; addDefaultAction (miss path) sets it to false.  We evaluate the
+            // value from the final model and discard miss states.
+            if (!chain->sinkTableControlPlaneName.isNullOrEmpty()) {
+                auto tblIt = tableByName_.find(chain->sinkTableControlPlaneName);
+                if (tblIt != tableByName_.end()) {
+                    const auto &hitVar = TableStepper::getTableHitVar(tblIt->second);
+                    phase1States.erase(
+                        std::remove_if(phase1States.begin(), phase1States.end(),
+                            [&hitVar](const FinalState *fs) {
+                                const auto *hitExpr =
+                                    fs->getExecutionState()->get(hitVar);
+                                if (hitExpr == nullptr) return true;
+                                const auto *hitVal =
+                                    fs->getFinalModel().evaluate(hitExpr, true);
+                                const auto *hitBool = hitVal->to<IR::BoolLiteral>();
+                                return hitBool == nullptr || !hitBool->value;
+                            }),
+                        phase1States.end());
+                }
             }
             if (phase1States.empty()) {
                 warning("[Tampering] Phase 1 found no terminal state for chain id=%1%.", chain->id);
@@ -269,7 +319,10 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 
             for (size_t i = 0; i < phase1Conditions.size(); ++i) {
                 const auto &cond1 = phase1Conditions[i];
-                ScopedSymbexOpts guard(/*outputPacketOnly=*/false);
+                // Exclude the sink table from Phase 2's synthesized entries: the attacker's
+                // write packet must not install a control-plane entry in the very table that
+                // reads the tampered register value, as that entry would belong to Phase 1/3.
+                ScopedSymbexOpts guard(/*outputPacketOnly=*/false, chain->sinkTableControlPlaneName);
                 auto &phase2Init = initState.clone();
                 // Constrain Phase 2's input port to differ from Phase 1's input AND output
                 phase2Init.pushPathConstraint(
@@ -318,15 +371,34 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                     // and (b) model overrides applied to processPhase(phase2) so the emitted
                     // Phase 2 input packet shows the attacker-chosen value.
                     std::map<cstring, const TestObject *> attackerRegValues;
+                    std::map<cstring, cstring> attackerRegSinkTables;
                     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
                         phase2ModelOverrides;
+                    // Collect the Phase-1 key value for only the specific sink-table key
+                    // that the register value flows into (sinkKeyName at sinkTableControlPlaneName).
+                    // The attacker-chosen register value must MISS exactly at that key in Phase 3.
+                    std::vector<big_int> forbiddenValues;
+                    const cstring sinkTableJoined = chain->sinkTableControlPlaneName;
+                    if (!sinkTableJoined.isNullOrEmpty() && !chain->sinkKeyName.isNullOrEmpty()) {
+                        auto tblIt = cond1.tableKeyMap.find(sinkTableJoined);
+                        if (tblIt != cond1.tableKeyMap.end()) {
+                            auto keyIt = tblIt->second.find(chain->sinkKeyName);
+                            if (keyIt != tblIt->second.end()) {
+                                forbiddenValues.push_back(keyIt->second->value);
+                            }
+                        }
+                    }
                     for (const auto &[regName, regObj] :
                              fs2->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
                         if (regName != chain->soName) continue;
                         auto [attackerValue, overrides] =
                             regObj->withAttackerValues(fs2->getFinalModel(),
-                                                       SymbexOptions::get().stateTamperValue);
+                                                       SymbexOptions::get().stateTamperValue,
+                                                       forbiddenValues);
                         attackerRegValues[regName] = attackerValue;
+                        if (!sinkTableJoined.isNullOrEmpty()) {
+                            attackerRegSinkTables[regName] = sinkTableJoined;
+                        }
                         phase2ModelOverrides.insert(phase2ModelOverrides.end(),
                                                     overrides.begin(), overrides.end());
                         for (const auto &[symVar, val] : overrides) {
@@ -349,10 +421,11 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                     auto [ip2, op2] = getPortPair(fs2);
                     // Phase 3 is purely dynamic: the test script replays Phase 1's packet after
                     // Phase 2 writes the attacker-chosen value to the register.
-                    TamperingFinalState ts{*fs1, *fs2, hasExit,
+                    TamperingFinalState ts{*fs1, *fs2, false,
                                            cond1.inputPort, cond1.outputPort,
                                            ip2, op2,
-                                           attackerRegValues, phase2ModelOverrides};
+                                           attackerRegValues, phase2ModelOverrides,
+                                           attackerRegSinkTables};
                     if (callBack(ts)) return;
                 }
             }
@@ -388,9 +461,14 @@ void StateDependencyTracker::runPhase(ExecutionState &phaseInit,
             auto inputPort = IR::getIntFromLiteral(ipVal);
             const auto *opVal =
                 model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true);
-            if (inputPort == IR::getIntFromLiteral(opVal)) {
+            auto outputPort = IR::getIntFromLiteral(opVal);
+            if (inputPort == outputPort) {
+                printInfo("[SDTrack DEBUG] Phase1 state rejected by distinctIOPorts: "
+                          "in=%1% == out=%2%", inputPort, outputPort);
                 return false;
             }
+            printInfo("[SDTrack DEBUG] Phase1 state accepted: in=%1% out=%2%",
+                      inputPort, outputPort);
         }
 
         out.push_back(new FinalState(fs));
@@ -452,7 +530,16 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                 const auto &visited = executionState.get().getVisited();
                 bool allCovered =
                     std::all_of(currentRequiredNodes.begin(), currentRequiredNodes.end(),
-                                [&visited](const IR::Node *n) { return visited.count(n) > 0; });
+                                [&visited, this](const IR::Node *n) {
+                                    // IR::Key nodes are never passed to markVisited; instead
+                                    // check whether the table that owns this key had its
+                                    // apply() MethodCallStatement visited.
+                                    if (n->is<IR::Key>()) {
+                                        return isTableVisited(
+                                            currentChain->sinkTableControlPlaneName, visited);
+                                    }
+                                    return visited.count(n) > 0;
+                                });
                 if (allCovered) {
                     printInfo("[SDTrack] Test found: chain=%1% id=%2% SO=%3% (%4% nodes)",
                                 currentChainName, currentChain->id, currentChain->soName,
@@ -464,6 +551,19 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                     }
                     bool terminate = handleTerminalState(callBack, executionState);
                     if (terminate) return;
+                } else {
+                    // DEBUG: show which required nodes were not visited so the caller can
+                    // distinguish a node-identity mismatch from a DFS coverage failure.
+                    printInfo("[SDTrack DEBUG] Terminal state reached but allCovered=false "
+                              "(%1% required nodes):", currentRequiredNodes.size());
+                    for (const auto *n : currentRequiredNodes) {
+                        bool hit = n->is<IR::Key>()
+                            ? isTableVisited(currentChain->sinkTableControlPlaneName, visited)
+                            : visited.count(n) > 0;
+                        printInfo("  %1% [%2%] %3% %4%", (hit ? "OK  " : "MISS"),
+                                  n->node_type_name(), n,
+                                  n->getSourceInfo().toPositionString());
+                    }
                 }
             } else {
                 StepResult successors = step(executionState);

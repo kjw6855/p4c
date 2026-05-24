@@ -385,7 +385,8 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     // Phase 3 is purely dynamic: the test script replays Phase 1's packet after Phase 2
     // writes the attacker-chosen value. No symbex is run for Phase 3.
     TamperingTestSpec tamperingSpec(res1->testSpec, res2->testSpec,
-                                    state.readPathHasExit, state.attackerRegisterValues);
+                                    state.readPathHasExit, state.attackerRegisterValues,
+                                    state.attackerRegisterSinkTables);
 
     // Build selected-branches string from the symbolic executor.
     std::stringstream selectedBranches;

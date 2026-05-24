@@ -158,6 +158,14 @@ class DependencyGraphs {
         /// context). esgId.first is the ESG vertex; check (*esg)[esgId.first].flags for KEY.
         /// Default-initialized (esgId.second == nullptr) when no sink vertex is found.
         DependencyVertex sinkNode;
+        /// Control-plane name of the table whose key is the sink of this chain.
+        /// Populated during construction by walking the ESG backward from the KEY sinkNode
+        /// to its parent TABLE vertex. Empty for non-KEY chains (e.g. header sinks).
+        cstring sinkTableControlPlaneName;
+        /// Control-plane name of the specific key field in sinkTableControlPlaneName that
+        /// corresponds to sinkNode (i.e. the key element whose expression is equiv to
+        /// sinkNode.esgId.second). Empty when no matching key element is found.
+        cstring sinkKeyName;
         /// Vertices on the write side: the EXIT node that writes to this SO plus its full
         /// backward-reachable context (including the update action body when isUpdate=true).
         std::unordered_set<vertex_t> writeVertices;
@@ -205,6 +213,34 @@ class DependencyGraphs {
                 auto cloneId = static_cast<size_t>(irNode->clone_id);
                 if (cloneId >= readNodeIds.size()) readNodeIds.resize(cloneId + 1, false);
                 readNodeIds.set(cloneId);
+            }
+            // Walk ESG backward from the KEY sink vertex to find the parent TABLE vertex.
+            // Record its control-plane name and the specific key field name that matches
+            // sinkNode.esgId.second for use in Phase 3 forbidden-value filtering.
+            auto sinkEsgVtx = sinkNode.esgId.first;
+            if (sinkEsgVtx < boost::num_vertices(*esg) &&
+                hasFlag((*esg)[sinkEsgVtx].flags, VertexFlags::KEY)) {
+                for (auto [ei, ee] = boost::in_edges(sinkEsgVtx, *esg); ei != ee; ++ei) {
+                    auto src = boost::source(*ei, *esg);
+                    if (hasFlag((*esg)[src].flags, VertexFlags::TABLE)) {
+                        const auto *tbl = (*esg)[src].node->to<IR::P4Table>();
+                        if (tbl == nullptr) break;
+                        sinkTableControlPlaneName = tbl->controlPlaneName();
+                        const auto *sinkVar = sinkNode.esgId.second;
+                        const IR::Key *key = tbl->getKey();
+                        if (sinkVar != nullptr && key != nullptr) {
+                            for (const auto *keyElem : key->keyElements) {
+                                if (!keyElem->expression->equiv(*sinkVar)) continue;
+                                const auto *nameAnnot = keyElem->getAnnotation(
+                                    IR::Annotation::nameAnnotation);
+                                if (nameAnnot != nullptr)
+                                    sinkKeyName = nameAnnot->getName();
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
             }
         };
     };
