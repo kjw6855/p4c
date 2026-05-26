@@ -16,6 +16,8 @@ script:
 Run with: sudo -v && python3 test_bmv2_tampering.py
 """
 
+from __future__ import annotations
+
 import argparse
 import codecs
 import csv
@@ -36,30 +38,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-try:
-    from p4.v1 import p4runtime_pb2
-    from p4.v1 import p4data_pb2
-    from p4.config.v1 import p4info_pb2
-    from google.protobuf import text_format
-except ImportError as e:
-    sys.exit(f"missing P4Runtime python bindings: {e}")
-
-try:
-    from scapy.all import Ether, sendp, rdpcap, conf as scapy_conf
-except ImportError as e:
-    sys.exit(f"missing scapy: {e}")
-
 # Hardcoded so that running under `sudo` (which sets HOME=/root) still resolves
 # the well-known paths correctly.
 HOME = Path("/home/vagrant")
 
-# Bundled minimal P4Runtime client (see p4_client.py next to this file).
+# Per-target subpackages live next to this script:
+#   bmv2/p4_client.py, bmv2/bmv2_thrift_client.py   — BMv2 control plane
+#   tofino/bfrt_grpc_client.py, tofino/tofino_driver.py — Tofino control plane
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    from p4_client import P4RuntimeClient, P4RuntimeWriteException
-    from bmv2_thrift_client import Bmv2ThriftClient
-except ImportError as e:
-    sys.exit(f"cannot import p4_client (expected at {Path(__file__).parent}): {e}")
 P4C_BIN = HOME / "Workspace/p4c/build/p4c"
 P4SYMBEX_BIN = HOME / "Workspace/p4c/build/p4symbex"
 SIMPLE_SWITCH_GRPC = shutil.which("simple_switch_grpc") or "simple_switch_grpc"
@@ -149,7 +135,7 @@ def request_shutdown(reason: str = "") -> None:
             pass
     # Broad cleanup for the well-known privileged binaries we launch.
     sudo = [] if os.geteuid() == 0 else ["sudo", "-n"]
-    for name in ("simple_switch_grpc", "tcpdump"):
+    for name in ("simple_switch_grpc", "tcpdump", "tofino-model", "bf_switchd"):
         try:
             subprocess.run(sudo + ["pkill", "-KILL", "-f", name],
                            check=False, stdin=subprocess.DEVNULL,
@@ -178,6 +164,7 @@ def _sigint_handler(signum, frame):
 class TargetSpec:
     name: str
     p4_file: str
+    p4_version: str = "p4-16"
     extra_args: List[str] = field(default_factory=list)
 
 
@@ -192,12 +179,11 @@ def parse_program_list(path: Path) -> List[TargetSpec]:
             if len(toks) < 4:
                 continue
             name, p4_file, target, p4_version = toks[:4]
-            if target != "v1model" or p4_version != "16":
-                continue
             extras = [t for t in toks[4:] if t != "$@"]
             targets.append(TargetSpec(
                 name=name,
                 p4_file=os.path.expanduser(p4_file),
+                p4_version=p4_version,
                 extra_args=[os.path.expanduser(a) for a in extras],
             ))
     return targets
@@ -236,7 +222,7 @@ def _run(cmd: List[str], log_path: Optional[Path] = None, timeout: int = 600) ->
         raise StepError(f"command failed ({proc.returncode}): {' '.join(str(c) for c in cmd)}\n{tail[-1000:]}")
 
 
-def run_p4c(name: str, p4_file: str, extra_args: List[str], build_dir: Path) -> Tuple[Path, Path]:
+def run_p4c(name: str, p4_file: str, extra_args: List[str], build_dir: Path, p4_version: str = "p4-16") -> Tuple[Path, Path]:
     build_dir.mkdir(parents=True, exist_ok=True)
     base = Path(p4_file).stem
     canonical_json = build_dir / f"{name}.json"
@@ -249,7 +235,7 @@ def run_p4c(name: str, p4_file: str, extra_args: List[str], build_dir: Path) -> 
         str(P4C_BIN),
         "--target", "bmv2",
         "--arch", "v1model",
-        "--std", "p4-16",
+        "--std", p4_version,
         "-o", str(build_dir),
         "--p4runtime-files", str(canonical_p4info),
         *extra_args,
@@ -272,11 +258,12 @@ def run_p4c(name: str, p4_file: str, extra_args: List[str], build_dir: Path) -> 
 
 
 def run_p4symbex(name: str, p4_file: str, protobuf_dir: Path, *,
-                 max_tests: int, tamper_value: str, skip: bool) -> List[Path]:
+                 max_tests: int, tamper_value: str, skip: bool, p4_version: str = "p4-16") -> List[Path]:
     if skip and protobuf_dir.exists():
         files = sorted(protobuf_dir.glob("*.txtpb"))
         if files:
-            log.info("[%s] reusing %d existing txtpb files", name, len(files))
+            log.info("[%s] reusing %d existing txtpb files in %s", \
+                     name, len(files), protobuf_dir)
             return files
     if protobuf_dir.exists():
         for f in protobuf_dir.glob("*.txtpb"):
@@ -286,7 +273,7 @@ def run_p4symbex(name: str, p4_file: str, protobuf_dir: Path, *,
     cmd = [
         str(P4SYMBEX_BIN),
         "--target", "bmv2",
-        "--std", "p4-16",
+        "--std", p4_version,
         "--arch", "v1model",
         "--test-backend", "protobuf",
         "--packet-size-range", "0:9600",
@@ -699,6 +686,7 @@ def install_entities(client: P4RuntimeClient, entities: List[p4runtime_pb2.Entit
             msg = str(ex)
             if "ALREADY_EXISTS" in msg:
                 continue
+            log.warn(f"Failed while installing {ent.table_entry}: {ex}")
             raise
 
 
@@ -722,9 +710,6 @@ def read_entities(client: P4RuntimeClient, p4info: p4info_pb2.P4Info) -> List[p4
 # --------------------------------------------------------------------------- #
 # Packet replay                                                               #
 # --------------------------------------------------------------------------- #
-
-scapy_conf.verb = 0
-
 
 def _masked_eq(actual: bytes, expected: bytes, mask: bytes) -> bool:
     n = len(expected)
@@ -966,7 +951,7 @@ class PacketTester:
 def do_build(spec: TargetSpec, args) -> Tuple[Path, Path]:
     out_root = Path(args.output_root).expanduser()
     build_dir = out_root / spec.name / "build"
-    return run_p4c(spec.name, spec.p4_file, spec.extra_args, build_dir)
+    return run_p4c(spec.name, spec.p4_file, spec.extra_args, build_dir, spec.p4_version)
 
 
 def do_p4symbex(spec: TargetSpec, args) -> List[Path]:
@@ -977,6 +962,7 @@ def do_p4symbex(spec: TargetSpec, args) -> List[Path]:
         max_tests=args.max_tests,
         tamper_value=args.tamper_value,
         skip=args.skip_p4symbex,
+        p4_version=spec.p4_version,
     )
 
 
@@ -1104,14 +1090,14 @@ class Status:
         self.lock = threading.Lock()
         self.total = total
         # phase counters (target granularity)
-        self.build_done = 0
-        self.build_ok = 0
-        self.build_err = 0
-        self.build_active: List[str] = []
-        self.symbex_done = 0
-        self.symbex_ok = 0
-        self.symbex_err = 0
-        self.symbex_active: List[str] = []
+        self.gen_done = 0
+        self.gen_ok = 0
+        self.gen_err = 0
+        self.gen_active: List[str] = []
+        self.compile_done = 0
+        self.compile_ok = 0
+        self.compile_err = 0
+        self.compile_active: List[str] = []
         self.test_done = 0
         self.test_ok = 0
         self.test_fail = 0
@@ -1129,16 +1115,16 @@ class Status:
             return ", ".join(names)
         return f"{names[0]}, {names[1]} (+{len(names) - 2} more)"
 
-    def render(self) -> Tuple[str, str, str]:
+    def render(self, target: str = "switch") -> Tuple[str, str, str]:
         with self.lock:
             t = self.total
             pct = lambda n: (100.0 * n / t) if t else 0.0
-            l1 = (f"(1) p4c build:    {self.build_ok}/{t} "
-                  f"({pct(self.build_ok):.0f}% success, {self.build_err} errors)"
-                  f"  building {self._fmt_active(self.build_active)}")
-            l2 = (f"(2) p4symbex:     {self.symbex_ok}/{t} "
-                  f"({pct(self.symbex_ok):.0f}% success, {self.symbex_err} errors)"
-                  f"  running {self._fmt_active(self.symbex_active)}")
+            l1 = (f"(1) gen (p4symbex): {self.gen_ok}/{t} "
+                  f"({pct(self.gen_ok):.0f}% success, {self.gen_err} errors)"
+                  f"  running {self._fmt_active(self.gen_active)}")
+            l2 = (f"(2) compile (p4c):  {self.compile_ok}/{t} "
+                  f"({pct(self.compile_ok):.0f}% success, {self.compile_err} errors)"
+                  f"  building {self._fmt_active(self.compile_active)}")
             tx_info = "-"
             if self.test_target:
                 if self.test_tx_total:
@@ -1148,7 +1134,7 @@ class Status:
                                f"({self.test_tx_idx}/{self.test_tx_total}: {tx_pct:.0f}%)]")
                 else:
                     tx_info = self.test_target
-            l3 = (f"(3) BMv2 testing: {self.test_ok}/{t} "
+            l3 = (f"(3) {target} testing: {self.test_ok}/{t} "
                   f"({pct(self.test_ok):.0f}% success, "
                   f"{self.test_fail} fail, {self.test_err} errors)"
                   f"  testing {tx_info}")
@@ -1158,15 +1144,17 @@ class Status:
 class Renderer:
     """Repaints three TUI lines in place using ANSI escape codes."""
 
-    def __init__(self, status: Status, enabled: bool, period: float = 0.2):
+    def __init__(self, status: Status, enabled: bool, period: float = 0.2,
+                 target: str = "switch"):
         self.status = status
         self.enabled = enabled and sys.stdout.isatty()
         self.period = period
+        self.target = target
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
     def _draw(self, first: bool) -> None:
-        l1, l2, l3 = self.status.render()
+        l1, l2, l3 = self.status.render(target=self.target)
         out = sys.stdout
         if first:
             out.write(l1 + "\n" + l2 + "\n" + l3 + "\n")
@@ -1199,92 +1187,123 @@ class Renderer:
 
 
 class Pipeline:
-    """Pipelined runner: build pool → symbex pool → single test worker."""
+    """Stage runner: gen pool (p4symbex) → compile pool (p4c) → single test worker.
 
-    def __init__(self, targets: List[TargetSpec], args, csv_writer_fn, status: Status):
+    Stage order:
+      gen:  p4symbex in parallel (--jobs workers) → produces .txtpb files
+      run:  p4c/cmake in parallel (--jobs workers), then packet testing single-process
+      all:  gen, then run
+
+    Testing is always single-process because tofino_model / simple_switch_grpc
+    are system-wide binaries sharing veth interfaces.
+    """
+
+    def __init__(self, targets: List[TargetSpec], args, csv_writer_fn, status: Status, builder=None):
         self.targets = targets
         self.args = args
         self.csv_writer = csv_writer_fn
         self.status = status
+        self.builder = builder
 
     def _csv(self, *row) -> None:
         self.csv_writer(*row)
 
-    def _build_task(self, spec: TargetSpec) -> None:
+    # ------------------------------------------------------------------ gen --
+
+    def _gen_task(self, spec: TargetSpec, out: Path) -> None:
         if SHUTDOWN.is_set():
             return
         with self.status.lock:
-            self.status.build_active.append(spec.name)
+            self.status.gen_active.append(spec.name)
         try:
-            json_path, p4info_path = do_build(spec, self.args)
+            txtpb_files = self.builder.p4symbex(spec, out, self.args)
+            ok = bool(txtpb_files)
             with self.status.lock:
-                self.status.build_done += 1
-                self.status.build_ok += 1
-                if spec.name in self.status.build_active:
-                    self.status.build_active.remove(spec.name)
-            self._symbex_q.put(("ok", spec, json_path, p4info_path))
+                self.status.gen_done += 1
+                if ok:
+                    self.status.gen_ok += 1
+                else:
+                    self.status.gen_err += 1
+                if spec.name in self.status.gen_active:
+                    self.status.gen_active.remove(spec.name)
+            if not ok:
+                self._csv(spec.name, "", "ERROR", "gen produced no .txtpb files")
         except StepError as ex:
             with self.status.lock:
-                self.status.build_done += 1
-                self.status.build_err += 1
-                self.status.symbex_done += 1
-                self.status.test_done += 1
-                if spec.name in self.status.build_active:
-                    self.status.build_active.remove(spec.name)
-            self._csv(spec.name, "", "ERROR", f"p4c: {ex}")
-        except Exception as ex:  # defensive
+                self.status.gen_done += 1
+                self.status.gen_err += 1
+                if spec.name in self.status.gen_active:
+                    self.status.gen_active.remove(spec.name)
+            self._csv(spec.name, "", "ERROR", f"gen: {ex}")
+        except Exception as ex:
             with self.status.lock:
-                self.status.build_done += 1
-                self.status.build_err += 1
-                self.status.symbex_done += 1
-                self.status.test_done += 1
-                if spec.name in self.status.build_active:
-                    self.status.build_active.remove(spec.name)
-            self._csv(spec.name, "", "ERROR", f"p4c-unhandled: {ex}")
+                self.status.gen_done += 1
+                self.status.gen_err += 1
+                if spec.name in self.status.gen_active:
+                    self.status.gen_active.remove(spec.name)
+            self._csv(spec.name, "", "ERROR", f"gen-unhandled: {ex}")
 
-    def _symbex_worker(self) -> None:
-        while True:
-            item = self._symbex_q.get()
-            if item is None:
-                return
-            if SHUTDOWN.is_set():
-                continue  # drain queue without doing work
-            _, spec, json_path, p4info_path = item
-            with self.status.lock:
-                self.status.symbex_active.append(spec.name)
+    def _run_gen_stage(self, jobs: int, out: Path) -> None:
+        with self.status.lock:
+            # compile and test are not part of this stage
+            self.status.compile_done = len(self.targets)
+            self.status.compile_ok = len(self.targets)
+            self.status.test_done = len(self.targets)
+        pool = ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="gen")
+        try:
+            for spec in self.targets:
+                if SHUTDOWN.is_set():
+                    break
+                pool.submit(self._gen_task, spec, out)
+            pool.shutdown(wait=True)
+        except KeyboardInterrupt:
             try:
-                txtpb_files = do_p4symbex(spec, self.args)
-                ok = bool(txtpb_files)
-                with self.status.lock:
-                    self.status.symbex_done += 1
-                    if ok:
-                        self.status.symbex_ok += 1
-                    else:
-                        self.status.symbex_err += 1
-                    if spec.name in self.status.symbex_active:
-                        self.status.symbex_active.remove(spec.name)
-                if not ok:
-                    with self.status.lock:
-                        self.status.test_done += 1
-                    self._csv(spec.name, "", "ERROR", "p4symbex produced no .txtpb files")
-                    continue
-                self._test_q.put((spec, json_path, p4info_path, txtpb_files))
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
+
+    # --------------------------------------------------------------- compile --
+
+    def _compile_task(self, spec: TargetSpec, out: Path) -> None:
+        if SHUTDOWN.is_set():
+            return
+        with self.status.lock:
+            self.status.compile_active.append(spec.name)
+        try:
+            json_path, p4info_path = self.builder.build(spec, out, self.args)
+            with self.status.lock:
+                self.status.compile_done += 1
+                self.status.compile_ok += 1
+                if spec.name in self.status.compile_active:
+                    self.status.compile_active.remove(spec.name)
+            # Find pre-existing .txtpb files generated by gen stage.
+            try:
+                _, _, txtpb_files = self.builder.find_artifacts(spec, out, self.args)
             except StepError as ex:
                 with self.status.lock:
-                    self.status.symbex_done += 1
-                    self.status.symbex_err += 1
                     self.status.test_done += 1
-                    if spec.name in self.status.symbex_active:
-                        self.status.symbex_active.remove(spec.name)
-                self._csv(spec.name, "", "ERROR", f"p4symbex: {ex}")
-            except Exception as ex:
-                with self.status.lock:
-                    self.status.symbex_done += 1
-                    self.status.symbex_err += 1
-                    self.status.test_done += 1
-                    if spec.name in self.status.symbex_active:
-                        self.status.symbex_active.remove(spec.name)
-                self._csv(spec.name, "", "ERROR", f"p4symbex-unhandled: {ex}")
+                    self.status.test_err += 1
+                self._csv(spec.name, "", "ERROR", f"no .txtpb (run gen first): {ex}")
+                return
+            self._test_q.put((spec, json_path, p4info_path, txtpb_files))
+        except StepError as ex:
+            with self.status.lock:
+                self.status.compile_done += 1
+                self.status.compile_err += 1
+                self.status.test_done += 1
+                if spec.name in self.status.compile_active:
+                    self.status.compile_active.remove(spec.name)
+            self._csv(spec.name, "", "ERROR", f"compile: {ex}")
+        except Exception as ex:
+            with self.status.lock:
+                self.status.compile_done += 1
+                self.status.compile_err += 1
+                self.status.test_done += 1
+                if spec.name in self.status.compile_active:
+                    self.status.compile_active.remove(spec.name)
+            self._csv(spec.name, "", "ERROR", f"compile-unhandled: {ex}")
+
+    # ----------------------------------------------------------------- test --
 
     def _test_worker(self) -> None:
         while True:
@@ -1303,8 +1322,8 @@ class Pipeline:
                     self.status.test_tx_name = name
 
             try:
-                ok_count, fail_count, err_count = do_testing(
-                    spec, json_path, p4info_path, txtpb_files,
+                ok_count, fail_count, err_count = self.builder.test(
+                    spec, (json_path, p4info_path), txtpb_files,
                     self.args, self.csv_writer, progress_cb,
                 )
             except Exception as ex:
@@ -1313,10 +1332,6 @@ class Pipeline:
 
             with self.status.lock:
                 self.status.test_done += 1
-                # target-level classification (only ONE bucket per target):
-                #   ERROR if any infrastructure failure was hit
-                #   OK    if every protobuf passed
-                #   FAIL  otherwise (at least one verification mismatch)
                 if err_count > 0:
                     self.status.test_err += 1
                 elif fail_count == 0 and ok_count > 0:
@@ -1328,42 +1343,56 @@ class Pipeline:
                 self.status.test_tx_idx = 0
                 self.status.test_tx_name = ""
 
-    def run(self) -> None:
-        self._symbex_q: "queue.Queue" = queue.Queue()
-        self._test_q: "queue.Queue" = queue.Queue()
-        jobs = max(1, self.args.jobs)
-        bpool = ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="build")
-        symbex_pool = ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="symbex")
-        for _ in range(jobs):
-            symbex_pool.submit(self._symbex_worker)
+    def _run_compile_and_test(self, jobs: int, out: Path) -> None:
+        """Compile all targets in parallel, then test them one at a time."""
+        with self.status.lock:
+            # gen is not part of this stage
+            self.status.gen_done = len(self.targets)
+            self.status.gen_ok = len(self.targets)
+
         test_thread = threading.Thread(target=self._test_worker, name="test", daemon=True)
         test_thread.start()
 
+        bpool = ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="compile")
         try:
             for spec in self.targets:
                 if SHUTDOWN.is_set():
                     break
-                bpool.submit(self._build_task, spec)
-            bpool.shutdown(wait=True)  # all build tasks complete
+                bpool.submit(self._compile_task, spec, out)
+            bpool.shutdown(wait=True)
         except KeyboardInterrupt:
-            # main thread got ^C — drop pending builds, drain via sentinels
             try:
                 bpool.shutdown(wait=False, cancel_futures=True)
             except TypeError:
                 bpool.shutdown(wait=False)
         finally:
-            # always send sentinels so workers exit even when interrupted
-            for _ in range(jobs):
-                self._symbex_q.put(None)
-            try:
-                symbex_pool.shutdown(wait=True)
-            except KeyboardInterrupt:
-                symbex_pool.shutdown(wait=False)
             self._test_q.put(None)
-            # Wait indefinitely for normal completion. On SHUTDOWN, the worker
-            # checks the flag between protobufs and bails out fast, so this join
-            # still returns promptly.
             test_thread.join()
+
+    # --------------------------------------------------------------- stages --
+
+    def run(self) -> None:
+        self._test_q: "queue.Queue" = queue.Queue()
+        jobs = max(1, self.args.jobs)
+        out = Path(self.args.output_root).expanduser()
+
+        if self.args.stage == "gen":
+            self._run_gen_stage(jobs, out)
+            return
+
+        if self.args.stage == "run":
+            self._run_compile_and_test(jobs, out)
+            return
+
+        # "all": gen then run
+        self._run_gen_stage(jobs, out)
+        # Reset the skipped-stage markers set by _run_gen_stage before running compile+test.
+        with self.status.lock:
+            self.status.compile_done = 0
+            self.status.compile_ok = 0
+            self.status.test_done = 0
+        if not SHUTDOWN.is_set():
+            self._run_compile_and_test(jobs, out)
 
 
 # --------------------------------------------------------------------------- #
@@ -1372,41 +1401,125 @@ class Pipeline:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target", choices=("bmv2", "tofino"), default="bmv2",
+                        help="switch target (bmv2 → simple_switch_grpc / P4Runtime; "
+                             "tofino → tofino_model / BF-Runtime)")
+    parser.add_argument("--stage", choices=("gen", "run", "all"), default=None,
+                        help="gen=p4symbex only; run=compile+test; all=both "
+                             "(bmv2 default=all, tofino default=gen)")
+    parser.add_argument("--arch", default=None,
+                        help="P4 architecture (v1model for bmv2; tna or t2na for tofino). "
+                             "Defaults to v1model / tna based on --target.")
+    parser.add_argument("--p4-file", default=None,
+                        help="run the pipeline against this single .p4 file, "
+                             "ignoring --program-list. Useful for ad-hoc smoke tests.")
+    parser.add_argument("--target-name", default=None,
+                        help="name used for output dirs when --p4-file is set "
+                             "(default: stem of --p4-file)")
+    parser.add_argument("--p4c-bin", default=None,
+                        help="override p4c binary path (defaults to ~/Workspace/p4c/build/p4c)")
+    parser.add_argument("--p4symbex-bin", default=None,
+                        help="override p4symbex binary path "
+                             "(defaults to ~/Workspace/p4c/build/p4symbex)")
     parser.add_argument("--program-list",
                         default=str(HOME / "Workspace-remote/top_tier_repo/program_list.txt"))
     parser.add_argument("--output-root",
                         default=str(HOME / "Workspace-remote/top_tier_repo/output"))
     parser.add_argument("--csv", default=None,
-                        help="CSV path (default: <output-root>/test_bmv2_tampering_results.csv)")
+                        help="CSV path (default: <output-root>/tampering_results.csv)")
     parser.add_argument("--filter", default=None,
                         help="substring match on target name; runs only matching rows")
     parser.add_argument("--skip-p4symbex", action="store_true",
                         help="reuse existing .txtpb files instead of regenerating")
     parser.add_argument("--keep-bmv2", action="store_true",
                         help="leave BMv2 running between targets (debug)")
+    parser.add_argument("--sde-cmake-build", action="store_true",
+                        help="tofino: use cmake+make install (SDE p4studio) for compile step")
+    parser.add_argument("--sde-manage-procs", action="store_true",
+                        help="tofino: auto-start/stop run_tofino_model.sh + run_switchd.sh")
     parser.add_argument("--phase-timeout", type=float, default=2.0)
     parser.add_argument("--tamper-value", default="0xdeadbeef")
     parser.add_argument("--max-tests", type=int, default=300)
     parser.add_argument("-j", "--jobs", type=int,
                         default=max(2, (os.cpu_count() or 2) // 2),
-                        help="parallel workers for build/p4symbex stages "
+                        help="parallel workers for gen/compile stages "
                              "(test stage is always single-process)")
     parser.add_argument("--no-ui", action="store_true",
                         help="disable the live 3-line status display")
     parser.add_argument("-v", "--verbose", action="count", default=0)
     args = parser.parse_args()
 
-    program_list = Path(args.program_list).expanduser()
+    # Defer heavy imports until after --help so missing dependencies don't
+    # block the usage message.
+    global p4runtime_pb2, p4data_pb2, p4info_pb2, text_format
+    global Ether, sendp, rdpcap, scapy_conf
+    global P4RuntimeClient, P4RuntimeWriteException, Bmv2ThriftClient
+
+    if args.target == "bmv2":
+        try:
+            from p4.v1 import p4runtime_pb2
+            from p4.v1 import p4data_pb2
+            from p4.config.v1 import p4info_pb2
+            from google.protobuf import text_format
+        except ImportError as e:
+            sys.exit(f"missing P4Runtime python bindings: {e}")
+        try:
+            from scapy.all import Ether, sendp, rdpcap, conf as scapy_conf
+            scapy_conf.verb = 0
+        except ImportError as e:
+            sys.exit(f"missing scapy: {e}")
+        try:
+            from bmv2.p4_client import P4RuntimeClient, P4RuntimeWriteException
+            from bmv2.bmv2_thrift_client import Bmv2ThriftClient
+        except ImportError as e:
+            sys.exit(f"cannot import bmv2 control-plane client (expected under "
+                     f"{Path(__file__).parent}/bmv2/): {e}")
+
+    try:
+        from builders import BuilderBase, BMv2Builder, TofinoBuilder
+    except ImportError as e:
+        sys.exit(f"cannot import builders (expected in {Path(__file__).parent}/builders.py): {e}")
+
+    # Resolve target-specific defaults.
+    if args.stage is None:
+        args.stage = "all" if args.target == "bmv2" else "gen"
+    if args.arch is None:
+        args.arch = "v1model" if args.target == "bmv2" else "tna"
+
     out_root = Path(args.output_root).expanduser()
     out_root.mkdir(parents=True, exist_ok=True)
-    csv_path = Path(args.csv).expanduser() if args.csv else out_root / "test_bmv2_tampering_results.csv"
+    csv_path = Path(args.csv).expanduser() if args.csv else out_root / "tampering_results.csv"
 
-    targets = parse_program_list(program_list)
-    if args.filter:
-        targets = [t for t in targets if args.filter in t.name]
+    if args.p4_file:
+        # Single ad-hoc program — skip program_list.
+        p4_path = str(Path(args.p4_file).expanduser())
+        name = args.target_name or Path(args.p4_file).stem
+        targets = [TargetSpec(name=name, p4_file=p4_path, extra_args=[])]
+    else:
+        program_list = Path(args.program_list).expanduser()
+        targets = parse_program_list(program_list) if program_list.exists() else []
+        if args.filter:
+            targets = [t for t in targets if args.filter in t.name]
+        # For --stage run without --p4-file: fall back to discovering targets
+        # from existing output directories so the user can run
+        #   --target tofino --filter <name> --stage run
+        # without needing a matching program-list entry.
+        if not targets and args.stage == "run":
+            txtpb_subdir = "bfrt" if args.target == "tofino" else "protobuf"
+            for d in sorted(out_root.iterdir()):
+                if not d.is_dir():
+                    continue
+                if args.filter and args.filter not in d.name:
+                    continue
+                if any((d / txtpb_subdir).glob("*.txtpb")):
+                    targets.append(TargetSpec(name=d.name, p4_file="", extra_args=[]))
+            if targets:
+                print(f"[run stage] discovered {len(targets)} target(s) from {out_root}",
+                      file=sys.stderr)
     if not targets:
         print("no targets after filtering", file=sys.stderr)
         return 0
+    args.targets = targets  # exposed for bmv2_driver/run_bmv2_pipeline
 
     # Decide log destination. With the live UI, route logs to a file so they
     # don't tear up the three status lines; without UI, log to stderr as before.
@@ -1416,7 +1529,7 @@ def main() -> int:
     log_handlers: List[logging.Handler] = []
 
     if ui_enabled:
-        log_path = out_root / "test_bmv2_tampering.log"
+        log_path = out_root / "tampering.log"
         log_handlers.append(logging.FileHandler(log_path, mode="w"))
     else:
         log_handlers.append(logging.StreamHandler(sys.stderr))
@@ -1425,13 +1538,17 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(message)s", force=True,
     )
 
-    # Prompt for sudo once so later sudo invocations are non-interactive.
-    subprocess.run(["sudo", "-v"], check=False)
-    # Make sure any leftover simple_switch_grpc is gone before we start.
-    subprocess.run(["sudo", "pkill", "-KILL", "-f", "simple_switch_grpc"],
-                   check=False, stdin=subprocess.DEVNULL,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                   start_new_session=True, timeout=10)
+    # sudo + dataplane cleanup are only needed when we exercise the data plane
+    # (run/all stage); gen stage doesn't shell out as root.
+    need_sudo = args.stage in ("run", "all") and args.target in ("bmv2", "tofino")
+    if need_sudo:
+        # Prompt for sudo once so later sudo invocations are non-interactive.
+        subprocess.run(["sudo", "-v"], check=False)
+        # Make sure any leftover simple_switch_grpc is gone before we start.
+        subprocess.run(["sudo", "pkill", "-KILL", "-f", "simple_switch_grpc"],
+                       check=False, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       start_new_session=True, timeout=10)
 
     # ^C → graceful shutdown across all stages and subprocesses.
     signal.signal(signal.SIGINT, _sigint_handler)
@@ -1453,12 +1570,19 @@ def main() -> int:
             cf.flush()
 
     status = Status(total=len(targets))
-    pipeline = Pipeline(targets, args, csv_emit, status)
 
-    renderer = Renderer(status, enabled=True) if ui_enabled else None
+    renderer = Renderer(status, enabled=True, target=args.target) if ui_enabled else None
     if renderer:
         renderer.start()
     try:
+        if args.target == "bmv2":
+            builder = BMv2Builder()
+        elif args.target == "tofino":
+            builder = TofinoBuilder()
+        else:
+            sys.exit(f"unknown target: {args.target}")
+
+        pipeline = Pipeline(targets, args, csv_emit, status, builder=builder)
         pipeline.run()
     except KeyboardInterrupt:
         log.warning("interrupted by user")
@@ -1470,18 +1594,33 @@ def main() -> int:
         # Final safety net: make sure nothing privileged we spawned is still alive.
         if SHUTDOWN.is_set():
             request_shutdown()  # idempotent re-issue of pkill / tracked-kill
+        # Always clean up tofino-model / bf_switchd regardless of how we exit.
+        # do_testing()'s finally block calls stop(), but stop() may miss the real
+        # binary if the launcher script already exited (new session fork pattern).
+        if getattr(args, "target", None) == "tofino" and \
+                getattr(args, "sde_manage_procs", False):
+            sudo = [] if os.geteuid() == 0 else ["sudo", "-n"]
+            for proc_name in ("tofino-model", "bf_switchd"):
+                try:
+                    subprocess.run(sudo + ["pkill", "-KILL", "-f", proc_name],
+                                   check=False, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL,
+                                   start_new_session=True, timeout=5)
+                except Exception:
+                    pass
 
     # Per-stage breakdown — tells the user which step things died at.
     n = status.total
     print("summary:")
-    print(f"  step (1) p4c build:    {status.build_ok}/{n} OK, {status.build_err} errors")
-    print(f"  step (2) p4symbex:     {status.symbex_ok}/{n} OK, {status.symbex_err} errors")
-    print(f"  step (3) BMv2 testing: {status.test_ok}/{n} OK, "
+    print(f"  step (1) gen (p4symbex):    {status.gen_ok}/{n} OK, {status.gen_err} errors")
+    print(f"  step (2) compile (p4c):     {status.compile_ok}/{n} OK, {status.compile_err} errors")
+    print(f"  step (3) {args.target} testing: {status.test_ok}/{n} OK, "
           f"{status.test_fail} FAIL, {status.test_err} errors")
-    print(f"  per-protobuf rows:     OK={counts['OK']} FAIL={counts['FAIL']} ERROR={counts['ERROR']}")
+    print(f"  per-protobuf rows:          OK={counts['OK']} FAIL={counts['FAIL']} ERROR={counts['ERROR']}")
     print(f"  csv: {csv_path}")
     if ui_enabled:
-        print(f"  log: {out_root / 'test_bmv2_tampering.log'}")
+        print(f"  log: {out_root / 'tampering.log'}")
     return 0
 
 
