@@ -11,6 +11,7 @@
 #include "lib/timer.h"
 
 #include "backends/p4tools/common/control_plane/symbolic_variables.h"
+#include "backends/p4tools/common/lib/taint.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
@@ -170,14 +171,22 @@ void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
 // entries, so addDefaultAction takes the default unconditionally — no entry is emitted.
 struct ScopedSymbexOpts {
     bool savedOutputPacketOnly;
-    bool savedDistinctIOPorts;
+    // Forced true during SD execution so that IR::AssignmentStatement nodes
+    // (e.g. inside RegisterAction::apply) are added to visitedNodes.
+    bool savedCoverStatements;
+    // Forced true so RegisterAction.execute() always creates a symbolic
+    // TofinoRegisterValue test object and emits tofino_register_writeback for both
+    // Phase 1 and Phase 2 (register reads in Phase 1 also update state).
+    bool savedTamperingRegisterTracking;
     cstring sinkTableName_ = ""_cs;
     ScopedSymbexOpts(bool setOutputPacketOnly, cstring sinkTableName = ""_cs) {
         auto &opts = SymbexOptions::get();
-        savedOutputPacketOnly = opts.outputPacketOnly;
-        savedDistinctIOPorts  = opts.distinctIOPorts;
-        opts.outputPacketOnly = setOutputPacketOnly;
-        opts.distinctIOPorts  = true;
+        savedOutputPacketOnly             = opts.outputPacketOnly;
+        savedCoverStatements              = opts.coverageOptions.coverStatements;
+        savedTamperingRegisterTracking    = opts.tamperingRegisterTracking;
+        opts.outputPacketOnly             = setOutputPacketOnly;
+        opts.coverageOptions.coverStatements = true;
+        opts.tamperingRegisterTracking    = true;
         sinkTableName_ = sinkTableName;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.insert(sinkTableName_);
@@ -185,8 +194,9 @@ struct ScopedSymbexOpts {
     }
     ~ScopedSymbexOpts() {
         auto &opts = SymbexOptions::get();
-        opts.outputPacketOnly = savedOutputPacketOnly;
-        opts.distinctIOPorts  = savedDistinctIOPorts;
+        opts.outputPacketOnly             = savedOutputPacketOnly;
+        opts.coverageOptions.coverStatements     = savedCoverStatements;
+        opts.tamperingRegisterTracking    = savedTamperingRegisterTracking;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.erase(sinkTableName_);
         }
@@ -243,7 +253,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             std::vector<const FinalState *> phase1States;
             {
                 // TODO: Expected output packet can be unchanged or drop-to-fwd
-                ScopedSymbexOpts guard(true);
+                ScopedSymbexOpts guard(/*outputPacketOnly=*/true);
                 auto &phase1Init = initState.clone();
                 runPhase(phase1Init, phase1States);
             }
@@ -285,9 +295,10 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 auto cond = buildPhaseCondition(*fs1, programInfo);
                 BUG_CHECK(cond.inputPort >= 0,  "Phase 1 invalid input port %1%",  cond.inputPort);
                 BUG_CHECK(cond.outputPort >= 0, "Phase 1 invalid output port %1%", cond.outputPort);
-                BUG_CHECK(cond.inputPort != cond.outputPort,
-                          "Phase 1 identical input/output ports %1%", cond.inputPort);
-
+                if (SymbexOptions::get().distinctIOPorts) {
+                    BUG_CHECK(cond.inputPort != cond.outputPort,
+                              "Phase 1 identical input/output ports %1%", cond.inputPort);
+                }
                 auto it = std::find(phase1Conditions.begin(), phase1Conditions.end(), cond);
                 size_t idx;
                 if (it == phase1Conditions.end()) {
@@ -454,21 +465,23 @@ void StateDependencyTracker::runPhase(ExecutionState &phaseInit,
 
         // distinctIOPorts: always a terminal-state check because the output port is
         // assigned during execution (not a free initial symbolic variable).
+        // Skip when either port is tainted — a tainted port means the path does not
+        // constrain the port value, so we cannot evaluate distinctness.
         if (opts.distinctIOPorts) {
-            const auto &model = fs.getFinalModel();
-            const auto *ipVal =
-                model.evaluate(es->get(programInfo.getTargetInputPortVar()), true);
-            auto inputPort = IR::getIntFromLiteral(ipVal);
-            const auto *opVal =
-                model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true);
-            auto outputPort = IR::getIntFromLiteral(opVal);
-            if (inputPort == outputPort) {
-                printInfo("[SDTrack DEBUG] Phase1 state rejected by distinctIOPorts: "
-                          "in=%1% == out=%2%", inputPort, outputPort);
-                return false;
+            const auto *ipExpr = es->get(programInfo.getTargetInputPortVar());
+            const auto *opExpr = es->get(programInfo.getTargetOutputPortVar());
+            if (!Taint::hasTaint(ipExpr) && !Taint::hasTaint(opExpr)) {
+                const auto &model = fs.getFinalModel();
+                auto inputPort = IR::getIntFromLiteral(model.evaluate(ipExpr, true));
+                auto outputPort = IR::getIntFromLiteral(model.evaluate(opExpr, true));
+                if (inputPort == outputPort) {
+                    printInfo("[SDTrack DEBUG] Phase1 state rejected by distinctIOPorts: "
+                              "in=%1% == out=%2%", inputPort, outputPort);
+                    return false;
+                }
+                printInfo("[SDTrack DEBUG] Phase1 state accepted: in=%1% out=%2%",
+                          inputPort, outputPort);
             }
-            printInfo("[SDTrack DEBUG] Phase1 state accepted: in=%1% out=%2%",
-                      inputPort, outputPort);
         }
 
         out.push_back(new FinalState(fs));
@@ -545,7 +558,7 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                                 currentChainName, currentChain->id, currentChain->soName,
                                 currentRequiredNodes.size());
                     for (const auto *node : currentRequiredNodes) {
-                        printInfo("  covered: [%1%] %2% %3%",
+                        printInfo("  OK  [%1%] %2% %3%",
                                     node->node_type_name(), node,
                                     node->getSourceInfo().toPositionString());
                     }

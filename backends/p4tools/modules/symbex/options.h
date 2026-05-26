@@ -126,6 +126,13 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).
     std::optional<big_int> stateTamperValue = std::nullopt;
 
+    /// When true, RegisterAction.execute() always creates a symbolic TofinoRegisterValue
+    /// test object regardless of the active test backend, and also emits a
+    /// tofino_register_writeback continuation after the apply body so that
+    /// withAttackerValues() can extract the written register value for Phase 2 tampering.
+    /// Set by the tampering symbolic executor during both Phase 1 and Phase 2.
+    bool tamperingRegisterTracking = false;
+
  protected:
     bool validateOptions() const override;
 };
