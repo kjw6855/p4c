@@ -19,7 +19,16 @@
 
 #include "backends/p4tools/modules/symbex/targets/tofino/test_spec.h"
 
+#include <random>
+
+#include <boost/random/mersenne_twister.hpp>
+#include <boost/random/uniform_int_distribution.hpp>
+
+#include "ir/irutils.h"
+
 namespace P4::P4Tools::Symbex::Tofino {
+
+using namespace P4::literals;
 
 /* =========================================================================================
  *  IndexExpression
@@ -131,6 +140,52 @@ const IR::Constant *TofinoRegisterValue::getEvaluatedInitialIndex() const {
     BUG_CHECK(constant, "Variable is not a constant, has the test object %1% been evaluated?",
               getObjectName());
     return constant;
+}
+
+AttackerControlResult TofinoRegisterValue::withAttackerValues(
+    const Model &model, std::optional<big_int> fixedValue,
+    const std::vector<big_int> &forbiddenValues) const {
+    auto *randReg = new TofinoRegisterValue(decl, getInitialValue(), initialIndex);
+    std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
+    auto isForbidden = [&](const big_int &v) {
+        return std::find(forbiddenValues.begin(), forbiddenValues.end(), v) !=
+               forbiddenValues.end();
+    };
+    for (const auto &cond : indexConditions) {
+        const auto *concreteIdx =
+            model.evaluate(cond.getIndex(), /*doComplete=*/true)->checkedTo<IR::Constant>();
+        const auto *symVal = cond.getValue();
+        const auto *concreteVal =
+            model.evaluate(symVal, /*doComplete=*/true)->checkedTo<IR::Constant>();
+        const auto *attackerVal = [&]() -> const IR::Constant * {
+            if (fixedValue.has_value()) {
+                if (isForbidden(*fixedValue)) {
+                    ::P4::warning(
+                        "[Tampering] --state-tamper-value 0x%1% collides with a Phase-1 "
+                        "table-key value (HIT would be preserved in Phase 3). Using it "
+                        "anyway since the value was explicitly requested.",
+                        fixedValue->str(0, std::ios_base::hex));
+                }
+                return IR::Constant::get(concreteVal->type, *fixedValue);
+            }
+            const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
+            big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
+            boost::random::mt19937 localRng(std::random_device{}());
+            boost::random::uniform_int_distribution<big_int> dist(0, maxVal);
+            for (int attempt = 0; attempt < 64; ++attempt) {
+                big_int candidate = dist(localRng);
+                if (!isForbidden(candidate)) {
+                    return IR::Constant::get(bitsType, candidate);
+                }
+            }
+            return IR::Constant::get(bitsType, dist(localRng));
+        }();
+        randReg->writeToIndex(concreteIdx, attackerVal);
+        if (const auto *symVar = symVal->to<IR::SymbolicVariable>()) {
+            modelOverrides.emplace_back(symVar, attackerVal);
+        }
+    }
+    return {randReg, modelOverrides};
 }
 
 /* =========================================================================================

@@ -201,6 +201,28 @@ p4tools_add_tests(
 )
 include(${CMAKE_CURRENT_LIST_DIR}/Tofino2PTFXfail.cmake)
 
+# # # ##########################################################################
+# BFRT TESTS
+# # # ##########################################################################
+# The BFRT backend emits .txtpb artifacts only; no live data-plane replay is
+# done at ctest time (test_tampering.py / tools/p4csd/tampering.py is the
+# runtime replay harness). We use RUN_STF here purely to drive the
+# emission-only step, since the existing test runner doesn't have a BFRT-only
+# mode yet.
+p4tools_add_tests(
+  TESTS "${P4TOOLS_SYMBEX_TOFINO_TNA}"
+  TAG "symbex-tofino-bfrt" DRIVER ${SYMBEX_DRIVER}
+  TARGET "tofino" ARCH "tna" CTEST_P4C_ARGS "${P416INCLUDES} --disable-power-check --disable-parse-depth-limit" RUN_STF TEST_ARGS "-D__TARGET_TOFINO__=1 --test-backend BFRT --port-ranges 0:15 ${EXTRA_OPTS}"
+)
+include(${CMAKE_CURRENT_LIST_DIR}/TofinoBfRtXfail.cmake)
+
+p4tools_add_tests(
+  TESTS "${P4TOOLS_SYMBEX_TOFINO_T2NA}"
+  TAG "symbex-tofino2-bfrt" DRIVER ${SYMBEX_DRIVER}
+  TARGET "tofino2" ARCH "t2na" CTEST_P4C_ARGS "${P416INCLUDES} --disable-power-check --disable-parse-depth-limit" RUN_STF TEST_ARGS "-D__TARGET_TOFINO__=2 --test-backend BFRT --port-ranges 8:15 ${EXTRA_OPTS}"
+)
+include(${CMAKE_CURRENT_LIST_DIR}/Tofino2BfRtXfail.cmake)
+
 
 # # # ##########################################################################
 # TEST PROPERTIES

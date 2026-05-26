@@ -1,0 +1,126 @@
+// Schema for the BfRt textproto artifacts emitted by the p4symbex `BFRT`
+// test_backend on the Tofino/TNA target.
+//
+// This .proto is informational — it documents the on-disk format of the
+// .txtpb files produced by `--test-backend BFRT`. The harness in
+// tools/p4csd/tofino/tofino_driver.py parses these files at runtime and
+// translates them into BF-Runtime gRPC calls (table.entry_add(...) etc.)
+// against a live tofino_model.
+//
+// Entities are deliberately addressed by name rather than by numeric handle:
+// BfRt table handles are derived from the compiled bf-rt.json and are
+// resolved by the harness via bfrt_grpc.client.bfrt_info_get() at replay
+// time. Storing names keeps the .txtpb portable across recompiles.
+
+syntax = "proto3";
+
+package symbex.tofino;
+
+// Raw packet emitted on a switch port.
+message InputPacketAtPort {
+    bytes packet = 1;
+    int32 port = 2;
+}
+
+// Expected packet observed on a switch port (with optional don't-care mask).
+message OutputPacketAtPort {
+    bytes packet = 1;
+    int32 port = 2;
+    // The don't-care mask for the packet (1 = compared, 0 = ignored).
+    bytes packet_mask = 3;
+}
+
+// Match-key field for a BfRt table entry. Exactly one of the oneof variants
+// is populated. Field name resolves against the BfRt table's key spec.
+message BfRtKeyField {
+    string field_name = 1;
+    oneof match {
+        BfRtExactMatch exact = 2;
+        BfRtTernaryMatch ternary = 3;
+        BfRtLpmMatch lpm = 4;
+        BfRtRangeMatch range = 5;
+        BfRtOptionalMatch optional = 6;
+    }
+}
+
+message BfRtExactMatch    { bytes value = 1; }
+message BfRtTernaryMatch  { bytes value = 1; bytes mask = 2; }
+message BfRtLpmMatch      { bytes value = 1; uint32 prefix_len = 2; }
+message BfRtRangeMatch    { bytes low = 1; bytes high = 2; }
+message BfRtOptionalMatch { bytes value = 1; }
+
+// Action/data field for a BfRt table entry. For the symbex backend we only
+// need a bytes payload — bfrt_grpc.client.DataTuple accepts integer-encoded
+// bytes for all numeric action params, register values, etc.
+message BfRtDataField {
+    string field_name = 1;
+    bytes value = 2;
+}
+
+// One BfRt table entry (key set + action + action data).
+// In a TamperingTestCase, `phase` distinguishes Phase-1 entries from Phase-2
+// entries so the harness installs them in the right order.
+message BfRtEntity {
+    string table_name = 1;
+    string action_name = 2;
+    repeated BfRtKeyField key = 3;
+    repeated BfRtDataField data = 4;
+    // Required for ternary/range matches; 0 otherwise.
+    uint32 priority = 5;
+    // 1 = Phase 1 install, 2 = Phase 2 install. 0/unset means "install once
+    // before sending the single packet" (used by non-tampering tests).
+    uint32 phase = 6;
+}
+
+// Register write that the attacker performs in Phase 2 of a tampering test.
+// The harness uses these to verify that the register actually holds
+// attacker_value after Phase 2 has been replayed.
+//
+// For Key-sink chains (where the register value flows into a table's match
+// key), the optional sink_table / hit_phase / miss_phase fields describe the
+// stronger HIT→MISS property: Phase 1's installed entries on `sink_table`
+// must produce a HIT for the Phase-1 register value, and Phase 3 (which
+// replays Phase 1's input after Phase 2 has written attacker_value) must
+// produce a MISS. The harness runs an extra check against the named
+// table(s); when the field is empty/unset, only the basic Phase-3 deviation
+// check applies.
+message AffectedRegister {
+    string register_name = 1;
+    uint64 index = 2;
+    bytes attacker_value = 3;
+    // Comma-separated list of Phase-1 sink-table control-plane names.
+    string sink_table = 4;
+    // Phase number expected to HIT the sink table(s). 1 for Tampering.
+    uint32 hit_phase = 5;
+    // Phase number expected to MISS the sink table(s). 3 for Tampering.
+    uint32 miss_phase = 6;
+}
+
+// A single-phase test case (the BFRT backend's default output).
+message TestCase {
+    InputPacketAtPort input_packet = 1;
+    repeated OutputPacketAtPort expected_output_packet = 2;
+    repeated BfRtEntity entities = 3;
+    repeated string traces = 4;
+    repeated string metadata = 5;
+    bytes stmt_cov_bitmap = 6;
+    int32 stmt_cov_size = 7;
+}
+
+// A three-phase tampering test case (emitted when --path-selection
+// STATE_DEP_TAMPERING is active). The three input_packet/expected_output
+// blocks correspond to:
+//   Phase 1: send packet, expect the original (pre-tamper) output.
+//   Phase 2: send packet that triggers an attacker register write.
+//   Phase 3: replay Phase 1's input — the harness checks for deviation.
+//
+// `entities` are tagged via BfRtEntity.phase so the harness knows whether to
+// install them before Phase 1 or before Phase 2.
+message TamperingTestCase {
+    repeated InputPacketAtPort input_packet = 1;
+    repeated OutputPacketAtPort expected_output_packet = 2;
+    repeated BfRtEntity entities = 3;
+    repeated AffectedRegister affected_register = 4;
+    repeated string traces = 5;
+    repeated string metadata = 6;
+}

@@ -322,9 +322,16 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
             registerParamType = stepper.state.resolveType(typeName);
         }
         // Check whether we can configure this register.
-        auto canConfigure = SymbexOptions::get().testBackend == "PTF";
+        // tamperingRegisterTracking is set by the SD tampering executor so that register
+        // values are always tracked symbolically regardless of the test backend.
+        auto canConfigure = SymbexOptions::get().testBackend == "PTF" ||
+                            SymbexOptions::get().tamperingRegisterTracking;
 
         auto &nextState = stepper.state.clone();
+        // Mark the apply function so state-dependency allCovered checks can detect it.
+        // IR::Function is not a Statement/Entry/Action so markVisited has no guard for it,
+        // but it is never marked elsewhere in the stepper.
+        nextState.markVisited(applyFunction);
         /// Initialize the value of the apply call.
         if (applyParams->size() > 1) {
             const auto *param = applyParams->getParameter(1);
@@ -356,15 +363,28 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
             replacements.emplace_back(applyFunction->body);
         }
 
-        // Write back the result of the register to the respective index.
-        // TODO: Currently, writing to a register has no effect in Tofino.
-        // Only the subsequent packet will be able to access the updated register value.
-        // const auto *writeBackStmt =
-        //     new IR::MethodCallStatement(Utils::generateInternalMethodCall(
-        //         "tofino_register_writeback",
-        //         {new IR::StringLiteral(externInstance->toString()), registerParamRef,
-        //         index}));
-        // replacements.emplace_back(writeBackStmt);
+        // Emit write-back when register tracking is active (Phase 1 and Phase 2).
+        // Records the value that val holds after apply() into indexConditions so
+        // withAttackerValues() can extract it for Phase 2 tampering.
+        // The IR::ParameterList must be non-empty and have the correct arity (3), otherwise
+        // resolveMethodCallArguments crashes at methodParams.at(0) on an empty vector.
+        // The "param" argument uses Out direction so resolveMethodCallArguments skips it;
+        // the handler reads the current value of val directly from the symbolic state.
+        if (SymbexOptions::get().tamperingRegisterTracking) {
+            const auto *writeBackStmt =
+                new IR::MethodCallStatement(Utils::generateInternalMethodCall(
+                    "tofino_register_writeback",
+                    {new IR::StringLiteral(externInstance->toString()), registerParamRef, index},
+                    IR::Type_Void::get(),
+                    new IR::ParameterList(
+                        {new IR::Parameter("externInstance"_cs, IR::Direction::In,
+                                           IR::Type_Unknown::get()),
+                         new IR::Parameter("param"_cs, IR::Direction::Out, registerParamType),
+                         new IR::Parameter("index"_cs, IR::Direction::In,
+                                           index->type != nullptr ? index->type
+                                                                   : IR::Type_Unknown::get())})));
+            replacements.emplace_back(writeBackStmt);
+        }
 
         if (applyParams->size() > 1) {
             const auto *returnParam = applyParams->getParameter(1);
@@ -374,7 +394,15 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
             const auto *returnType = specType->arguments->at(2);
             // Some registers have no return type.
             if (!returnType->is<IR::Type_Void>()) {
-                replacements.emplace_back(Continuation::Return(IR::Constant::get(returnType, 0)));
+                // `IR::Constant::get(Type_Boolean, 0)` triggers a BUG in
+                // `IR::Constant::handleOverflow` (expression.cpp:84) because that
+                // path assumes `IR::Type_Bits`. Bool-returning RegisterActions
+                // (e.g. `RegisterAction<_, _, bool>`) need an `IR::BoolLiteral`.
+                const IR::Expression *zeroVal =
+                    returnType->is<IR::Type_Boolean>()
+                        ? static_cast<const IR::Expression *>(IR::BoolLiteral::get(false))
+                        : static_cast<const IR::Expression *>(IR::Constant::get(returnType, 0));
+                replacements.emplace_back(Continuation::Return(zeroVal));
             }
         }
 
@@ -418,11 +446,14 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
                 stepper.state.getTestObject("tableconfigs"_cs, table->controlPlaneName(), false);
         }
         // Check whether we can configure this register.
-        auto canConfigure = SymbexOptions::get().testBackend == "PTF" && tableEntry != nullptr;
+        auto canConfigure = (SymbexOptions::get().testBackend == "PTF" && tableEntry != nullptr) ||
+                            SymbexOptions::get().tamperingRegisterTracking;
 
         const auto *initializer = declInstance->initializer;
         const auto *applyFunction = initializer->getDeclByName("apply")->checkedTo<IR::Function>();
         CHECK_NULL(applyFunction);
+        // Mark the apply function so state-dependency allCovered checks can detect it.
+        nextState.markVisited(applyFunction);
 
         // Enter the function's namespace.
         nextState.pushNamespace(applyFunction);
@@ -474,9 +505,15 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
                 new IR::PathExpression(returnParam->type, new IR::Path(returnParam->getName()))));
         } else {
             const auto *returnType = specType->arguments->at(1);
-            // Some registers have no return type.
+            // Some registers have no return type. See the matching note above:
+            // bool-returning DirectRegisterActions need an IR::BoolLiteral, not
+            // an IR::Constant (handleOverflow assumes Type_Bits).
             if (!returnType->is<IR::Type_Void>()) {
-                replacements.emplace_back(Continuation::Return(IR::Constant::get(returnType, 0)));
+                const IR::Expression *zeroVal =
+                    returnType->is<IR::Type_Boolean>()
+                        ? static_cast<const IR::Expression *>(IR::BoolLiteral::get(false))
+                        : static_cast<const IR::Expression *>(IR::Constant::get(returnType, 0));
+                replacements.emplace_back(Continuation::Return(zeroVal));
             }
         }
 

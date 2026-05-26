@@ -30,12 +30,13 @@
 #include "lib/exceptions.h"
 
 #include "backends/p4tools/modules/symbex/options.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/test_backend/bfrt.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/test_backend/ptf.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/test_backend/stf.h"
 
 namespace P4::P4Tools::Symbex::Tofino {
 
-const std::vector<std::string> TofinoTestBackend::SUPPORTED_BACKENDS = {"PTF", "STF"};
+const std::vector<std::string> TofinoTestBackend::SUPPORTED_BACKENDS = {"PTF", "STF", "BFRT"};
 
 TofinoTestBackend::TofinoTestBackend(const TofinoSharedProgramInfo &programInfo,
                                      const TestBackendConfiguration &testBackendConfiguration,
@@ -53,6 +54,8 @@ TofinoTestBackend::TofinoTestBackend(const TofinoSharedProgramInfo &programInfo,
         testWriter = new PTF(testBackendConfiguration);
     } else if (testBackendString == "STF") {
         testWriter = new STF(testBackendConfiguration);
+    } else if (testBackendString == "BFRT") {
+        testWriter = new BfRt(testBackendConfiguration);
     } else {
         std::stringstream supportedBackendString;
         bool isFirst = true;

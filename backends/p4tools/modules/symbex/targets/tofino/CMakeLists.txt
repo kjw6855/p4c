@@ -9,6 +9,7 @@ set(
 SYMBEX_SOURCES
 ${SYMBEX_SOURCES}
 
+${CMAKE_CURRENT_SOURCE_DIR}/test_backend/bfrt.cpp
 ${CMAKE_CURRENT_SOURCE_DIR}/test_backend/ptf.cpp
 ${CMAKE_CURRENT_SOURCE_DIR}/test_backend/stf.cpp
 ${CMAKE_CURRENT_SOURCE_DIR}/compiler_result.cpp

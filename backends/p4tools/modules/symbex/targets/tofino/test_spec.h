@@ -21,6 +21,7 @@
 #define BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_TOFINO_TEST_SPEC_H_
 
 #include <cstddef>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -103,6 +104,11 @@ class IndexMap : public TestObject {
     /// Return the "writes" to this index map as a
     [[nodiscard]] std::map<big_int, std::pair<int, const IR::Constant *>> unravelMap() const;
 
+    /// @returns the list of index-value pairs written to this index map.
+    [[nodiscard]] const std::vector<IndexExpression> &getIndexConditions() const {
+        return indexConditions;
+    }
+
     DECLARE_TYPEINFO(IndexMap, TestObject);
 };
 
@@ -140,6 +146,16 @@ class TofinoRegisterValue : public IndexMap {
 
     /// @returns the initial index this register is initialized with.
     [[nodiscard]] const IR::Constant *getEvaluatedInitialIndex() const;
+
+    /// Returns a copy of this register with each symbolic write value replaced by an
+    /// attacker-chosen constant (random unless fixedValue is provided), together with
+    /// model overrides that pin each symbolic write expression to its chosen value.
+    /// Must be called on the unevaluated register object (pre-evaluate()), so that
+    /// cond.getValue() still holds the original symbolic expression.
+    [[nodiscard]] AttackerControlResult withAttackerValues(
+        const Model &model,
+        std::optional<big_int> fixedValue = std::nullopt,
+        const std::vector<big_int> &forbiddenValues = {}) const override;
 
     DECLARE_TYPEINFO(TofinoRegisterValue, TestObject);
 };
