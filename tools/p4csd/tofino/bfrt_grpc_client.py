@@ -145,6 +145,22 @@ class BfRtClient:
         data_list = [table.make_data(data_tuples, action_name)]
         table.entry_add(self.target, key_list, data_list)
 
+    def get_table_entry_count(self, table_name: str) -> int:
+        """Return the number of entries currently in the named table (software view)."""
+        assert self.bfrt_info is not None, "call bind_pipeline() first"
+        try:
+            table = self.bfrt_info.table_get(table_name)
+        except Exception as e:
+            log.debug("table_get(%s) failed: %s", table_name, e)
+            return 0
+        count = 0
+        try:
+            for _data, _key in table.entry_get(self.target, [], {"from_hw": False}):
+                count += 1
+        except Exception as e:
+            log.debug("get_table_entry_count(%s) entry_get failed: %s", table_name, e)
+        return count
+
     def clear_table(self, table_name: str) -> None:
         """Delete every entry in the named table by reading it back first and
         issuing per-entry deletes. Wildcard delete semantics vary across BF-SDE

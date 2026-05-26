@@ -152,12 +152,27 @@ class PacketTester:
                 priority=ent.priority,
             )
 
+    def _verify_entity_count(self, entities: List[BfRtEntity]) -> Tuple[bool, str]:
+        """Read entry counts from the device and compare with the expected entity list."""
+        from collections import Counter
+        expected: Counter = Counter(ent.table_name for ent in entities)
+        for table_name, exp_count in expected.items():
+            got = self.client.get_table_entry_count(table_name)
+            if got != exp_count:
+                return False, (f"table {table_name!r}: expected {exp_count} "
+                               f"entries, device reports {got}")
+        return True, ""
+
     def _send_and_capture(self, phase: Phase, label: str) -> Dict[int, List[bytes]]:
         in_iface = self.port_to_iface.get(phase.in_port)
         if in_iface is None:
             raise RuntimeError(f"unmapped input port {phase.in_port}")
         log.debug("Phase %s: sending on iface %s (port %d)", label, in_iface, phase.in_port)
-        sniff = [i for i in self._all_ifaces() if i != in_iface]
+        # Always capture on the input interface too: when exp_port == in_port the
+        # switch returns the output packet on the same veth, so tcpdump sees both
+        # the injected packet and the switch reply.  We strip the injected copy
+        # below so only actual switch output remains.
+        sniff = self._all_ifaces()
         pcaps = {i: self.capture_dir / f"{label}_{i}.pcap" for i in sniff}
         dumps = {i: _start_tcpdump(i, pcaps[i]) for i in sniff}
         try:
@@ -168,7 +183,29 @@ class PacketTester:
             for iface, p in dumps.items():
                 _stop_tcpdump(p, pcaps[iface])
         iface_to_port = {v: k for k, v in self.port_to_iface.items()}
-        return {iface_to_port[i]: _read_pcap_bytes(pcaps[i]) for i in sniff}
+        result: Dict[int, List[bytes]] = {
+            iface_to_port[i]: _read_pcap_bytes(pcaps[i]) for i in sniff
+        }
+        # When in_port == exp_port AND in_packet == exp_packet we cannot tell
+        # the injected copy apart from the switch's reply by content alone.
+        # Leave both intact; _verify_strict will confirm count == 2.
+        # Otherwise strip exactly one injected copy so only switch output remains.
+        same_port_same_content = (
+            phase.exp_port == phase.in_port
+            and phase.exp_packet is not None
+            and phase.in_packet == phase.exp_packet
+        )
+        if not same_port_same_content:
+            in_pkts = result.get(phase.in_port, [])
+            stripped = False
+            filtered: List[bytes] = []
+            for pkt in in_pkts:
+                if not stripped and pkt == phase.in_packet:
+                    stripped = True
+                else:
+                    filtered.append(pkt)
+            result[phase.in_port] = filtered
+        return result
 
     def _verify_strict(self, phase: Phase, captured: Dict[int, List[bytes]]
                        ) -> Tuple[bool, str]:
@@ -177,6 +214,18 @@ class PacketTester:
             return (not stray, f"expected no output, got {stray}" if stray else "")
         exp_port = phase.exp_port
         on_exp = captured.get(exp_port, [])
+        # Same-port, same-content: tcpdump captures both the injected packet and
+        # the switch reply — verify count == 2 (1 sent + 1 returned).
+        if exp_port == phase.in_port and phase.in_packet == phase.exp_packet:
+            elsewhere = {p: len(pkts) for p, pkts in captured.items()
+                         if p != exp_port and pkts}
+            if len(on_exp) == 2 and not elsewhere:
+                return True, ""
+            return False, (
+                f"expected 2 packets on port {exp_port} (1 injected + 1 returned), "
+                f"got {len(on_exp)}"
+                + (f"; also got {elsewhere}" if elsewhere else "")
+            )
         mask = phase.exp_mask or b"\xff" * len(phase.exp_packet)
         for pkt in on_exp:
             log.debug("verifying on port %d: pkt=%s exp=%s mask=%s",
@@ -231,6 +280,9 @@ class PacketTester:
     def run(self, case: TamperCase, label: str) -> Tuple[bool, str]:
         # Phase 1: install + send + strict verify.
         self._install_entities(case.entities)
+        ok, why = self._verify_entity_count(case.entities)
+        if not ok:
+            return False, f"entity_count: {why}"
         cap1 = self._send_and_capture(case.phases[0], f"{label}_p1")
         ok, why = self._verify_strict(case.phases[0], cap1)
         if not ok:
