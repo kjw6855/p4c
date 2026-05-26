@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 #include <vector>
 
 #include "ir/ir.h"
@@ -169,6 +170,8 @@ void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
 // so the table produces no synthesized entries (only its default action) during this phase.
 // evalTableConstEntries() returns "always-miss" (true) when the table has no constant
 // entries, so addDefaultAction takes the default unconditionally — no entry is emitted.
+// extraSkippedTables lists additional tables to suppress entry generation for (e.g.
+// size-1 tables whose single slot was already consumed by Phase 1).
 struct ScopedSymbexOpts {
     bool savedOutputPacketOnly;
     // Forced true during SD execution so that IR::AssignmentStatement nodes
@@ -179,7 +182,10 @@ struct ScopedSymbexOpts {
     // Phase 1 and Phase 2 (register reads in Phase 1 also update state).
     bool savedTamperingRegisterTracking;
     cstring sinkTableName_ = ""_cs;
-    ScopedSymbexOpts(bool setOutputPacketOnly, cstring sinkTableName = ""_cs) {
+    std::vector<cstring> extraSkippedTables_;
+    ScopedSymbexOpts(bool setOutputPacketOnly, cstring sinkTableName = ""_cs,
+                     std::vector<cstring> extraSkippedTables = {})
+        : extraSkippedTables_(std::move(extraSkippedTables)) {
         auto &opts = SymbexOptions::get();
         savedOutputPacketOnly             = opts.outputPacketOnly;
         savedCoverStatements              = opts.coverageOptions.coverStatements;
@@ -191,6 +197,9 @@ struct ScopedSymbexOpts {
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.insert(sinkTableName_);
         }
+        for (const auto &n : extraSkippedTables_) {
+            opts.skippedControlPlaneEntities.insert(n);
+        }
     }
     ~ScopedSymbexOpts() {
         auto &opts = SymbexOptions::get();
@@ -199,6 +208,9 @@ struct ScopedSymbexOpts {
         opts.tamperingRegisterTracking    = savedTamperingRegisterTracking;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.erase(sinkTableName_);
+        }
+        for (const auto &n : extraSkippedTables_) {
+            opts.skippedControlPlaneEntities.erase(n);
         }
     }
 };
@@ -330,11 +342,61 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 
             for (size_t i = 0; i < phase1Conditions.size(); ++i) {
                 const auto &cond1 = phase1Conditions[i];
+
+                // Find a representative Phase 1 state for this condition bucket (used to
+                // extract the evaluated TableConfig for size-1 tables below).
+                const FinalState *repPhase1State = nullptr;
+                for (size_t k = 0; k < phase1States.size(); ++k) {
+                    if (phase1StateToCondition[k] == i) {
+                        repPhase1State = phase1States[k];
+                        break;
+                    }
+                }
+
+                // Identify size-1 tables whose single slot was already consumed by Phase 1.
+                // Phase 2 must not synthesize a new (different) entry for these tables; instead
+                // Phase 1's pre-existing entry is injected into phase2Init so that Phase 2
+                // evaluates it as HIT or MISS without generating a second control-plane entry.
+                std::vector<cstring> size1Tables;
+                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+                    auto tblIt = tableByName_.find(tblName);
+                    if (tblIt == tableByName_.end()) continue;
+                    const auto *sizeConst = tblIt->second->getSizeProperty();
+                    if (sizeConst != nullptr && sizeConst->asInt() == 1) {
+                        size1Tables.push_back(tblName);
+                        printInfo("[Tampering] Phase 2: size-1 table '%1%': "
+                                  "reusing Phase 1 entry (no new entry generated)", tblName);
+                    }
+                }
+
                 // Exclude the sink table from Phase 2's synthesized entries: the attacker's
                 // write packet must not install a control-plane entry in the very table that
                 // reads the tampered register value, as that entry would belong to Phase 1/3.
-                ScopedSymbexOpts guard(/*outputPacketOnly=*/false, chain->sinkTableControlPlaneName);
+                // Also exclude size-1 tables whose slot is already occupied by Phase 1's entry.
+                ScopedSymbexOpts guard(/*outputPacketOnly=*/false, chain->sinkTableControlPlaneName,
+                                       size1Tables);
                 auto &phase2Init = initState.clone();
+
+                // Inject Phase 1's evaluated TableConfig for each size-1 table into Phase 2's
+                // initial state so that evalTableConstEntries() can evaluate it as a
+                // pre-existing entry (HIT/MISS) rather than creating a fresh symbolic entry.
+                if (repPhase1State != nullptr) {
+                    const auto &model1 = repPhase1State->getFinalModel();
+                    const auto *es1 = repPhase1State->getExecutionState();
+                    for (const auto &tblName : size1Tables) {
+                        const auto *tblObj =
+                            es1->getTestObject("tableconfigs"_cs, tblName, /*checked=*/false);
+                        if (tblObj == nullptr) continue;
+                        const auto *evalCfg =
+                            tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
+                        if (evalCfg != nullptr)
+                            // Use a separate category so this entry is visible to
+                            // evalTablePreExistingConfig but not emitted in Phase 2's test output
+                            // (processPhase only reads "tableconfigs").
+                            phase2Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+                    }
+                }
+
                 // Constrain Phase 2's input port to differ from Phase 1's input AND output
                 phase2Init.pushPathConstraint(
                     new IR::Neq(inputPortSymExpr,
@@ -344,7 +406,10 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                                 IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
                 // Constrain Phase 2's table match keys to differ from Phase 1's, so the two
                 // phases produce compatible (non-conflicting) table entries that can coexist.
+                // Skip size-1 tables: their entry is pre-injected and no new Neq is needed.
+                const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
                 for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+                    if (size1Set.count(tblName) > 0) continue;
                     for (const auto &[keyName, concreteVal] : keyMap) {
                         const auto *ctrlPlaneKey =
                             ControlPlaneState::getTableKey(tblName, keyName, concreteVal->type);

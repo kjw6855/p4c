@@ -162,8 +162,19 @@ const IR::Expression *TableStepper::evalTableConstEntries() {
     BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
 
     const auto *entries = table->getEntries();
-    // Sometimes, there are no entries. Just return.
+    // Sometimes, there are no entries.
     if (entries == nullptr) {
+        // If a pre-existing TableConfig was injected into the state (e.g. Phase 1's entry for
+        // a size-1 table during Phase 2 evaluation), evaluate it as HIT/MISS branches instead
+        // of returning MISS-only.  Uses "preexisting_tableconfigs" so the entry is not picked
+        // up by processPhase (which reads only "tableconfigs") and thus not duplicated in output.
+        const auto *preExisting = stepper->state.getTestObject(
+            "preexisting_tableconfigs"_cs, properties.tableName, /*checked=*/false);
+        if (preExisting != nullptr) {
+            const auto *cfg = preExisting->to<TableConfig>();
+            if (cfg != nullptr && !cfg->getRules()->empty())
+                return evalTablePreExistingConfig(*cfg);
+        }
         return tableMissCondition;
     }
 
@@ -237,6 +248,106 @@ const IR::Expression *TableStepper::evalTableConstEntries() {
         // Update the default condition.
         // The default condition can only be triggered, if we do not hit this match.
         // We encode this constraint in this expression.
+        stepper->result->emplace_back(new IR::LAnd(tableMissCondition, hitCondition),
+                                      stepper->state, nextState, coveredNodes);
+        tableMissCondition = new IR::LAnd(new IR::LNot(hitCondition), tableMissCondition);
+    }
+    return tableMissCondition;
+}
+
+const IR::Expression *TableStepper::evalTablePreExistingConfig(const TableConfig &cfg) {
+    const IR::Expression *tableMissCondition = IR::BoolLiteral::get(true);
+    const auto *key = table->getKey();
+    BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
+
+    for (const auto &rule : *cfg.getRules()) {
+        const IR::Expression *hitCondition = IR::BoolLiteral::get(true);
+
+        // Build hit condition from the rule's concrete match values.
+        for (const auto &keyProp : properties.resolvedKeys) {
+            auto matchIt = rule.getMatches()->find(keyProp.name);
+            if (matchIt == rule.getMatches()->end()) continue;
+            const auto *matchObj = matchIt->second;
+            const IR::Expression *keyExpr = keyProp.key->expression;
+
+            if (const auto *exact = matchObj->to<Exact>()) {
+                hitCondition = new IR::LAnd(
+                    hitCondition, new IR::Equ(keyExpr, exact->getEvaluatedValue()));
+            } else if (const auto *ternary = matchObj->to<Ternary>()) {
+                const auto *mask = ternary->getEvaluatedMask();
+                hitCondition = new IR::LAnd(
+                    hitCondition,
+                    new IR::Equ(new IR::BAnd(keyExpr, mask),
+                                new IR::BAnd(ternary->getEvaluatedValue(), mask)));
+            } else if (const auto *lpm = matchObj->to<LPM>()) {
+                const auto *prefix = lpm->getEvaluatedPrefixLength();
+                const auto *keyType = keyExpr->type->checkedTo<IR::Type_Bits>();
+                auto width = keyType->width_bits();
+                auto maxVal = IR::getMaxBvVal(width);
+                const IR::Expression *shift =
+                    new IR::Sub(IR::Constant::get(keyType, width), prefix);
+                const IR::Expression *lpmMask =
+                    new IR::Shl(IR::Constant::get(keyType, maxVal), shift);
+                hitCondition = new IR::LAnd(
+                    hitCondition,
+                    new IR::Equ(new IR::BAnd(keyExpr, lpmMask),
+                                new IR::BAnd(lpm->getEvaluatedValue(), lpmMask)));
+            }
+        }
+
+        // Find the matching action in the table's declared action list.
+        const auto *ruleAction = rule.getActionCall();
+        const IR::MethodCallExpression *tableAction = nullptr;
+        const IR::P4Action *actionType = nullptr;
+        for (const auto *actionElem : TableUtils::buildTableActionList(*table)) {
+            const auto *mce = actionElem->expression->checkedTo<IR::MethodCallExpression>();
+            const auto *act = stepper->state.getP4Action(mce);
+            if (act->controlPlaneName() == ruleAction->getActionName()) {
+                tableAction = mce;
+                actionType = act;
+                break;
+            }
+        }
+        if (tableAction == nullptr) {
+            warning("[pre-existing entry] action '%1%' not found in table '%2%'; skipping HIT.",
+                    ruleAction->getActionName(), properties.tableName);
+            continue;
+        }
+
+        // Reconstruct the method call with the rule's concrete arguments.
+        // getEvaluatedValue() converts BoolLiteral → Constant (bit<1>), which causes a type
+        // mismatch when the parameter is bool (Type_Boolean). Restore the BoolLiteral in that case.
+        auto *synthesizedAction = tableAction->clone();
+        auto *arguments = new IR::Vector<IR::Argument>();
+        for (const auto &arg : *ruleAction->getArgs()) {
+            const IR::Expression *argExpr = arg.getEvaluatedValue();
+            const auto *param = arg.getActionParam();
+            if (param != nullptr && param->type->is<IR::Type_Boolean>()) {
+                argExpr = IR::BoolLiteral::get(arg.getEvaluatedValue()->value != 0);
+            }
+            arguments->push_back(new IR::Argument(argExpr));
+        }
+        synthesizedAction->arguments = arguments;
+
+        // Create the HIT branch state.
+        auto &nextState = stepper->state.clone();
+        P4::Coverage::CoverageSet coveredNodes;
+        if (requiresLookahead(SymbexOptions::get().pathSelectionPolicy)) {
+            auto collector = CoverableNodesScanner(stepper->state);
+            collector.updateNodeCoverage(actionType, coveredNodes);
+        }
+        nextState.set(getTableHitVar(table), IR::BoolLiteral::get(true));
+        nextState.set(getTableActionVar(table), getTableActionString(synthesizedAction));
+        nextState.set(getActiveTableVar(), IR::StringLiteral::get(table->name));
+        std::stringstream preExistingStream;
+        preExistingStream << "Pre-existing Table Entry Hit: " << properties.tableName;
+        nextState.add(*new TraceEvents::Generic(preExistingStream.str()));
+
+        std::vector<Continuation::Command> replacements;
+        replacements.emplace_back(
+            new IR::MethodCallStatement(Util::SourceInfo(), synthesizedAction));
+        nextState.replaceTopBody(&replacements);
+
         stepper->result->emplace_back(new IR::LAnd(tableMissCondition, hitCondition),
                                       stepper->state, nextState, coveredNodes);
         tableMissCondition = new IR::LAnd(new IR::LNot(hitCondition), tableMissCondition);

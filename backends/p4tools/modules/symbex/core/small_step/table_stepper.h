@@ -122,6 +122,12 @@ class TableStepper {
     /// executed.
     const IR::Expression *evalTableConstEntries();
 
+    /// Evaluates a pre-injected @param cfg (e.g. Phase 1's evaluated TableConfig for a size-1
+    /// table) as if it were a set of constant entries.  For each rule in @param cfg a HIT branch
+    /// is emitted using the rule's concrete match values and action; the complement is the MISS
+    /// condition returned to the caller.  No new control-plane symbolic variable is created.
+    const IR::Expression *evalTablePreExistingConfig(const TableConfig &cfg);
+
     /// This helper function evaluates potential insertion from the control plane. We use variables
     /// variables to mimic an operator inserting entries. We only cover ONE entry per table for
     /// now.
