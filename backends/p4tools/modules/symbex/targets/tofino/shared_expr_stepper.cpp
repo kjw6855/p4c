@@ -65,11 +65,13 @@ ExprStepper::PacketCursorAdvanceInfo SharedTofinoExprStepper::calculateSuccessfu
     // Calculate the necessary size of the packet to extract successfully.
     // The minimum required size for a packet is the current cursor and the amount we are
     // advancing into the packet minus whatever has been buffered in the current buffer.
-    auto minSize = state.getInputPacketCursor() + advanceSize;
+    auto cursor = state.getInputPacketCursor();
+    auto bufSz = state.getPacketBufferSize();
+    auto minSize = std::max(0, cursor + advanceSize - bufSz);
     auto *cond = new IR::Geq(IR::Type::Boolean::get(), ExecutionState::getInputPacketSizeVar(),
                              IR::Constant::get(&PacketVars::PACKET_SIZE_VAR_TYPE, minSize));
     auto fcsLeft = std::max<int64_t>(0, state.getProperty<int64_t>("fcsLeft"_cs));
-    auto rejectSize = std::max<int64_t>(0, minSize - state.getPacketBufferSize() - fcsLeft);
+    auto rejectSize = std::max<int64_t>(0, minSize - fcsLeft);
     const IR::Expression *notCond = nullptr;
     // Do not generate short packets when the parser error is referenced.
     // TODO: Model this exception.

@@ -69,8 +69,8 @@ void JBayCmdStepper::initializeTargetEnvironment(ExecutionState &nextState) cons
     }
     // Set intrinsic metadata fields. Fields that are out of our control are tainted.
     const auto *oneBitType = IR::Type_Bits::get(1);
-    const auto *nineBitType = IR::Type_Bits::get(1);
-    const auto *sixteenBitType = IR::Type_Bits::get(1);
+    const auto *nineBitType = IR::Type_Bits::get(9);
+    const auto *sixteenBitType = IR::Type_Bits::get(16);
     const auto *queueIdType = IR::Type_Bits::get(7);
 
     // ingress_intrinsic_metadata_t
