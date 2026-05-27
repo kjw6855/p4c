@@ -230,12 +230,53 @@ class BfRtClient:
         assert self.bfrt_info is not None, "call bind_pipeline() first"
         reg = self.bfrt_info.table_get(register_name)
         out: List[Tuple[int, Any]] = []
+        out_map: Dict[int, Any] = {}
         # Query with an empty key set = wildcard read.
         for data, key in reg.entry_get(self.target, [], {"from_hw": True}):
-            idx = next((k.val for k in key.to_dict().get("fields", [])
-                        if k.name == "$REGISTER_INDEX"), None)
+            idx = key.to_dict().get("$REGISTER_INDEX", {}).get("value")
             out.append((idx, data.to_dict()))
-        return out
+            out_map[idx] = data.to_dict()
+        return out, out_map
+
+    def clear_all_registers(self, register_name: str = "") -> None:
+        """Reset all cells of the specified register (or every register) to zero.
+
+        Registers are fixed-size arrays — entries cannot be deleted and
+        ``entry_rst()`` is absent in some SDE versions.  The portable approach
+        is a bulk ``entry_mod`` that writes 0 to every cell index in one call.
+        """
+        assert self.bfrt_info is not None, "call bind_pipeline() first"
+        if register_name:
+            regs = [register_name]
+        else:
+            regs = []
+            for name, table in self.bfrt_info.table_dict.items():
+                if name.startswith("$"):
+                    continue
+                try:
+                    if table.info.type_get() == "Register":
+                        regs.append(name)
+                except Exception:
+                    continue
+        log.debug("clear_all_registers: resetting %d registers", len(regs))
+        for reg_name in regs:
+            reg = self.bfrt_info.table_get(reg_name)
+            try:
+                size = reg.info.size_get()
+                # Pick the first non-$ data field — that is the register's value field.
+                field_name = next(
+                    (f for f in reg.info.data_field_name_list_get()
+                     if not f.startswith("$")),
+                    "f1",
+                )
+                key_list = [reg.make_key([_gc.KeyTuple("$REGISTER_INDEX", i)])
+                            for i in range(size)]
+                data_list = [reg.make_data([_gc.DataTuple(field_name, 0)])
+                             for _ in range(size)]
+                reg.entry_mod(self.target, key_list, data_list)
+                log.debug("reset register %s (%d cells)", reg_name, size)
+            except Exception as e:
+                log.warning("clear_all_registers(%s) failed: %s", reg_name, e)
 
     # --- helpers ------------------------------------------------------------
     def _key_to_tuple(self, k: KeyField) -> Any:

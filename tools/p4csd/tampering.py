@@ -168,7 +168,7 @@ class TargetSpec:
     extra_args: List[str] = field(default_factory=list)
 
 
-def parse_program_list(path: Path) -> List[TargetSpec]:
+def parse_program_list(path: Path, arch: str) -> List[TargetSpec]:
     targets: List[TargetSpec] = []
     with path.open() as f:
         for line in f:
@@ -179,6 +179,8 @@ def parse_program_list(path: Path) -> List[TargetSpec]:
             if len(toks) < 4:
                 continue
             name, p4_file, target, p4_version = toks[:4]
+            if target != arch:
+                continue
             extras = [t for t in toks[4:] if t != "$@"]
             targets.append(TargetSpec(
                 name=name,
@@ -1155,6 +1157,15 @@ class Renderer:
 
     def _draw(self, first: bool) -> None:
         l1, l2, l3 = self.status.render(target=self.target)
+        # Truncate to terminal width so no line wraps onto a second row.
+        # Wrapping would add extra terminal rows, making \033[3A land in the
+        # wrong place on the next redraw (causes the "new line" symptom with
+        # long Tofino program names).
+        try:
+            cols = os.get_terminal_size().columns - 1
+            l1, l2, l3 = l1[:cols], l2[:cols], l3[:cols]
+        except OSError:
+            pass
         out = sys.stdout
         if first:
             out.write(l1 + "\n" + l2 + "\n" + l3 + "\n")
@@ -1497,7 +1508,7 @@ def main() -> int:
         targets = [TargetSpec(name=name, p4_file=p4_path, extra_args=[])]
     else:
         program_list = Path(args.program_list).expanduser()
-        targets = parse_program_list(program_list) if program_list.exists() else []
+        targets = parse_program_list(program_list, args.arch) if program_list.exists() else []
         if args.filter:
             targets = [t for t in targets if args.filter in t.name]
         # For --stage run without --p4-file: fall back to discovering targets

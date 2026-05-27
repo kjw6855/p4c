@@ -467,6 +467,7 @@ def do_testing(spec, build_dir: Path, txtpb_files: List[Path],
                 progress_cb(idx - 1, total, tx.name)
                 try:
                     client.clear_all_tables()
+                    client.clear_all_registers()
                     case = parse_case(tx)
                     ok, reason = tester.run(case, label=tx.stem)
                 except Exception as ex:

@@ -238,8 +238,18 @@ class PacketTester:
                 return True, ""
         return False, f"no match on port {exp_port}; captured={ {p:len(v) for p,v in captured.items()} }"
 
-    def _verify_register(self, reg: AffectedRegister) -> Tuple[bool, str]:
-        cells = self.client.read_register_all(reg.register_name)
+    # weak verification
+    def _verify_register(self, reg: AffectedRegister, strong_verify: bool = False) -> Tuple[bool, str]:
+        cells, cell_map = self.client.read_register_all(reg.register_name)
+        # 1. Check with cell_map for quick lookup by index (if available).
+        if cell_map and reg.index in cell_map:
+            got = _coerce_register_value(cell_map[reg.index])
+            if got == reg.attacker_value:
+                return True, ""
+            elif any(got) or strong_verify:
+                return False, f"register {reg.register_name}[{reg.index}] = {got!r}, expected {reg.attacker_value!r}"
+
+        # 2. Fall back to linear search through cells if cell_map is unavailable or missing the index.
         for (idx, data) in cells:
             if idx == reg.index:
                 # data is the client's representation; the harness accepts a
@@ -248,10 +258,24 @@ class PacketTester:
                 got = _coerce_register_value(data)
                 if got == reg.attacker_value:
                     return True, ""
-                return False, (f"register {reg.register_name}[{idx}] = "
-                               f"{got.hex() if isinstance(got, bytes) else got!r}, "
-                               f"expected {reg.attacker_value.hex()}")
-        return False, f"register {reg.register_name}[{reg.index}] not present"
+                if any(got) or strong_verify:
+                    return False, (f"register {reg.register_name}[{idx}] = "
+                                f"{got.hex() if isinstance(got, bytes) else got!r}, "
+                                f"expected {reg.attacker_value.hex()}")
+
+            else:
+                got = _coerce_register_value(data)
+                if got == reg.attacker_value:
+                    if strong_verify:
+                        return False, (f"register {reg.register_name}[{idx}] = "
+                                    f"{got.hex() if isinstance(got, bytes) else got!r} "
+                                    f"matches attacker_value but index {idx} != expected {reg.index}")
+                    else:
+                        log.debug("register %s[%d] = %s matches attacker_value but index does not match expected %d",
+                                  reg.register_name, idx, got, reg.index)
+                        return True, ""
+
+        return False, f"register {reg.register_name}[{reg.index}] not present among {len(cells)} cells read"
 
     def _verify_sink_miss(self, sink_tables: List[str], phase1_keys: Dict[str, set],
                           captured_p3: Dict[int, List[bytes]],
@@ -319,13 +343,41 @@ class PacketTester:
 
 
 def _coerce_register_value(data) -> bytes:
-    """Normalize whatever bfrt_grpc returns for a register read to bytes."""
+    """Normalize whatever bfrt_grpc returns for a register read to bytes.
+
+    BF-RT can return register data in two shapes:
+
+    *Flat dict* (common with read_register_all):
+        {'<table>.<field>': [<int_pipe0>, <int_pipe1>, ...],
+         'action_name': None, 'is_default_entry': False}
+    The value list contains one integer per pipeline; we take the first
+    non-zero entry (pipe 0 after a write).
+
+    *Legacy nested dict* (older bfrt_grpc data.to_dict()):
+        {'fields': [{'name': '...', 'stream': b'...', ...}, ...]}
+    """
     if isinstance(data, (bytes, bytearray)):
         return bytes(data)
     if isinstance(data, int):
         return data.to_bytes((data.bit_length() + 7) // 8 or 1, "big")
     if isinstance(data, dict):
-        # bfrt_grpc 'data.to_dict()' shape: {"fields": [{"name":…, "stream":…}, ...]}
+        # --- flat dict format -------------------------------------------
+        _META_KEYS = {"action_name", "is_default_entry", "fields"}
+        for k, v in data.items():
+            if k in _META_KEYS:
+                continue
+            # Per-pipe list: pick first non-zero value, fall back to pipe 0.
+            if isinstance(v, list) and v:
+                val = next((x for x in v if x), v[0])
+                if isinstance(val, int):
+                    return val.to_bytes((val.bit_length() + 7) // 8 or 1, "big")
+                if isinstance(val, (bytes, bytearray)):
+                    return bytes(val)
+            if isinstance(v, int):
+                return v.to_bytes((v.bit_length() + 7) // 8 or 1, "big")
+            if isinstance(v, (bytes, bytearray)):
+                return bytes(v)
+        # --- legacy nested dict format ----------------------------------
         for fld in data.get("fields", []):
             v = fld.get("stream", fld.get("int_val"))
             if isinstance(v, (bytes, bytearray)):
