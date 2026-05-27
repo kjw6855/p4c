@@ -119,7 +119,8 @@ class TestBackEnd {
         std::optional<int> overrideInputPort = std::nullopt,
         std::optional<int> overrideOutputPort = std::nullopt,
         const std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
-            &modelOverrides = {});
+            &modelOverrides = {},
+        const std::vector<const IR::Expression *> &extraConstraints = {});
 
     /// @returns the test specification which is consumed by the test back ends.
     virtual const TestSpec *createTestSpec(const ExecutionState *executionState,

@@ -297,7 +297,8 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
     const FinalState &state, std::optional<int> overrideInputPort,
     std::optional<int> overrideOutputPort,
     const std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
-        &modelOverrides) {
+        &modelOverrides,
+    const std::vector<const IR::Expression *> &extraConstraints) {
     const auto *executionState = state.getExecutionState();
     const auto *outputPacketExpr = executionState->getPacketBuffer();
     const auto *outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
@@ -328,6 +329,11 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
             new IR::Equ(outputPortExpr, IR::Constant::get(outputPortExpr->type, *overrideOutputPort)));
     }
 
+    // Append caller-supplied NEQ constraints (e.g. Phase 2 key pin-aways for Phase 1 re-solve)
+    // so Z3 cannot re-assign Phase 1's packet fields to Phase 2's already-determined key values.
+    for (const auto *neq : extraConstraints) {
+        portConstraints.push_back(neq);
+    }
     auto concolicOptState = state.computeConcolicState(*resolvedConcolicVariables, portConstraints);
     if (!concolicOptState.has_value()) {
         return std::nullopt;
@@ -370,7 +376,7 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     std::optional<int> p2in  = (state.phase2InputPort  >= 0) ? std::optional<int>(state.phase2InputPort)  : std::nullopt;
     std::optional<int> p2out = (state.phase2OutputPort >= 0) ? std::optional<int>(state.phase2OutputPort) : std::nullopt;
 
-    auto res1 = processPhase(state.phase1, p1in, p1out);
+    auto res1 = processPhase(state.phase1, p1in, p1out, {}, state.phase1ExtraConstraints);
     if (!res1.has_value()) {
         testCount++;
         return needsToTerminate(testCount);

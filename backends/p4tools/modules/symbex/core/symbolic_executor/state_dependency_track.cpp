@@ -13,6 +13,7 @@
 
 #include "backends/p4tools/common/control_plane/symbolic_variables.h"
 #include "backends/p4tools/common/lib/taint.h"
+#include "backends/p4tools/common/lib/variables.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
@@ -184,7 +185,8 @@ struct ScopedSymbexOpts {
     cstring sinkTableName_ = ""_cs;
     std::vector<cstring> extraSkippedTables_;
     ScopedSymbexOpts(bool setOutputPacketOnly, cstring sinkTableName = ""_cs,
-                     std::vector<cstring> extraSkippedTables = {})
+                     std::vector<cstring> extraSkippedTables = {},
+                     bool setRegTracking = true)
         : extraSkippedTables_(std::move(extraSkippedTables)) {
         auto &opts = SymbexOptions::get();
         savedOutputPacketOnly             = opts.outputPacketOnly;
@@ -192,7 +194,7 @@ struct ScopedSymbexOpts {
         savedTamperingRegisterTracking    = opts.tamperingRegisterTracking;
         opts.outputPacketOnly             = setOutputPacketOnly;
         opts.coverageOptions.coverStatements = true;
-        opts.tamperingRegisterTracking    = true;
+        opts.tamperingRegisterTracking    = setRegTracking;
         sinkTableName_ = sinkTableName;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.insert(sinkTableName_);
@@ -495,13 +497,75 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                         continue;
                     }
                     auto [ip2, op2] = getPortPair(fs2);
+
+                    // Build selective NEQ constraints for Phase 1's re-solve in processPhase.
+                    // These prevent Z3 from assigning Phase 1's packet fields / control-plane
+                    // keys to the same concrete values Phase 2 already used, which would
+                    // create conflicting table entries or cause Phase 1 to unexpectedly hit
+                    // a Phase 2-installed entry at runtime.
+                    std::vector<const IR::Expression *> p1ExtraConstraints;
+                    {
+                        auto cond2 = buildPhaseCondition(*fs2, programInfo);
+                        // Re-derive the set of size-1 tables for this condition bucket
+                        // so we can skip them (their entry is shared via preexisting_tableconfigs).
+                        std::set<cstring> size1Set;
+                        for (const auto &[tblName, _km] : cond1.tableKeyMap) {
+                            auto tblIt = tableByName_.find(tblName);
+                            if (tblIt == tableByName_.end()) continue;
+                            const auto *sizeConst = tblIt->second->getSizeProperty();
+                            if (sizeConst != nullptr && sizeConst->asInt() == 1)
+                                size1Set.insert(tblName);
+                        }
+                        for (const auto &[tblName, keyMap2] : cond2.tableKeyMap) {
+                            // Skip tables already handled by the pre-existing-configs mechanism
+                            // or tables Phase 2 was explicitly prohibited from entering.
+                            if (size1Set.count(tblName) > 0 ||
+                                    tblName == chain->sinkTableControlPlaneName)
+                                continue;
+                            for (const auto &[keyName, K2] : keyMap2) {
+                                if (cond1.tableKeyMap.count(tblName) > 0) {
+                                    // Phase 1 HIT this table: prevent the re-solve from picking
+                                    // the same control-plane key as Phase 2 (conflicting entries).
+                                    const auto *cpKey = ControlPlaneState::getTableKey(
+                                        tblName, keyName, K2->type);
+                                    p1ExtraConstraints.push_back(new IR::Neq(cpKey, K2));
+                                } else {
+                                    // Phase 1 MISSED this table but Phase 2 hit it with key K2.
+                                    // If Phase 1's packet field equals K2, Phase 1 would
+                                    // unexpectedly hit Phase 2's entry at runtime.
+                                    auto tblIt = tableByName_.find(tblName);
+                                    if (tblIt == tableByName_.end()) continue;
+                                    const auto *tblIR = tblIt->second;
+                                    if (tblIR->getKey() == nullptr) continue;
+                                    for (const auto *keyElem : tblIR->getKey()->keyElements) {
+                                        const auto *nameAnnot = keyElem->getAnnotation(
+                                            IR::Annotation::nameAnnotation);
+                                        if (nameAnnot == nullptr ||
+                                                nameAnnot->getName() != keyName)
+                                            continue;
+                                        // Resolve the packet-field expression through Phase 1's
+                                        // execution state to get the symbolic variable.
+                                        const auto stateVar = ToolsVariables::convertReference(
+                                            keyElem->expression);
+                                        if (!fs1->getExecutionState()->exists(stateVar))
+                                            continue;
+                                        const auto *pktField =
+                                            fs1->getExecutionState()->get(stateVar);
+                                        p1ExtraConstraints.push_back(new IR::Neq(pktField, K2));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Phase 3 is purely dynamic: the test script replays Phase 1's packet after
                     // Phase 2 writes the attacker-chosen value to the register.
                     TamperingFinalState ts{*fs1, *fs2, false,
                                            cond1.inputPort, cond1.outputPort,
                                            ip2, op2,
                                            attackerRegValues, phase2ModelOverrides,
-                                           attackerRegSinkTables};
+                                           attackerRegSinkTables,
+                                           p1ExtraConstraints};
                     if (callBack(ts)) return;
                 }
             }

@@ -64,6 +64,10 @@ struct TamperingFinalState {
     /// Empty (or register not in map) for non-Key-sink chains. Emitted as
     /// `sink_table` + `hit_phase=1` + `miss_phase=3` metadata on affected_register.
     std::map<cstring, cstring> attackerRegisterSinkTables;
+    /// Extra path constraints for processPhase(phase1)'s computeConcolicState.
+    /// NEQ constraints derived from Phase 2's concrete table keys to prevent
+    /// Z3 from re-assigning Phase 1's packet fields to Phase 2's key values.
+    std::vector<const IR::Expression *> phase1ExtraConstraints;
 };
 
 /// Callback type for the three-phase tampering scenario.
