@@ -260,7 +260,8 @@ def run_p4c(name: str, p4_file: str, extra_args: List[str], build_dir: Path, p4_
 
 
 def run_p4symbex(name: str, p4_file: str, protobuf_dir: Path, *,
-                 max_tests: int, tamper_value: str, skip: bool, p4_version: str = "p4-16") -> List[Path]:
+                 max_tests: int, tamper_value: str, skip: bool, p4_version: str = "p4-16",
+                 extra_args: List[str] = []) -> List[Path]:
     if skip and protobuf_dir.exists():
         files = sorted(protobuf_dir.glob("*.txtpb"))
         if files:
@@ -285,6 +286,7 @@ def run_p4symbex(name: str, p4_file: str, protobuf_dir: Path, *,
         "--out-dir", str(protobuf_dir),
         "--state-dep",
         "--path-selection", "STATE_DEP_TAMPERING",
+        *extra_args,
         p4_file,
         "--state-tamper-value", tamper_value,
     ]
@@ -965,6 +967,7 @@ def do_p4symbex(spec: TargetSpec, args) -> List[Path]:
         tamper_value=args.tamper_value,
         skip=args.skip_p4symbex,
         p4_version=spec.p4_version,
+        extra_args=spec.extra_args,
     )
 
 

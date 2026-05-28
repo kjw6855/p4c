@@ -269,11 +269,22 @@ class BfRtClient:
                      if not f.startswith("$")),
                     "f1",
                 )
+                probe_key = reg.make_key([_gc.KeyTuple("$REGISTER_INDEX", 0)])
+                probe_data = reg.make_data([_gc.DataTuple(field_name, 0)])
+                try:
+                    reg.entry_mod(self.target, [probe_key], [probe_data])
+                except Exception as probe_err:
+                    err_str = str(probe_err)
+                    if "NOT_FOUND" in err_str or "Table not found" in err_str:
+                        log.debug("skip register %s: not present at runtime", reg_name)
+                        continue
+                    raise
                 key_list = [reg.make_key([_gc.KeyTuple("$REGISTER_INDEX", i)])
-                            for i in range(size)]
+                            for i in range(1, size)]
                 data_list = [reg.make_data([_gc.DataTuple(field_name, 0)])
-                             for _ in range(size)]
-                reg.entry_mod(self.target, key_list, data_list)
+                             for _ in range(1, size)]
+                if key_list:
+                    reg.entry_mod(self.target, key_list, data_list)
                 log.debug("reset register %s (%d cells)", reg_name, size)
             except Exception as e:
                 log.warning("clear_all_registers(%s) failed: %s", reg_name, e)

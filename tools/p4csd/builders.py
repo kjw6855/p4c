@@ -219,6 +219,7 @@ class TofinoBuilder(BuilderBase):
             skip=args.skip_p4symbex,
             p4symbex_bin=p4symbex_bin,
             p4_version=spec.p4_version,
+            extra_args=spec.extra_args,
         )
 
     def test(self, spec, artifacts, txtpb_files, args, csv_writer, progress_cb):

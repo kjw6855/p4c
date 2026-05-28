@@ -40,10 +40,14 @@ DEFAULT_BFRT_GRPC_PORT = 50052
 BFRT_GRPC_HOST = "127.0.0.1"    # mirrors GRPC_HOST in tampering.py
 BFRT_GRPC_ADDR = f"{BFRT_GRPC_HOST}:{DEFAULT_BFRT_GRPC_PORT}"
 
-NUM_PORTS = 8
-# Odd-numbered end is usually the one connected to the switch,
-# and the even-numbered end is the peer on the host side.
+NUM_PORTS = 32
+# Even-numbered veth is the host/PTF side; odd-numbered veth is the model side.
+# This matches the standard SDE veth_setup.sh pairing convention.
 PORT_TO_HOST_IFACE = {n: f"veth{2 * n}" for n in range(NUM_PORTS)}
+
+# ports.json passed to run_tofino_model.sh via -f, mapping device ports 0-31
+# to their veth pairs (port N → veth{2N}/veth{2N+1}).
+_PORTS_JSON_PATH = Path(__file__).parent / "ports.json"
 
 # --------------------------------------------------------------------------- #
 # SDE detection                                                               #
@@ -154,7 +158,8 @@ def run_p4symbex(name: str, p4_file: str, txtpb_dir: Path, *, arch: str = "tna",
                  max_tests: int, tamper_value: str, skip: bool,
                  path_selection: str = "STATE_DEP_TAMPERING",
                  p4symbex_bin: Path = DEFAULT_P4SYMBEX_BIN,
-                 p4_version: str = "p4-16") -> List[Path]:
+                 p4_version: str = "p4-16",
+                 extra_args: List[str] = []) -> List[Path]:
     """Run p4symbex with the BFRT backend to emit .txtpb tampering cases."""
     if skip and txtpb_dir.exists():
         files = sorted(txtpb_dir.glob("*.txtpb"))
@@ -180,6 +185,7 @@ def run_p4symbex(name: str, p4_file: str, txtpb_dir: Path, *, arch: str = "tna",
         "--out-dir", str(txtpb_dir),
         "--state-dep",
         "--path-selection", path_selection,
+        *extra_args,
         p4_file,
         "--state-tamper-value", tamper_value,
     ]
@@ -341,7 +347,7 @@ class TofinoModelProcess(SdeManagedProcess):
     def _build_cmd(self) -> List[str]:
         arch_str = "tofino2" if self.arch in ("t2na", "tofino2") else "tofino"
         return [f"{self.sde}/run_tofino_model.sh", "-p", self.p4_name,
-                "--arch", arch_str]
+                "--arch", arch_str, "-f", str(_PORTS_JSON_PATH)]
 
     def wait_ready(self) -> None:
         time.sleep(2)
@@ -398,6 +404,7 @@ def do_p4symbex(spec: TofinoTarget, args) -> List[Path]:
         tamper_value=args.tamper_value,
         skip=args.skip_p4symbex,
         p4symbex_bin=p4symbex_bin,
+        extra_args=spec.extra_args,
     )
 
 
@@ -458,10 +465,27 @@ def do_testing(spec, build_dir: Path, txtpb_files: List[Path],
             csv_writer(spec.name, "", "ERROR", f"bfrt-grpc connect: {ex}")
             return 0, 0, len(txtpb_files)
         try:
+            # Build a port→veth map covering only the ports used in this batch
+            # to avoid starting a tcpdump on every one of the 32 mapped veths.
+            used_ports: set = set()
+            for _tx in txtpb_files:
+                try:
+                    _c = parse_case(_tx)
+                    for _ph in _c.phases:
+                        used_ports.add(_ph.in_port)
+                        if _ph.exp_port is not None:
+                            used_ports.add(_ph.exp_port)
+                except Exception:
+                    pass
+            port_to_iface = {p: PORT_TO_HOST_IFACE[p]
+                             for p in sorted(used_ports)
+                             if p in PORT_TO_HOST_IFACE}
+            if not port_to_iface:
+                port_to_iface = dict(PORT_TO_HOST_IFACE)
             tester = PacketTester(client=client,
                                   phase_timeout=args.phase_timeout,
                                   capture_dir=capture_dir,
-                                  port_to_iface=dict(PORT_TO_HOST_IFACE))
+                                  port_to_iface=port_to_iface)
             total = len(txtpb_files)
             for idx, tx in enumerate(txtpb_files, 1):
                 progress_cb(idx - 1, total, tx.name)
