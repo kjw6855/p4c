@@ -134,6 +134,21 @@ class TableMatch : public TestObject {
     /// @returns the key associated with this object.
     [[nodiscard]] const IR::KeyElement *getKey() const;
 
+    /// Compare this evaluated match to another for deduplication in PhaseConditions.
+    [[nodiscard]] virtual bool isEqualTo(const TableMatch *other) const = 0;
+
+    /// Build an IR constraint preventing Phase 2's control-plane symbolic variable
+    /// from equaling this Phase 1 concrete match value.
+    [[nodiscard]] virtual const IR::Expression *buildTableKeyNeqConstraint(
+        cstring tableName, cstring keyName) const = 0;
+
+    /// Build an IR constraint preventing a packet field from matching this Phase 2 entry.
+    [[nodiscard]] virtual const IR::Expression *buildPacketFieldNeqConstraint(
+        const IR::Expression *pktField) const = 0;
+
+    /// @returns the primary match value used for forbiddenValues in Phase 3.
+    [[nodiscard]] virtual const IR::Constant *getRepresentativeValue() const = 0;
+
     DECLARE_TYPEINFO(TableMatch, TestObject);
 };
 
@@ -165,6 +180,13 @@ class Ternary : public TableMatch {
     /// A BUG is thrown otherwise.
     [[nodiscard]] const IR::Constant *getEvaluatedMask() const;
 
+    [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
+        cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
+        const IR::Expression *pktField) const override;
+    [[nodiscard]] const IR::Constant *getRepresentativeValue() const override;
+
     DECLARE_TYPEINFO(Ternary, TableMatch);
 };
 
@@ -194,6 +216,13 @@ class LPM : public TableMatch {
     /// A BUG is thrown otherwise.
     [[nodiscard]] const IR::Constant *getEvaluatedPrefixLength() const;
 
+    [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
+        cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
+        const IR::Expression *pktField) const override;
+    [[nodiscard]] const IR::Constant *getRepresentativeValue() const override;
+
     DECLARE_TYPEINFO(LPM, TableMatch);
 };
 
@@ -212,6 +241,13 @@ class Exact : public TableMatch {
     /// @returns the match value. It is expected to be a constant at this point.
     /// A BUG is thrown otherwise.
     [[nodiscard]] const IR::Constant *getEvaluatedValue() const;
+
+    [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
+        cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
+        const IR::Expression *pktField) const override;
+    [[nodiscard]] const IR::Constant *getRepresentativeValue() const override;
 
     DECLARE_TYPEINFO(Exact, TableMatch);
 };

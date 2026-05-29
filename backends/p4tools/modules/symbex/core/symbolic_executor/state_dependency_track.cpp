@@ -28,22 +28,20 @@ namespace P4::P4Tools::Symbex {
 struct PhaseConditions {
     int inputPort = -1;
     int outputPort = -1;
-    // tableName → keyName → concrete key value (Exact match only)
-    std::map<cstring, std::map<cstring, const IR::Constant *>> tableKeyMap;
+    // tableName → keyName → concrete evaluated match (all match kinds)
+    std::map<cstring, std::map<cstring, const TableMatch *>> tableKeyMap;
 
     bool operator==(const PhaseConditions &other) const {
         if (inputPort != other.inputPort || outputPort != other.outputPort) return false;
         if (tableKeyMap.size() != other.tableKeyMap.size()) return false;
         for (const auto &[tblName, keyMap] : tableKeyMap) {
-            // TODO: check validity of table rules
             auto it = other.tableKeyMap.find(tblName);
             if (it == other.tableKeyMap.end()) return false;
-            const auto &otherKeyMap = it->second;
-            if (keyMap.size() != otherKeyMap.size()) return false;
-            for (const auto &[keyName, concreteVal] : keyMap) {
-                auto kit = otherKeyMap.find(keyName);
-                if (kit == otherKeyMap.end()) return false;
-                if (concreteVal->value != kit->second->value) return false;
+            if (keyMap.size() != it->second.size()) return false;
+            for (const auto &[keyName, match] : keyMap) {
+                auto kit = it->second.find(keyName);
+                if (kit == it->second.end()) return false;
+                if (!match->isEqualTo(kit->second)) return false;
             }
         }
         return true;
@@ -51,7 +49,7 @@ struct PhaseConditions {
 };
 
 // Build a PhaseConditions from a terminal FinalState, extracting concrete port values and
-// all Exact-match table key concrete values from the evaluated tableconfigs test objects.
+// all table key concrete matches (any match kind) from the evaluated tableconfigs test objects.
 static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramInfo &programInfo) {
     PhaseConditions cond;
     const auto &model = fs.getFinalModel();
@@ -66,9 +64,7 @@ static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramIn
         if (cfg == nullptr) continue;
         for (const auto &rule : *cfg->getRules()) {
             for (const auto &[keyName, match] : *rule.getMatches()) {
-                const auto *exact = match->to<Exact>();
-                if (exact == nullptr) continue;
-                cond.tableKeyMap[tblName][keyName] = exact->getEvaluatedValue();
+                cond.tableKeyMap[tblName][keyName] = match;
             }
         }
     }
@@ -412,10 +408,9 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
                 for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
                     if (size1Set.count(tblName) > 0) continue;
-                    for (const auto &[keyName, concreteVal] : keyMap) {
-                        const auto *ctrlPlaneKey =
-                            ControlPlaneState::getTableKey(tblName, keyName, concreteVal->type);
-                        phase2Init.pushPathConstraint(new IR::Neq(ctrlPlaneKey, concreteVal));
+                    for (const auto &[keyName, match] : keyMap) {
+                        phase2Init.pushPathConstraint(
+                            match->buildTableKeyNeqConstraint(tblName, keyName));
                     }
                 }
                 runPhase(phase2Init, phase2StateMap[i]);
@@ -462,7 +457,9 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                         if (tblIt != cond1.tableKeyMap.end()) {
                             auto keyIt = tblIt->second.find(chain->sinkKeyName);
                             if (keyIt != tblIt->second.end()) {
-                                forbiddenValues.push_back(keyIt->second->value);
+                                const auto *reprVal = keyIt->second->getRepresentativeValue();
+                                if (reprVal != nullptr)
+                                    forbiddenValues.push_back(reprVal->value);
                             }
                         }
                     }
@@ -522,17 +519,15 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                             if (size1Set.count(tblName) > 0 ||
                                     tblName == chain->sinkTableControlPlaneName)
                                 continue;
-                            for (const auto &[keyName, K2] : keyMap2) {
+                            for (const auto &[keyName, match2] : keyMap2) {
                                 if (cond1.tableKeyMap.count(tblName) > 0) {
                                     // Phase 1 HIT this table: prevent the re-solve from picking
                                     // the same control-plane key as Phase 2 (conflicting entries).
-                                    const auto *cpKey = ControlPlaneState::getTableKey(
-                                        tblName, keyName, K2->type);
-                                    p1ExtraConstraints.push_back(new IR::Neq(cpKey, K2));
+                                    p1ExtraConstraints.push_back(
+                                        match2->buildTableKeyNeqConstraint(tblName, keyName));
                                 } else {
-                                    // Phase 1 MISSED this table but Phase 2 hit it with key K2.
-                                    // If Phase 1's packet field equals K2, Phase 1 would
-                                    // unexpectedly hit Phase 2's entry at runtime.
+                                    // Phase 1 MISSED this table but Phase 2 hit it.
+                                    // Prevent Phase 1's packet from matching Phase 2's entry.
                                     auto tblIt = tableByName_.find(tblName);
                                     if (tblIt == tableByName_.end()) continue;
                                     const auto *tblIR = tblIt->second;
@@ -551,7 +546,8 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                                             continue;
                                         const auto *pktField =
                                             fs1->getExecutionState()->get(stateVar);
-                                        p1ExtraConstraints.push_back(new IR::Neq(pktField, K2));
+                                        p1ExtraConstraints.push_back(
+                                            match2->buildPacketFieldNeqConstraint(pktField));
                                     }
                                 }
                             }

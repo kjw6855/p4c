@@ -5,6 +5,7 @@
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_int_distribution.hpp>
 
+#include "backends/p4tools/common/control_plane/symbolic_variables.h"
 #include "backends/p4tools/common/lib/model.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
@@ -345,6 +346,24 @@ cstring Optional::getObjectName() const { return "Optional"_cs; }
 
 bool Optional::addAsExactMatch() const { return addMatch; }
 
+bool Optional::isEqualTo(const TableMatch *other) const {
+    const auto *o = other->to<Optional>();
+    return o && getEvaluatedValue()->value == o->getEvaluatedValue()->value &&
+           addAsExactMatch() == o->addAsExactMatch();
+}
+
+const IR::Expression *Optional::buildTableKeyNeqConstraint(cstring tbl, cstring key) const {
+    const auto *cp = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    return new IR::Neq(cp, getEvaluatedValue());
+}
+
+const IR::Expression *Optional::buildPacketFieldNeqConstraint(
+    const IR::Expression *pktField) const {
+    return new IR::Neq(pktField, getEvaluatedValue());
+}
+
+const IR::Constant *Optional::getRepresentativeValue() const { return getEvaluatedValue(); }
+
 Range::Range(const IR::KeyElement *key, const IR::Expression *low, const IR::Expression *high)
     : TableMatch(key), low(low), high(high) {}
 
@@ -398,5 +417,26 @@ void MetadataCollection::addMetaDataField(cstring name, const IR::Literal *metad
 }
 
 cstring Range::getObjectName() const { return "Range"_cs; }
+
+bool Range::isEqualTo(const TableMatch *other) const {
+    const auto *o = other->to<Range>();
+    return o && getEvaluatedLow()->value == o->getEvaluatedLow()->value &&
+           getEvaluatedHigh()->value == o->getEvaluatedHigh()->value;
+}
+
+const IR::Expression *Range::buildTableKeyNeqConstraint(cstring tbl, cstring key) const {
+    auto [minVar, maxVar] =
+        Bmv2ControlPlaneState::getTableRange(tbl, key, getEvaluatedLow()->type);
+    return new IR::LOr(new IR::Neq(minVar, getEvaluatedLow()),
+                       new IR::Neq(maxVar, getEvaluatedHigh()));
+}
+
+const IR::Expression *Range::buildPacketFieldNeqConstraint(
+    const IR::Expression *pktField) const {
+    return new IR::LOr(new IR::Lss(pktField, getEvaluatedLow()),
+                       new IR::Grt(pktField, getEvaluatedHigh()));
+}
+
+const IR::Constant *Range::getRepresentativeValue() const { return getEvaluatedLow(); }
 
 }  // namespace P4::P4Tools::Symbex::Bmv2

@@ -8,6 +8,7 @@
 
 #include <boost/multiprecision/cpp_int.hpp>
 
+#include "backends/p4tools/common/control_plane/symbolic_variables.h"
 #include "backends/p4tools/common/lib/model.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "ir/irutils.h"
@@ -185,6 +186,69 @@ const Exact *Exact::evaluate(const Model &model, bool doComplete) const {
 }
 
 cstring Exact::getObjectName() const { return "Exact"_cs; }
+
+bool Exact::isEqualTo(const TableMatch *other) const {
+    const auto *o = other->to<Exact>();
+    return o && getEvaluatedValue()->value == o->getEvaluatedValue()->value;
+}
+
+const IR::Expression *Exact::buildTableKeyNeqConstraint(cstring tbl, cstring key) const {
+    const auto *cp = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    return new IR::Neq(cp, getEvaluatedValue());
+}
+
+const IR::Expression *Exact::buildPacketFieldNeqConstraint(const IR::Expression *pktField) const {
+    return new IR::Neq(pktField, getEvaluatedValue());
+}
+
+const IR::Constant *Exact::getRepresentativeValue() const { return getEvaluatedValue(); }
+
+bool Ternary::isEqualTo(const TableMatch *other) const {
+    const auto *o = other->to<Ternary>();
+    return o && getEvaluatedValue()->value == o->getEvaluatedValue()->value &&
+           getEvaluatedMask()->value == o->getEvaluatedMask()->value;
+}
+
+const IR::Expression *Ternary::buildTableKeyNeqConstraint(cstring tbl, cstring key) const {
+    const auto *cpVal = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    const auto *cpMask =
+        ControlPlaneState::getTableTernaryMask(tbl, key, getEvaluatedMask()->type);
+    return new IR::LOr(new IR::Neq(cpVal, getEvaluatedValue()),
+                       new IR::Neq(cpMask, getEvaluatedMask()));
+}
+
+const IR::Expression *Ternary::buildPacketFieldNeqConstraint(
+    const IR::Expression *pktField) const {
+    return new IR::Neq(new IR::BAnd(pktField, getEvaluatedMask()),
+                       new IR::BAnd(getEvaluatedValue(), getEvaluatedMask()));
+}
+
+const IR::Constant *Ternary::getRepresentativeValue() const { return getEvaluatedValue(); }
+
+bool LPM::isEqualTo(const TableMatch *other) const {
+    const auto *o = other->to<LPM>();
+    return o && getEvaluatedValue()->value == o->getEvaluatedValue()->value &&
+           getEvaluatedPrefixLength()->value == o->getEvaluatedPrefixLength()->value;
+}
+
+const IR::Expression *LPM::buildTableKeyNeqConstraint(cstring tbl, cstring key) const {
+    const auto *cpVal = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    const auto *cpPfx = ControlPlaneState::getTableMatchLpmPrefix(
+        tbl, key, getEvaluatedPrefixLength()->type);
+    return new IR::LOr(new IR::Neq(cpVal, getEvaluatedValue()),
+                       new IR::Neq(cpPfx, getEvaluatedPrefixLength()));
+}
+
+const IR::Expression *LPM::buildPacketFieldNeqConstraint(const IR::Expression *pktField) const {
+    const auto keyWidth =
+        getEvaluatedValue()->type->checkedTo<IR::Type_Bits>()->width_bits();
+    const auto shift = keyWidth - static_cast<int>(getEvaluatedPrefixLength()->value);
+    const auto *shiftConst = IR::Constant::get(getEvaluatedValue()->type, shift);
+    return new IR::Neq(new IR::Shr(pktField, shiftConst),
+                       new IR::Shr(getEvaluatedValue(), shiftConst));
+}
+
+const IR::Constant *LPM::getRepresentativeValue() const { return getEvaluatedValue(); }
 
 TableRule::TableRule(TableMatchMap matches, int priority, ActionCall action, int ttl)
     : matches(std::move(matches)), priority(priority), action(std::move(action)), ttl(ttl) {}

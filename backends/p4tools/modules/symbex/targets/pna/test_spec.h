@@ -202,6 +202,13 @@ class Optional : public TableMatch {
     /// @returns whether to add this optional match as an exact match.
     bool addAsExactMatch() const;
 
+    bool isEqualTo(const TableMatch *other) const override;
+    const IR::Expression *buildTableKeyNeqConstraint(cstring tableName,
+                                                    cstring keyName) const override;
+    const IR::Expression *buildPacketFieldNeqConstraint(
+        const IR::Expression *pktField) const override;
+    const IR::Constant *getRepresentativeValue() const override;
+
     DECLARE_TYPEINFO(Optional, TableMatch);
 };
 
@@ -228,6 +235,13 @@ class Range : public TableMatch {
     /// @returns the inclusive end of the range. It is expected to be a constant at this point.
     /// A BUG is thrown otherwise.
     const IR::Constant *getEvaluatedHigh() const;
+
+    bool isEqualTo(const TableMatch *other) const override;
+    const IR::Expression *buildTableKeyNeqConstraint(cstring tableName,
+                                                    cstring keyName) const override;
+    const IR::Expression *buildPacketFieldNeqConstraint(
+        const IR::Expression *pktField) const override;
+    const IR::Constant *getRepresentativeValue() const override;
 
     DECLARE_TYPEINFO(Range, TableMatch);
 };

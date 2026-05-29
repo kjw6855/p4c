@@ -24,6 +24,7 @@
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_int_distribution.hpp>
 
+#include "backends/p4tools/common/lib/variables.h"
 #include "ir/irutils.h"
 
 namespace P4::P4Tools::Symbex::Tofino {
@@ -346,5 +347,29 @@ const Range *Range::evaluate(const Model &model, bool doComplete) const {
 }
 
 cstring Range::getObjectName() const { return "Range"_cs; }
+
+bool Range::isEqualTo(const TableMatch *other) const {
+    const auto *o = other->to<Range>();
+    return o && getEvaluatedLow()->value == o->getEvaluatedLow()->value &&
+           getEvaluatedHigh()->value == o->getEvaluatedHigh()->value;
+}
+
+const IR::Expression *Range::buildTableKeyNeqConstraint(cstring tbl, cstring key) const {
+    // Variable names mirror TofinoTableStepper::computeTargetMatchType
+    cstring minName = tbl + "_range_min_" + key;
+    cstring maxName = tbl + "_range_max_" + key;
+    const auto *minVar = ToolsVariables::getSymbolicVariable(getEvaluatedLow()->type, minName);
+    const auto *maxVar = ToolsVariables::getSymbolicVariable(getEvaluatedHigh()->type, maxName);
+    return new IR::LOr(new IR::Neq(minVar, getEvaluatedLow()),
+                       new IR::Neq(maxVar, getEvaluatedHigh()));
+}
+
+const IR::Expression *Range::buildPacketFieldNeqConstraint(
+    const IR::Expression *pktField) const {
+    return new IR::LOr(new IR::Lss(pktField, getEvaluatedLow()),
+                       new IR::Grt(pktField, getEvaluatedHigh()));
+}
+
+const IR::Constant *Range::getRepresentativeValue() const { return getEvaluatedLow(); }
 
 }  // namespace P4::P4Tools::Symbex::Tofino
