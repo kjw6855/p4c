@@ -68,7 +68,8 @@ class ControlGraphs : public Graphs,
                     VertexFlags flags=VertexFlags::NONE,
                     std::vector<const IR::Node *> args={},
                     std::vector<const IR::Node *> retArgs={},
-                    const IR::Node *soObj=nullptr);
+                    const IR::Node *soObj=nullptr,
+                    const IR::Node *callSite=nullptr);
 
     const P4::ExternMethod *get_extern_method(const Visitor::Context *ctxt_);
     const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed,

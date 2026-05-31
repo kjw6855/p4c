@@ -342,7 +342,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                     em->expr->method->dbprint(sstream);
                     auto extName = cstring(sstream);
                     visit_call(extName, obj, VertexFlags::SO_IDX, params, {},
-                            em->object->getNode());
+                            em->object->getNode(), statement);
                     return false;
                 }
             }
@@ -476,7 +476,7 @@ bool ControlGraphs::preorder(const IR::BaseAssignmentStatement *statement) {
                             params.push_back(p);
                     }
                     visit_call(extName, obj, VertexFlags::SO_IDX,
-                            params, {statement->left});
+                            params, {statement->left}, nullptr, statement);
                     return false;
                 }
             }
@@ -899,10 +899,11 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
 void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
                                VertexFlags flags, std::vector<const IR::Node *> args,
                                std::vector<const IR::Node *> retArgs,
-                               const IR::Node *soObj) {
+                               const IR::Node *soObj,
+                               const IR::Node *callSite) {
     // before visit
     auto call_v = add_and_connect_vertex("CALL "_cs + name,
-            VertexFlags::CALL | flags);
+            VertexFlags::CALL | flags, callSite);
     parents = {{call_v, new EdgeProcedural()}};
 
     if (args.size() > 0) {
@@ -937,7 +938,13 @@ void ControlGraphs::visit_call(const cstring &name, const IR::Node *node,
     procCallerMaps[graphName][name].push_back(call_v);
 
     // after visit
-    auto ret_v = add_and_connect_vertex("RETURN "_cs + name, VertexFlags::RETURN);
+    auto ret_v = add_and_connect_vertex("RETURN "_cs + name, VertexFlags::RETURN | flags);
+
+    auto &procEntryInfo = (*g)[pp.first];
+    if (procEntryInfo.statefulObjectNode != nullptr) {
+        (*g)[call_v].statefulObjectNode = procEntryInfo.statefulObjectNode;
+        (*g)[ret_v].statefulObjectNode = procEntryInfo.statefulObjectNode;
+    }
 
     // store callMap (ENTRY, RETURN)
     callMaps[graphName][call_v] = {pp.first, ret_v};
