@@ -143,7 +143,7 @@ int main(int argc, char *const argv[]) {
         if (options.genSupergraphs != P4StateDependency::GenSGMode::NONE) {
             sdResult = P4StateDependency::runStateDependencyAnalysis(
                     program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
-                    options.graphsDir, options.onlyHdrToStateToKey);
+                    options.graphsDir);
             if (sdResult.cfgGraphs)
                 sdResult.cfgGraphs->varVis = options.varVis;
         } else {

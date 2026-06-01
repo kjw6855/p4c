@@ -18,7 +18,6 @@ class P4StateDependencyOptions : public CompilerOptions {
     bool graphs = true;           // default behavior
     bool fullGraph = false;
     bool jsonOut = false;
-    bool onlyHdrToStateToKey = true;
     VarVisibility varVis = VarVisibility::NONE;
     GenSGMode genSupergraphs = GenSGMode::NONE;
     VarEdgeVisibility varEdgeVis = VarEdgeVisibility::NONE;

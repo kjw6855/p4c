@@ -21,9 +21,14 @@
 namespace P4::P4StateDependency {
 
 struct StateDependencyResult {
-    /// H2S2V: header variable → stateful object → packet field.
+    /// H2S2V: header variable → stateful object → packet field (header/port value sinks).
     /// Heap-allocated; caller takes ownership. Null if no deps found.
     DependencyGraphs *h2s2vGraphs = nullptr;
+
+    /// H2S2K: header variable → stateful object → table match key (key sinks only).
+    /// Split out from H2S2V so a field that is both a table key and a written header is
+    /// not double-counted. Heap-allocated; caller takes ownership. Null if no deps found.
+    DependencyGraphs *h2s2kGraphs = nullptr;
 
     /// A2S2V: action parameter → stateful object → packet field.
     /// Heap-allocated; caller takes ownership. Null if no deps found.
@@ -73,8 +78,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::TypeMap *typeMap,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
-                                                  std::filesystem::path graphsDir = {},
-                                                  bool onlyHdrToStateToKey = true);
+                                                  std::filesystem::path graphsDir = {});
 
 /// Convenience overload: builds its own lightweight midend
 /// (TypeChecking → EvaluatorPass → IFDS analysis → RemoveActionParameters → TypeChecking)

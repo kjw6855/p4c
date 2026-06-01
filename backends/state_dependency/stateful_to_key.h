@@ -11,6 +11,15 @@ namespace P4::P4StateDependency {
 
 using Graph = Graphs::Graph;
 
+/// Which sink kind this pass harvests. Each sink type gets its own dependency graph
+/// (H2S2K for keys, H2S2V for header/port values) so that a field which is both a table
+/// key and a written header is not double-counted into a single graph's SOChains.
+enum class KeySinkMode {
+    KEY_ONLY,        ///< Harvest only KEY-flagged sink vertices (table match keys).
+    HEADER_ONLY,     ///< Harvest only EXIT/header sink vertices (output packet fields/ports).
+    KEY_AND_HEADER,  ///< Harvest both (legacy behavior for A2S2V and the S2V viz checker).
+};
+
 class FindStatefulToKey : public IDEPass {
 
  public:
@@ -21,10 +30,10 @@ class FindStatefulToKey : public IDEPass {
             hvec_map<cstring, std::vector<TabVertex>> *stateVars,
             hvec_map<cstring, IDEPass::DepEdgeMap> *prevDepEdgeMaps,
             cstring analysisType,
-            bool onlyToKey)
+            KeySinkMode sinkMode)
         : IDEPass(refMap, typeMap, controlGraphsArray, graphProps, genSupergraphs),
           stateVars(stateVars), prevDepEdgeMaps(prevDepEdgeMaps), analysisType(analysisType),
-          onlyToKey(onlyToKey) {}
+          sinkMode(sinkMode) {}
     Visitor::profile_t init_apply(const IR::Node *) override;
 
  protected:
@@ -38,7 +47,7 @@ class FindStatefulToKey : public IDEPass {
     hvec_map<cstring, std::vector<TabVertex>> *stateVars{};
     hvec_map<cstring, IDEPass::DepEdgeMap> *prevDepEdgeMaps{};
     cstring analysisType;
-    bool onlyToKey;
+    KeySinkMode sinkMode;
 };
 
 class StatefulToKey : public PassManager {
@@ -50,11 +59,11 @@ class StatefulToKey : public PassManager {
             hvec_map<cstring, std::vector<TabVertex>> *stateVars,
             hvec_map<cstring, IDEPass::DepEdgeMap> *prevDepEdgeMaps,
             cstring analysisType,
-            bool onlyToKey) {
+            KeySinkMode sinkMode) {
         stdPass = new FindStatefulToKey(refMap, typeMap,
                     controlGraphsArray, graphProps,
                     genSupergraphs, stateVars, prevDepEdgeMaps, analysisType,
-                    onlyToKey);
+                    sinkMode);
         passes.push_back(stdPass);
     }
 

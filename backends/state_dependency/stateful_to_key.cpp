@@ -101,10 +101,16 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
         }
 
         // TODO: support for condition blocks (e.g., if and switch)
-        if (hasFlag(vinfo.flags, VertexFlags::KEY)) {
+        // Harvest the configured sink kind(s). KEY_ONLY → H2S2K, HEADER_ONLY → H2S2V so a
+        // field that is both a table key and a written header lands in exactly one graph
+        // (not double-counted). KEY_AND_HEADER preserves the legacy combined behavior used
+        // by A2S2V and the S2V visualization checker.
+        if (sinkMode != KeySinkMode::HEADER_ONLY &&
+            hasFlag(vinfo.flags, VertexFlags::KEY)) {
             collect_all_dep_edges(tab, *vit);
         }
-        if (!onlyToKey && hasFlag(vinfo.flags, VertexFlags::EXIT) && sgProp->procOf[*vit] == mainProcName) {
+        if (sinkMode != KeySinkMode::KEY_ONLY &&
+            hasFlag(vinfo.flags, VertexFlags::EXIT) && sgProp->procOf[*vit] == mainProcName) {
             collect_all_dep_edge_to_hdr(tab, *vit);
         }
     }

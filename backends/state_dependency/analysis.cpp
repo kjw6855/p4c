@@ -31,8 +31,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::TypeMap *typeMap,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
-                                                  std::filesystem::path graphsDir,
-                                                  bool onlyHdrToStateToKey) {
+                                                  std::filesystem::path graphsDir) {
     Util::ScopedTimer sdTimer("P4SD");
     StateDependencyResult result;
 
@@ -90,7 +89,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         Util::ScopedTimer actSoToKeyTimer("ACT->SO->KEY/HDR");
         StatefulToKey a2s2vPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
-                &stateVars, &depEdgeMaps, "A2S2V"_cs, false);
+                &stateVars, &depEdgeMaps, "A2S2V"_cs, KeySinkMode::KEY_AND_HEADER);
         program->apply(a2s2vPdChecker);
         for (size_t i = 0; i < numGraphs; i++) {
             auto *g = cgen.controlGraphsArray[i];
@@ -122,8 +121,9 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     stateVars.clear();
     depEdgeMaps.clear();
 
-    /* II. H2S2(V/C) */
-    /* II-1. H2S2V: header variable → stateful object → packet field */
+    /* II. H2S2(K/V/C) */
+    /* II-1. Base H2S2: header variable → stateful object. Shared by all three sink graphs. */
+    auto *h2s2kGraphs = new DependencyGraphs(numGraphs);
     auto *h2s2vGraphs = new DependencyGraphs(numGraphs);
     auto *h2s2cGraphs = new DependencyGraphs(numGraphs);
     auto *hdChecker = new HdrToStateful(refMap, typeMap,
@@ -140,6 +140,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                     g, sg.graphProps[i], refMap, typeMap, htsEdgeMap, stateVarMap, true);
             depEdgeMaps[graphName] = htsEdgeMap;
             auto sthEdgeMap = convert_dep_edges(htsEdgeMap);
+            h2s2kGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
+            h2s2kGraphs->add_dependencies_from_map(i, g, stateVarMap);
             h2s2vGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
             h2s2vGraphs->add_dependencies_from_map(i, g, stateVarMap);
             h2s2cGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
@@ -149,12 +151,28 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                     LOG2(Graphs::dump_var_edge(g, {ve.first, dst}));
         }
     }
+    /* II-2. H2S2K: state object → table match KEY sinks only. */
     {
-        Util::ScopedTimer hdrSoToKeyTimer("HDR->SO->KEY/HDR");
+        Util::ScopedTimer hdrSoToKeyTimer("HDR->SO->KEY");
+        StatefulToKey h2s2kPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "H2S2V"_cs,
+                KeySinkMode::KEY_ONLY);
+        program->apply(h2s2kPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            h2s2kGraphs->add_dependencies_from_map(i, g,
+                    h2s2kPdChecker.getFoundDepEdges(graphName), true);
+        }
+    }
+    /* II-3. H2S2V: state object → header/port value sinks only. */
+    {
+        Util::ScopedTimer hdrSoToHdrTimer("HDR->SO->HDR");
         StatefulToKey h2s2vPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
                 &stateVars, &depEdgeMaps, "H2S2V"_cs,
-                onlyHdrToStateToKey);
+                KeySinkMode::HEADER_ONLY);
         program->apply(h2s2vPdChecker);
         for (size_t i = 0; i < numGraphs; i++) {
             auto *g = cgen.controlGraphsArray[i];
@@ -163,6 +181,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                     h2s2vPdChecker.getFoundDepEdges(graphName), true);
         }
     }
+    result.h2s2kGraphs = h2s2kGraphs;
     result.h2s2vGraphs = h2s2vGraphs;
 
     /* II-2. H2S2C: header variable → stateful object → conditions */
@@ -195,7 +214,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             }
             s2vChecker = new StatefulToKey(refMap, typeMap,
                     &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
-                    &stateVars, &depEdgeMaps, "S2V"_cs, false);
+                    &stateVars, &depEdgeMaps, "S2V"_cs, KeySinkMode::KEY_AND_HEADER);
             program->apply(*s2vChecker);
         }
     }
@@ -207,6 +226,16 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         auto *g = cgen.controlGraphsArray[i];
         auto graphName = cstring(boost::get_property(*g, boost::graph_name));
 
+        if (!h2s2kGraphs->leaves[i].empty()) {
+            h2s2kGraphs->add_so_constant_edges(i, g);
+            if (!graphsDir.empty() && h2s2kGraphs->num_vertices(i) > 0)
+                h2s2kGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_h2s2k_dep.dot"));
+            h2s2kGraphs->merge_nodes_without_variable(i);
+            if (!graphsDir.empty() && h2s2kGraphs->num_vertices(i) > 0)
+                h2s2kGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_h2s2k_dep.dot"));
+            h2s2kGraphs->prune_nodes_not_reaching_leaves(i);
+            h2s2kGraphs->prune_call_nodes_without_return(i, g);
+        }
         if (!h2s2vGraphs->leaves[i].empty()) {
             h2s2vGraphs->add_so_constant_edges(i, g);
             if (!graphsDir.empty() && h2s2vGraphs->num_vertices(i) > 0)
@@ -229,27 +258,36 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
 
-    // Category 1 (nowrite SO reads): H2S2V vertices forward-reachable from SOs with no write_to.
+    for (size_t i = 0; i < numGraphs; i++) {
+        auto *esg = cgen.controlGraphsArray[i];
+        auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+        result.noWriteReadChains[graphName] = {};
+    }
+
+    // Each graph carries exactly one sink type, so its data-write chains belong wholly to
+    // one category — no post-hoc isKey split, and per-graph chain ids stay contiguous.
+    // Category 1 (nowrite SO reads) is sink-independent (shares the base H->SO edges), so it
+    // is read from the key graph.
+    if (h2s2kGraphs) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (h2s2kGraphs->leaves[i].empty()) continue;
+            auto *esg = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            result.noWriteReadChains[graphName].insert(result.noWriteReadChains[graphName].end(),
+                h2s2kGraphs->get_nowrite_so_vertices(i, esg).begin(),
+                h2s2kGraphs->get_nowrite_so_vertices(i, esg).end());
+            result.dataWriteKeyChains[graphName] = h2s2kGraphs->get_data_write_so_chains(i, esg);
+        }
+    }
     if (h2s2vGraphs) {
         for (size_t i = 0; i < numGraphs; i++) {
             if (h2s2vGraphs->leaves[i].empty()) continue;
             auto *esg = cgen.controlGraphsArray[i];
             auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
-            result.noWriteReadChains[graphName] = h2s2vGraphs->get_nowrite_so_vertices(i, esg);
-
-            // Split data-write chains by sink type using the sinkNode baked in at creation.
-            // sinkNode.esgId.first is the ESG vertex of the dep-graph leaf; check its flags
-            // for VertexFlags::KEY to distinguish key chains from header/port chains.
-            for (auto &chain : h2s2vGraphs->get_data_write_so_chains(i, esg)) {
-                auto esgVtx = chain.sinkNode.esgId.first;
-                bool isKey = (chain.sinkNode.esgId.second != nullptr &&
-                              esgVtx < boost::num_vertices(*esg) &&
-                              hasFlag((*esg)[esgVtx].flags, VertexFlags::KEY));
-                if (isKey)
-                    result.dataWriteKeyChains[graphName].push_back(std::move(chain));
-                else
-                    result.dataWriteHeaderChains[graphName].push_back(std::move(chain));
-            }
+            result.noWriteReadChains[graphName].insert(result.noWriteReadChains[graphName].end(),
+                h2s2vGraphs->get_nowrite_so_vertices(i, esg).begin(),
+                h2s2vGraphs->get_nowrite_so_vertices(i, esg).end());
+            result.dataWriteHeaderChains[graphName] = h2s2vGraphs->get_data_write_so_chains(i, esg);
         }
     }
     if (h2s2cGraphs) {
@@ -262,19 +300,27 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     }
 
     // Export pruned dep graphs with satellite chain-category nodes (binary mode only).
+    // One file per sink type; each graph is independent so add_chain_satellites mutates
+    // only its own graph (no clone/snapshot needed).
     if (!graphsDir.empty()) {
         for (size_t i = 0; i < numGraphs; i++) {
             auto *g = cgen.controlGraphsArray[i];
             auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            if (!h2s2kGraphs->leaves[i].empty() && h2s2kGraphs->num_vertices(i) > 0) {
+                auto dotPath = graphsDir / (graphName + "_h2s2k_dep.dot");
+                // TODO: noWriteReadChains can have both h2s2v and h2s2k
+                auto rankPairs = h2s2kGraphs->add_chain_satellites(i,
+                    result.noWriteReadChains[graphName],
+                    result.dataWriteKeyChains[graphName]);
+                h2s2kGraphs->export_to_graphviz(i, dotPath);
+                DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
+            }
             if (!h2s2vGraphs->leaves[i].empty() && h2s2vGraphs->num_vertices(i) > 0) {
                 auto dotPath = graphsDir / (graphName + "_h2s2v_dep.dot");
-                auto writeChains = result.dataWriteKeyChains[graphName];
-                writeChains.insert(writeChains.end(),
-                     result.dataWriteHeaderChains[graphName].begin(),
-                     result.dataWriteHeaderChains[graphName].end());
+                // TODO: noWriteReadChains can have both h2s2v and h2s2k
                 auto rankPairs = h2s2vGraphs->add_chain_satellites(i,
                     result.noWriteReadChains[graphName],
-                    writeChains);
+                    result.dataWriteHeaderChains[graphName]);
                 h2s2vGraphs->export_to_graphviz(i, dotPath);
                 DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
             }
@@ -303,6 +349,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         // s2vChecker is null in library mode.
         // Free IFDS dep-graphs; callers only need depChainNodes / depChainNodeIds.
         delete a2s2vGraphs;  result.a2s2vGraphs = nullptr;
+        delete h2s2kGraphs;  result.h2s2kGraphs = nullptr;
         delete h2s2vGraphs;  result.h2s2vGraphs = nullptr;
         delete h2s2cGraphs;  result.h2s2cGraphs = nullptr;
 #ifdef ENABLE_GC
@@ -354,7 +401,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     if (program == nullptr || toplevel == nullptr || ::P4::errorCount() > 0)
         return {};
 
-    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir, false);
+    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir);
 }
 
 }  // namespace P4::P4StateDependency
