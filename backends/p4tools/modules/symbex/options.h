@@ -133,6 +133,12 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Set by the tampering symbolic executor during both Phase 1 and Phase 2.
     bool tamperingRegisterTracking = false;
 
+    /// When true, register initial values are zero-initialized instead of using free
+    /// symbolic variables. Set only during Phase 1 (read phase) of tampering analysis so
+    /// that Z3 explores paths with register value = 0 (hardware initial state), not arbitrary
+    /// symbolic values. Must be false during Phase 2 so the write path remains reachable.
+    bool initRegZeroValue = false;
+
  protected:
     bool validateOptions() const override;
 };

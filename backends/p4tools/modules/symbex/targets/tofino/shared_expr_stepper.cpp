@@ -182,12 +182,21 @@ const IR::Expression *initializeRegisterParameters(const TestObject *registerSta
             nextState.set(registerParamRef, registerExpr);
         }
     } else {
+        // During tampering analysis, assume registers start at 0 (hardware default).
+        // This avoids free symbolic variables for initial register contents that would
+        // be unconstrained by Z3 and produce non-zero values requiring hardware pre-seeding.
+        const bool useZeroInit =
+            canConfigure && SymbexOptions::get().initRegZeroValue;
         if (const auto *structType = registerParamType->to<IR::Type_StructLike>()) {
             const IR::StructExpression *registerValueList = nullptr;
             IR::IndexedVector<IR::NamedExpression> valueVector{};
             for (const auto *structField : structType->fields) {
                 const IR::NamedExpression *inputValue = nullptr;
-                if (canConfigure) {
+                if (useZeroInit) {
+                    inputValue = new IR::NamedExpression(
+                        structField->name.name,
+                        IR::Constant::get(structField->type, 0));
+                } else if (canConfigure) {
                     inputValue = new IR::NamedExpression(
                         structField->name.name,
                         ToolsVariables::getSymbolicVariable(
@@ -214,7 +223,9 @@ const IR::Expression *initializeRegisterParameters(const TestObject *registerSta
             }
             registerExpr = registerValueList;
         } else {
-            if (canConfigure) {
+            if (useZeroInit) {
+                registerExpr = IR::Constant::get(registerParamType, 0);
+            } else if (canConfigure) {
                 registerExpr =
                     ToolsVariables::getSymbolicVariable(registerParamType, externInstanceName);
             } else {

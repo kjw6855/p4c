@@ -178,19 +178,23 @@ struct ScopedSymbexOpts {
     // TofinoRegisterValue test object and emits tofino_register_writeback for both
     // Phase 1 and Phase 2 (register reads in Phase 1 also update state).
     bool savedTamperingRegisterTracking;
+    bool savedInitRegZeroValue;
     cstring sinkTableName_ = ""_cs;
     std::vector<cstring> extraSkippedTables_;
     ScopedSymbexOpts(bool setOutputPacketOnly, cstring sinkTableName = ""_cs,
                      std::vector<cstring> extraSkippedTables = {},
-                     bool setRegTracking = true)
+                     bool setRegTracking = true,
+                     bool isPhase1 = false)
         : extraSkippedTables_(std::move(extraSkippedTables)) {
         auto &opts = SymbexOptions::get();
         savedOutputPacketOnly             = opts.outputPacketOnly;
         savedCoverStatements              = opts.coverageOptions.coverStatements;
         savedTamperingRegisterTracking    = opts.tamperingRegisterTracking;
+        savedInitRegZeroValue        = opts.initRegZeroValue;
         opts.outputPacketOnly             = setOutputPacketOnly;
         opts.coverageOptions.coverStatements = true;
         opts.tamperingRegisterTracking    = setRegTracking;
+        opts.initRegZeroValue        = isPhase1;
         sinkTableName_ = sinkTableName;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.insert(sinkTableName_);
@@ -204,6 +208,7 @@ struct ScopedSymbexOpts {
         opts.outputPacketOnly             = savedOutputPacketOnly;
         opts.coverageOptions.coverStatements     = savedCoverStatements;
         opts.tamperingRegisterTracking    = savedTamperingRegisterTracking;
+        opts.initRegZeroValue        = savedInitRegZeroValue;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.erase(sinkTableName_);
         }
@@ -263,7 +268,9 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             std::vector<const FinalState *> phase1States;
             {
                 // TODO: Expected output packet can be unchanged or drop-to-fwd
-                ScopedSymbexOpts guard(/*outputPacketOnly=*/true);
+                // isPhase1=true: zero-init registers so Z3 models hardware initial state (all-0).
+                ScopedSymbexOpts guard(/*outputPacketOnly=*/true, ""_cs, {}, /*setRegTracking=*/true,
+                                       /*isPhase1=*/true);
                 auto &phase1Init = initState.clone();
                 runPhase(phase1Init, phase1States);
             }
