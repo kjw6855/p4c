@@ -274,6 +274,9 @@ class PacketTester:
                         log.debug("register %s[%d] = %s matches attacker_value but index does not match expected %d",
                                   reg.register_name, idx, got, reg.index)
                         return True, ""
+                elif any(got):
+                    log.debug("register %s[%d] = %s does not match attacker_value",
+                              reg.register_name, idx, got)
 
         return False, f"register {reg.register_name}[{reg.index}] not present among {len(cells)} cells read"
 
