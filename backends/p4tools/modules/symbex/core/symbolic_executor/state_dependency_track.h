@@ -68,6 +68,12 @@ struct TamperingFinalState {
     /// NEQ constraints derived from Phase 2's concrete table keys to prevent
     /// Z3 from re-assigning Phase 1's packet fields to Phase 2's key values.
     std::vector<const IR::Expression *> phase1ExtraConstraints;
+    /// SOChain id this test case belongs to. Used to name the emitted file
+    /// basePath_<chainId>_<subTestId>. Assigned in runTamperingScenario.
+    size_t chainId = 0;
+    /// Per-chain sub-test index (1-based), distinguishing the multiple valid
+    /// Phase-1 × Phase-2 paths of a single SOChain. Assigned in runTamperingScenario.
+    size_t subTestId = 0;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -130,9 +136,11 @@ class StateDependencyTracker : public SymbolicExecutor {
         const P4StateDependency::DependencyGraphs::SOChain &chain) const;
 
     /// Runs a single-phase DFS from phaseInit (a caller-owned clone with any required path
-    /// constraints already pushed), saving each terminal FinalState into out.
-    /// Stops after the first accepted result.
-    void runPhase(ExecutionState &phaseInit, std::vector<const FinalState *> &out);
+    /// constraints already pushed), saving each accepted terminal FinalState into out.
+    /// @param maxStates caps the number of collected states; 0 means collect every valid
+    /// path (the DFS keeps backtracking until the search space is exhausted).
+    void runPhase(ExecutionState &phaseInit, std::vector<const FinalState *> &out,
+                  size_t maxStates);
 
     /// Orchestrates Phase 1 → Phase 2 → Phase 3 for every SOChain and fires callBack.
     void runTamperingScenario(const TamperingCallback &callBack, const ExecutionState &initState);

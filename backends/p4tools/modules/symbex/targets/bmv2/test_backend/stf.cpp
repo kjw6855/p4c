@@ -300,8 +300,10 @@ expect {{phase3_verify.eg_port}} {{phase3_verify.exp_pkt}}$
 }
 
 void STF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selectedBranches,
-                                 size_t testId, const std::string &testCase,
+                                 size_t chainId, size_t subTestId, const std::string &testCase,
                                  float currentCoverage) {
+    // Combined id for in-file metadata: stable and unique across a chain's sub-tests.
+    size_t testId = chainId * 1000 + subTestId;
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -369,7 +371,7 @@ void STF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selec
     auto optBasePath = getTestBackendConfiguration().fileBasePath;
     BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
     auto incrementedbasePath = optBasePath.value();
-    incrementedbasePath.concat("_" + std::to_string(testId));
+    incrementedbasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId));
     incrementedbasePath.replace_extension(".stf");
     auto stfFileStream = std::ofstream(incrementedbasePath);
     inja::render_to(stfFileStream, testCase, dataJson);
@@ -377,9 +379,9 @@ void STF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selec
 }
 
 void STF::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBranches,
-                           size_t testId, float currentCoverage) {
+                           size_t chainId, size_t subTestId, float currentCoverage) {
     std::string testCase = getTamperingTestCaseTemplate();
-    emitTamperingTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
+    emitTamperingTestcase(testSpec, selectedBranches, chainId, subTestId, testCase, currentCoverage);
 }
 
 }  // namespace P4::P4Tools::Symbex::Bmv2

@@ -420,8 +420,10 @@ class TamperingTest{{test_id}}(AbstractTest):
 }
 
 void PTF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selectedBranches,
-                                 size_t testId, const std::string &testCase,
+                                 size_t chainId, size_t subTestId, const std::string &testCase,
                                  float currentCoverage) {
+    // Combined id for the in-file Python class suffix: unique across a chain's sub-tests.
+    size_t testId = chainId * 1000 + subTestId;
     inja::json dataJson;
     if (selectedBranches != nullptr) {
         dataJson["selected_branches"] = selectedBranches.c_str();
@@ -493,9 +495,9 @@ void PTF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selec
 }
 
 void PTF::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBranches,
-                           size_t testId, float currentCoverage) {
+                           size_t chainId, size_t subTestId, float currentCoverage) {
     std::string testCase = getTamperingTestCaseTemplate();
-    emitTamperingTestcase(testSpec, selectedBranches, testId, testCase, currentCoverage);
+    emitTamperingTestcase(testSpec, selectedBranches, chainId, subTestId, testCase, currentCoverage);
 }
 
 }  // namespace P4::P4Tools::Symbex::Bmv2

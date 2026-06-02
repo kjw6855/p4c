@@ -64,8 +64,8 @@ class BfRt : public TestFramework {
     /// Emit a three-phase tampering test case as one .txtpb file with three
     /// input_packet / expected_output_packet blocks plus affected_register
     /// metadata and per-phase BfRt entities.
-    void writeTestToFile(const TamperingTestSpec *spec, cstring selectedBranches, size_t testIdx,
-                         float currentCoverage) override;
+    void writeTestToFile(const TamperingTestSpec *spec, cstring selectedBranches, size_t chainId,
+                         size_t subTestId, float currentCoverage) override;
 
  private:
     /// @returns the inja template for single-phase BfRt tests.

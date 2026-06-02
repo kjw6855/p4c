@@ -681,14 +681,16 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
 }
 
 void Protobuf::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBranches,
-                                size_t testId, float currentCoverage) {
+                                size_t chainId, size_t subTestId, float currentCoverage) {
+    // Combined id for in-file metadata: stable and unique across a chain's sub-tests.
+    size_t testId = chainId * 1000 + subTestId;
     inja::json dataJson = produceTamperingTestCase(testSpec, selectedBranches, testId, currentCoverage);
     LOG5("Protobuf tampering test back end: emitting testcase:" << std::setw(4) << dataJson);
 
     auto optBasePath = getTestBackendConfiguration().fileBasePath;
     BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
     auto incrementedbasePath = optBasePath.value();
-    incrementedbasePath.concat("_" + std::to_string(testId));
+    incrementedbasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId));
     incrementedbasePath.replace_extension(".txtpb");
     auto protobufFileStream = std::ofstream(incrementedbasePath);
     inja::render_to(protobufFileStream, getTamperingTestCaseTemplate(), dataJson);

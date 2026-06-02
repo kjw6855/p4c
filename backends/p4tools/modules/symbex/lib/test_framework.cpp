@@ -16,12 +16,15 @@ bool TestFramework::isInFileMode() const {
 }
 
 void TestFramework::writeTestToFile(const TamperingTestSpec *spec, cstring selectedBranches,
-                                    size_t testIdx, float currentCoverage) {
+                                    size_t chainId, size_t subTestId, float currentCoverage) {
     // Default: write each phase as a separate test file using the single-spec overload.
-    writeTestToFile(spec->spec1, selectedBranches, testIdx * 3 - 2, currentCoverage, nullptr, 0);
-    writeTestToFile(spec->spec2, selectedBranches, testIdx * 3 - 1, currentCoverage, nullptr, 0);
+    // Derive a stable, collision-free single-test index from (chainId, subTestId) so the
+    // three per-phase files of distinct sub-tests never overwrite each other.
+    size_t baseIdx = (chainId * 1000 + subTestId) * 3;
+    writeTestToFile(spec->spec1, selectedBranches, baseIdx + 1, currentCoverage, nullptr, 0);
+    writeTestToFile(spec->spec2, selectedBranches, baseIdx + 2, currentCoverage, nullptr, 0);
     // Phase 3 replays Phase 1's input packet (dynamic — no symbex output for phase 3).
-    writeTestToFile(spec->spec1, selectedBranches, testIdx * 3, currentCoverage, nullptr, 0);
+    writeTestToFile(spec->spec1, selectedBranches, baseIdx + 3, currentCoverage, nullptr, 0);
 }
 
 AbstractTestReferenceOrError TestFramework::produceTest(const TestSpec * /*spec*/,

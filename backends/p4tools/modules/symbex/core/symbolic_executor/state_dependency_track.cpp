@@ -242,6 +242,11 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
                       chainName, chain->id, chain->soName);
 
+            // Per-chain cap on emitted sub-tests, reusing the existing --max-tests option.
+            // Applied per chain (not globally) so every SOChain produces its own tests.
+            // 0 means "unlimited": collect every valid Phase-1 × Phase-2 path.
+            const size_t maxPerChain = static_cast<size_t>(SymbexOptions::get().maxTests);
+
             // Reset the incremental Z3 solver state between chains.  After the previous
             // chain's Phase-2 DFS + processPhase() callback, p4Assertions contains that
             // chain's complex write-path constraints (NEQ port/table conditions plus concolic
@@ -272,7 +277,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 ScopedSymbexOpts guard(/*outputPacketOnly=*/true, ""_cs, {}, /*setRegTracking=*/true,
                                        /*isPhase1=*/true);
                 auto &phase1Init = initState.clone();
-                runPhase(phase1Init, phase1States);
+                runPhase(phase1Init, phase1States, maxPerChain);
             }
             // Keep only Phase 1 states where the sink table HIT.
             // evalTableControlEntries sets tableHitVar to a concrete true/false in each
@@ -420,7 +425,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                             match->buildTableKeyNeqConstraint(tblName, keyName));
                     }
                 }
-                runPhase(phase2Init, phase2StateMap[i]);
+                runPhase(phase2Init, phase2StateMap[i], maxPerChain);
                 phase2StateNum += phase2StateMap[i].size();
             }
             if (phase2StateNum == 0) {
@@ -439,11 +444,25 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             }
 
             // ---- Phase 3: dynamic (no symbex — test script replays Phase 1's packet) ----
-            for (size_t i = 0; i < phase1States.size(); ++i) {
-                const auto *fs1 = phase1States[i];
-                const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
-
-                for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
+            // Round-robin emission across Phase-1 states so the per-chain cap
+            // (maxPerChain) never starves a later Phase-1 read-state: every Phase-1
+            // state contributes at least one sub-test before any state gets a second.
+            // The discriminating write path (the one that actually drives the register
+            // write) may only be reachable under a specific Phase-1 read-state, so
+            // draining the whole budget on the first state's Phase-2 paths could
+            // otherwise skip it entirely.
+            size_t subTestId = 0;
+            std::vector<size_t> cursor(phase1States.size(), 0);
+            bool chainCapHit = false;
+            while (!chainCapHit) {
+                bool emittedThisRound = false;
+                for (size_t i = 0; i < phase1States.size() && !chainCapHit; ++i) {
+                    auto &fs2List = phase2StateMap[phase1StateToCondition[i]];
+                    if (cursor[i] >= fs2List.size()) continue;  // Phase-1 state exhausted
+                    const auto *fs1 = phase1States[i];
+                    const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
+                    const auto *fs2 = fs2List[cursor[i]++];
+                    emittedThisRound = true;
                     // Derive attacker-chosen register values from Phase 2.
                     // withAttackerValues() is called on the *unevaluated* register object so
                     // that symbolic write expressions are still available to build constraints.
@@ -569,8 +588,14 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                                            attackerRegValues, phase2ModelOverrides,
                                            attackerRegSinkTables,
                                            p1ExtraConstraints};
-                    if (callBack(ts)) return;
+                    ts.chainId = chain->id;
+                    ts.subTestId = ++subTestId;
+                    callBack(ts);
+                    if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
                 }
+                // A full sweep that emitted nothing means every Phase-1 state's Phase-2
+                // paths are exhausted: this chain is done.
+                if (!emittedThisRound) break;
             }
         }
     }
@@ -581,12 +606,13 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 // ---------------------------------------------------------------------------
 
 void StateDependencyTracker::runPhase(ExecutionState &phaseInit,
-                                       std::vector<const FinalState *> &out) {
+                                       std::vector<const FinalState *> &out,
+                                       size_t maxStates) {
     unexploredBranches.clear();
     // phaseInit is a caller-owned clone. The caller is responsible for pushing any
     // Z3 path constraints (e.g., port equality/exclusion from Phase 1's symbolic
     // variable) before calling this function.
-    runImpl([&out, this](const FinalState &fs) -> bool {
+    runImpl([&out, maxStates, this](const FinalState &fs) -> bool {
         const auto *es = fs.getExecutionState();
         const auto &opts = SymbexOptions::get();
 
@@ -617,7 +643,10 @@ void StateDependencyTracker::runPhase(ExecutionState &phaseInit,
         }
 
         out.push_back(new FinalState(fs));
-        return out.size() >= 1;
+        // Returning true tells runImpl to stop (terminate the DFS). When maxStates is 0
+        // we never stop early, so the guided DFS keeps backtracking and collects every
+        // valid terminal path; otherwise we stop once maxStates paths are collected.
+        return maxStates != 0 && out.size() >= maxStates;
     }, phaseInit);
 }
 
@@ -721,6 +750,18 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
         } catch (SymbexUnimplemented &e) {
             if (SymbexOptions::get().strict) throw;
             warning("Path encountered unimplemented feature. Message: %1%\n", e.what());
+        } catch (Util::CompilerBug &e) {
+            // Collecting *every* valid path (runPhase with maxStates>1) makes the guided
+            // DFS explore far more of the state space than the previous first-match-wins
+            // behaviour did. Some of those paths hit modeling gaps in the shared symbex
+            // engine (e.g. a tainted Mux of unknown type reaching ExecutionState::set()),
+            // which are raised as BUG_CHECK/CompilerBug. A single unmodelable path must not
+            // abort the whole multi-path search: log it and backtrack like an unimplemented
+            // feature, so the remaining (modelable) paths — including the discriminating
+            // write path — are still collected and emitted. --strict re-throws for debugging.
+            if (SymbexOptions::get().strict) throw;
+            warning("[SDTrack] Skipping path that triggered an internal error during guided "
+                    "DFS. Message: %1%\n", e.what());
         }
 
         // Backtrack (LIFO).

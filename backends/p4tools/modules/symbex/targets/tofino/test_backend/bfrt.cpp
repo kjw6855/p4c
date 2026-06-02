@@ -578,7 +578,9 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
 }
 
 void BfRt::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBranches,
-                           size_t testId, float currentCoverage) {
+                           size_t chainId, size_t subTestId, float currentCoverage) {
+    // Combined id for in-file metadata: stable and unique across a chain's sub-tests.
+    size_t testId = chainId * 1000 + subTestId;
     inja::json dataJson =
         produceTamperingTestCase(testSpec, selectedBranches, testId, currentCoverage);
     LOG5("BfRt tampering backend: emitting testcase:" << std::setw(4) << dataJson);
@@ -586,7 +588,7 @@ void BfRt::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBr
     auto optBasePath = getTestBackendConfiguration().fileBasePath;
     BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
     auto incrementedBasePath = optBasePath.value();
-    incrementedBasePath.concat("_" + std::to_string(testId));
+    incrementedBasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId));
     incrementedBasePath.replace_extension(".txtpb");
     auto fileStream = std::ofstream(incrementedBasePath);
     inja::render_to(fileStream, getTamperingTestCaseTemplate(), dataJson);

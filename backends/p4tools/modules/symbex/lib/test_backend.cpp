@@ -404,14 +404,19 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     }
 
     testCount++;
-    printInfo("============ Tampering Test %1% ============", testCount);
+    printInfo("============ Tampering Test %1% (chain=%2% sub=%3%) ============",
+              testCount, state.chainId, state.subTestId);
 
-    Util::withTimer("backend", [this, &tamperingSpec, &selectedBranches] {
-        testWriter->writeTestToFile(&tamperingSpec, selectedBranches, testCount, coverage);
+    Util::withTimer("backend", [this, &tamperingSpec, &selectedBranches, &state] {
+        testWriter->writeTestToFile(&tamperingSpec, selectedBranches, state.chainId,
+                                    state.subTestId, coverage);
     });
 
     printTraces("============ End Tampering Test %1% ============\n", testCount);
-    return needsToTerminate(testCount);
+    // Per-chain capping in runTamperingScenario governs the total test count, so we never
+    // abort the whole run here — returning true would stop emission after the first chain
+    // once the global maxTests was reached. testCount is still tracked for logging.
+    return false;
 }
 
 int64_t TestBackEnd::getTestCount() const { return testCount; }

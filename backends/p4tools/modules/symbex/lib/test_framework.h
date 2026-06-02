@@ -188,8 +188,10 @@ class TestFramework {
     /// Writes a three-phase tampering test case to a file.
     /// The default implementation emits three individual test files (one per phase).
     /// Target backends can override this to emit a single file with three packet pairs.
+    /// @param chainId SOChain id; @param subTestId per-chain sub-test index. Together they
+    /// name the file basePath_<chainId>_<subTestId> so the working path is identifiable.
     virtual void writeTestToFile(const TamperingTestSpec *spec, cstring selectedBranches,
-                                 size_t testIdx, float currentCoverage);
+                                 size_t chainId, size_t subTestId, float currentCoverage);
 
     /// The method used to return the test case. This method is optional to each test framework.
     /// @param spec the testcase specification to be outputted.
