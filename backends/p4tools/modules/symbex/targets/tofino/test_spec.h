@@ -157,6 +157,13 @@ class TofinoRegisterValue : public IndexMap {
         std::optional<big_int> fixedValue = std::nullopt,
         const std::vector<big_int> &forbiddenValues = {}) const override;
 
+    /// Snapshot for cross-phase carry: returns a register whose initialValue is this
+    /// register's post-write contents at initialIndex (evaluated against @param model) and
+    /// whose indexConditions are empty. A subsequent getValueAtIndex() therefore returns the
+    /// folded value directly (no Mux), which initializeRegisterParameters can consume via the
+    /// literal flat-field path even for struct-typed registers.
+    [[nodiscard]] const TestObject *evaluateForCarry(const Model &model) const override;
+
     DECLARE_TYPEINFO(TofinoRegisterValue, TestObject);
 };
 

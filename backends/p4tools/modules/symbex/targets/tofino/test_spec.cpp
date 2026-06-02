@@ -136,6 +136,30 @@ const TofinoRegisterValue *TofinoRegisterValue::evaluate(const Model &model,
     return new TofinoRegisterValue(decl, evaluatedValue, evaluatedInitialIndex);
 }
 
+const TestObject *TofinoRegisterValue::evaluateForCarry(const Model &model) const {
+    // Determine this register's contents at initialIndex after all recorded writes
+    // (last-write-wins), then evaluate that single value to a concrete expression and use it
+    // as the snapshot's initialValue with NO indexConditions. This avoids the per-index Mux
+    // that getValueAtIndex() would build (which model.evaluate() cannot collapse for struct
+    // registers and which initializeRegisterParameters() cannot consume), while still
+    // carrying the post-write value a later phase must read.
+    const IR::Expression *finalValue = initialValue;
+    const auto *evalIndex = model.evaluate(initialIndex, /*doComplete=*/true);
+    for (const auto &cond : indexConditions) {
+        const auto *condIndex = model.evaluate(cond.getIndex(), /*doComplete=*/true);
+        if (condIndex->equiv(*evalIndex)) {
+            finalValue = cond.getValue();  // later writes overwrite earlier ones
+        }
+    }
+    const IR::Expression *evaluatedValue = nullptr;
+    if (const auto *structVal = finalValue->to<IR::StructExpression>()) {
+        evaluatedValue = model.evaluateStructExpr(structVal, /*doComplete=*/true);
+    } else {
+        evaluatedValue = model.evaluate(finalValue, /*doComplete=*/true);
+    }
+    return new TofinoRegisterValue(decl, evaluatedValue, evalIndex);
+}
+
 const IR::Constant *TofinoRegisterValue::getEvaluatedInitialIndex() const {
     const auto *constant = initialIndex->to<IR::Constant>();
     BUG_CHECK(constant, "Variable is not a constant, has the test object %1% been evaluated?",

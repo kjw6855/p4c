@@ -130,6 +130,14 @@ class Bmv2V1ModelRegisterValue : public IndexMap {
         std::optional<big_int> fixedValue = std::nullopt,
         const std::vector<big_int> &forbiddenValues = {}) const override;
 
+    /// Snapshot for cross-phase carry: returns a register whose initialValue is this
+    /// register's post-write contents (last write wins, evaluated against @param model) and
+    /// whose indexConditions are empty, so a subsequent getValueAtIndex() returns the folded
+    /// value directly with no leftover Mux. Used by the tampering executor to seed Phase 2
+    /// with Phase 1's register writes. BMv2 registers are scalar, so the folded value is a
+    /// plain constant.
+    [[nodiscard]] const TestObject *evaluateForCarry(const Model &model) const override;
+
     DECLARE_TYPEINFO(Bmv2V1ModelRegisterValue, IndexMap);
 };
 

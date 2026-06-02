@@ -405,6 +405,22 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                             // (processPhase only reads "tableconfigs").
                             phase2Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
                     }
+
+                    // Carry Phase 1's register writes into Phase 2's initial state. Hardware
+                    // runs Phase 1 → Phase 2 on the same device without clearing registers
+                    // between phases, so Phase 2 reads whatever Phase 1 wrote. Without this,
+                    // each runPhase zero-inits registers and Phase 2 accepts write paths gated
+                    // on a prior register value Phase 1 actually determined (e.g.
+                    // set_key_if_not_active's `prev != 0` gate depends on the access_bit that
+                    // Phase 1's check_key set). evaluateForCarry() folds Phase 1's writes into
+                    // the register's initialValue so initializeRegisterParameters resolves the
+                    // Phase-2 read to the post-Phase-1 contents, matching hardware and pruning
+                    // unreachable write paths.
+                    for (const auto &[regName, regObj] :
+                             es1->getTestObjectCategory("registervalues"_cs)) {
+                        const auto *carried = regObj->evaluateForCarry(model1);
+                        phase2Init.addTestObject("registervalues"_cs, regName, carried);
+                    }
                 }
 
                 // Constrain Phase 2's input port to differ from Phase 1's input AND output

@@ -114,6 +114,22 @@ const Bmv2V1ModelRegisterValue *Bmv2V1ModelRegisterValue::evaluate(const Model &
     return evaluatedRegisterValue;
 }
 
+const TestObject *Bmv2V1ModelRegisterValue::evaluateForCarry(const Model &model) const {
+    // Fold the recorded writes into a single concrete initialValue (last write wins) and
+    // return a register with NO indexConditions, so a subsequent getValueAtIndex(anyIndex)
+    // returns that value directly without a leftover Mux. This seeds Phase 2 with what
+    // Phase 1 wrote so Phase-2 gating reads see the post-Phase-1 value. BMv2 registers are
+    // scalar, so the folded value is a plain evaluated constant. (Single-index registers —
+    // the tampering case — read back exactly the written value; multi-index registers
+    // collapse to the last write, which is sufficient for the gating reads we steer.)
+    const IR::Expression *finalValue = getInitialValue();
+    if (!indexConditions.empty()) {
+        finalValue = indexConditions.back().getValue();
+    }
+    const auto *evaluatedValue = model.evaluate(finalValue, /*doComplete=*/true);
+    return new Bmv2V1ModelRegisterValue(evaluatedValue);
+}
+
 AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
     const Model &model, std::optional<big_int> fixedValue,
     const std::vector<big_int> &forbiddenValues) const {

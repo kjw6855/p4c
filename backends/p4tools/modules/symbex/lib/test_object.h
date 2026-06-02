@@ -75,6 +75,17 @@ class TestObject : public ICastable {
         return {this, {}};
     }
 
+    /// Returns a snapshot of this object's final state, evaluated against @param model and
+    /// flattened so it can seed the *initial* state of a later symbolic phase. Used by the
+    /// tampering executor to carry Phase-1 register writes into Phase-2's initial state, so
+    /// Phase-2 reads see what Phase-1 actually wrote (registers are not reset between phases
+    /// on hardware). Distinct from evaluate(): for stateful objects (registers) the recorded
+    /// writes are folded into the object's initial value so a subsequent read returns the
+    /// post-write contents without per-index Mux expressions. Default: same as evaluate().
+    [[nodiscard]] virtual const TestObject *evaluateForCarry(const Model &model) const {
+        return evaluate(model, /*doComplete=*/true);
+    }
+
     DECLARE_TYPEINFO(TestObject);
 };
 
