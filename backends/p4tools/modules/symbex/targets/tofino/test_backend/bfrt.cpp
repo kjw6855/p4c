@@ -379,8 +379,13 @@ metadata: "{{selected_branches}}"
 metadata: "Current node coverage: {{coverage}}"
 metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=replay phase1 (dynamic deviation check)"
 
+# --- Phase 1 (read) symbex trace ---
 ## for trace_item in trace
-traces: '{{trace_item}}'
+traces: '[P1] {{trace_item}}'
+## endfor
+# --- Phase 2 (write) symbex trace ---
+## for trace_item in trace2
+traces: '[P2] {{trace_item}}'
 ## endfor
 
 # Phase 1: read original register value
@@ -491,6 +496,7 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     dataJson["test_name"] = getTestBackendConfiguration().testBaseName;
     dataJson["test_id"] = testId;
     dataJson["trace"] = getTrace(testSpec->spec1);
+    dataJson["trace2"] = getTrace(testSpec->spec2);
 
     // Build merged control-plane JSON spanning Phase 1 (read) and Phase 2 (write).
     {

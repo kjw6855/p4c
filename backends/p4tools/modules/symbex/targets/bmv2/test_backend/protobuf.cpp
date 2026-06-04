@@ -413,8 +413,13 @@ metadata: "{{selected_branches}}"
 metadata: "Current node coverage: {{coverage}}"
 metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=dynamic (same as phase1)"
 
+# --- Phase 1 (read) symbex trace ---
 ## for trace_item in trace
-traces: '{{trace_item}}'
+traces: '[P1] {{trace_item}}'
+## endfor
+# --- Phase 2 (write) symbex trace ---
+## for trace_item in trace2
+traces: '[P2] {{trace_item}}'
 ## endfor
 
 # Phase 1: read original register value
@@ -583,6 +588,7 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     dataJson["test_name"] = getTestBackendConfiguration().testBaseName;
     dataJson["test_id"] = testId;
     dataJson["trace"] = getTrace(testSpec->spec1);
+    dataJson["trace2"] = getTrace(testSpec->spec2);
 
     // Build a merged control-plane JSON that includes table entries from both Phase 1
     // (read-action entries) and Phase 2 (write-action entries), preserving P4Runtime IDs.
