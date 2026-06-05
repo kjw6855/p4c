@@ -388,6 +388,16 @@ const IR::Expression *Range::buildTableKeyNeqConstraint(cstring tbl, cstring key
                        new IR::Neq(maxVar, getEvaluatedHigh()));
 }
 
+const IR::Expression *Range::buildTableKeyEqConstraint(cstring tbl, cstring key) const {
+    // Variable names mirror TofinoTableStepper::computeTargetMatchType
+    cstring minName = tbl + "_range_min_" + key;
+    cstring maxName = tbl + "_range_max_" + key;
+    const auto *minVar = ToolsVariables::getSymbolicVariable(getEvaluatedLow()->type, minName);
+    const auto *maxVar = ToolsVariables::getSymbolicVariable(getEvaluatedHigh()->type, maxName);
+    return new IR::LAnd(new IR::Equ(minVar, getEvaluatedLow()),
+                        new IR::Equ(maxVar, getEvaluatedHigh()));
+}
+
 const IR::Expression *Range::buildPacketFieldNeqConstraint(
     const IR::Expression *pktField) const {
     return new IR::LOr(new IR::Lss(pktField, getEvaluatedLow()),

@@ -197,6 +197,11 @@ const IR::Expression *Exact::buildTableKeyNeqConstraint(cstring tbl, cstring key
     return new IR::Neq(cp, getEvaluatedValue());
 }
 
+const IR::Expression *Exact::buildTableKeyEqConstraint(cstring tbl, cstring key) const {
+    const auto *cp = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    return new IR::Equ(cp, getEvaluatedValue());
+}
+
 const IR::Expression *Exact::buildPacketFieldNeqConstraint(const IR::Expression *pktField) const {
     return new IR::Neq(pktField, getEvaluatedValue());
 }
@@ -215,6 +220,14 @@ const IR::Expression *Ternary::buildTableKeyNeqConstraint(cstring tbl, cstring k
         ControlPlaneState::getTableTernaryMask(tbl, key, getEvaluatedMask()->type);
     return new IR::LOr(new IR::Neq(cpVal, getEvaluatedValue()),
                        new IR::Neq(cpMask, getEvaluatedMask()));
+}
+
+const IR::Expression *Ternary::buildTableKeyEqConstraint(cstring tbl, cstring key) const {
+    const auto *cpVal = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    const auto *cpMask =
+        ControlPlaneState::getTableTernaryMask(tbl, key, getEvaluatedMask()->type);
+    return new IR::LAnd(new IR::Equ(cpVal, getEvaluatedValue()),
+                        new IR::Equ(cpMask, getEvaluatedMask()));
 }
 
 const IR::Expression *Ternary::buildPacketFieldNeqConstraint(
@@ -237,6 +250,14 @@ const IR::Expression *LPM::buildTableKeyNeqConstraint(cstring tbl, cstring key) 
         tbl, key, getEvaluatedPrefixLength()->type);
     return new IR::LOr(new IR::Neq(cpVal, getEvaluatedValue()),
                        new IR::Neq(cpPfx, getEvaluatedPrefixLength()));
+}
+
+const IR::Expression *LPM::buildTableKeyEqConstraint(cstring tbl, cstring key) const {
+    const auto *cpVal = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    const auto *cpPfx = ControlPlaneState::getTableMatchLpmPrefix(
+        tbl, key, getEvaluatedPrefixLength()->type);
+    return new IR::LAnd(new IR::Equ(cpVal, getEvaluatedValue()),
+                        new IR::Equ(cpPfx, getEvaluatedPrefixLength()));
 }
 
 const IR::Expression *LPM::buildPacketFieldNeqConstraint(const IR::Expression *pktField) const {

@@ -372,6 +372,8 @@ class Optional : public TableMatch {
     [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
     [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
         cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyEqConstraint(
+        cstring tableName, cstring keyName) const override;
     [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
         const IR::Expression *pktField) const override;
     [[nodiscard]] const IR::Constant *getRepresentativeValue() const override;
@@ -405,6 +407,8 @@ class Range : public TableMatch {
 
     [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
     [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
+        cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyEqConstraint(
         cstring tableName, cstring keyName) const override;
     [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
         const IR::Expression *pktField) const override;

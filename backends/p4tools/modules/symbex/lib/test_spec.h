@@ -142,6 +142,15 @@ class TableMatch : public TestObject {
     [[nodiscard]] virtual const IR::Expression *buildTableKeyNeqConstraint(
         cstring tableName, cstring keyName) const = 0;
 
+    /// Build an IR constraint pinning a table's control-plane symbolic key variable(s) to this
+    /// concrete match value (the logical dual of buildTableKeyNeqConstraint). Used by the size-1
+    /// table consistency guard to force Phase 1's re-solved entry key to agree with the value the
+    /// Phase 2 fork constrained the packet against. Supports every match kind (exact pins the
+    /// value; ternary/lpm/range also pin the mask/prefix/high so the installed entry is fully
+    /// determined).
+    [[nodiscard]] virtual const IR::Expression *buildTableKeyEqConstraint(
+        cstring tableName, cstring keyName) const = 0;
+
     /// Build an IR constraint preventing a packet field from matching this Phase 2 entry.
     [[nodiscard]] virtual const IR::Expression *buildPacketFieldNeqConstraint(
         const IR::Expression *pktField) const = 0;
@@ -183,6 +192,8 @@ class Ternary : public TableMatch {
     [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
     [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
         cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyEqConstraint(
+        cstring tableName, cstring keyName) const override;
     [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
         const IR::Expression *pktField) const override;
     [[nodiscard]] const IR::Constant *getRepresentativeValue() const override;
@@ -219,6 +230,8 @@ class LPM : public TableMatch {
     [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
     [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
         cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyEqConstraint(
+        cstring tableName, cstring keyName) const override;
     [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
         const IR::Expression *pktField) const override;
     [[nodiscard]] const IR::Constant *getRepresentativeValue() const override;
@@ -244,6 +257,8 @@ class Exact : public TableMatch {
 
     [[nodiscard]] bool isEqualTo(const TableMatch *other) const override;
     [[nodiscard]] const IR::Expression *buildTableKeyNeqConstraint(
+        cstring tableName, cstring keyName) const override;
+    [[nodiscard]] const IR::Expression *buildTableKeyEqConstraint(
         cstring tableName, cstring keyName) const override;
     [[nodiscard]] const IR::Expression *buildPacketFieldNeqConstraint(
         const IR::Expression *pktField) const override;

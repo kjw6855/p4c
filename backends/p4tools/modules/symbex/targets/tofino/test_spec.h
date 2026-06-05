@@ -331,6 +331,8 @@ class Range : public TableMatch {
     bool isEqualTo(const TableMatch *other) const override;
     const IR::Expression *buildTableKeyNeqConstraint(cstring tableName,
                                                     cstring keyName) const override;
+    const IR::Expression *buildTableKeyEqConstraint(cstring tableName,
+                                                   cstring keyName) const override;
     const IR::Expression *buildPacketFieldNeqConstraint(
         const IR::Expression *pktField) const override;
     const IR::Constant *getRepresentativeValue() const override;

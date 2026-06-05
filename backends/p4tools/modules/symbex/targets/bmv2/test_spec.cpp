@@ -373,6 +373,11 @@ const IR::Expression *Optional::buildTableKeyNeqConstraint(cstring tbl, cstring 
     return new IR::Neq(cp, getEvaluatedValue());
 }
 
+const IR::Expression *Optional::buildTableKeyEqConstraint(cstring tbl, cstring key) const {
+    const auto *cp = ControlPlaneState::getTableKey(tbl, key, getEvaluatedValue()->type);
+    return new IR::Equ(cp, getEvaluatedValue());
+}
+
 const IR::Expression *Optional::buildPacketFieldNeqConstraint(
     const IR::Expression *pktField) const {
     return new IR::Neq(pktField, getEvaluatedValue());
@@ -445,6 +450,13 @@ const IR::Expression *Range::buildTableKeyNeqConstraint(cstring tbl, cstring key
         Bmv2ControlPlaneState::getTableRange(tbl, key, getEvaluatedLow()->type);
     return new IR::LOr(new IR::Neq(minVar, getEvaluatedLow()),
                        new IR::Neq(maxVar, getEvaluatedHigh()));
+}
+
+const IR::Expression *Range::buildTableKeyEqConstraint(cstring tbl, cstring key) const {
+    auto [minVar, maxVar] =
+        Bmv2ControlPlaneState::getTableRange(tbl, key, getEvaluatedLow()->type);
+    return new IR::LAnd(new IR::Equ(minVar, getEvaluatedLow()),
+                        new IR::Equ(maxVar, getEvaluatedHigh()));
 }
 
 const IR::Expression *Range::buildPacketFieldNeqConstraint(

@@ -594,6 +594,25 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                                 }
                             }
                         }
+                        // Size-1 tables: pin Phase-1's emitted control-plane key to the SAME
+                        // value the Phase-2 preexisting fork constrained the packet against
+                        // (cond1's value V). The single slot persists across phases, so the
+                        // installed entry key (== Phase-1 packet key on HIT) and the Phase-2
+                        // packet key must agree on V; otherwise Phase-1's free re-solve picks a
+                        // different key (e.g. 0) that collides with Phase-2's packet key, making
+                        // the slot HIT in Phase 2 on hardware (the switchv2p match_gw/to_gw bug).
+                        for (const auto &tblName : size1Set) {
+                            auto cIt = cond1.tableKeyMap.find(tblName);
+                            if (cIt == cond1.tableKeyMap.end()) continue;
+                            for (const auto &[keyName, match1] : cIt->second) {
+                                // Pin the emitted control-plane key to Phase 1's concrete match
+                                // for every match kind (exact/ternary/lpm/range/optional); the
+                                // per-type override also pins mask/prefix/high so the single slot
+                                // is fully determined.
+                                p1ExtraConstraints.push_back(
+                                    match1->buildTableKeyEqConstraint(tblName, keyName));
+                            }
+                        }
                     }
 
                     // Phase 3 is purely dynamic: the test script replays Phase 1's packet after
