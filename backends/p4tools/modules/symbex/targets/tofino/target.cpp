@@ -29,6 +29,7 @@
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
 #include "lib/cstring.h"
+#include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/ordered_map.h"
 
@@ -44,6 +45,9 @@
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino2/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino2/expr_stepper.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino2/program_info.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/v1model/cmd_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/v1model/expr_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/v1model/program_info.h"
 
 namespace P4::P4Tools::Symbex::Tofino {
 
@@ -324,6 +328,80 @@ CmdVisitor *JBay_T2naSymbexTarget::getCmdVisitorImpl(ExecutionState & /*state*/,
 ExprVisitor *JBay_T2naSymbexTarget::getExprVisitorImpl(ExecutionState & /*state*/,
                                                         const ProgramInfo & /*programInfo*/,
                                                         TestCase & /*testCase*/) const {
+    return nullptr;
+}
+
+/* =============================================================================================
+ *  Tofino_V1ModelSymbexTarget implementation
+ * ============================================================================================= */
+
+Tofino_V1ModelSymbexTarget::Tofino_V1ModelSymbexTarget()
+    : AbstractTofinoSymbexTarget("tofino", "v1model") {}
+
+void Tofino_V1ModelSymbexTarget::make() {
+    static Tofino_V1ModelSymbexTarget *INSTANCE = nullptr;
+    if (INSTANCE == nullptr) {
+        INSTANCE = new Tofino_V1ModelSymbexTarget();
+    }
+}
+
+const TofinoV1ModelProgramInfo *Tofino_V1ModelSymbexTarget::produceProgramInfoImpl(
+    const CompilerResult &compilerResult, const IR::Declaration_Instance *mainDecl) const {
+    // Ensure that main instantiates V1Switch (the v1model package).
+    const auto *mainType = mainDecl->type->to<IR::Type_Specialized>();
+    if ((mainType == nullptr) || mainType->baseType->path->name != "V1Switch") {
+        return nullptr;
+    }
+
+    // Unlike TNA's nested Pipeline(...), V1Switch passes the six controls directly as arguments.
+    const auto blocks =
+        argumentsToTypeDeclarations(&compilerResult.getProgram(), mainDecl->arguments);
+    if (blocks.size() != 6) {
+        error(ErrorType::ERR_INVALID,
+              "%1%: The V1Switch architecture requires 6 blocks. Received %2%.", mainDecl,
+              blocks.size());
+        return nullptr;
+    }
+
+    // V1Switch is single-pipe. Map blocks to their canonical names and assign ingress/egress gress.
+    ordered_map<cstring, const IR::Type_Declaration *> programmableBlocks;
+    std::map<int, gress_t> declIdToGress;
+    std::map<int, size_t> declIdToPipe;
+    for (size_t idx = 0; idx < blocks.size(); ++idx) {
+        const auto *declType = blocks.at(idx);
+        auto canonicalName = TofinoV1ModelProgramInfo::ARCH_SPEC.getArchMember(idx)->blockName;
+        programmableBlocks.emplace(canonicalName, declType);
+        // Blocks 0-2 (Parser, VerifyChecksum, Ingress) are ingress; 3-5 (Egress, ComputeChecksum,
+        // Deparser) are egress.
+        declIdToGress[declType->declid] = (idx < 3) ? INGRESS : EGRESS;
+        declIdToPipe[declType->declid] = 0;
+    }
+    std::vector<TofinoSharedProgramInfo::PipeInfo> pipeInfos;
+    pipeInfos.push_back({mainDecl->controlPlaneName(), programmableBlocks});
+
+    return new TofinoV1ModelProgramInfo(*compilerResult.checkedTo<TofinoCompilerResult>(), pipeInfos,
+                                        declIdToGress, declIdToPipe);
+}
+
+TofinoV1ModelCmdStepper *Tofino_V1ModelSymbexTarget::getCmdStepperImpl(
+    ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo) const {
+    return new TofinoV1ModelCmdStepper(state, solver, programInfo);
+}
+
+TofinoV1ModelExprStepper *Tofino_V1ModelSymbexTarget::getExprStepperImpl(
+    ExecutionState &state, AbstractSolver &solver, const ProgramInfo &programInfo) const {
+    return new TofinoV1ModelExprStepper(state, solver, programInfo);
+}
+
+CmdVisitor *Tofino_V1ModelSymbexTarget::getCmdVisitorImpl(ExecutionState & /*state*/,
+                                                          const ProgramInfo & /*programInfo*/,
+                                                          TestCase & /*testCase*/) const {
+    return nullptr;
+}
+
+ExprVisitor *Tofino_V1ModelSymbexTarget::getExprVisitorImpl(ExecutionState & /*state*/,
+                                                            const ProgramInfo & /*programInfo*/,
+                                                            TestCase & /*testCase*/) const {
     return nullptr;
 }
 

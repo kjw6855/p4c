@@ -32,6 +32,10 @@ ${CMAKE_CURRENT_SOURCE_DIR}/tofino2/cmd_stepper.cpp
 ${CMAKE_CURRENT_SOURCE_DIR}/tofino2/expr_stepper.cpp
 ${CMAKE_CURRENT_SOURCE_DIR}/tofino2/program_info.cpp
 
+${CMAKE_CURRENT_SOURCE_DIR}/v1model/cmd_stepper.cpp
+${CMAKE_CURRENT_SOURCE_DIR}/v1model/expr_stepper.cpp
+${CMAKE_CURRENT_SOURCE_DIR}/v1model/program_info.cpp
+
 PARENT_SCOPE
 )
 

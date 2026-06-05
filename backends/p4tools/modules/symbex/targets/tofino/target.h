@@ -38,6 +38,9 @@
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino2/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino2/expr_stepper.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino2/program_info.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/v1model/cmd_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/v1model/expr_stepper.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/v1model/program_info.h"
 #if HAVE_FLATROCK_TARGET
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino5/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/tofino5/expr_stepper.h"
@@ -117,6 +120,36 @@ class JBay_T2naSymbexTarget : public AbstractTofinoSymbexTarget {
 
  private:
     JBay_T2naSymbexTarget();
+};
+
+/// The (tofino, v1model) target: a v1model `V1Switch` program (p4_14 -> p4_16 conversion output)
+/// that uses native Tofino RegisterAction externs. Reuses the Tofino device's expr stepper, BFRT
+/// backend, and compiler config; supplies a V1Switch-shaped program info and a standard_metadata
+/// command stepper.
+class Tofino_V1ModelSymbexTarget : public AbstractTofinoSymbexTarget {
+ public:
+    /// Registers this target.
+    static void make();
+
+ protected:
+    const TofinoV1ModelProgramInfo *produceProgramInfoImpl(
+        const CompilerResult &compilerResult,
+        const IR::Declaration_Instance *mainDecl) const override;
+
+    TofinoV1ModelCmdStepper *getCmdStepperImpl(ExecutionState &state, AbstractSolver &solver,
+                                               const ProgramInfo &programInfo) const override;
+
+    TofinoV1ModelExprStepper *getExprStepperImpl(ExecutionState &state, AbstractSolver &solver,
+                                                 const ProgramInfo &programInfo) const override;
+
+    CmdVisitor *getCmdVisitorImpl(ExecutionState &state, const ProgramInfo &programInfo,
+                                  TestCase &testCase) const override;
+
+    ExprVisitor *getExprVisitorImpl(ExecutionState &state, const ProgramInfo &programInfo,
+                                    TestCase &testCase) const override;
+
+ private:
+    Tofino_V1ModelSymbexTarget();
 };
 
 }  // namespace P4::P4Tools::Symbex::Tofino

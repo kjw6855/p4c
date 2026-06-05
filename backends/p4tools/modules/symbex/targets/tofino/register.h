@@ -32,6 +32,7 @@ namespace P4::P4Tools::Symbex {
 inline void tofinoRegisterSymbexTarget() {
     Tofino::Tofino_TnaSymbexTarget::make();
     Tofino::JBay_T2naSymbexTarget::make();
+    Tofino::Tofino_V1ModelSymbexTarget::make();
 }
 
 }  // namespace P4::P4Tools::Symbex
