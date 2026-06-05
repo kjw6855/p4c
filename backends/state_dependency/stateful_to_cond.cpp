@@ -64,8 +64,15 @@ void FindStatefulToCond::analyze_control_graph(Tabulation *tab) {
         // CONDITION: if-statement guards with non-table-hit/miss expressions.
         // SWITCH: switch expressions (action_run switches have empty useVars
         //         so they produce no results naturally).
+        // Skip conditions inside a RegisterAction apply body (SO_DATA): these are stateful-ALU
+        // control flow (e.g. `if (value >= meta.rset_size - 1)` in a RegisterAction), not MAU
+        // condition sinks. They carry internal value→condition→new-value edges, so they have
+        // out-degree > 0 and would violate the leaf-is-a-sink invariant in
+        // prune_nodes_not_reaching_leaves (dependency_graph.cpp:378). Real control-block
+        // conditions (SO_DATA=0) remain valid H2S2C sinks.
         if ((hasFlag(vinfo.flags, VertexFlags::CONDITION) ||
              hasFlag(vinfo.flags, VertexFlags::SWITCH)) &&
+            !hasFlag(vinfo.flags, VertexFlags::SO_DATA) &&
             !vinfo.useVars.empty()) {
             collect_all_dep_edges(tab, *vit);
         }
