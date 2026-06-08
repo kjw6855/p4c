@@ -29,6 +29,10 @@ class CoverableNodesScanner : public Inspector {
     /// IDs of already visited parser states. To avoid loops.
     std::set<int> seenParserIds;
 
+    /// IDs of extern instances whose initializer (abstract-method) bodies were already scanned.
+    /// Avoids redundant descent when the same instance is executed multiple times.
+    std::set<int> seenInstanceIds;
+
     /// Specifies, which IR nodes to track with this particular visitor.
     P4::Coverage::CoverageOptions coverageOptions;
 

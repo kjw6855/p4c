@@ -64,6 +64,27 @@ bool CoverableNodesScanner::preorder(const IR::MethodCallExpression *call) {
             // Handle table calls.
             const auto *table = executionState.findTable(member);
             if (table == nullptr) {
+                // Not a table. It may be an extern method call (e.g. a Tofino
+                // RegisterAction.execute) whose instance supplies abstract-method bodies in its
+                // initializer block. The executor steps into that apply body, so lookahead-based
+                // path selection must collect its nodes too; otherwise it is blind to register
+                // reads/writes nested inside the extern and cannot steer toward them.
+                // Skip synthetic internal externs (path "*", produced by
+                // generateInternalMethodCall, e.g. copy_in/StartIngress) — they have no
+                // resolvable declaration and findDecl would raise a BUG.
+                const auto *instPath = member->expr->to<IR::PathExpression>();
+                if (instPath != nullptr && instPath->path->name != "*") {
+                    const auto *decl = executionState.findDecl(instPath);
+                    if (decl != nullptr) {
+                        if (const auto *declInst =
+                                decl->getNode()->to<IR::Declaration_Instance>()) {
+                            if (declInst->initializer != nullptr &&
+                                seenInstanceIds.emplace(declInst->clone_id).second) {
+                                declInst->initializer->apply_visitor_preorder(*this);
+                            }
+                        }
+                    }
+                }
                 return true;
             }
             TableUtils::TableProperties properties;
