@@ -136,6 +136,11 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// The SOChain being explored (set in run(), read in runImpl()).
     const P4StateDependency::DependencyGraphs::SOChain *currentChain = nullptr;
 
+    /// The current chain's sink table (the table whose key the SO value feeds), or nullptr for
+    /// chains without a Key sink. Set before Phase 1; used by pickSuccessor to prefer the sink
+    /// table's HIT branch so the table lookup actually matches in Phase 1.
+    const IR::P4Table *currentSinkTable_ = nullptr;
+
     /// Name of the current chain category (e.g. "Write Condition"), set in run().
     cstring currentChainName;
 

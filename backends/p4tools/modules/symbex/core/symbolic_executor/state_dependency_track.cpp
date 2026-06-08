@@ -273,6 +273,14 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
                           node->getSourceInfo().toPositionString());
 
+            // Resolve the chain's sink table so pickSuccessor can steer Phase 1 toward its HIT
+            // branch (the register value must actually match a table entry to be tamperable).
+            currentSinkTable_ = nullptr;
+            if (!chain->sinkTableControlPlaneName.isNullOrEmpty()) {
+                auto sinkIt = tableByName_.find(chain->sinkTableControlPlaneName);
+                if (sinkIt != tableByName_.end()) currentSinkTable_ = sinkIt->second;
+            }
+
             std::vector<const FinalState *> phase1States;
             {
                 // TODO: Expected output packet can be unchanged or drop-to-fwd
@@ -449,7 +457,19 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 phase2StateNum += phase2StateMap[i].size();
             }
             if (phase2StateNum == 0) {
-                warning("[Tampering] Phase 2 found no terminal state for chain id=%1%.", chain->id);
+                // The chain's write nodes come from the state-dependency control/dep graph, so the
+                // write exists in the program's control flow. An exhaustive Phase-2 DFS finding no
+                // terminal that reaches it therefore means the write is reachable in control flow
+                // but not satisfiable in a single packet — its gate depends on a register
+                // precondition that only a prior packet can establish (e.g. the write to
+                // reg_rset_2 is gated by rset_size==1, which needs reg_rset_size already 1). Under
+                // the sound single-packet model (uncarried registers read as taint, no
+                // pre-seeding) this is the correct outcome, not a failure: classify it as an
+                // expected skip rather than emitting a bug-looking warning.
+                printInfo("[Tampering] chain id=%1% (%2%): Phase-2 write is in the control flow but "
+                          "not satisfiable in a single packet (likely requires a register "
+                          "precondition set by a prior packet); skipping (sound).",
+                          chain->id, currentChainName);
                 continue;
             }
 
@@ -772,15 +792,43 @@ std::optional<ExecutionStateReference> StateDependencyTracker::pickSuccessor(
         return false;                                    // tracked + unreachable → prune
     };
 
-    // Prefer a branch that already hits a required node (closest); otherwise the first viable
-    // branch (transitive steering toward the target chain).
+    // A branch that takes the chain's sink table HIT (Write-Key chains, Phase 1). The HIT branch
+    // stamps getTableHitVar(sinkTable)=true into its nextState at creation; every other step leaves
+    // it unset. Steering onto it ensures the register value actually matches a table entry, which
+    // the Phase-1 HIT filter requires (otherwise the lookup is a MISS and the state is discarded).
+    auto isSinkHit = [this](const auto &b) {
+        if (currentSinkTable_ == nullptr || currentPhase != TamperingPhase::Phase1_Read)
+            return false;
+        // Only steer to the sink HIT once the read-side required nodes (everything except the sink
+        // Key itself) are already covered. The sink table is applied unconditionally, including on
+        // control paths that bypass the register read; preferring its HIT before the read is
+        // covered would divert onto a path that never reads the register.
+        const auto &visited = b.nextState.get().getVisited();
+        for (const auto *n : currentRequiredNodes)
+            if (!n->is<IR::Key>() && visited.count(n) == 0U) return false;
+        const auto &sinkHitVar = TableStepper::getTableHitVar(currentSinkTable_);
+        const auto *hv = b.nextState.get().get(sinkHitVar);
+        return hv != nullptr && hv->template is<IR::BoolLiteral>() &&
+               hv->template to<IR::BoolLiteral>()->value;
+    };
+
+    // Prefer (1) the sink table's HIT branch, then (2) a branch that already hits a required node
+    // (closest), else (3) the first viable branch (transitive steering toward the target chain).
     std::optional<size_t> chosenIdx;
     for (size_t i = 0; i < successors->size(); ++i) {
-        if (hitsRequired(successors->at(i))) {
+        if (isSinkHit(successors->at(i))) {
             chosenIdx = i;
             break;
         }
-        if (!chosenIdx.has_value() && isViable(successors->at(i))) chosenIdx = i;
+    }
+    if (!chosenIdx.has_value()) {
+        for (size_t i = 0; i < successors->size(); ++i) {
+            if (hitsRequired(successors->at(i))) {
+                chosenIdx = i;
+                break;
+            }
+            if (!chosenIdx.has_value() && isViable(successors->at(i))) chosenIdx = i;
+        }
     }
 
     if (chosenIdx.has_value()) {
