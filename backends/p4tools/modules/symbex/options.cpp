@@ -518,6 +518,9 @@ SymbexOptions::SymbexOptions()
             // filter in the test backend can match visited nodes.
             coverageOptions.coverStatements = true;
             coverageOptions.coverActions = true;
+            // Build the program DCG so the tampering tracker's directed-search
+            // reachability oracle (pickSuccessor branch pruning) is available.
+            dcg = true;
             return true;
         },
         "Build a dataflow dependency graph by using the state_dependency module."

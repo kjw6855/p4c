@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <optional>
 #include <set>
+#include <variant>
 #include <vector>
 
 #include "ir/ir.h"
@@ -17,6 +18,7 @@
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
+#include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/lib/logging.h"
@@ -265,6 +267,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 warning("[Tampering] Chain id=%1% has no readNodes; skipping.", chain->id);
                 continue;
             }
+            buildReachingSet();
             printInfo("[Tampering] Phase 1 (Read) — %1% required nodes", currentRequiredNodes.size());
             for (const auto *node : currentRequiredNodes)
                 printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
@@ -341,6 +344,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
                 warning("[Tampering] Chain id=%1% has no writeNodes; skipping.", chain->id);
                 continue;
             }
+            buildReachingSet();
             printInfo("[Tampering] Phase 2 (Write) — %1% required nodes", currentRequiredNodes.size());
             for (const auto *node : currentRequiredNodes)
                 printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
@@ -689,42 +693,107 @@ void StateDependencyTracker::runPhase(ExecutionState &phaseInit,
 // Guided DFS
 // ---------------------------------------------------------------------------
 
+void StateDependencyTracker::buildReachingSet() {
+    reachingSet_.clear();
+    reachingSetValid_ = false;
+    // getCallGraph() BUGs if no DCG was built; --state-dep enables the DCG. Degrade gracefully
+    // (legacy steering, no pruning) when it is absent.
+    if (!SymbexOptions::get().dcg) return;
+
+    const auto &dcg = programInfo.getCallGraph();
+    const auto &dcgNodes = dcg.getNodes();
+    const auto &inEdges = dcg.getInEdges();
+
+    std::vector<const IR::Node *> work;
+    auto seed = [&](const IR::Node *n) {
+        if (n == nullptr || dcgNodes.find(n) == dcgNodes.end()) return;
+        if (reachingSet_.insert(n).second) work.push_back(n);
+    };
+
+    // Seed from the required nodes that are control vertices in the DCG. RegisterAction-internal
+    // nodes (the apply Function / its body statements) are not DCG vertices and need no seed: they
+    // are reached transitively once the `.execute()` assignment (which IS a DCG vertex) is reached.
+    // IR::Key required nodes are not DCG vertices either; seed from the owning sink table instead.
+    for (const auto *req : currentRequiredNodes) {
+        if (req == nullptr) continue;
+        if (req->is<IR::Key>()) {
+            if (currentChain != nullptr) {
+                auto it = tableByName_.find(currentChain->sinkTableControlPlaneName);
+                if (it != tableByName_.end()) seed(it->second);
+            }
+            continue;
+        }
+        seed(req);
+    }
+    if (reachingSet_.empty()) return;  // no usable seed → keep legacy behaviour
+
+    // Backward BFS over predecessor edges: closure of all nodes that can reach a seed.
+    while (!work.empty()) {
+        const auto *n = work.back();
+        work.pop_back();
+        auto it = inEdges.find(n);
+        if (it == inEdges.end() || it->second == nullptr) continue;
+        for (const auto *pred : *it->second)
+            if (reachingSet_.insert(pred).second) work.push_back(pred);
+    }
+    reachingSetValid_ = true;
+}
+
 std::optional<ExecutionStateReference> StateDependencyTracker::pickSuccessor(
     StepResult successors) {
     if (successors->empty()) return std::nullopt;
     if (successors->size() == 1) return successors->at(0).nextState;
 
-    // Find the first branch that intersects currentRequiredNodes via potentialNodes
-    // or already-visited nodes.
+    // The IR node a branch is about to execute (nullptr if its next command is not an IR node).
+    auto branchNextNode = [](const auto &b) -> const IR::Node * {
+        auto cmdOpt = b.nextState.get().getNextCmd();
+        if (!cmdOpt.has_value()) return nullptr;
+        if (const auto *np = std::get_if<const IR::Node *>(&*cmdOpt)) return *np;
+        return nullptr;
+    };
+    // A branch already covers a required node via local lookahead or its visited set.
+    auto hitsRequired = [this](const auto &b) {
+        for (const auto *node : b.potentialNodes)
+            if (currentRequiredNodes.count(node) != 0U) return true;
+        for (const auto *node : b.nextState.get().getVisited())
+            if (currentRequiredNodes.count(node) != 0U) return true;
+        return false;
+    };
+    // Conservative viability: a branch is viable unless the reachability oracle proves its next
+    // (tracked) control node cannot reach any required node. Untracked/unknown next nodes are kept.
+    auto isViable = [&](const auto &b) {
+        if (!reachingSetValid_) return true;             // no oracle → never prune (legacy)
+        if (hitsRequired(b)) return true;                // already covers a required node
+        const auto *next = branchNextNode(b);
+        if (next == nullptr) return true;                // non-IR next command → can't reason
+        if (reachingSet_.count(next) != 0U) return true;  // transitively reaches the target
+        const auto &dcgNodes = programInfo.getCallGraph().getNodes();
+        if (dcgNodes.find(next) == dcgNodes.end()) return true;  // untracked node → keep
+        return false;                                    // tracked + unreachable → prune
+    };
+
+    // Prefer a branch that already hits a required node (closest); otherwise the first viable
+    // branch (transitive steering toward the target chain).
+    std::optional<size_t> chosenIdx;
     for (size_t i = 0; i < successors->size(); ++i) {
-        auto &branch = successors->at(i);
-        bool hits = false;
-
-        for (const auto *node : branch.potentialNodes) {
-            if (currentRequiredNodes.count(node) != 0U) {
-                hits = true;
-                break;
-            }
+        if (hitsRequired(successors->at(i))) {
+            chosenIdx = i;
+            break;
         }
-        if (!hits) {
-            for (const auto *node : branch.nextState.get().getVisited()) {
-                if (currentRequiredNodes.count(node) != 0U) {
-                    hits = true;
-                    break;
-                }
-            }
-        }
-
-        if (hits) {
-            auto chosen = branch;
-            successors->erase(successors->begin() + static_cast<ptrdiff_t>(i));
-            unexploredBranches.insert(unexploredBranches.end(), successors->begin(),
-                                      successors->end());
-            return chosen.nextState;
-        }
+        if (!chosenIdx.has_value() && isViable(successors->at(i))) chosenIdx = i;
     }
 
-    // No branch covers required nodes; pick at random and keep the rest.
+    if (chosenIdx.has_value()) {
+        auto chosen = successors->at(*chosenIdx);
+        successors->erase(successors->begin() + static_cast<ptrdiff_t>(*chosenIdx));
+        // Prune non-viable siblings: only branches that can still reach the target are kept on
+        // the backtrack stack, so the DFS no longer wanders subtrees that provably cannot.
+        for (auto &b : *successors)
+            if (isViable(b)) unexploredBranches.push_back(b);
+        return chosen.nextState;
+    }
+
+    // No viable branch (e.g. genuine dead end, or oracle unavailable): legacy random fallback.
     auto chosen = popRandomBranch(*successors);
     unexploredBranches.insert(unexploredBranches.end(), successors->begin(), successors->end());
     return chosen.nextState;

@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 #include "ir/ir.h"
@@ -116,6 +117,21 @@ class StateDependencyTracker : public SymbolicExecutor {
 
     /// IR nodes that the current chain requires the path to cover.
     P4::Coverage::CoverageSet currentRequiredNodes;
+
+    /// Directed-search reachability oracle: every IR node from which some node in
+    /// currentRequiredNodes is control-reachable (backward closure over the program DCG).
+    /// A branch whose next IR node is absent from this set provably cannot reach the target
+    /// chain and is pruned. Recomputed per phase by buildReachingSet().
+    std::unordered_set<const IR::Node *> reachingSet_;
+
+    /// True once reachingSet_ is a usable oracle for the current phase. When false (no DCG was
+    /// built, or a required-node seed could not be resolved to a DCG vertex), pickSuccessor
+    /// falls back to the legacy potentialNodes/visited steering and prunes nothing.
+    bool reachingSetValid_ = false;
+
+    /// Builds reachingSet_ from currentRequiredNodes via a single backward BFS over the program
+    /// DCG's predecessor edges. No-op (leaves reachingSetValid_ = false) when no DCG is available.
+    void buildReachingSet();
 
     /// The SOChain being explored (set in run(), read in runImpl()).
     const P4StateDependency::DependencyGraphs::SOChain *currentChain = nullptr;
