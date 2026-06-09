@@ -784,7 +784,22 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
                          // Bookkeeping, advance the packet temporary packet cursor.
                          localOffset += fieldWidth;
                      }
-                     unpackExpr = structExpr;
+                     // port_metadata is commonly declared as a *header* (e.g. Cerberus'
+                     // `header port_metadata`). Assigning a plain StructExpression to a header
+                     // lvalue trips the validity-count check in assignStructLike (target carries a
+                     // $valid bit, source carries none). Mirror ConvertStructExpr: hand back a
+                     // HeaderExpression with validity=true (unpacked port metadata is always
+                     // present) so the flattened valid-field counts match.
+                     if (structType->is<IR::Type_Header>()) {
+                         // structType field must be a Type_Header or null for a HeaderExpression
+                         // (HeaderExpression::validate); pass nullptr like abstract_execution_state
+                         // does — structTypeName is a Type_Name, which only StructExpression accepts.
+                         unpackExpr = new IR::HeaderExpression(structType, nullptr,
+                                                               structExpr->components,
+                                                               IR::BoolLiteral::get(true));
+                     } else {
+                         unpackExpr = structExpr;
+                     }
                  } else if (const auto *bitType = extractedType->to<IR::Type_Bits>()) {
                      // Recast the slice to the correct type.
                      if (bitType->isSigned) {
@@ -1065,8 +1080,12 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
              const auto *hashAlgoExpr = externDeclArgs->at(0)->expression;
              IR::IndexedVector<IR::Node> decls({externInstance});
              if (externDeclArgs->size() == 2) {
+                 // The custom CRC polynomial is the *second constructor* argument of the Hash
+                 // instance (e.g. Hash<W>(HashAlgorithm_t.CUSTOM, poly) hash), not an argument of
+                 // the .get(data) call — externArguments only holds `data` (index 0), so reading
+                 // externArguments.at(1) overruns it. Use externDeclArgs->at(1).
                  const auto *crcCustomPath =
-                     externInfo.externArguments.at(1)->expression->checkedTo<IR::PathExpression>();
+                     externDeclArgs->at(1)->expression->checkedTo<IR::PathExpression>();
                  const auto *crcDecl = stepper.state.findDecl(crcCustomPath);
                  decls.push_back(crcDecl->checkedTo<IR::Declaration_Instance>());
              }
