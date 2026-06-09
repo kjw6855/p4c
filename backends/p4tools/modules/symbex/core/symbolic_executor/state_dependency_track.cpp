@@ -110,6 +110,14 @@ P4::Coverage::CoverageSet StateDependencyTracker::buildRequiredNodes(
             if (currentPhase == TamperingPhase::Phase2_Write) {
                 for (const auto &[v, node] : chain.writeNodes)
                     if (node != nullptr) nodes.insert(node);
+            } else if (chain.isUpdate) {
+                // Update chains (read-modify-write in one action) have no separate read path:
+                // the register read lives inside the update (writeNodes), and readNodes is empty.
+                // For these, the read phase (Phase 1 baseline / Phase 3 replay) targets the
+                // update's writeNodes so Phase 1 runs the update from clean state and the sink
+                // HITs on the written value; the directed search + sink-HIT steering then apply.
+                for (const auto &[v, node] : chain.writeNodes)
+                    if (node != nullptr) nodes.insert(node);
             } else {
                 for (const auto &[v, node] : chain.readNodes)
                     if (node != nullptr) nodes.insert(node);
@@ -913,6 +921,15 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
             // write path — are still collected and emitted. --strict re-throws for debugging.
             if (SymbexOptions::get().strict) throw;
             warning("[SDTrack] Skipping path that triggered an internal error during guided "
+                    "DFS. Message: %1%\n", e.what());
+        } catch (const std::exception &e) {
+            // Some paths surface an unmodeled construct as a plain std::exception rather than a
+            // Util::CompilerBug — e.g. a std::out_of_range from a vector range-check inside a
+            // stepper (observed on multi-field sink-key / sketch-register paths). As above, a
+            // single unmodelable path must not abort the whole search: skip it and backtrack so
+            // the remaining (modelable) paths are still collected. --strict re-throws for debugging.
+            if (SymbexOptions::get().strict) throw;
+            warning("[SDTrack] Skipping path that triggered a std::exception during guided "
                     "DFS. Message: %1%\n", e.what());
         }
 
