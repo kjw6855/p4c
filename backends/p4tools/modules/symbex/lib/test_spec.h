@@ -379,6 +379,16 @@ class TamperingTestSpec {
     /// Empty (or register absent) for non-Key-sink chains.
     std::map<cstring, cstring> attackerRegisterSinkTables;
 
+    /// Tamper direction. false = HIT→MISS (Phase-1 sink HIT → Phase-3 MISS): emit hit_phase=1,
+    /// miss_phase=3. true = MISS→HIT (Phase-1 sink MISS → Phase-3 HIT): emit hit_phase=3,
+    /// miss_phase=1. Phase 3 is a dynamic deviation check for both directions (the validator
+    /// compares the Phase-3 output to the Phase-1 reference).
+    bool missToHit = false;
+
+    /// Human-readable case label (e.g. "MISS_TO_HIT/DROP_TO_FWD"), emitted as metadata. Empty for
+    /// HIT→MISS.
+    cstring caseLabel = ""_cs;
+
     TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, bool hasExit,
                       std::map<cstring, const TestObject *> attackerRegVals = {},
                       std::map<cstring, cstring> attackerRegSinkTables = {})

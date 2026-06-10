@@ -411,7 +411,10 @@ metadata: "Date generated: {{timestamp}}"
 metadata: "{{selected_branches}}"
 ## endif
 metadata: "Current node coverage: {{coverage}}"
-metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=dynamic (same as phase1)"
+metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=replay phase1 (dynamic deviation check)"
+## if length(tamper_case) > 0
+metadata: "Tamper case: {{tamper_case}}"
+## endif
 
 # --- Phase 1 (read) symbex trace ---
 ## for trace_item in trace
@@ -448,18 +451,12 @@ expected_output_packet {
 }
 ## endif
 
-# Phase 3: replay Phase 1 input — dynamic deviation check only
+# Phase 3: replay Phase 1 input — dynamic deviation check (the validator compares the Phase-3
+# output to Phase 1's reference to detect drop/port/byte divergence).
 input_packet {
   packet: "{{phase3_send.pkt}}"
   port: {{phase3_send.ig_port}}
 }
-## if phase3_verify
-expected_output_packet {
-  packet: "{{phase3_verify.exp_pkt}}"
-  port: {{phase3_verify.eg_port}}
-  packet_mask: "{{phase3_verify.ignore_mask}}"
-}
-## endif
 
 ## for reg in affected_registers
 affected_register {
@@ -468,8 +465,8 @@ affected_register {
   attacker_value: "{{reg.value}}"
 ## if existsIn(reg, "sink_table")
   sink_table: "{{reg.sink_table}}"
-  hit_phase: 1
-  miss_phase: 3
+  hit_phase: {{reg.hit_phase}}
+  miss_phase: {{reg.miss_phase}}
 ## endif
 }
 ## endfor
@@ -653,9 +650,9 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     dataJson["phase1_verify"] = getExpectedPacket(testSpec->spec1);
     dataJson["phase2_send"] = getSend(testSpec->spec2);
     dataJson["phase2_verify"] = getExpectedPacket(testSpec->spec2);
-    // Phase 3 replays Phase 1's input packet; expected output is determined dynamically.
+    // Phase 3 replays Phase 1's input packet; the validator detects the deviation dynamically.
     dataJson["phase3_send"] = getSend(testSpec->spec1);
-    dataJson["phase3_verify"] = false;
+    dataJson["tamper_case"] = testSpec->caseLabel.c_str();
 
     // Emit affected_register entries for each attacker-chosen write in Phase 2.
     inja::json affectedRegsJson = inja::json::array();
@@ -677,6 +674,10 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
             j["value"] = formatHexExpressionWithSeparators(*valConst);
             if (!sinkTableList.isNullOrEmpty()) {
                 j["sink_table"] = sinkTableList.c_str();
+                // HIT→MISS: sink HITs in Phase 1, MISSes after tamper in Phase 3.
+                // MISS→HIT: sink MISSes in Phase 1, HITs after tamper in Phase 3.
+                j["hit_phase"] = testSpec->missToHit ? 3 : 1;
+                j["miss_phase"] = testSpec->missToHit ? 1 : 3;
             }
             affectedRegsJson.push_back(j);
         }

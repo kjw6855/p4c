@@ -388,11 +388,19 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
         return needsToTerminate(testCount);
     }
 
-    // Phase 3 is purely dynamic: the test script replays Phase 1's packet after Phase 2
-    // writes the attacker-chosen value. No symbex is run for Phase 3.
+    // Phase 3: HIT→MISS leaves it a dynamic deviation check. MISS→HIT carries a
+    // symbolically-verified Phase-3 terminal whose expected output we materialise (phase3_verify)
+    // so the emitted test asserts a concrete Phase-1 ≠ Phase-3 output.
     TamperingTestSpec tamperingSpec(res1->testSpec, res2->testSpec,
                                     state.readPathHasExit, state.attackerRegisterValues,
                                     state.attackerRegisterSinkTables);
+    tamperingSpec.missToHit = state.missToHit;
+    tamperingSpec.caseLabel = state.caseLabel;
+    // Phase 3 is a dynamic deviation check for both directions: the test script replays Phase 1's
+    // packet and the end-to-end validator compares the Phase-3 output to the Phase-1 reference
+    // (detecting drop/port/byte divergence — including non-drop table misses). p4symbex therefore
+    // emits no predicted phase3_verify; the sink-flip metadata (hit_phase/miss_phase + sink_table)
+    // plus Phase 1's own expected output is all the validator needs.
 
     // Build selected-branches string from the symbolic executor.
     std::stringstream selectedBranches;

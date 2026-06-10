@@ -234,15 +234,6 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
     // allCovered can check whether a table's apply() was visited in visitedNodes.
     buildTableByNameMap();
 
-    // Helper: extract concrete (input, output) port pair from a final state
-    auto getPortPair = [&](const FinalState *fs) -> std::pair<int, int> {
-        const auto &model = fs->getFinalModel();
-        const auto *es = fs->getExecutionState();
-        int ip = IR::getIntFromLiteral(model.evaluate(es->get(programInfo.getTargetInputPortVar()),  true));
-        int op = IR::getIntFromLiteral(model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true));
-        return {ip, op};
-    };
-
     auto chains = collectChains();
 
     for (const auto &[chainName, chainList] : chains) {
@@ -256,416 +247,560 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             // Applied per chain (not globally) so every SOChain produces its own tests.
             // 0 means "unlimited": collect every valid Phase-1 × Phase-2 path.
             const size_t maxPerChain = static_cast<size_t>(SymbexOptions::get().maxTests);
+            runTamperingChain(*chain, initState, callBack, maxPerChain, /*missToHit=*/false);
+            runTamperingChain(*chain, initState, callBack, maxPerChain, /*missToHit=*/true);
+        }
+    }
+}
 
-            // Reset the incremental Z3 solver state between chains.  After the previous
-            // chain's Phase-2 DFS + processPhase() callback, p4Assertions contains that
-            // chain's complex write-path constraints (NEQ port/table conditions plus concolic
-            // assignments).  If left in place, Z3's accumulated heuristics (VSIDS scores,
-            // learned clauses) from the write-path exploration degrade solver performance for
-            // this chain's Phase-1 read-path queries, causing branches to be incorrectly
-            // pruned as unsatisfiable and leaving the DFS with no terminal state.
-            // checkSat({}) pops all outstanding assertions, resetting p4Assertions /
-            // checkpoints / declaredVarsById to empty so Phase 1 starts from a clean slate.
-            solver.checkSat({});
+// ---------------------------------------------------------------------------
+// Sink-state / disposition helpers
+// ---------------------------------------------------------------------------
 
-            // ---- Phase 1: read original register value ----
-            currentPhase = TamperingPhase::Phase1_Read;
-            currentRequiredNodes = buildRequiredNodes(*chain);
-            if (currentRequiredNodes.empty()) {
-                warning("[Tampering] Chain id=%1% has no readNodes; skipping.", chain->id);
-                continue;
+int StateDependencyTracker::evalSinkHit(const FinalState *fs) const {
+    if (currentSinkTable_ == nullptr) return -1;
+    const auto &hitVar = TableStepper::getTableHitVar(currentSinkTable_);
+    const auto *hitExpr = fs->getExecutionState()->get(hitVar);
+    // -1: the sink table was never applied on this path (e.g. the packet dropped earlier). Such a
+    // terminal cannot flip MISS→HIT under tampering, so the Phase-1 filter discards it (keeps only
+    // reached-and-MISS terminals). 0 = reached and MISSed, 1 = reached and HIT.
+    if (hitExpr == nullptr) return -1;
+    const auto *hitVal = fs->getFinalModel().evaluate(hitExpr, true);
+    const auto *hitBool = hitVal->to<IR::BoolLiteral>();
+    if (hitBool == nullptr) return -1;
+    return hitBool->value ? 1 : 0;
+}
+
+void StateDependencyTracker::evalDisposition(const FinalState *fs, bool &dropped,
+                                             int &outPort) const {
+    const auto *es = fs->getExecutionState();
+    // Mirrors runPhase's drop predicate: no output bytes or the drop property ⇒ dropped.
+    dropped = es->getPacketBufferSize() <= 0 || es->getProperty<bool>("drop"_cs);
+    outPort = -1;
+    if (dropped) return;
+    const auto *opExpr = es->get(programInfo.getTargetOutputPortVar());
+    if (opExpr == nullptr || Taint::hasTaint(opExpr)) {
+        // A tainted/unset egress port means the packet is dropped (see check_tofino_drop).
+        dropped = true;
+        return;
+    }
+    outPort = IR::getIntFromLiteral(fs->getFinalModel().evaluate(opExpr, true));
+}
+
+// ---------------------------------------------------------------------------
+// Per-chain three-phase scenario (both tamper directions; Phase 1/2 shared)
+// ---------------------------------------------------------------------------
+
+std::pair<int, int> StateDependencyTracker::getPortPair(const FinalState *fs) const {
+    const auto &model = fs->getFinalModel();
+    const auto *es = fs->getExecutionState();
+    int ip = IR::getIntFromLiteral(model.evaluate(es->get(programInfo.getTargetInputPortVar()), true));
+    int op = IR::getIntFromLiteral(model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true));
+    return {ip, op};
+}
+
+const FinalState *StateDependencyTracker::runSymbolicPhase3(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
+    const std::map<cstring, const TestObject *> &carriedRegs) {
+    const auto &model1 = fs1->getFinalModel();
+    const auto *p1PktExpr = fs1->getExecutionState()->getInputPacket();
+    const auto *p1PktSize = model1.evaluate(ExecutionState::getInputPacketSizeVar(), true);
+
+    currentPhase = TamperingPhase::Phase3_Read;
+    currentRequiredNodes = buildRequiredNodes(chain);
+    buildReachingSet();
+
+    auto &phase3Init = initState.clone();
+    // Pre-set the (tampered) register state the caller computed.
+    for (const auto &[regName, regObj] : carriedRegs)
+        phase3Init.addTestObject("registervalues"_cs, regName, regObj);
+
+    // Replay Phase 1's exact input. The accumulated input-packet expression is a Concat rooted at a
+    // zero-width constant (the initial empty packet), which Z3 cannot translate; so instead of
+    // constraining the whole expression we pin each pktvar_N *symbolic variable* it contains to its
+    // Phase-1 value. Cloning initState re-pulls the same pktvar_N in order, so this replays
+    // Phase-1's bytes (same register index + header-derived key fields).
+    std::function<void(const IR::Expression *)> pinPktVars = [&](const IR::Expression *e) {
+        if (e == nullptr) return;
+        if (const auto *sv = e->to<IR::SymbolicVariable>()) {
+            phase3Init.pushPathConstraint(new IR::Equ(sv, model1.evaluate(sv, true)));
+        } else if (const auto *cc = e->to<IR::Concat>()) {
+            pinPktVars(cc->left);
+            pinPktVars(cc->right);
+        } else if (const auto *sl = e->to<IR::Slice>()) {
+            pinPktVars(sl->e0);
+        }
+    };
+    pinPktVars(p1PktExpr);
+    phase3Init.pushPathConstraint(new IR::Equ(ExecutionState::getInputPacketSizeVar(), p1PktSize));
+    phase3Init.pushPathConstraint(
+        new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
+
+    std::vector<const FinalState *> phase3States;
+    {
+        // Carry registers (isPhase1=false ⇒ no zero-init); the sink uses its own entries.
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, ""_cs, {}, /*setRegTracking=*/true,
+                               /*isPhase1=*/false);
+        runPhase(phase3Init, phase3States, 1);
+    }
+    return phase3States.empty() ? nullptr : phase3States[0];
+}
+
+size_t StateDependencyTracker::runTamperingChain(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const TamperingCallback &callBack, size_t maxPerChain, bool missToHit) {
+    currentChain = &chain;
+
+    // Resolve the chain's sink table so pickSuccessor can steer Phase 1 toward/away from its HIT
+    // branch. MISS→HIT observes the flip there, so it needs a resolvable sink.
+    currentSinkTable_ = nullptr;
+    if (!chain.sinkTableControlPlaneName.isNullOrEmpty()) {
+        auto sinkIt = tableByName_.find(chain.sinkTableControlPlaneName);
+        if (sinkIt != tableByName_.end()) currentSinkTable_ = sinkIt->second;
+    }
+    if (missToHit && currentSinkTable_ == nullptr) return 0;
+
+    // Reset the incremental Z3 solver state between directions/chains. A previous Phase-2 DFS +
+    // processPhase() callback leaves write-path constraints in p4Assertions; Z3's accumulated
+    // heuristics would otherwise degrade this pass's Phase-1 read queries (branches wrongly pruned
+    // unsat). checkSat({}) pops all outstanding assertions so Phase 1 starts from a clean slate.
+    solver.checkSat({});
+
+    // ---- Phase 1: read the original register value ----
+    // HIT→MISS keeps terminals where the sink HIT; MISS→HIT keeps reached-sink-MISS baselines.
+    currentPhase = TamperingPhase::Phase1_Read;
+    currentRequiredNodes = buildRequiredNodes(chain);
+    if (currentRequiredNodes.empty()) {
+        if (!missToHit) warning("[Tampering] Chain id=%1% has no readNodes; skipping.", chain.id);
+        return 0;
+    }
+    buildReachingSet();
+    if (!missToHit) {
+        printInfo("[Tampering] Phase 1 (Read) — %1% required nodes", currentRequiredNodes.size());
+        for (const auto *node : currentRequiredNodes)
+            printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
+                      node->getSourceInfo().toPositionString());
+    }
+
+    std::vector<const FinalState *> phase1States;
+    {
+        // HIT→MISS forwards (outputPacketOnly) and steers toward the sink HIT. MISS→HIT allows drop
+        // terminals (drop→fwd) and disables the HIT steering (seekMiss_) so it lands on MISS
+        // baselines; it collects a small diverse set since only some sink-key combinations flip.
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/!missToHit, ""_cs, {}, /*setRegTracking=*/true,
+                               /*isPhase1=*/true);
+        seekMiss_ = missToHit;
+        const size_t phase1Cap =
+            missToHit ? std::max<size_t>(4, std::min<size_t>(maxPerChain * 2, 8)) : maxPerChain;
+        auto &phase1Init = initState.clone();
+        runPhase(phase1Init, phase1States, phase1Cap);
+        seekMiss_ = false;
+    }
+
+    if (missToHit) {
+        // Keep only reached-and-MISS terminals (the flippable baselines).
+        phase1States.erase(
+            std::remove_if(phase1States.begin(), phase1States.end(),
+                           [this](const FinalState *fs) { return evalSinkHit(fs) != 0; }),
+            phase1States.end());
+    } else if (!chain.sinkTableControlPlaneName.isNullOrEmpty()) {
+        // Keep only Phase 1 states where the sink table HIT. evalTableControlEntries sets
+        // tableHitVar to a concrete true/false in each branch; addDefaultAction (miss path) sets it
+        // to false. We evaluate the value from the final model and discard miss states.
+        auto tblIt = tableByName_.find(chain.sinkTableControlPlaneName);
+        if (tblIt != tableByName_.end()) {
+            const auto &hitVar = TableStepper::getTableHitVar(tblIt->second);
+            phase1States.erase(
+                std::remove_if(phase1States.begin(), phase1States.end(),
+                               [&hitVar](const FinalState *fs) {
+                                   const auto *hitExpr = fs->getExecutionState()->get(hitVar);
+                                   if (hitExpr == nullptr) return true;
+                                   const auto *hitVal = fs->getFinalModel().evaluate(hitExpr, true);
+                                   const auto *hitBool = hitVal->to<IR::BoolLiteral>();
+                                   return hitBool == nullptr || !hitBool->value;
+                               }),
+                phase1States.end());
+        }
+    }
+    if (phase1States.empty()) {
+        if (!missToHit)
+            warning("[Tampering] Phase 1 found no terminal state for chain id=%1%.", chain.id);
+        return 0;
+    }
+    if (missToHit)
+        printInfo("[Tampering MISS→HIT] chain id=%1% (%2%): %3% Phase-1 MISS terminal(s)", chain.id,
+                  chain.soName, phase1States.size());
+
+    // Build deduplicated PhaseConditions (port pair + table key values) for Phase 1.
+    std::vector<PhaseConditions> phase1Conditions;
+    std::map<size_t, size_t> phase1StateToCondition;
+    const IR::Expression *inputPortSymExpr = nullptr;
+    for (size_t i = 0; i < phase1States.size(); ++i) {
+        const auto *fs1 = phase1States[i];
+        inputPortSymExpr = fs1->getExecutionState()->get(programInfo.getTargetInputPortVar());
+        auto cond = buildPhaseCondition(*fs1, programInfo);
+        if (!missToHit) {
+            // HIT→MISS Phase-1 always forwards, so ports are concrete and valid. (MISS→HIT may keep
+            // dropped baselines with no output port, so these checks/logs are skipped there.)
+            BUG_CHECK(cond.inputPort >= 0, "Phase 1 invalid input port %1%", cond.inputPort);
+            BUG_CHECK(cond.outputPort >= 0, "Phase 1 invalid output port %1%", cond.outputPort);
+            if (SymbexOptions::get().distinctIOPorts) {
+                BUG_CHECK(cond.inputPort != cond.outputPort,
+                          "Phase 1 identical input/output ports %1%", cond.inputPort);
             }
-            buildReachingSet();
-            printInfo("[Tampering] Phase 1 (Read) — %1% required nodes", currentRequiredNodes.size());
-            for (const auto *node : currentRequiredNodes)
-                printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
-                          node->getSourceInfo().toPositionString());
+        }
+        auto it = std::find(phase1Conditions.begin(), phase1Conditions.end(), cond);
+        size_t idx;
+        if (it == phase1Conditions.end()) {
+            idx = phase1Conditions.size();
+            phase1Conditions.push_back(cond);
+            if (!missToHit)
+                printInfo("[Tampering] Phase 1 chose input_port=%1% output_port=%2%", cond.inputPort,
+                          cond.outputPort);
+        } else {
+            idx = static_cast<size_t>(std::distance(phase1Conditions.begin(), it));
+        }
+        phase1StateToCondition[i] = idx;
+    }
 
-            // Resolve the chain's sink table so pickSuccessor can steer Phase 1 toward its HIT
-            // branch (the register value must actually match a table entry to be tamperable).
-            currentSinkTable_ = nullptr;
-            if (!chain->sinkTableControlPlaneName.isNullOrEmpty()) {
-                auto sinkIt = tableByName_.find(chain->sinkTableControlPlaneName);
-                if (sinkIt != tableByName_.end()) currentSinkTable_ = sinkIt->second;
-            }
+    // ---- Phase 2: write the tampered value (shared by both directions) ----
+    currentPhase = TamperingPhase::Phase2_Write;
+    currentRequiredNodes = buildRequiredNodes(chain);
+    if (currentRequiredNodes.empty()) {
+        if (!missToHit) warning("[Tampering] Chain id=%1% has no writeNodes; skipping.", chain.id);
+        return 0;
+    }
+    buildReachingSet();
+    if (!missToHit) {
+        printInfo("[Tampering] Phase 2 (Write) — %1% required nodes", currentRequiredNodes.size());
+        for (const auto *node : currentRequiredNodes)
+            printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
+                      node->getSourceInfo().toPositionString());
+    }
 
-            std::vector<const FinalState *> phase1States;
-            {
-                // TODO: Expected output packet can be unchanged or drop-to-fwd
-                // isPhase1=true: zero-init registers so Z3 models hardware initial state (all-0).
-                ScopedSymbexOpts guard(/*outputPacketOnly=*/true, ""_cs, {}, /*setRegTracking=*/true,
-                                       /*isPhase1=*/true);
-                auto &phase1Init = initState.clone();
-                runPhase(phase1Init, phase1States, maxPerChain);
-            }
-            // Keep only Phase 1 states where the sink table HIT.
-            // evalTableControlEntries sets tableHitVar to a concrete true/false in each
-            // branch; addDefaultAction (miss path) sets it to false.  We evaluate the
-            // value from the final model and discard miss states.
-            if (!chain->sinkTableControlPlaneName.isNullOrEmpty()) {
-                auto tblIt = tableByName_.find(chain->sinkTableControlPlaneName);
-                if (tblIt != tableByName_.end()) {
-                    const auto &hitVar = TableStepper::getTableHitVar(tblIt->second);
-                    phase1States.erase(
-                        std::remove_if(phase1States.begin(), phase1States.end(),
-                            [&hitVar](const FinalState *fs) {
-                                const auto *hitExpr =
-                                    fs->getExecutionState()->get(hitVar);
-                                if (hitExpr == nullptr) return true;
-                                const auto *hitVal =
-                                    fs->getFinalModel().evaluate(hitExpr, true);
-                                const auto *hitBool = hitVal->to<IR::BoolLiteral>();
-                                return hitBool == nullptr || !hitBool->value;
-                            }),
-                        phase1States.end());
-                }
-            }
-            if (phase1States.empty()) {
-                warning("[Tampering] Phase 1 found no terminal state for chain id=%1%.", chain->id);
-                continue;
-            }
+    std::map<size_t, std::vector<const FinalState *>> phase2StateMap;
+    size_t phase2StateNum = 0;
+    for (size_t i = 0; i < phase1Conditions.size(); ++i) {
+        const auto &cond1 = phase1Conditions[i];
 
-            // Build deduplicated PhaseConditions (port pair + table key values) for Phase 1.
-            std::vector<PhaseConditions> phase1Conditions;
-            std::map<size_t, size_t> phase1StateToCondition;
-            const IR::Expression *inputPortSymExpr = nullptr;
+        // Find a representative Phase 1 state for this condition bucket (used to extract the
+        // evaluated TableConfig for size-1 tables below).
+        const FinalState *repPhase1State = nullptr;
+        for (size_t k = 0; k < phase1States.size(); ++k) {
+            if (phase1StateToCondition[k] == i) {
+                repPhase1State = phase1States[k];
+                break;
+            }
+        }
 
-            for (size_t i = 0; i < phase1States.size(); ++i) {
+        // Identify size-1 tables whose single slot was already consumed by Phase 1. Phase 2 must
+        // not synthesize a new (different) entry for these; instead Phase 1's pre-existing entry is
+        // injected into phase2Init so Phase 2 evaluates it as HIT/MISS without a second entry.
+        std::vector<cstring> size1Tables;
+        for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+            auto tblIt = tableByName_.find(tblName);
+            if (tblIt == tableByName_.end()) continue;
+            const auto *sizeConst = tblIt->second->getSizeProperty();
+            if (sizeConst != nullptr && sizeConst->asInt() == 1) {
+                size1Tables.push_back(tblName);
+                printInfo("[Tampering] Phase 2: size-1 table '%1%': reusing Phase 1 entry "
+                          "(no new entry generated)",
+                          tblName);
+            }
+        }
+
+        // Exclude the sink table from Phase 2's synthesized entries (its entries belong to Phase
+        // 1/3), plus size-1 tables whose slot is already occupied by Phase 1's entry.
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, chain.sinkTableControlPlaneName,
+                               size1Tables);
+        auto &phase2Init = initState.clone();
+
+        if (repPhase1State != nullptr) {
+            const auto &model1 = repPhase1State->getFinalModel();
+            const auto *es1 = repPhase1State->getExecutionState();
+            // Inject Phase 1's evaluated TableConfig for each size-1 table so evalTableConstEntries
+            // can evaluate a pre-existing entry rather than creating a fresh symbolic one.
+            for (const auto &tblName : size1Tables) {
+                const auto *tblObj =
+                    es1->getTestObject("tableconfigs"_cs, tblName, /*checked=*/false);
+                if (tblObj == nullptr) continue;
+                const auto *evalCfg =
+                    tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
+                if (evalCfg != nullptr)
+                    phase2Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+            }
+            // Carry Phase 1's register writes into Phase 2's initial state: hardware runs Phase 1 →
+            // Phase 2 on the same device without clearing registers, so Phase 2 reads what Phase 1
+            // wrote. evaluateForCarry folds those writes into the register's initialValue.
+            for (const auto &[regName, regObj] :
+                 es1->getTestObjectCategory("registervalues"_cs)) {
+                const auto *carried = regObj->evaluateForCarry(model1);
+                phase2Init.addTestObject("registervalues"_cs, regName, carried);
+            }
+        }
+
+        // Constrain Phase 2's input port to differ from Phase 1's input AND output.
+        phase2Init.pushPathConstraint(new IR::Neq(
+            inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
+        phase2Init.pushPathConstraint(new IR::Neq(
+            inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
+        // Constrain Phase 2's table match keys to differ from Phase 1's (compatible, coexisting
+        // entries). Skip size-1 tables: their entry is pre-injected.
+        const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
+        for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+            if (size1Set.count(tblName) > 0) continue;
+            for (const auto &[keyName, match] : keyMap) {
+                phase2Init.pushPathConstraint(match->buildTableKeyNeqConstraint(tblName, keyName));
+            }
+        }
+        runPhase(phase2Init, phase2StateMap[i], maxPerChain);
+        phase2StateNum += phase2StateMap[i].size();
+    }
+    if (phase2StateNum == 0) {
+        // The write nodes come from the dep graph, so the write exists in control flow. An
+        // exhaustive Phase-2 DFS finding no terminal means the write is reachable but not
+        // satisfiable in a single packet (its gate depends on a register precondition only a prior
+        // packet can set). Under the sound single-packet model this is the correct outcome.
+        printInfo("[Tampering] chain id=%1% (%2%): Phase-2 write is in the control flow but not "
+                  "satisfiable in a single packet (likely requires a register precondition set by a "
+                  "prior packet); skipping (sound).",
+                  chain.id, currentChainName);
+        return 0;
+    }
+
+    // ---- Phase 3 (HIT→MISS): dynamic — the test script replays Phase 1's packet ----
+    if (!missToHit) {
+        // Log Phase 2 port pairs (deduplicated per Phase-1 condition bucket).
+        for (size_t i = 0; i < phase1Conditions.size(); ++i) {
+            const auto &cond1 = phase1Conditions[i];
+            for (const auto *fs2 : phase2StateMap.at(i)) {
+                auto portPair = getPortPair(fs2);
+                printInfo("[Tampering] Phase 2 chose input_port=%1% output_port=%2% from Phase 1 "
+                          "ports %3%/%4%",
+                          portPair.first, portPair.second, cond1.inputPort, cond1.outputPort);
+            }
+        }
+
+        // Round-robin emission across Phase-1 states so the per-chain cap never starves a later
+        // Phase-1 read-state: every Phase-1 state contributes one sub-test before any gets a second.
+        size_t subTestId = 0;
+        std::vector<size_t> cursor(phase1States.size(), 0);
+        bool chainCapHit = false;
+        while (!chainCapHit) {
+            bool emittedThisRound = false;
+            for (size_t i = 0; i < phase1States.size() && !chainCapHit; ++i) {
+                auto &fs2List = phase2StateMap.at(phase1StateToCondition.at(i));
+                if (cursor[i] >= fs2List.size()) continue;  // Phase-1 state exhausted
                 const auto *fs1 = phase1States[i];
-                inputPortSymExpr = fs1->getExecutionState()->get(programInfo.getTargetInputPortVar());
-                auto cond = buildPhaseCondition(*fs1, programInfo);
-                BUG_CHECK(cond.inputPort >= 0,  "Phase 1 invalid input port %1%",  cond.inputPort);
-                BUG_CHECK(cond.outputPort >= 0, "Phase 1 invalid output port %1%", cond.outputPort);
-                if (SymbexOptions::get().distinctIOPorts) {
-                    BUG_CHECK(cond.inputPort != cond.outputPort,
-                              "Phase 1 identical input/output ports %1%", cond.inputPort);
-                }
-                auto it = std::find(phase1Conditions.begin(), phase1Conditions.end(), cond);
-                size_t idx;
-                if (it == phase1Conditions.end()) {
-                    idx = phase1Conditions.size();
-                    phase1Conditions.push_back(cond);
-                    printInfo("[Tampering] Phase 1 chose input_port=%1% output_port=%2%",
-                              cond.inputPort, cond.outputPort);
-                } else {
-                    idx = static_cast<size_t>(std::distance(phase1Conditions.begin(), it));
-                }
-                phase1StateToCondition[i] = idx;
-            }
-
-            // ---- Phase 2: write tampered value ----
-            currentPhase = TamperingPhase::Phase2_Write;
-            currentRequiredNodes = buildRequiredNodes(*chain);
-            if (currentRequiredNodes.empty()) {
-                warning("[Tampering] Chain id=%1% has no writeNodes; skipping.", chain->id);
-                continue;
-            }
-            buildReachingSet();
-            printInfo("[Tampering] Phase 2 (Write) — %1% required nodes", currentRequiredNodes.size());
-            for (const auto *node : currentRequiredNodes)
-                printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
-                          node->getSourceInfo().toPositionString());
-
-            // Store phase2States per phase1 condition bucket
-            std::map<size_t, std::vector<const FinalState *>> phase2StateMap;
-            size_t phase2StateNum = 0;
-
-            for (size_t i = 0; i < phase1Conditions.size(); ++i) {
-                const auto &cond1 = phase1Conditions[i];
-
-                // Find a representative Phase 1 state for this condition bucket (used to
-                // extract the evaluated TableConfig for size-1 tables below).
-                const FinalState *repPhase1State = nullptr;
-                for (size_t k = 0; k < phase1States.size(); ++k) {
-                    if (phase1StateToCondition[k] == i) {
-                        repPhase1State = phase1States[k];
-                        break;
-                    }
-                }
-
-                // Identify size-1 tables whose single slot was already consumed by Phase 1.
-                // Phase 2 must not synthesize a new (different) entry for these tables; instead
-                // Phase 1's pre-existing entry is injected into phase2Init so that Phase 2
-                // evaluates it as HIT or MISS without generating a second control-plane entry.
-                std::vector<cstring> size1Tables;
-                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
-                    auto tblIt = tableByName_.find(tblName);
-                    if (tblIt == tableByName_.end()) continue;
-                    const auto *sizeConst = tblIt->second->getSizeProperty();
-                    if (sizeConst != nullptr && sizeConst->asInt() == 1) {
-                        size1Tables.push_back(tblName);
-                        printInfo("[Tampering] Phase 2: size-1 table '%1%': "
-                                  "reusing Phase 1 entry (no new entry generated)", tblName);
-                    }
-                }
-
-                // Exclude the sink table from Phase 2's synthesized entries: the attacker's
-                // write packet must not install a control-plane entry in the very table that
-                // reads the tampered register value, as that entry would belong to Phase 1/3.
-                // Also exclude size-1 tables whose slot is already occupied by Phase 1's entry.
-                ScopedSymbexOpts guard(/*outputPacketOnly=*/false, chain->sinkTableControlPlaneName,
-                                       size1Tables);
-                auto &phase2Init = initState.clone();
-
-                // Inject Phase 1's evaluated TableConfig for each size-1 table into Phase 2's
-                // initial state so that evalTableConstEntries() can evaluate it as a
-                // pre-existing entry (HIT/MISS) rather than creating a fresh symbolic entry.
-                if (repPhase1State != nullptr) {
-                    const auto &model1 = repPhase1State->getFinalModel();
-                    const auto *es1 = repPhase1State->getExecutionState();
-                    for (const auto &tblName : size1Tables) {
-                        const auto *tblObj =
-                            es1->getTestObject("tableconfigs"_cs, tblName, /*checked=*/false);
-                        if (tblObj == nullptr) continue;
-                        const auto *evalCfg =
-                            tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
-                        if (evalCfg != nullptr)
-                            // Use a separate category so this entry is visible to
-                            // evalTablePreExistingConfig but not emitted in Phase 2's test output
-                            // (processPhase only reads "tableconfigs").
-                            phase2Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
-                    }
-
-                    // Carry Phase 1's register writes into Phase 2's initial state. Hardware
-                    // runs Phase 1 → Phase 2 on the same device without clearing registers
-                    // between phases, so Phase 2 reads whatever Phase 1 wrote. Without this,
-                    // each runPhase zero-inits registers and Phase 2 accepts write paths gated
-                    // on a prior register value Phase 1 actually determined (e.g.
-                    // set_key_if_not_active's `prev != 0` gate depends on the access_bit that
-                    // Phase 1's check_key set). evaluateForCarry() folds Phase 1's writes into
-                    // the register's initialValue so initializeRegisterParameters resolves the
-                    // Phase-2 read to the post-Phase-1 contents, matching hardware and pruning
-                    // unreachable write paths.
-                    for (const auto &[regName, regObj] :
-                             es1->getTestObjectCategory("registervalues"_cs)) {
-                        const auto *carried = regObj->evaluateForCarry(model1);
-                        phase2Init.addTestObject("registervalues"_cs, regName, carried);
-                    }
-                }
-
-                // Constrain Phase 2's input port to differ from Phase 1's input AND output
-                phase2Init.pushPathConstraint(
-                    new IR::Neq(inputPortSymExpr,
-                                IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
-                phase2Init.pushPathConstraint(
-                    new IR::Neq(inputPortSymExpr,
-                                IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
-                // Constrain Phase 2's table match keys to differ from Phase 1's, so the two
-                // phases produce compatible (non-conflicting) table entries that can coexist.
-                // Skip size-1 tables: their entry is pre-injected and no new Neq is needed.
-                const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
-                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
-                    if (size1Set.count(tblName) > 0) continue;
-                    for (const auto &[keyName, match] : keyMap) {
-                        phase2Init.pushPathConstraint(
-                            match->buildTableKeyNeqConstraint(tblName, keyName));
-                    }
-                }
-                runPhase(phase2Init, phase2StateMap[i], maxPerChain);
-                phase2StateNum += phase2StateMap[i].size();
-            }
-            if (phase2StateNum == 0) {
-                // The chain's write nodes come from the state-dependency control/dep graph, so the
-                // write exists in the program's control flow. An exhaustive Phase-2 DFS finding no
-                // terminal that reaches it therefore means the write is reachable in control flow
-                // but not satisfiable in a single packet — its gate depends on a register
-                // precondition that only a prior packet can establish (e.g. the write to
-                // reg_rset_2 is gated by rset_size==1, which needs reg_rset_size already 1). Under
-                // the sound single-packet model (uncarried registers read as taint, no
-                // pre-seeding) this is the correct outcome, not a failure: classify it as an
-                // expected skip rather than emitting a bug-looking warning.
-                printInfo("[Tampering] chain id=%1% (%2%): Phase-2 write is in the control flow but "
-                          "not satisfiable in a single packet (likely requires a register "
-                          "precondition set by a prior packet); skipping (sound).",
-                          chain->id, currentChainName);
-                continue;
-            }
-
-            // Log Phase 2 port pairs (deduplicated per Phase-1 condition bucket)
-            for (size_t i = 0; i < phase1Conditions.size(); ++i) {
-                const auto &cond1 = phase1Conditions[i];
-                for (const auto *fs2 : phase2StateMap[i]) {
-                    auto portPair = getPortPair(fs2);
-                    printInfo("[Tampering] Phase 2 chose input_port=%1% output_port=%2% from Phase 1 ports %3%/%4%",
-                                portPair.first, portPair.second, cond1.inputPort, cond1.outputPort);
-                }
-            }
-
-            // ---- Phase 3: dynamic (no symbex — test script replays Phase 1's packet) ----
-            // Round-robin emission across Phase-1 states so the per-chain cap
-            // (maxPerChain) never starves a later Phase-1 read-state: every Phase-1
-            // state contributes at least one sub-test before any state gets a second.
-            // The discriminating write path (the one that actually drives the register
-            // write) may only be reachable under a specific Phase-1 read-state, so
-            // draining the whole budget on the first state's Phase-2 paths could
-            // otherwise skip it entirely.
-            size_t subTestId = 0;
-            std::vector<size_t> cursor(phase1States.size(), 0);
-            bool chainCapHit = false;
-            while (!chainCapHit) {
-                bool emittedThisRound = false;
-                for (size_t i = 0; i < phase1States.size() && !chainCapHit; ++i) {
-                    auto &fs2List = phase2StateMap[phase1StateToCondition[i]];
-                    if (cursor[i] >= fs2List.size()) continue;  // Phase-1 state exhausted
-                    const auto *fs1 = phase1States[i];
-                    const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
-                    const auto *fs2 = fs2List[cursor[i]++];
-                    emittedThisRound = true;
-                    // Derive attacker-chosen register values from Phase 2.
-                    // withAttackerValues() is called on the *unevaluated* register object so
-                    // that symbolic write expressions are still available to build constraints.
-                    // It returns (a) the register seeded with concrete attacker-chosen values
-                    // and (b) model overrides applied to processPhase(phase2) so the emitted
-                    // Phase 2 input packet shows the attacker-chosen value.
-                    std::map<cstring, const TestObject *> attackerRegValues;
-                    std::map<cstring, cstring> attackerRegSinkTables;
-                    std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
-                        phase2ModelOverrides;
-                    // Collect the Phase-1 key value for only the specific sink-table key
-                    // that the register value flows into (sinkKeyName at sinkTableControlPlaneName).
-                    // The attacker-chosen register value must MISS exactly at that key in Phase 3.
-                    std::vector<big_int> forbiddenValues;
-                    const cstring sinkTableJoined = chain->sinkTableControlPlaneName;
-                    if (!sinkTableJoined.isNullOrEmpty() && !chain->sinkKeyName.isNullOrEmpty()) {
-                        auto tblIt = cond1.tableKeyMap.find(sinkTableJoined);
-                        if (tblIt != cond1.tableKeyMap.end()) {
-                            auto keyIt = tblIt->second.find(chain->sinkKeyName);
-                            if (keyIt != tblIt->second.end()) {
-                                const auto *reprVal = keyIt->second->getRepresentativeValue();
-                                if (reprVal != nullptr)
-                                    forbiddenValues.push_back(reprVal->value);
-                            }
+                const auto &cond1 = phase1Conditions[phase1StateToCondition.at(i)];
+                const auto *fs2 = fs2List[cursor[i]++];
+                emittedThisRound = true;
+                // Derive attacker-chosen register values from Phase 2 (on the *unevaluated* register
+                // object so symbolic write expressions remain available for constraints).
+                std::map<cstring, const TestObject *> attackerRegValues;
+                std::map<cstring, cstring> attackerRegSinkTables;
+                std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
+                    phase2ModelOverrides;
+                // The attacker-chosen register value must MISS exactly at the sink key the register
+                // flows into (sinkKeyName at sinkTableControlPlaneName) when Phase 3 replays Phase 1.
+                std::vector<big_int> forbiddenValues;
+                const cstring sinkTableJoined = chain.sinkTableControlPlaneName;
+                if (!sinkTableJoined.isNullOrEmpty() && !chain.sinkKeyName.isNullOrEmpty()) {
+                    auto tblIt = cond1.tableKeyMap.find(sinkTableJoined);
+                    if (tblIt != cond1.tableKeyMap.end()) {
+                        auto keyIt = tblIt->second.find(chain.sinkKeyName);
+                        if (keyIt != tblIt->second.end()) {
+                            const auto *reprVal = keyIt->second->getRepresentativeValue();
+                            if (reprVal != nullptr) forbiddenValues.push_back(reprVal->value);
                         }
                     }
-                    for (const auto &[regName, regObj] :
-                             fs2->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
-                        if (regName != chain->soName) continue;
-                        auto [attackerValue, overrides] =
-                            regObj->withAttackerValues(fs2->getFinalModel(),
-                                                       SymbexOptions::get().stateTamperValue,
-                                                       forbiddenValues);
-                        attackerRegValues[regName] = attackerValue;
-                        if (!sinkTableJoined.isNullOrEmpty()) {
-                            attackerRegSinkTables[regName] = sinkTableJoined;
-                        }
-                        phase2ModelOverrides.insert(phase2ModelOverrides.end(),
-                                                    overrides.begin(), overrides.end());
-                        for (const auto &[symVar, val] : overrides) {
-                            printInfo("[Tampering] Phase 2 register override: "
-                                      "register='%1%' symVar='%2%' value=0x%3%",
-                                      regName, symVar->label,
-                                      val->value.str(0, std::ios_base::hex));
-                        }
-                        if (overrides.empty()) {
-                            printInfo("[Tampering] Phase 3 register '%1%': "
-                                      "no symbolic var found — value not injectable into Phase 2 packet",
-                                      regName);
-                        }
+                }
+                for (const auto &[regName, regObj] :
+                     fs2->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
+                    if (regName != chain.soName) continue;
+                    auto [attackerValue, overrides] = regObj->withAttackerValues(
+                        fs2->getFinalModel(), SymbexOptions::get().stateTamperValue, forbiddenValues);
+                    attackerRegValues[regName] = attackerValue;
+                    if (!sinkTableJoined.isNullOrEmpty()) attackerRegSinkTables[regName] = sinkTableJoined;
+                    phase2ModelOverrides.insert(phase2ModelOverrides.end(), overrides.begin(),
+                                                overrides.end());
+                    for (const auto &[symVar, val] : overrides) {
+                        printInfo("[Tampering] Phase 2 register override: register='%1%' symVar='%2%' "
+                                  "value=0x%3%",
+                                  regName, symVar->label, val->value.str(0, std::ios_base::hex));
                     }
-                    if (attackerRegValues.empty()) {
-                        warning("[Tampering] No register matching '%1%' found in Phase 2 state "
-                                "for chain id=%2%; skipping.", chain->soName, chain->id);
-                        continue;
+                    if (overrides.empty()) {
+                        printInfo("[Tampering] Phase 3 register '%1%': no symbolic var found — value "
+                                  "not injectable into Phase 2 packet",
+                                  regName);
                     }
-                    auto [ip2, op2] = getPortPair(fs2);
+                }
+                if (attackerRegValues.empty()) {
+                    warning("[Tampering] No register matching '%1%' found in Phase 2 state for chain "
+                            "id=%2%; skipping.",
+                            chain.soName, chain.id);
+                    continue;
+                }
+                auto [ip2, op2] = getPortPair(fs2);
 
-                    // Build selective NEQ constraints for Phase 1's re-solve in processPhase.
-                    // These prevent Z3 from assigning Phase 1's packet fields / control-plane
-                    // keys to the same concrete values Phase 2 already used, which would
-                    // create conflicting table entries or cause Phase 1 to unexpectedly hit
-                    // a Phase 2-installed entry at runtime.
-                    std::vector<const IR::Expression *> p1ExtraConstraints;
-                    {
-                        auto cond2 = buildPhaseCondition(*fs2, programInfo);
-                        // Re-derive the set of size-1 tables for this condition bucket
-                        // so we can skip them (their entry is shared via preexisting_tableconfigs).
-                        std::set<cstring> size1Set;
-                        for (const auto &[tblName, _km] : cond1.tableKeyMap) {
-                            auto tblIt = tableByName_.find(tblName);
-                            if (tblIt == tableByName_.end()) continue;
-                            const auto *sizeConst = tblIt->second->getSizeProperty();
-                            if (sizeConst != nullptr && sizeConst->asInt() == 1)
-                                size1Set.insert(tblName);
-                        }
-                        for (const auto &[tblName, keyMap2] : cond2.tableKeyMap) {
-                            // Skip tables already handled by the pre-existing-configs mechanism
-                            // or tables Phase 2 was explicitly prohibited from entering.
-                            if (size1Set.count(tblName) > 0 ||
-                                    tblName == chain->sinkTableControlPlaneName)
-                                continue;
-                            for (const auto &[keyName, match2] : keyMap2) {
-                                if (cond1.tableKeyMap.count(tblName) > 0) {
-                                    // Phase 1 HIT this table: prevent the re-solve from picking
-                                    // the same control-plane key as Phase 2 (conflicting entries).
+                // Build selective NEQ constraints for Phase 1's re-solve in processPhase, preventing
+                // Z3 from reassigning Phase 1's packet fields / control-plane keys to Phase 2's
+                // values (which would create conflicting entries or unexpected Phase-1 hits).
+                std::vector<const IR::Expression *> p1ExtraConstraints;
+                {
+                    auto cond2 = buildPhaseCondition(*fs2, programInfo);
+                    std::set<cstring> size1Set;
+                    for (const auto &[tblName, _km] : cond1.tableKeyMap) {
+                        auto tblIt = tableByName_.find(tblName);
+                        if (tblIt == tableByName_.end()) continue;
+                        const auto *sizeConst = tblIt->second->getSizeProperty();
+                        if (sizeConst != nullptr && sizeConst->asInt() == 1) size1Set.insert(tblName);
+                    }
+                    for (const auto &[tblName, keyMap2] : cond2.tableKeyMap) {
+                        if (size1Set.count(tblName) > 0 ||
+                            tblName == chain.sinkTableControlPlaneName)
+                            continue;
+                        for (const auto &[keyName, match2] : keyMap2) {
+                            if (cond1.tableKeyMap.count(tblName) > 0) {
+                                // Phase 1 HIT this table: prevent the re-solve from picking Phase 2's
+                                // control-plane key (conflicting entries).
+                                p1ExtraConstraints.push_back(
+                                    match2->buildTableKeyNeqConstraint(tblName, keyName));
+                            } else {
+                                // Phase 1 MISSED this table but Phase 2 hit it: keep Phase 1's packet
+                                // from matching Phase 2's entry.
+                                auto tblIt = tableByName_.find(tblName);
+                                if (tblIt == tableByName_.end()) continue;
+                                const auto *tblIR = tblIt->second;
+                                if (tblIR->getKey() == nullptr) continue;
+                                for (const auto *keyElem : tblIR->getKey()->keyElements) {
+                                    const auto *nameAnnot =
+                                        keyElem->getAnnotation(IR::Annotation::nameAnnotation);
+                                    if (nameAnnot == nullptr || nameAnnot->getName() != keyName)
+                                        continue;
+                                    const auto stateVar =
+                                        ToolsVariables::convertReference(keyElem->expression);
+                                    if (!fs1->getExecutionState()->exists(stateVar)) continue;
+                                    const auto *pktField = fs1->getExecutionState()->get(stateVar);
                                     p1ExtraConstraints.push_back(
-                                        match2->buildTableKeyNeqConstraint(tblName, keyName));
-                                } else {
-                                    // Phase 1 MISSED this table but Phase 2 hit it.
-                                    // Prevent Phase 1's packet from matching Phase 2's entry.
-                                    auto tblIt = tableByName_.find(tblName);
-                                    if (tblIt == tableByName_.end()) continue;
-                                    const auto *tblIR = tblIt->second;
-                                    if (tblIR->getKey() == nullptr) continue;
-                                    for (const auto *keyElem : tblIR->getKey()->keyElements) {
-                                        const auto *nameAnnot = keyElem->getAnnotation(
-                                            IR::Annotation::nameAnnotation);
-                                        if (nameAnnot == nullptr ||
-                                                nameAnnot->getName() != keyName)
-                                            continue;
-                                        // Resolve the packet-field expression through Phase 1's
-                                        // execution state to get the symbolic variable.
-                                        const auto stateVar = ToolsVariables::convertReference(
-                                            keyElem->expression);
-                                        if (!fs1->getExecutionState()->exists(stateVar))
-                                            continue;
-                                        const auto *pktField =
-                                            fs1->getExecutionState()->get(stateVar);
-                                        p1ExtraConstraints.push_back(
-                                            match2->buildPacketFieldNeqConstraint(pktField));
-                                    }
+                                        match2->buildPacketFieldNeqConstraint(pktField));
                                 }
                             }
                         }
-                        // Size-1 tables: pin Phase-1's emitted control-plane key to the SAME
-                        // value the Phase-2 preexisting fork constrained the packet against
-                        // (cond1's value V). The single slot persists across phases, so the
-                        // installed entry key (== Phase-1 packet key on HIT) and the Phase-2
-                        // packet key must agree on V; otherwise Phase-1's free re-solve picks a
-                        // different key (e.g. 0) that collides with Phase-2's packet key, making
-                        // the slot HIT in Phase 2 on hardware (the switchv2p match_gw/to_gw bug).
-                        for (const auto &tblName : size1Set) {
-                            auto cIt = cond1.tableKeyMap.find(tblName);
-                            if (cIt == cond1.tableKeyMap.end()) continue;
-                            for (const auto &[keyName, match1] : cIt->second) {
-                                // Pin the emitted control-plane key to Phase 1's concrete match
-                                // for every match kind (exact/ternary/lpm/range/optional); the
-                                // per-type override also pins mask/prefix/high so the single slot
-                                // is fully determined.
-                                p1ExtraConstraints.push_back(
-                                    match1->buildTableKeyEqConstraint(tblName, keyName));
-                            }
+                    }
+                    // Size-1 tables: pin Phase-1's emitted control-plane key to cond1's value V
+                    // (the single slot persists across phases; otherwise Phase-1's free re-solve
+                    // picks a colliding key — the switchv2p match_gw/to_gw bug).
+                    for (const auto &tblName : size1Set) {
+                        auto cIt = cond1.tableKeyMap.find(tblName);
+                        if (cIt == cond1.tableKeyMap.end()) continue;
+                        for (const auto &[keyName, match1] : cIt->second) {
+                            p1ExtraConstraints.push_back(
+                                match1->buildTableKeyEqConstraint(tblName, keyName));
                         }
                     }
-
-                    // Phase 3 is purely dynamic: the test script replays Phase 1's packet after
-                    // Phase 2 writes the attacker-chosen value to the register.
-                    TamperingFinalState ts{*fs1, *fs2, false,
-                                           cond1.inputPort, cond1.outputPort,
-                                           ip2, op2,
-                                           attackerRegValues, phase2ModelOverrides,
-                                           attackerRegSinkTables,
-                                           p1ExtraConstraints};
-                    ts.chainId = chain->id;
-                    ts.subTestId = ++subTestId;
-                    callBack(ts);
-                    if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
                 }
-                // A full sweep that emitted nothing means every Phase-1 state's Phase-2
-                // paths are exhausted: this chain is done.
-                if (!emittedThisRound) break;
+
+                // Phase 3 is a dynamic deviation check: the test script replays Phase 1's packet
+                // after Phase 2 sets the attacker value; the observable is the sink-table HIT(Phase
+                // 1)→MISS(Phase 3) flip (emitted as hit_phase=1 / miss_phase=3).
+                TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, cond1.outputPort, ip2, op2,
+                                       attackerRegValues, phase2ModelOverrides, attackerRegSinkTables,
+                                       p1ExtraConstraints};
+                ts.chainId = chain.id;
+                ts.subTestId = ++subTestId;
+                callBack(ts);
+                if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
             }
+            if (!emittedThisRound) break;  // every Phase-1 state's Phase-2 paths exhausted
+        }
+        return subTestId;
+    }
+
+    // ---- Phase 3 (MISS→HIT): symbolically replay Phase 1 with the tampered register ----
+    // Require the sink to flip MISS→HIT AND the packet disposition to change.
+    size_t emitted = 0;
+    for (size_t i = 0; i < phase1States.size() && emitted < maxPerChain; ++i) {
+        const auto *fs1 = phase1States[i];
+        const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
+        bool d1Drop = false;
+        int d1Port = -1;
+        evalDisposition(fs1, d1Drop, d1Port);
+
+        for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
+            if (emitted >= maxPerChain) break;
+
+            // Carry the tampered (post-Phase-2) register contents into Phase 3.
+            const auto &model2 = fs2->getFinalModel();
+            const auto *es2 = fs2->getExecutionState();
+            std::map<cstring, const TestObject *> carriedRegs;
+            bool carriedSo = false;
+            for (const auto &[regName, regObj] :
+                 es2->getTestObjectCategory("registervalues"_cs)) {
+                carriedRegs[regName] = regObj->evaluateForCarry(model2);
+                if (regName == chain.soName) carriedSo = true;
+            }
+            if (!carriedSo) continue;
+            const auto *fs3 = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
+                                                inputPortSymExpr, carriedRegs);
+            if (fs3 == nullptr) continue;       // pinned input had no terminal (unsatisfiable)
+            if (evalSinkHit(fs3) != 1) continue;  // sink did not flip MISS→HIT
+            bool d3Drop = false;
+            int d3Port = -1;
+            evalDisposition(fs3, d3Drop, d3Port);
+            if (d1Drop == d3Drop && d1Port == d3Port) continue;  // no observable output change
+
+            // Compute the 4-case label (MISS→HIT × disposition flip).
+            std::string disp;
+            if (d1Drop && !d3Drop) {
+                disp = "DROP_TO_FWD";
+            } else if (!d1Drop && d3Drop) {
+                disp = "FWD_TO_DROP";
+            } else {
+                disp = "FWD_TO_FWD_PORTCHANGE";
+            }
+
+            // Build the emitted attacker register from Phase 3's read of the SO register: its index
+            // conditions hold the (pinned, == Phase-1) read index, and withAttackerValues stamps the
+            // tampered value there so the emitter produces an affected_register the harness can
+            // pre-set. The carry above (evaluateForCarry) drove the symbolic run but has no index
+            // conditions, so it cannot be emitted directly.
+            const auto &model3 = fs3->getFinalModel();
+            std::map<cstring, const TestObject *> attackerRegValues;
+            const auto *fs3SoReg =
+                fs3->getExecutionState()->getTestObject("registervalues"_cs, chain.soName, false);
+            if (fs3SoReg == nullptr) continue;
+            auto [attackerReg, _ovr] = fs3SoReg->withAttackerValues(
+                model3, SymbexOptions::get().stateTamperValue, {});
+            attackerRegValues[chain.soName] = attackerReg;
+
+            int ip2 = IR::getIntFromLiteral(
+                model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
+            int op2 = IR::getIntFromLiteral(
+                model2.evaluate(es2->get(programInfo.getTargetOutputPortVar()), true));
+            std::map<cstring, cstring> attackerRegSinkTables;
+            attackerRegSinkTables[chain.soName] = chain.sinkTableControlPlaneName;
+
+            // Emit a sink-flip test: Phase 1 (its own disposition is the validator's reference) →
+            // Phase 3 (replay with the tampered register). The flip MISS→HIT is symbolically
+            // confirmed above; the end-to-end validator observes the actual Phase-1→Phase-3 output
+            // divergence (drop/port/bytes), so p4symbex does not emit a predicted phase3_verify.
+            TamperingFinalState ts{*fs1, *fs2, false,
+                                   cond1.inputPort, cond1.outputPort, ip2, op2,
+                                   attackerRegValues, {}, attackerRegSinkTables, {}};
+            ts.chainId = chain.id;
+            ts.subTestId = ++emitted;
+            ts.missToHit = true;
+            ts.caseLabel = cstring("MISS_TO_HIT/" + disp);
+            std::string p1d = d1Drop ? std::string("drop") : ("port=" + std::to_string(d1Port));
+            std::string p3d = d3Drop ? std::string("drop") : ("port=" + std::to_string(d3Port));
+            printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: sink MISS→HIT, %3% (P1 %4%, P3 %5%)",
+                      chain.id, ts.subTestId, ts.caseLabel, p1d, p3d);
+            callBack(ts);
         }
     }
+    return emitted;
 }
 
 // ---------------------------------------------------------------------------
@@ -807,6 +942,9 @@ std::optional<ExecutionStateReference> StateDependencyTracker::pickSuccessor(
     auto isSinkHit = [this](const auto &b) {
         if (currentSinkTable_ == nullptr || currentPhase != TamperingPhase::Phase1_Read)
             return false;
+        // In the MISS→HIT pass Phase 1 must land on sink-MISS terminals; steering toward the HIT
+        // branch (the default behaviour) would defeat that, so suppress the preference there.
+        if (seekMiss_) return false;
         // Only steer to the sink HIT once the read-side required nodes (everything except the sink
         // Key itself) are already covered. The sink table is applied unconditionally, including on
         // control paths that bypass the register read; preferring its HIT before the read is

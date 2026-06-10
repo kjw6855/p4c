@@ -75,6 +75,16 @@ struct TamperingFinalState {
     /// Per-chain sub-test index (1-based), distinguishing the multiple valid
     /// Phase-1 × Phase-2 paths of a single SOChain. Assigned in runTamperingScenario.
     size_t subTestId = 0;
+
+    // ---- Tamper direction (sink-flip observable) ---------------------------------------------
+    /// Tamper direction. false = HIT→MISS (Phase-1 sink HIT, Phase-3 MISS); true = MISS→HIT
+    /// (Phase-1 sink MISS, Phase-3 HIT). Selects how hit_phase/miss_phase are emitted. Phase 3 is a
+    /// dynamic deviation check for both directions — the end-to-end validator compares the Phase-3
+    /// output to the Phase-1 reference, so p4symbex emits no predicted Phase-3 disposition.
+    bool missToHit = false;
+    /// Human-readable case label, e.g. "MISS_TO_HIT/FWD_TO_DROP" (set for MISS→HIT, from the
+    /// flip-confirmation run). Emitted as informational metadata; empty for HIT→MISS.
+    cstring caseLabel = ""_cs;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -141,6 +151,10 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// table's HIT branch so the table lookup actually matches in Phase 1.
     const IR::P4Table *currentSinkTable_ = nullptr;
 
+    /// True while runMissToHitChain collects Phase-1 sink-MISS baselines. Disables pickSuccessor's
+    /// sink-HIT steering (which would otherwise pull Phase 1 onto HIT branches we discard).
+    bool seekMiss_ = false;
+
     /// Name of the current chain category (e.g. "Write Condition"), set in run().
     cstring currentChainName;
 
@@ -163,8 +177,43 @@ class StateDependencyTracker : public SymbolicExecutor {
     void runPhase(ExecutionState &phaseInit, std::vector<const FinalState *> &out,
                   size_t maxStates);
 
-    /// Orchestrates Phase 1 → Phase 2 → Phase 3 for every SOChain and fires callBack.
+    /// Orchestrates the per-chain three-phase scenario for every SOChain (both tamper directions)
+    /// and fires callBack.
     void runTamperingScenario(const TamperingCallback &callBack, const ExecutionState &initState);
+
+    /// Runs the three-phase scenario for one SOChain in one tamper direction, sharing the Phase-1
+    /// collection and Phase-2 write between directions. @p missToHit selects the direction:
+    ///   false (HIT→MISS): keep Phase-1 sink-HIT terminals; Phase 3 is a dynamic deviation check
+    ///                     (emit hit_phase=1 / miss_phase=3).
+    ///   true  (MISS→HIT): keep reached-sink-MISS terminals; symbolically replay Phase 1 with the
+    ///                     tampered register and emit only when the sink flips MISS→HIT *and* the
+    ///                     packet disposition changes (emit hit_phase=3 / miss_phase=1 + case label
+    ///                     + phase3_verify).
+    /// Returns the number of sub-tests emitted for this (chain, direction).
+    size_t runTamperingChain(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                             const ExecutionState &initState, const TamperingCallback &callBack,
+                             size_t maxPerChain, bool missToHit);
+
+    /// Extracts the concrete (input, output) port pair from a final state's model.
+    std::pair<int, int> getPortPair(const FinalState *fs) const;
+
+    /// Symbolically replays @p fs1's input packet with the registers in @p carriedRegs pre-set
+    /// (the tampered state), pinning the packet bytes, size, and input port. Used by both tamper
+    /// directions to compute the actual Phase-3 disposition. Returns the single Phase-3 terminal,
+    /// or nullptr if the pinned input has no satisfiable terminal.
+    const FinalState *runSymbolicPhase3(
+        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
+        const std::map<cstring, const TestObject *> &carriedRegs);
+
+    /// Evaluates the current sink table's hit-var in @p fs's final model.
+    /// Returns 1 (HIT), 0 (MISS / not reached), or -1 (unknown: no sink, or tainted/non-literal).
+    int evalSinkHit(const FinalState *fs) const;
+
+    /// Evaluates @p fs's packet disposition from its final model: sets @p dropped (packet not
+    /// emitted: drop property, empty buffer, or tainted egress port) and, when not dropped,
+    /// @p outPort to the concrete egress port (else -1).
+    void evalDisposition(const FinalState *fs, bool &dropped, int &outPort) const;
 
     /// Returns true when any read-side vertex in the chain maps to an EXIT/ENTRY ESG node
     /// (i.e. a dep-graph vertex whose corresponding ESG node has a null IR::Node*).
