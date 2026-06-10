@@ -31,9 +31,14 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::TypeMap *typeMap,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
-                                                  std::filesystem::path graphsDir) {
+                                                  std::filesystem::path graphsDir,
+                                                  unsigned categories) {
     Util::ScopedTimer sdTimer("P4SD");
     StateDependencyResult result;
+    // Graph/binary mode (graphsDir set) exports every category, so it must compute them all.
+    // In library mode a caller may request a subset (e.g. symbex Tampering needs only SD_KEY) to
+    // skip the other expensive IFDS passes.
+    if (!graphsDir.empty()) categories = SD_ALL;
 
     // Heap-allocate ControlGraphs so it can be returned to the caller in binary mode
     // (needed by GraphVisitor). Library-mode callers should delete it themselves or
@@ -67,7 +72,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     auto *a2s2vGraphs = new DependencyGraphs(numGraphs);
     auto *sdChecker = new ActParamToStateful(refMap, typeMap,
             &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL);
-    {
+    if (categories & SD_A2S2V) {
         Util::ScopedTimer actToSoTimer("ACT->SO");
         program->apply(*sdChecker);
         for (size_t i = 0; i < numGraphs; i++) {
@@ -85,7 +90,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                     LOG2(Graphs::dump_var_edge(g, {ve.first, dst}));
         }
     }
-    {
+    if (categories & SD_A2S2V) {
         Util::ScopedTimer actSoToKeyTimer("ACT->SO->KEY/HDR");
         StatefulToKey a2s2vPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
@@ -98,7 +103,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                     a2s2vPdChecker.getFoundDepEdges(graphName), true);
         }
     }
-    {
+    if (categories & SD_A2S2V) {
         Util::ScopedTimer actSoToKeyDrawTimer("ACT->SO->KEY/HDR drawing");
         for (size_t i = 0; i < numGraphs; i++) {
             if (a2s2vGraphs->leaves[i].empty()) continue;
@@ -128,7 +133,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     auto *h2s2cGraphs = new DependencyGraphs(numGraphs);
     auto *hdChecker = new HdrToStateful(refMap, typeMap,
             &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL);
-    {
+    if (categories & (SD_KEY | SD_HEADER | SD_COND)) {
         Util::ScopedTimer hdrToStatefulTimer("HDR->SO");
         program->apply(*hdChecker);
         for (size_t i = 0; i < numGraphs; i++) {
@@ -152,7 +157,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
     /* II-2. H2S2K: state object → table match KEY sinks only. */
-    {
+    if (categories & SD_KEY) {
         Util::ScopedTimer hdrSoToKeyTimer("HDR->SO->KEY");
         StatefulToKey h2s2kPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
@@ -167,7 +172,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
     /* II-3. H2S2V: state object → header/port value sinks only. */
-    {
+    if (categories & SD_HEADER) {
         Util::ScopedTimer hdrSoToHdrTimer("HDR->SO->HDR");
         StatefulToKey h2s2vPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
@@ -185,7 +190,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     result.h2s2vGraphs = h2s2vGraphs;
 
     /* II-2. H2S2C: header variable → stateful object → conditions */
-    {
+    if (categories & SD_COND) {
         Util::ScopedTimer hdrSoToCondTimer("HDR->SO->COND");
         StatefulToCond h2s2cPdChecker(refMap, typeMap,
                 &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
@@ -364,7 +369,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
 StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   cstring arch,
                                                   bool isv1,
-                                                  std::filesystem::path graphsDir) {
+                                                  std::filesystem::path graphsDir,
+                                                  unsigned categories) {
     Util::ScopedTimer sdPrepTimer("P4SD-prep");
 
     P4::ReferenceMap refMap;
@@ -401,7 +407,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     if (program == nullptr || toplevel == nullptr || ::P4::errorCount() > 0)
         return {};
 
-    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir);
+    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
+                                      categories);
 }
 
 }  // namespace P4::P4StateDependency

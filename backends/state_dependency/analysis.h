@@ -60,6 +60,19 @@ struct StateDependencyResult {
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteCondChains;
 };
 
+/// Bitmask of chain categories to compute. The four expensive IFDS sink passes are gated on
+/// these, so a caller that needs only one category skips the rest. The base HDR->SO pass always
+/// runs when any H2S2 category (KEY/HEADER/COND) is requested. Symbex's Tampering policy needs
+/// only SD_KEY; AlteringPath needs only SD_COND. SD_ALL preserves the full analysis (graph/binary
+/// mode, where graphsDir is set, always computes everything regardless of this mask).
+enum SDCategories : unsigned {
+    SD_A2S2V = 1u,
+    SD_KEY = 2u,
+    SD_HEADER = 4u,
+    SD_COND = 8u,
+    SD_ALL = SD_A2S2V | SD_KEY | SD_HEADER | SD_COND,
+};
+
 /// Run the full state-dependency analysis (A2S2V and H2S2V) on a compiled P4 program.
 ///
 /// All IR::Node* values stored in the returned DependencyGraphs are drawn from @program,
@@ -78,7 +91,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::TypeMap *typeMap,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
-                                                  std::filesystem::path graphsDir = {});
+                                                  std::filesystem::path graphsDir = {},
+                                                  unsigned categories = SD_ALL);
 
 /// Convenience overload: builds its own lightweight midend
 /// (TypeChecking → EvaluatorPass → IFDS analysis → RemoveActionParameters → TypeChecking)
@@ -93,7 +107,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
 StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   cstring arch,
                                                   bool isv1 = false,
-                                                  std::filesystem::path graphsDir = {});
+                                                  std::filesystem::path graphsDir = {},
+                                                  unsigned categories = SD_ALL);
 
 }  // namespace P4::P4StateDependency
 

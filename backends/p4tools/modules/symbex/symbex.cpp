@@ -5,7 +5,6 @@
 #include <filesystem>
 #include <fcntl.h>
 #include <fstream>
-#include <iostream>
 #include <optional>
 #include <string>
 #include <utility>
@@ -247,8 +246,19 @@ std::optional<AbstractTestList> generateTestsImpl(std::optional<std::string_view
     if (symbexOptions.stateDep) {
         const auto *program = &compilerResultOpt.value().get().getProgram();
         bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
+        // Only compute the chain categories the active policy actually consumes: the Tampering
+        // tracker reads only dataWriteKeyChains (SD_KEY), AlteringPath only dataWriteCondChains
+        // (SD_COND). Skipping the other IFDS passes (A2S2V, H2S2V, and the unused sink) is the
+        // dominant analysis-time saving for these runs. Other policies keep the full analysis.
+        unsigned sdCats = P4StateDependency::SD_ALL;
+        if (symbexOptions.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
+            sdCats = P4StateDependency::SD_KEY;
+        else if (symbexOptions.pathSelectionPolicy ==
+                 PathSelectionPolicy::StateDependencyAlteringPath)
+            sdCats = P4StateDependency::SD_COND;
         auto *stateDep = new P4StateDependency::StateDependencyResult(
-            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1));
+            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1,
+                                                          {}, sdCats));
         if (::P4::errorCount() > 0) return std::nullopt;
         symbexCompilerResult->setStateDep(stateDep);
     }
@@ -371,8 +381,18 @@ int Symbex::mainImpl(const CompilerResult &compilerResult) {
     if (symbexOptions.stateDep) {
         const auto *program = &compilerResult.getProgram();
         bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
+        // Only compute the chain categories the active policy consumes: Tampering reads only
+        // dataWriteKeyChains (SD_KEY), AlteringPath only dataWriteCondChains (SD_COND). Skipping
+        // the other IFDS passes is the dominant analysis-time saving for these runs.
+        unsigned sdCats = P4StateDependency::SD_ALL;
+        if (symbexOptions.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
+            sdCats = P4StateDependency::SD_KEY;
+        else if (symbexOptions.pathSelectionPolicy ==
+                 PathSelectionPolicy::StateDependencyAlteringPath)
+            sdCats = P4StateDependency::SD_COND;
         auto *stateDep = new P4StateDependency::StateDependencyResult(
-            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1));
+            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1,
+                                                          {}, sdCats));
         if (::P4::errorCount() > 0) return 1;
         symbexCompilerResult->setStateDep(stateDep);
     }
