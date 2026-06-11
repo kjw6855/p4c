@@ -47,9 +47,11 @@ const IR::Expression *TofinoTableStepper::computeTargetMatchType(
     const IR::Expression *hitCondition) {
     const IR::Expression *keyExpr = keyProperties.key->expression;
 
-    // Ranges are not yet implemented for Tofino STF tests.
+    // Ranges are supported for the PTF and BFRT backends (the latter renders `range_matches` in
+    // its test templates); only the STF backend cannot express them.
     if (keyProperties.matchType == SharedTofinoConstants::MATCH_KIND_RANGE &&
-        SymbexOptions::get().testBackend == "PTF") {
+        (SymbexOptions::get().testBackend == "PTF" ||
+         SymbexOptions::get().testBackend == "BFRT")) {
         cstring minName = properties.tableName + "_range_min_" + keyProperties.name;
         cstring maxName = properties.tableName + "_range_max_" + keyProperties.name;
         // We can recover from taint by matching on the entire possible range.
