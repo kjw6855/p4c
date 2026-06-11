@@ -25,6 +25,12 @@ struct AttackerControlResult {
     /// Direct model overrides: each (symVar, attackerVal) pair is applied via Model::set()
     /// after Phase 2's computeConcolicState() to inject the attacker value into the model.
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
+    /// False when the chosen attacker value cannot actually tamper this Phase-2 packet: i.e. the
+    /// register write is a program constant (not packet-controllable) AND that constant collides
+    /// with a forbidden value (the Phase-1 sink-HIT key), so the sink would not flip. The
+    /// tampering executor must then skip this Phase-2 packet rather than emit an un-replayable
+    /// test (the emitted attacker_value must equal what the packet really writes).
+    bool feasible = true;
 };
 
 /* =========================================================================================

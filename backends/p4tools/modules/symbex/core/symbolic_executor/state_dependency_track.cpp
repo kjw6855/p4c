@@ -632,11 +632,15 @@ size_t StateDependencyTracker::runTamperingChain(
                         }
                     }
                 }
+                bool soFeasible = true;
                 for (const auto &[regName, regObj] :
                      fs2->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
                     if (regName != chain.soName) continue;
-                    auto [attackerValue, overrides] = regObj->withAttackerValues(
+                    auto attackerResult = regObj->withAttackerValues(
                         fs2->getFinalModel(), SymbexOptions::get().stateTamperValue, forbiddenValues);
+                    const auto *attackerValue = attackerResult.testObject;
+                    const auto &overrides = attackerResult.modelOverrides;
+                    soFeasible = attackerResult.feasible;
                     attackerRegValues[regName] = attackerValue;
                     if (!sinkTableJoined.isNullOrEmpty()) attackerRegSinkTables[regName] = sinkTableJoined;
                     phase2ModelOverrides.insert(phase2ModelOverrides.end(), overrides.begin(),
@@ -647,8 +651,8 @@ size_t StateDependencyTracker::runTamperingChain(
                                   regName, symVar->label, val->value.str(0, std::ios_base::hex));
                     }
                     if (overrides.empty()) {
-                        printInfo("[Tampering] Phase 3 register '%1%': no symbolic var found — value "
-                                  "not injectable into Phase 2 packet",
+                        printInfo("[Tampering] Phase 3 register '%1%': program-fixed write value (not "
+                                  "packet-injectable); emitting the value the packet actually writes",
                                   regName);
                     }
                 }
@@ -656,6 +660,16 @@ size_t StateDependencyTracker::runTamperingChain(
                     warning("[Tampering] No register matching '%1%' found in Phase 2 state for chain "
                             "id=%2%; skipping.",
                             chain.soName, chain.id);
+                    continue;
+                }
+                // The Phase-2 packet's register write is a program constant that does NOT flip the
+                // sink (it equals the Phase-1 HIT key). This packet can't tamper — skip it; the
+                // round-robin will try the next Phase-2 packet (which may run a different action
+                // writing a flipping value). Emitting it would produce an un-replayable test.
+                if (!soFeasible) {
+                    printInfo("[Tampering] Phase 2 packet for chain id=%1%: constant register write "
+                              "does not flip sink '%2%'; trying another Phase-2 packet.",
+                              chain.id, chain.soName);
                     continue;
                 }
                 auto [ip2, op2] = getPortPair(fs2);
@@ -793,8 +807,14 @@ size_t StateDependencyTracker::runTamperingChain(
             const auto *fs3SoReg =
                 fs3->getExecutionState()->getTestObject("registervalues"_cs, chain.soName, false);
             if (fs3SoReg == nullptr) continue;
-            auto [attackerReg, _ovr] = fs3SoReg->withAttackerValues(
-                model3, SymbexOptions::get().stateTamperValue, {});
+            // Empty forbidden set: feasibility is always true here; the value becomes the real
+            // (carried) Phase-2 write, and the symbolic Phase-3 confirmation (evalSinkHit==HIT
+            // above) is the correctness gate. Overrides are unused for MISS→HIT (carry handles it).
+            const auto *attackerReg = fs3SoReg
+                                          ->withAttackerValues(model3,
+                                                               SymbexOptions::get().stateTamperValue,
+                                                               {})
+                                          .testObject;
             attackerRegValues[chain.soName] = attackerReg;
 
             int ip2 = IR::getIntFromLiteral(

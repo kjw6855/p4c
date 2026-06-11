@@ -135,6 +135,7 @@ AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
     const std::vector<big_int> &forbiddenValues) const {
     auto *randReg = new Bmv2V1ModelRegisterValue(getInitialValue());
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
+    bool feasible = true;
     auto isForbidden = [&](const big_int &v) {
         return std::find(forbiddenValues.begin(), forbiddenValues.end(), v) !=
                forbiddenValues.end();
@@ -143,52 +144,55 @@ AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
         // Concretize the index so Phase 3's register seed has a concrete write key.
         const auto *concreteIdx =
             model.evaluate(cond.getIndex(), /*doComplete=*/true)->checkedTo<IR::Constant>();
-        // The symbolic write expression — typically a packet symbolic variable (pktvar_N).
+        // The symbolic write expression — a packet symbolic variable (pktvar_N) if the written
+        // value is packet-controllable, or a constant when the program fixes it.
         const auto *symVal = cond.getValue();
-        // Evaluate to get the concrete type/width.
         const auto *concreteVal =
             model.evaluate(symVal, /*doComplete=*/true)->checkedTo<IR::Constant>();
-        // Use the caller-supplied fixed value, or generate a random one.
-        // For Key-sink chains the attacker must avoid Phase 1's installed key values so
-        // that the same packet input misses the sink table in Phase 3 — that's the
-        // forbiddenValues set. We fail loud if the user-supplied --state-tamper-value
-        // collides with that set: the user explicitly asked for that specific value, and
-        // a silent change would mask intent.
-        const auto *attackerVal = [&]() -> const IR::Constant * {
-            if (fixedValue.has_value()) {
-                if (isForbidden(*fixedValue)) {
-                    ::P4::warning(
-                        "[Tampering] --state-tamper-value 0x%1% collides with a Phase-1 "
-                        "table-key value (HIT would be preserved in Phase 3). Using it "
-                        "anyway since the value was explicitly requested.",
-                        fixedValue->str(0, std::ios_base::hex));
+        const auto *symVar = symVal->to<IR::SymbolicVariable>();
+        const IR::Constant *attackerVal = nullptr;
+        if (symVar != nullptr) {
+            // Packet-controllable write: the attacker chooses the value. Use the caller-supplied
+            // fixed value, or a random one avoiding the forbidden (Phase-1 HIT-key) set, and
+            // record a model override so processPhase() injects it into the Phase-2 packet. We
+            // warn (not fail) if --state-tamper-value collides with the forbidden set.
+            attackerVal = [&]() -> const IR::Constant * {
+                if (fixedValue.has_value()) {
+                    if (isForbidden(*fixedValue)) {
+                        ::P4::warning(
+                            "[Tampering] --state-tamper-value 0x%1% collides with a Phase-1 "
+                            "table-key value (HIT would be preserved in Phase 3). Using it "
+                            "anyway since the value was explicitly requested.",
+                            fixedValue->str(0, std::ios_base::hex));
+                    }
+                    return IR::Constant::get(concreteVal->type, *fixedValue);
                 }
-                return IR::Constant::get(concreteVal->type, *fixedValue);
-            }
-            const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
-            big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
-            boost::random::mt19937 localRng(std::random_device{}());
-            boost::random::uniform_int_distribution<big_int> dist(0, maxVal);
-            // Retry loop: avoid landing on a forbidden value. Bounded to prevent
-            // pathological loops when the forbidden set covers most of the type range.
-            for (int attempt = 0; attempt < 64; ++attempt) {
-                big_int candidate = dist(localRng);
-                if (!isForbidden(candidate)) {
-                    return IR::Constant::get(bitsType, candidate);
+                const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
+                big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
+                boost::random::mt19937 localRng(std::random_device{}());
+                boost::random::uniform_int_distribution<big_int> dist(0, maxVal);
+                for (int attempt = 0; attempt < 64; ++attempt) {
+                    big_int candidate = dist(localRng);
+                    if (!isForbidden(candidate)) {
+                        return IR::Constant::get(bitsType, candidate);
+                    }
                 }
-            }
-            // Fallback: pick the value-space's max+1 mod range — better to emit a
-            // potentially-colliding value than to loop forever.
-            return IR::Constant::get(bitsType, dist(localRng));
-        }();
-        randReg->writeToIndex(concreteIdx, attackerVal);
-        // Record a direct model override so processPhase() can inject attackerVal into Phase 2's
-        // model via Model::set(), making the emitted input packet show the attacker-chosen value.
-        if (const auto *symVar = symVal->to<IR::SymbolicVariable>()) {
+                return IR::Constant::get(bitsType, dist(localRng));
+            }();
             modelOverrides.emplace_back(symVar, attackerVal);
+        } else {
+            // Program-fixed write (a constant, not packet-derived): the attacker cannot choose it,
+            // so --state-tamper-value does not apply. The emitted value must be exactly what the
+            // packet writes (concreteVal). The tamper only flips the sink if that value avoids the
+            // forbidden (HIT-key) set; otherwise this Phase-2 packet is not a valid tamper.
+            attackerVal = concreteVal;
+            if (isForbidden(concreteVal->value)) {
+                feasible = false;
+            }
         }
+        randReg->writeToIndex(concreteIdx, attackerVal);
     }
-    return {randReg, modelOverrides};
+    return {randReg, modelOverrides, feasible};
 }
 
 /* =========================================================================================

@@ -172,6 +172,7 @@ AttackerControlResult TofinoRegisterValue::withAttackerValues(
     const std::vector<big_int> &forbiddenValues) const {
     auto *randReg = new TofinoRegisterValue(decl, getInitialValue(), initialIndex);
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
+    bool feasible = true;
     auto isForbidden = [&](const big_int &v) {
         return std::find(forbiddenValues.begin(), forbiddenValues.end(), v) !=
                forbiddenValues.end();
@@ -182,35 +183,49 @@ AttackerControlResult TofinoRegisterValue::withAttackerValues(
         const auto *symVal = cond.getValue();
         const auto *concreteVal =
             model.evaluate(symVal, /*doComplete=*/true)->checkedTo<IR::Constant>();
-        const auto *attackerVal = [&]() -> const IR::Constant * {
-            if (fixedValue.has_value()) {
-                if (isForbidden(*fixedValue)) {
-                    ::P4::warning(
-                        "[Tampering] --state-tamper-value 0x%1% collides with a Phase-1 "
-                        "table-key value (HIT would be preserved in Phase 3). Using it "
-                        "anyway since the value was explicitly requested.",
-                        fixedValue->str(0, std::ios_base::hex));
+        const auto *symVar = symVal->to<IR::SymbolicVariable>();
+        const IR::Constant *attackerVal = nullptr;
+        if (symVar != nullptr) {
+            // Packet-controllable write: the attacker chooses the value. Use the requested fixed
+            // value, else a random one avoiding the forbidden (Phase-1 HIT-key) set, and inject
+            // it into the Phase-2 packet via a model override.
+            attackerVal = [&]() -> const IR::Constant * {
+                if (fixedValue.has_value()) {
+                    if (isForbidden(*fixedValue)) {
+                        ::P4::warning(
+                            "[Tampering] --state-tamper-value 0x%1% collides with a Phase-1 "
+                            "table-key value (HIT would be preserved in Phase 3). Using it "
+                            "anyway since the value was explicitly requested.",
+                            fixedValue->str(0, std::ios_base::hex));
+                    }
+                    return IR::Constant::get(concreteVal->type, *fixedValue);
                 }
-                return IR::Constant::get(concreteVal->type, *fixedValue);
-            }
-            const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
-            big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
-            boost::random::mt19937 localRng(std::random_device{}());
-            boost::random::uniform_int_distribution<big_int> dist(0, maxVal);
-            for (int attempt = 0; attempt < 64; ++attempt) {
-                big_int candidate = dist(localRng);
-                if (!isForbidden(candidate)) {
-                    return IR::Constant::get(bitsType, candidate);
+                const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
+                big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
+                boost::random::mt19937 localRng(std::random_device{}());
+                boost::random::uniform_int_distribution<big_int> dist(0, maxVal);
+                for (int attempt = 0; attempt < 64; ++attempt) {
+                    big_int candidate = dist(localRng);
+                    if (!isForbidden(candidate)) {
+                        return IR::Constant::get(bitsType, candidate);
+                    }
                 }
-            }
-            return IR::Constant::get(bitsType, dist(localRng));
-        }();
-        randReg->writeToIndex(concreteIdx, attackerVal);
-        if (const auto *symVar = symVal->to<IR::SymbolicVariable>()) {
+                return IR::Constant::get(bitsType, dist(localRng));
+            }();
             modelOverrides.emplace_back(symVar, attackerVal);
+        } else {
+            // Program-fixed write (e.g. `value = LOCK_SHARED`), not packet-derived: the attacker
+            // cannot choose it, so --state-tamper-value does not apply. The emitted value must be
+            // exactly what the packet writes (concreteVal). The tamper only flips the sink if that
+            // value avoids the forbidden (HIT-key) set; otherwise this Phase-2 packet is no tamper.
+            attackerVal = concreteVal;
+            if (isForbidden(concreteVal->value)) {
+                feasible = false;
+            }
         }
+        randReg->writeToIndex(concreteIdx, attackerVal);
     }
-    return {randReg, modelOverrides};
+    return {randReg, modelOverrides, feasible};
 }
 
 /* =========================================================================================
