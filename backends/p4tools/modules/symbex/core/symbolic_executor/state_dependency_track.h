@@ -85,6 +85,16 @@ struct TamperingFinalState {
     /// Human-readable case label, e.g. "MISS_TO_HIT/FWD_TO_DROP" (set for MISS→HIT, from the
     /// flip-confirmation run). Emitted as informational metadata; empty for HIT→MISS.
     cstring caseLabel = ""_cs;
+
+    // ---- Multicast forward (over-approximated as a single representative port) ----------------
+    /// True if the forwarding phase reached a non-zero multicast group (mcast_grp), i.e. the
+    /// modeled forward came from multicast rather than a unicast egress port. When set, the
+    /// emitted test carries a multicast_group block so the p4csd validator installs the group
+    /// (mgid → representative port) before replay and removes it after.
+    bool usesMulticast = false;
+    /// The concrete multicast group id the packet carries on the forwarding path; valid only
+    /// when usesMulticast is true.
+    int multicastGroupId = -1;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -214,6 +224,11 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// emitted: drop property, empty buffer, or tainted egress port) and, when not dropped,
     /// @p outPort to the concrete egress port (else -1).
     void evalDisposition(const FinalState *fs, bool &dropped, int &outPort) const;
+
+    /// Evaluates the target's multicast-group metadata in @p fs. Returns the concrete non-zero
+    /// multicast group id if the packet is multicast-forwarded, or -1 if no group is set / the
+    /// target does not model multicast / the value is tainted.
+    int evalMulticastGroup(const FinalState *fs) const;
 
     /// Returns true when any read-side vertex in the chain maps to an EXIT/ENTRY ESG node
     /// (i.e. a dep-graph vertex whose corresponding ESG node has a null IR::Node*).

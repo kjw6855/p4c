@@ -66,6 +66,8 @@ class Bmv2V1ModelProgramInfo : public ProgramInfo {
 
     [[nodiscard]] const IR::StateVariable &getTargetOutputPortVar() const override;
 
+    [[nodiscard]] std::vector<const IR::StateVariable *> getMulticastGroupVars() const override;
+
     [[nodiscard]] const IR::Expression *dropIsActive() const override;
 
     [[nodiscard]] const IR::Type_Bits *getParserErrorType() const override;

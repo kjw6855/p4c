@@ -287,6 +287,22 @@ void StateDependencyTracker::evalDisposition(const FinalState *fs, bool &dropped
     outPort = IR::getIntFromLiteral(fs->getFinalModel().evaluate(opExpr, true));
 }
 
+int StateDependencyTracker::evalMulticastGroup(const FinalState *fs) const {
+    const auto *es = fs->getExecutionState();
+    // Return the first non-zero, untainted multicast group id among the target's mcast vars.
+    for (const auto *mcastVar : programInfo.getMulticastGroupVars()) {
+        const auto *mcastExpr = es->get(*mcastVar);
+        if (mcastExpr == nullptr || Taint::hasTaint(mcastExpr)) {
+            continue;
+        }
+        int mgid = IR::getIntFromLiteral(fs->getFinalModel().evaluate(mcastExpr, true));
+        if (mgid != 0) {
+            return mgid;
+        }
+    }
+    return -1;
+}
+
 // ---------------------------------------------------------------------------
 // Per-chain three-phase scenario (both tamper directions; Phase 1/2 shared)
 // ---------------------------------------------------------------------------
@@ -710,6 +726,12 @@ size_t StateDependencyTracker::runTamperingChain(
                                        p1ExtraConstraints};
                 ts.chainId = chain.id;
                 ts.subTestId = ++subTestId;
+                // If Phase 1's forward (the validator's reference) came from multicast, emit a
+                // multicast_group hint so the validator installs the group before replay.
+                if (int mgid = evalMulticastGroup(fs1); mgid >= 0) {
+                    ts.usesMulticast = true;
+                    ts.multicastGroupId = mgid;
+                }
                 callBack(ts);
                 if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
             }
@@ -793,6 +815,15 @@ size_t StateDependencyTracker::runTamperingChain(
             ts.subTestId = ++emitted;
             ts.missToHit = true;
             ts.caseLabel = cstring("MISS_TO_HIT/" + disp);
+            // Whichever phase forwards via multicast (Phase 3 on DROP_TO_FWD, Phase 1 on
+            // FWD_TO_DROP) needs its group installed; emit the hint so the validator installs it.
+            if (int mgid = evalMulticastGroup(fs3); mgid >= 0) {
+                ts.usesMulticast = true;
+                ts.multicastGroupId = mgid;
+            } else if (int mgid1 = evalMulticastGroup(fs1); mgid1 >= 0) {
+                ts.usesMulticast = true;
+                ts.multicastGroupId = mgid1;
+            }
             std::string p1d = d1Drop ? std::string("drop") : ("port=" + std::to_string(d1Port));
             std::string p3d = d3Drop ? std::string("drop") : ("port=" + std::to_string(d3Port));
             printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: sink MISS→HIT, %3% (P1 %4%, P3 %5%)",

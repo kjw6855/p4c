@@ -240,6 +240,24 @@ std::vector<Continuation::Command> JBayProgramInfo::processDeclaration(
             new IR::Member(nineBitType, new IR::PathExpression("*ig_intr_md_for_tm"),
                            "ucast_egress_port"));
         cmds.emplace_back(portAssign);
+
+        // Multicast is not modeled precisely. As a sound over-approximation for tampering
+        // observability, if a multicast group is set we forward the packet to a single
+        // representative port (instead of leaving ucast_egress_port at 0, which would otherwise
+        // collide with the valid-port/drop constraint and look like a drop). Placed before
+        // check_tofino_drop below so an explicit drop_ctl still wins.
+        const auto *sixteenBitType = IR::Type_Bits::get(16);
+        const IR::Expression *mcastSet = new IR::LOr(
+            new IR::Neq(new IR::Member(sixteenBitType,
+                                       new IR::PathExpression("*ig_intr_md_for_tm"), "mcast_grp_a"),
+                        IR::Constant::get(sixteenBitType, 0)),
+            new IR::Neq(new IR::Member(sixteenBitType,
+                                       new IR::PathExpression("*ig_intr_md_for_tm"), "mcast_grp_b"),
+                        IR::Constant::get(sixteenBitType, 0)));
+        auto *mcastPortAssign = new IR::AssignmentStatement(
+            getTargetOutputPortVar(),
+            IR::Constant::get(nineBitType, SharedTofinoConstants::MULTICAST_REP_PORT));
+        cmds.emplace_back(new IR::IfStatement(mcastSet, mcastPortAssign, nullptr));
     }
 
     const auto *stmt =
@@ -280,6 +298,14 @@ const IR::StateVariable &JBayProgramInfo::getTargetOutputPortVar() const {
     return *new IR::StateVariable(new IR::Member(IR::Type_Bits::get(JBayConstants::PORT_BIT_WIDTH),
                                                  new IR::PathExpression("*eg_intr_md"),
                                                  "egress_port"));
+}
+
+std::vector<const IR::StateVariable *> JBayProgramInfo::getMulticastGroupVars() const {
+    const auto *sixteenBitType = IR::Type_Bits::get(16);
+    return {new IR::StateVariable(new IR::Member(
+                sixteenBitType, new IR::PathExpression("*ig_intr_md_for_tm"), "mcast_grp_a")),
+            new IR::StateVariable(new IR::Member(
+                sixteenBitType, new IR::PathExpression("*ig_intr_md_for_tm"), "mcast_grp_b"))};
 }
 
 const IR::Expression *JBayProgramInfo::dropIsActive() const {

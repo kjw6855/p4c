@@ -71,6 +71,14 @@ class ProgramInfo : public ICastable {
     /// @returns the metadata member corresponding to the final output port
     [[nodiscard]] virtual const IR::StateVariable &getTargetOutputPortVar() const = 0;
 
+    /// @returns the metadata member(s) holding the multicast group id for this target (e.g.
+    /// standard_metadata.mcast_grp, or ig_intr_md_for_tm.mcast_grp_a/_b). A non-zero value means
+    /// the packet is multicast-forwarded. Default is empty (target does not model multicast).
+    /// Used by the tampering backend to emit a multicast_group hint into the generated test.
+    [[nodiscard]] virtual std::vector<const IR::StateVariable *> getMulticastGroupVars() const {
+        return {};
+    }
+
     /// @returns an expression that checks whether the packet is to be dropped.
     /// The computation is target specific.
     [[nodiscard]] virtual const IR::Expression *dropIsActive() const = 0;

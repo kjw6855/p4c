@@ -24,6 +24,7 @@
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
 #include "backends/p4tools/modules/symbex/options.h"
+#include "backends/p4tools/modules/symbex/targets/bmv2/constants.h"
 #include "backends/p4tools/modules/symbex/targets/bmv2/test_spec.h"
 
 namespace P4::P4Tools::Symbex::Bmv2 {
@@ -471,6 +472,15 @@ affected_register {
 }
 ## endfor
 
+## if has_multicast
+# Multicast forward modeled as a single representative port; the harness installs this
+# group (mgid -> replica_port) before replay and removes it afterwards.
+multicast_group {
+  mgid: {{multicast_group.mgid}}
+  replica_port: {{multicast_group.replica_port}}
+}
+## endif
+
 ## if control_plane
 ## for table in control_plane.tables
 ## for rule in table.rules
@@ -683,6 +693,16 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
         }
     }
     dataJson["affected_registers"] = affectedRegsJson;
+
+    // Multicast forward (over-approximated as a single representative port): emit the group the
+    // harness must install (mgid -> representative port) so the replayed packet egresses.
+    dataJson["has_multicast"] = testSpec->usesMulticast;
+    if (testSpec->usesMulticast) {
+        inja::json mc;
+        mc["mgid"] = testSpec->multicastGroupId;
+        mc["replica_port"] = BMv2Constants::MULTICAST_REP_PORT;
+        dataJson["multicast_group"] = mc;
+    }
 
     return dataJson;
 }

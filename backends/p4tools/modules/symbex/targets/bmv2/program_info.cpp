@@ -171,12 +171,22 @@ std::vector<Continuation::Command> Bmv2V1ModelProgramInfo::processDeclaration(
             }
             cmds.emplace_back(Continuation::Guard(cond));
         }
-        // TODO: We have not implemented multi cast yet.
-        // Drop the packet if the multicast group is set.
+        // Multicast is not modeled precisely. As a sound over-approximation for tampering
+        // observability, if a multicast group is set we forward the packet to a single
+        // representative port instead of dropping it. The p4csd validator installs the
+        // corresponding multicast group so the replayed packet actually egresses this port.
+        // We set both egress_spec (so dropIsActive() at the deparser is false) and egress_port
+        // (the device output) to the representative port.
         const IR::Expression *mcastGroupVar = new IR::Member(
             IR::Type_Bits::get(16), new IR::PathExpression("*standard_metadata"), "mcast_grp");
         mcastGroupVar = new IR::Neq(mcastGroupVar, IR::Constant::get(IR::Type_Bits::get(16), 0));
-        auto *mcastStmt = new IR::IfStatement(mcastGroupVar, dropStmt, nullptr);
+        auto *mcastSpecAssign = new IR::AssignmentStatement(
+            getTargetOutputPortVar(),
+            IR::Constant::get(getTargetOutputPortVar()->type, BMv2Constants::MULTICAST_REP_PORT));
+        auto *mcastPortAssign = new IR::AssignmentStatement(
+            egressPortVar, IR::Constant::get(egressPortVar->type, BMv2Constants::MULTICAST_REP_PORT));
+        auto *mcastBody = new IR::BlockStatement({mcastSpecAssign, mcastPortAssign});
+        auto *mcastStmt = new IR::IfStatement(mcastGroupVar, mcastBody, nullptr);
         cmds.emplace_back(mcastStmt);
     }
     // After some specific pipelines (deparsers), we have to append the remaining packet
@@ -199,6 +209,11 @@ const IR::StateVariable &Bmv2V1ModelProgramInfo::getTargetInputPortVar() const {
     return *new IR::StateVariable(new IR::Member(IR::Type_Bits::get(BMv2Constants::PORT_BIT_WIDTH),
                                                  new IR::PathExpression("*standard_metadata"),
                                                  "ingress_port"));
+}
+
+std::vector<const IR::StateVariable *> Bmv2V1ModelProgramInfo::getMulticastGroupVars() const {
+    return {new IR::StateVariable(new IR::Member(
+        IR::Type_Bits::get(16), new IR::PathExpression("*standard_metadata"), "mcast_grp"))};
 }
 
 const IR::Expression *Bmv2V1ModelProgramInfo::getOutPortConstraint(const IR::StateVariable &portVar,

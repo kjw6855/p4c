@@ -58,6 +58,8 @@ class JBayProgramInfo : public TofinoSharedProgramInfo {
 
     [[nodiscard]] const IR::StateVariable &getTargetOutputPortVar() const override;
 
+    [[nodiscard]] std::vector<const IR::StateVariable *> getMulticastGroupVars() const override;
+
     [[nodiscard]] const IR::Expression *dropIsActive() const override;
 
     [[nodiscard]] std::vector<std::vector<Continuation::Command>> ingressCmds() const override;

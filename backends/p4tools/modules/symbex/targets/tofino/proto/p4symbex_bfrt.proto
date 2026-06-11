@@ -107,6 +107,15 @@ message TestCase {
     int32 stmt_cov_size = 7;
 }
 
+// A multicast group the harness must install before replay (and remove after).
+// Emitted only when the forwarding path is multicast, which p4symbex models as a
+// single representative egress port. The harness installs mgid -> replica_port via
+// the BfRt $pre.node/$pre.mgid tables so the replayed packet actually egresses.
+message MulticastGroup {
+    uint32 mgid = 1;
+    repeated uint32 replica_port = 2;
+}
+
 // A three-phase tampering test case (emitted when --path-selection
 // STATE_DEP_TAMPERING is active). The three input_packet/expected_output
 // blocks correspond to:
@@ -123,4 +132,6 @@ message TamperingTestCase {
     repeated AffectedRegister affected_register = 4;
     repeated string traces = 5;
     repeated string metadata = 6;
+    // Present only when the forwarding path is multicast.
+    repeated MulticastGroup multicast_group = 7;
 }

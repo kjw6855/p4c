@@ -41,6 +41,10 @@ class BMv2Constants {
     static constexpr int STF_MIN_PKT_SIZE = 22;
     static constexpr int ETH_HDR_SIZE = 112;
     static constexpr int DROP_PORT = 511;
+    /// Representative egress port used to model a multicast-forwarded packet as a single
+    /// unicast forward (tampering observability over-approximation). The p4csd validator
+    /// installs the multicast group so the replayed packet egresses this port.
+    static constexpr int MULTICAST_REP_PORT = 8;
 };
 
 }  // namespace P4::P4Tools::Symbex::Bmv2

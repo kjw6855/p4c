@@ -39,6 +39,11 @@ class SharedTofinoConstants {
     static constexpr const char *MATCH_KIND_ATCAM = "atcam_partition_index";
     /// The port value that corresponds to a dropped packet.
     static constexpr int DROP_CONSTANT = 511;
+    /// Representative egress port used to model a multicast-forwarded packet as a single
+    /// unicast forward (tampering observability over-approximation; see the multicast model in
+    /// the ingress deparser of the program_info classes). Must be a valid port per
+    /// getValidPortConstraint and is the port the p4csd validator monitors.
+    static constexpr int MULTICAST_REP_PORT = 8;
     /// Bitmask which indicates which ports allowed to be used by generated tests.
     /// Particularly useful for test environments which do not enable all ports to
     /// be used.

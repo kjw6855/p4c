@@ -389,6 +389,13 @@ class TamperingTestSpec {
     /// HIT→MISS.
     cstring caseLabel = ""_cs;
 
+    /// True if the forwarding path is multicast (modeled as a single representative port). When
+    /// set, the emitted test carries a multicast_group block so the p4csd validator installs the
+    /// group (mgid → representative port) before replay and removes it afterwards.
+    bool usesMulticast = false;
+    /// The concrete multicast group id to install; valid only when usesMulticast is true.
+    int multicastGroupId = -1;
+
     TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, bool hasExit,
                       std::map<cstring, const TestObject *> attackerRegVals = {},
                       std::map<cstring, cstring> attackerRegSinkTables = {})

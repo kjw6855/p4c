@@ -173,11 +173,22 @@ std::vector<Continuation::Command> TofinoV1ModelProgramInfo::processDeclaration(
         // egress guard in the constructor, plus getPipePortRangeConstraint in StartIngress/Egress),
         // not by the bmv2-style per-block input/output port guards, which conflict with it.
 
-        // TODO: We have not implemented multicast yet. Drop the packet if mcast group is set.
+        // Multicast is not modeled precisely. As a sound over-approximation for tampering
+        // observability, if a multicast group is set we forward the packet to a single
+        // representative port instead of dropping it (the p4csd validator installs the group so
+        // the replayed packet egresses this port). Set both egress_spec (so dropIsActive() is
+        // false) and egress_port (the device output) to the representative port.
         const IR::Expression *mcastGroupVar = new IR::Member(
             IR::Type_Bits::get(16), new IR::PathExpression("*standard_metadata"), "mcast_grp");
         mcastGroupVar = new IR::Neq(mcastGroupVar, IR::Constant::get(IR::Type_Bits::get(16), 0));
-        auto *mcastStmt = new IR::IfStatement(mcastGroupVar, dropStmt, nullptr);
+        auto *mcastSpecAssign = new IR::AssignmentStatement(
+            getTargetOutputPortVar(), IR::Constant::get(getTargetOutputPortVar()->type,
+                                                        Bmv2::BMv2Constants::MULTICAST_REP_PORT));
+        auto *mcastPortAssign = new IR::AssignmentStatement(
+            egressPortVar,
+            IR::Constant::get(egressPortVar->type, Bmv2::BMv2Constants::MULTICAST_REP_PORT));
+        auto *mcastBody = new IR::BlockStatement({mcastSpecAssign, mcastPortAssign});
+        auto *mcastStmt = new IR::IfStatement(mcastGroupVar, mcastBody, nullptr);
         cmds.emplace_back(mcastStmt);
     }
     // After the deparser, append the remaining packet payload and apply the drop decision.
@@ -203,6 +214,11 @@ const IR::StateVariable &TofinoV1ModelProgramInfo::getTargetOutputPortVar() cons
     return *new IR::StateVariable(new IR::Member(IR::Type_Bits::get(Bmv2::BMv2Constants::PORT_BIT_WIDTH),
                                                  new IR::PathExpression("*standard_metadata"),
                                                  "egress_spec"));
+}
+
+std::vector<const IR::StateVariable *> TofinoV1ModelProgramInfo::getMulticastGroupVars() const {
+    return {new IR::StateVariable(new IR::Member(
+        IR::Type_Bits::get(16), new IR::PathExpression("*standard_metadata"), "mcast_grp"))};
 }
 
 const IR::Expression *TofinoV1ModelProgramInfo::dropIsActive() const {
