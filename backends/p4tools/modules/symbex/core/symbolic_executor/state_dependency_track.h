@@ -225,6 +225,14 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// @p outPort to the concrete egress port (else -1).
     void evalDisposition(const FinalState *fs, bool &dropped, int &outPort) const;
 
+    /// Sink action-divergence gate (replaces the cross-phase Phase1↔Phase3 output comparison).
+    /// Returns true unless the sink table's HIT action (the action of @p fs's matched entry) and its
+    /// default (MISS) action are provably identical in observable effect — i.e. a HIT↔MISS flip
+    /// would change nothing. @p sink may be nullptr (returns true). Compares the two action bodies
+    /// *locally* — no continuation, no terminal, no downstream result consulted; the real switch
+    /// judges end-to-end. Sound-toward-emitting: anything not provably identical counts as divergent.
+    bool sinkActionsDiverge(const FinalState *fs, const IR::P4Table *sink, cstring sinkCpName) const;
+
     /// Evaluates the target's multicast-group metadata in @p fs. Returns the concrete non-zero
     /// multicast group id if the packet is multicast-forwarded, or -1 if no group is set / the
     /// target does not model multicast / the value is tainted.

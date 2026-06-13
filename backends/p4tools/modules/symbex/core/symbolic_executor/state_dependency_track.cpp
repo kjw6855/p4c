@@ -73,6 +73,143 @@ static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramIn
     return cond;
 }
 
+// ---------------------------------------------------------------------------
+// Sink action-divergence (replaces the cross-phase Phase1↔Phase3 output diff)
+// ---------------------------------------------------------------------------
+// A sink-table HIT↔MISS flip is only observable if the table's HIT action and its default (MISS)
+// action write *different* output state. We compare the two action bodies *locally* — no
+// continuation, no terminal, no downstream result consulted. The real switch (differential oracle)
+// decides the end-to-end effect; this gate only drops flips that are provably invisible.
+// Sound-toward-emitting: anything we cannot prove identical counts as divergent (emit).
+namespace {
+
+// Replaces references to an action's parameters with their bound argument expressions, so two
+// calls of the same action with different action data yield structurally different bodies.
+class ActionParamSubstitute : public Transform {
+ public:
+    explicit ActionParamSubstitute(std::map<cstring, const IR::Expression *> binding)
+        : binding_(std::move(binding)) {}
+    const IR::Node *postorder(IR::PathExpression *pe) override {
+        auto it = binding_.find(pe->path->name.name);
+        if (it != binding_.end()) return it->second;
+        return pe;
+    }
+
+ private:
+    std::map<cstring, const IR::Expression *> binding_;
+};
+
+// The (parameter-substituted) output-affecting effect of an action body. `ok=false` marks a body
+// we cannot summarize (control flow etc.); callers then treat the actions as divergent.
+struct ActionEffect {
+    bool ok = true;
+    std::vector<std::pair<const IR::Expression *, const IR::Expression *>> assigns;  // (lhs, rhs)
+    std::vector<const IR::Expression *> calls;  // method/extern calls (e.g. mark_to_drop)
+};
+
+void collectEffect(const IR::Statement *stmt, ActionEffect &eff) {
+    if (stmt == nullptr) return;
+    if (const auto *block = stmt->to<IR::BlockStatement>()) {
+        for (const auto *c : block->components) {
+            const auto *s = c->to<IR::Statement>();
+            if (s == nullptr) {  // a nested declaration we do not model
+                eff.ok = false;
+                return;
+            }
+            collectEffect(s, eff);
+            if (!eff.ok) return;
+        }
+        return;
+    }
+    if (const auto *asg = stmt->to<IR::AssignmentStatement>()) {
+        eff.assigns.emplace_back(asg->left, asg->right);
+        return;
+    }
+    if (const auto *mc = stmt->to<IR::MethodCallStatement>()) {
+        eff.calls.push_back(mc->methodCall);
+        return;
+    }
+    if (stmt->is<IR::EmptyStatement>()) return;
+    // if/switch/return/exit/...: cannot summarize statically -> be conservative.
+    eff.ok = false;
+}
+
+bool exprEquiv(const IR::Expression *a, const IR::Expression *b) {
+    if (a == b) return true;
+    if (a == nullptr || b == nullptr) return false;
+    return a->equiv(*b);
+}
+
+bool effectsEqual(const ActionEffect &a, const ActionEffect &b) {
+    if (!a.ok || !b.ok) return false;  // unsummarizable -> not provably equal
+    if (a.assigns.size() != b.assigns.size() || a.calls.size() != b.calls.size()) return false;
+    for (size_t i = 0; i < a.assigns.size(); ++i) {
+        if (!exprEquiv(a.assigns[i].first, b.assigns[i].first)) return false;
+        if (!exprEquiv(a.assigns[i].second, b.assigns[i].second)) return false;
+    }
+    for (size_t i = 0; i < a.calls.size(); ++i)
+        if (!exprEquiv(a.calls[i], b.calls[i])) return false;
+    return true;
+}
+
+ActionEffect summarizeAction(const IR::P4Action *action,
+                             const std::map<cstring, const IR::Expression *> &binding) {
+    ActionEffect eff;
+    if (action == nullptr || action->body == nullptr) {
+        eff.ok = false;
+        return eff;
+    }
+    ActionParamSubstitute subst(binding);
+    const auto *body = action->body->apply(subst)->to<IR::BlockStatement>();
+    if (body == nullptr) {
+        eff.ok = false;
+        return eff;
+    }
+    collectEffect(body, eff);
+    return eff;
+}
+
+}  // namespace
+
+bool StateDependencyTracker::sinkActionsDiverge(const FinalState *fs, const IR::P4Table *sink,
+                                                cstring sinkCpName) const {
+    // No resolvable sink -> cannot prove invisibility -> emit.
+    if (sink == nullptr || fs == nullptr) return true;
+    const auto *es = fs->getExecutionState();
+
+    // --- Default (MISS) action and its bound (const) args ---
+    const auto *defActExpr = sink->getDefaultAction();
+    if (defActExpr == nullptr) return true;
+    const auto *defMce = defActExpr->to<IR::MethodCallExpression>();
+    if (defMce == nullptr) return true;
+    const auto *defAction = es->getP4Action(defMce);
+    if (defAction == nullptr) return true;
+    std::map<cstring, const IR::Expression *> defBinding;
+    {
+        const auto &params = defAction->parameters->parameters;
+        const auto *args = defMce->arguments;
+        if (args != nullptr && params.size() == args->size())
+            for (size_t i = 0; i < params.size(); ++i)
+                defBinding[params.at(i)->name.name] = args->at(i)->expression;
+    }
+
+    // --- HIT action: the action chosen by the sink's matched entry in this terminal ---
+    const auto *tblObj = es->getTestObject("tableconfigs"_cs, sinkCpName, /*checked=*/false);
+    if (tblObj == nullptr) return true;
+    const auto *cfg = tblObj->evaluate(fs->getFinalModel(), /*doComplete=*/true)->to<TableConfig>();
+    if (cfg == nullptr || cfg->getRules() == nullptr || cfg->getRules()->empty()) return true;
+    const auto *hitCall = cfg->getRules()->front().getActionCall();
+    if (hitCall == nullptr || hitCall->getAction() == nullptr) return true;
+    std::map<cstring, const IR::Expression *> hitBinding;
+    for (const auto &arg : *hitCall->getArgs())
+        hitBinding[arg.getActionParamName()] = arg.getEvaluatedValue();
+
+    // Diverge unless the two action bodies are provably identical in observable effect.
+    auto hitEff = summarizeAction(hitCall->getAction(), hitBinding);
+    auto defEff = summarizeAction(defAction, defBinding);
+    return !effectsEqual(hitEff, defEff);
+}
+
 StateDependencyTracker::StateDependencyTracker(
     AbstractSolver &solver, const ProgramInfo &programInfo,
     const P4StateDependency::StateDependencyResult &sdResult, StateDependencyPolicy policy)
@@ -611,6 +748,17 @@ size_t StateDependencyTracker::runTamperingChain(
                 const auto *fs1 = phase1States[i];
                 const auto &cond1 = phase1Conditions[phase1StateToCondition.at(i)];
                 const auto *fs2 = fs2List[cursor[i]++];
+                // Sink action-divergence gate: a HIT→MISS flip is observable only if the sink's HIT
+                // action (Phase 1) and its default (MISS) action write different output state. If
+                // they are provably identical the flip changes nothing — drain this Phase-1 bucket
+                // and skip. (Sound-toward-emitting; the differential oracle is the final judge.)
+                if (!sinkActionsDiverge(fs1, currentSinkTable_, chain.sinkTableControlPlaneName)) {
+                    printInfo("[Tampering] HIT→MISS chain id=%1%: sink '%2%' HIT/default actions do "
+                              "not diverge; flip is unobservable, skipping.",
+                              chain.id, chain.sinkTableControlPlaneName);
+                    cursor[i] = fs2List.size();
+                    continue;
+                }
                 emittedThisRound = true;
                 // Derive attacker-chosen register values from Phase 2 (on the *unevaluated* register
                 // object so symbolic write expressions remain available for constraints).
@@ -782,19 +930,25 @@ size_t StateDependencyTracker::runTamperingChain(
                                                 inputPortSymExpr, carriedRegs);
             if (fs3 == nullptr) continue;       // pinned input had no terminal (unsatisfiable)
             if (evalSinkHit(fs3) != 1) continue;  // sink did not flip MISS→HIT
+            // Sink action-divergence gate (replaces the old Phase1-vs-Phase3 disposition compare):
+            // a confirmed MISS→HIT flip is observable only if the sink's HIT action (now taken in
+            // Phase 3) differs in effect from its default (MISS) action (taken in Phase 1). The
+            // end-to-end output divergence is the harness's call — we only drop provably-invisible
+            // flips here. (Sound-toward-emitting.)
+            if (!sinkActionsDiverge(fs3, currentSinkTable_, chain.sinkTableControlPlaneName)) continue;
+            // Disposition of fs1 (MISS) vs fs3 (HIT) — informational only, for the case label.
             bool d3Drop = false;
             int d3Port = -1;
             evalDisposition(fs3, d3Drop, d3Port);
-            if (d1Drop == d3Drop && d1Port == d3Port) continue;  // no observable output change
 
-            // Compute the 4-case label (MISS→HIT × disposition flip).
+            // Compute the informational case label (MISS→HIT × disposition).
             std::string disp;
             if (d1Drop && !d3Drop) {
                 disp = "DROP_TO_FWD";
             } else if (!d1Drop && d3Drop) {
                 disp = "FWD_TO_DROP";
             } else {
-                disp = "FWD_TO_FWD_PORTCHANGE";
+                disp = "FWD_TO_FWD";
             }
 
             // Build the emitted attacker register from Phase 3's read of the SO register: its index
