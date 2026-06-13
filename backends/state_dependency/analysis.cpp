@@ -278,9 +278,11 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             if (h2s2kGraphs->leaves[i].empty()) continue;
             auto *esg = cgen.controlGraphsArray[i];
             auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            // Evaluate the by-value getter once: calling it twice would make begin()/end()
+            // straddle two different temporaries (garbage range -> vector::_M_range_insert).
+            auto nowriteChains = h2s2kGraphs->get_nowrite_so_vertices(i, esg);
             result.noWriteReadChains[graphName].insert(result.noWriteReadChains[graphName].end(),
-                h2s2kGraphs->get_nowrite_so_vertices(i, esg).begin(),
-                h2s2kGraphs->get_nowrite_so_vertices(i, esg).end());
+                nowriteChains.begin(), nowriteChains.end());
             result.dataWriteKeyChains[graphName] = h2s2kGraphs->get_data_write_so_chains(i, esg);
         }
     }
@@ -289,9 +291,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             if (h2s2vGraphs->leaves[i].empty()) continue;
             auto *esg = cgen.controlGraphsArray[i];
             auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            // Evaluate the by-value getter once (see h2s2k site above).
+            auto nowriteChains = h2s2vGraphs->get_nowrite_so_vertices(i, esg);
             result.noWriteReadChains[graphName].insert(result.noWriteReadChains[graphName].end(),
-                h2s2vGraphs->get_nowrite_so_vertices(i, esg).begin(),
-                h2s2vGraphs->get_nowrite_so_vertices(i, esg).end());
+                nowriteChains.begin(), nowriteChains.end());
             result.dataWriteHeaderChains[graphName] = h2s2vGraphs->get_data_write_so_chains(i, esg);
         }
     }

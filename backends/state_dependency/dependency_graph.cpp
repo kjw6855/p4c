@@ -356,11 +356,11 @@ void DependencyGraphs::merge_nodes_without_variable(size_t index) {
         for (auto varVertex : varVerticesIt->second)
             moveEdges(noVarVertex, varVertex);
 
-        // Simply remove in/out edges for noVarVertex, since it will be removed later in pruning step.
-        for (auto [eit, eend] = boost::in_edges(noVarVertex, g); eit != eend; ++eit)
-            boost::remove_edge(*eit, g);
-        for (auto [eit, eend] = boost::out_edges(noVarVertex, g); eit != eend; ++eit)
-            boost::remove_edge(*eit, g);
+        // Remove all in/out edges of noVarVertex (the vertex is dropped later in the pruning step).
+        // Use clear_vertex rather than iterate-and-remove: on a vecS/bidirectional adjacency_list,
+        // remove_edge invalidates the edge iterators we would still be walking (UB; tripped boost's
+        // internal `rng.first != rng.second` assertion). clear_vertex removes them all safely.
+        boost::clear_vertex(noVarVertex, g);
     }
 }
 
