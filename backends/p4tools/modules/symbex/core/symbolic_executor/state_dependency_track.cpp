@@ -373,21 +373,123 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 
     auto chains = collectChains();
 
+    // Flatten all chains for the shared Phase-1 pass.
+    allChains.clear();
+    for (const auto &[chainName, chainList] : chains)
+        for (const auto *chain : chainList) allChains.push_back(chain);
+    if (allChains.empty()) return;
+
+    // One shared Phase-1 traversal of the whole program collects read-baseline terminals for EVERY
+    // chain at once (bucketed per chain), instead of re-traversing the program once per chain.
+    collectPhase1Terminals(initState);
+
+    // Per-chain cap on emitted sub-tests, reusing the existing --max-tests option. Applied per chain
+    // (not globally) so every SOChain produces its own tests. 0 means "unlimited".
+    const size_t maxPerChain = static_cast<size_t>(SymbexOptions::get().maxTests);
     for (const auto &[chainName, chainList] : chains) {
         for (const auto *chain : chainList) {
             currentChain = chain;
             currentChainName = chainName;
             printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
                       chainName, chain->id, chain->soName);
-
-            // Per-chain cap on emitted sub-tests, reusing the existing --max-tests option.
-            // Applied per chain (not globally) so every SOChain produces its own tests.
-            // 0 means "unlimited": collect every valid Phase-1 × Phase-2 path.
-            const size_t maxPerChain = static_cast<size_t>(SymbexOptions::get().maxTests);
-            runTamperingChain(*chain, initState, callBack, maxPerChain, /*missToHit=*/false);
-            runTamperingChain(*chain, initState, callBack, maxPerChain, /*missToHit=*/true);
+            const auto &bucket = phase1Buckets[chain->id];
+            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain, /*missToHit=*/false);
+            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain, /*missToHit=*/true);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared Phase-1 collection: one traversal, terminals bucketed per chain
+// ---------------------------------------------------------------------------
+
+bool StateDependencyTracker::chainTargetsCovered(
+    const P4StateDependency::DependencyGraphs::SOChain &chain,
+    const P4::Coverage::CoverageSet &visited) const {
+    auto it = chainPhase1Targets.find(chain.id);
+    if (it == chainPhase1Targets.end() || it->second.empty()) return false;
+    return std::all_of(it->second.begin(), it->second.end(),
+                       [&visited, &chain, this](const IR::Node *n) {
+                           if (n->is<IR::Key>())
+                               return isTableVisited(chain.sinkTableControlPlaneName, visited);
+                           return visited.count(n) > 0;
+                       });
+}
+
+bool StateDependencyTracker::allPhase1BucketsFull() const {
+    for (const auto *ch : allChains) {
+        auto it = phase1Buckets.find(ch->id);
+        if (it == phase1Buckets.end() || it->second.size() < phase1BucketCap) return false;
+    }
+    return true;
+}
+
+void StateDependencyTracker::handleSharedTerminal(const ExecutionState &es) {
+    ++phase1Examined;
+    const auto &visited = es.getVisited();
+    std::vector<size_t> matched;
+    for (const auto *ch : allChains) {
+        if (phase1Buckets[ch->id].size() >= phase1BucketCap) continue;  // bucket already full
+        if (chainTargetsCovered(*ch, visited)) matched.push_back(ch->id);
+    }
+    if (matched.empty()) return;
+    auto sat = solver.checkSat(es.getPathConstraint());
+    if (!sat || !*sat) return;
+    // One materialized terminal is shared (read-only) across all chains it covers.
+    const auto *fs = new FinalState(solver, es);
+    for (auto id : matched) phase1Buckets[id].push_back(fs);
+}
+
+void StateDependencyTracker::collectPhase1Terminals(const ExecutionState &initState) {
+    phase1Buckets.clear();
+    chainPhase1Targets.clear();
+    phase1Examined = 0;
+
+    // Per-chain Phase-1 targets (readNodes, or writeNodes for isUpdate) and their union.
+    currentPhase = TamperingPhase::Phase1_Read;
+    P4::Coverage::CoverageSet unionTargets;
+    for (const auto *chain : allChains) {
+        currentChain = chain;  // buildRequiredNodes consults currentPhase + chain
+        auto targets = buildRequiredNodes(*chain);
+        for (const auto *n : targets) unionTargets.insert(n);
+        chainPhase1Targets[chain->id] = std::move(targets);
+    }
+    currentChain = nullptr;
+    if (unionTargets.empty()) return;
+
+    // Caps. The bucket serves BOTH directions (HIT→MISS keeps sink-HIT terminals, MISS→HIT keeps
+    // sink-MISS); since the shared pass has no per-chain sink steering, collect generously so both
+    // subsets have material. The examine budget bounds runaway exploration when a chain's target is
+    // single-packet-infeasible (its bucket never fills). Both are tunable.
+    const size_t base = std::max<size_t>(static_cast<size_t>(SymbexOptions::get().maxTests), 1);
+    phase1BucketCap = std::max<size_t>(base * 4, 12);
+    phase1ExamineBudget = std::max<size_t>(phase1BucketCap * allChains.size() * 4, 2000);
+
+    // Multi-target directed search: steer toward / prune via the UNION of all chains' read targets.
+    currentRequiredNodes = unionTargets;
+    buildReachingSet();
+
+    solver.checkSat({});  // clear accumulated assertions before the read pass
+    sharedPhase1 = true;
+    seekMiss_ = false;
+    currentSinkTable_ = nullptr;
+    {
+        // Allow drops (serves both directions) + register zero-init + register tracking.
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, ""_cs, {}, /*setRegTracking=*/true,
+                               /*isPhase1=*/true);
+        unexploredBranches.clear();
+        auto &phase1Init = initState.clone();
+        // No-op callback: shared bucketing happens in runImpl/handleSharedTerminal, not the callback.
+        runImpl([](const FinalState &) -> bool { return false; }, phase1Init);
+    }
+    sharedPhase1 = false;
+    currentChain = nullptr;
+
+    size_t total = 0;
+    for (const auto &[id, b] : phase1Buckets) total += b.size();
+    printInfo("[Tampering] Shared Phase-1: %1% chains, %2% terminals examined, %3% bucketed "
+              "(cap %4%/chain)",
+              allChains.size(), phase1Examined, total, phase1BucketCap);
 }
 
 // ---------------------------------------------------------------------------
@@ -502,7 +604,8 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
 
 size_t StateDependencyTracker::runTamperingChain(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
-    const TamperingCallback &callBack, size_t maxPerChain, bool missToHit) {
+    const std::vector<const FinalState *> &phase1Bucket, const TamperingCallback &callBack,
+    size_t maxPerChain, bool missToHit) {
     currentChain = &chain;
 
     // Resolve the chain's sink table so pickSuccessor can steer Phase 1 toward/away from its HIT
@@ -520,61 +623,44 @@ size_t StateDependencyTracker::runTamperingChain(
     // unsat). checkSat({}) pops all outstanding assertions so Phase 1 starts from a clean slate.
     solver.checkSat({});
 
-    // ---- Phase 1: read the original register value ----
-    // HIT→MISS keeps terminals where the sink HIT; MISS→HIT keeps reached-sink-MISS baselines.
+    // ---- Phase 1: take this chain's share of the shared read-baseline traversal ----
+    // (collectPhase1Terminals already ran one program-wide DFS and bucketed terminals per chain.)
     currentPhase = TamperingPhase::Phase1_Read;
-    currentRequiredNodes = buildRequiredNodes(chain);
-    if (currentRequiredNodes.empty()) {
-        if (!missToHit) warning("[Tampering] Chain id=%1% has no readNodes; skipping.", chain.id);
-        return 0;
-    }
-    buildReachingSet();
-    if (!missToHit) {
-        printInfo("[Tampering] Phase 1 (Read) — %1% required nodes", currentRequiredNodes.size());
-        for (const auto *node : currentRequiredNodes)
-            printInfo("  [%1%] %2% %3%", node->node_type_name(), node,
-                      node->getSourceInfo().toPositionString());
-    }
+    std::vector<const FinalState *> phase1States(phase1Bucket.begin(), phase1Bucket.end());
 
-    std::vector<const FinalState *> phase1States;
-    {
-        // HIT→MISS forwards (outputPacketOnly) and steers toward the sink HIT. MISS→HIT allows drop
-        // terminals (drop→fwd) and disables the HIT steering (seekMiss_) so it lands on MISS
-        // baselines; it collects a small diverse set since only some sink-key combinations flip.
-        ScopedSymbexOpts guard(/*outputPacketOnly=*/!missToHit, ""_cs, {}, /*setRegTracking=*/true,
-                               /*isPhase1=*/true);
-        seekMiss_ = missToHit;
-        const size_t phase1Cap =
-            missToHit ? std::max<size_t>(4, std::min<size_t>(maxPerChain * 2, 8)) : maxPerChain;
-        auto &phase1Init = initState.clone();
-        runPhase(phase1Init, phase1States, phase1Cap);
-        seekMiss_ = false;
-    }
-
+    // Direction filter: the shared collector applied no sink/disposition filter (it served both
+    // directions and kept drops), so apply them here.
     if (missToHit) {
         // Keep only reached-and-MISS terminals (the flippable baselines).
         phase1States.erase(
             std::remove_if(phase1States.begin(), phase1States.end(),
                            [this](const FinalState *fs) { return evalSinkHit(fs) != 0; }),
             phase1States.end());
-    } else if (!chain.sinkTableControlPlaneName.isNullOrEmpty()) {
-        // Keep only Phase 1 states where the sink table HIT. evalTableControlEntries sets
-        // tableHitVar to a concrete true/false in each branch; addDefaultAction (miss path) sets it
-        // to false. We evaluate the value from the final model and discard miss states.
-        auto tblIt = tableByName_.find(chain.sinkTableControlPlaneName);
-        if (tblIt != tableByName_.end()) {
-            const auto &hitVar = TableStepper::getTableHitVar(tblIt->second);
-            phase1States.erase(
-                std::remove_if(phase1States.begin(), phase1States.end(),
-                               [&hitVar](const FinalState *fs) {
-                                   const auto *hitExpr = fs->getExecutionState()->get(hitVar);
-                                   if (hitExpr == nullptr) return true;
-                                   const auto *hitVal = fs->getFinalModel().evaluate(hitExpr, true);
-                                   const auto *hitBool = hitVal->to<IR::BoolLiteral>();
-                                   return hitBool == nullptr || !hitBool->value;
-                               }),
-                phase1States.end());
-        }
+    } else {
+        // HIT→MISS keeps sink-HIT terminals. The HIT action may itself DROP — e.g. a deny-ACL sink
+        // whose hit action is mark_to_drop — so dropped baselines are kept: under the differential
+        // oracle a Phase-1 drop is a valid reference (Phase-1 HIT→drop vs tampered Phase-3
+        // MISS→forward is an ACL bypass). Only forwarded terminals are subject to the distinct
+        // in/out port invariant.
+        const bool distinct = SymbexOptions::get().distinctIOPorts;
+        const bool hasSink = currentSinkTable_ != nullptr;
+        phase1States.erase(
+            std::remove_if(phase1States.begin(), phase1States.end(),
+                           [this, distinct, hasSink](const FinalState *fs) {
+                               if (hasSink && evalSinkHit(fs) != 1) return true;  // sink missed
+                               bool dropped = false;
+                               int outPort = -1;
+                               evalDisposition(fs, dropped, outPort);
+                               if (!dropped && distinct) {
+                                   const auto *ipExpr = fs->getExecutionState()->get(
+                                       programInfo.getTargetInputPortVar());
+                                   const auto inPort = IR::getIntFromLiteral(
+                                       fs->getFinalModel().evaluate(ipExpr, true));
+                                   if (inPort == outPort) return true;
+                               }
+                               return false;
+                           }),
+            phase1States.end());
     }
     if (phase1States.empty()) {
         if (!missToHit)
@@ -594,11 +680,11 @@ size_t StateDependencyTracker::runTamperingChain(
         inputPortSymExpr = fs1->getExecutionState()->get(programInfo.getTargetInputPortVar());
         auto cond = buildPhaseCondition(*fs1, programInfo);
         if (!missToHit) {
-            // HIT→MISS Phase-1 always forwards, so ports are concrete and valid. (MISS→HIT may keep
-            // dropped baselines with no output port, so these checks/logs are skipped there.)
+            // The input port is always concrete. The output port may be -1 for a dropped HIT-baseline
+            // (e.g. a deny-ACL sink whose hit action drops); the distinct-port invariant only applies
+            // to forwarded baselines.
             BUG_CHECK(cond.inputPort >= 0, "Phase 1 invalid input port %1%", cond.inputPort);
-            BUG_CHECK(cond.outputPort >= 0, "Phase 1 invalid output port %1%", cond.outputPort);
-            if (SymbexOptions::get().distinctIOPorts) {
+            if (cond.outputPort >= 0 && SymbexOptions::get().distinctIOPorts) {
                 BUG_CHECK(cond.inputPort != cond.outputPort,
                           "Phase 1 identical input/output ports %1%", cond.inputPort);
             }
@@ -693,11 +779,13 @@ size_t StateDependencyTracker::runTamperingChain(
             }
         }
 
-        // Constrain Phase 2's input port to differ from Phase 1's input AND output.
+        // Constrain Phase 2's input port to differ from Phase 1's input AND output. A dropped
+        // Phase-1 baseline has no output port (cond1.outputPort < 0), so only the input NEQ applies.
         phase2Init.pushPathConstraint(new IR::Neq(
             inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
-        phase2Init.pushPathConstraint(new IR::Neq(
-            inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
+        if (cond1.outputPort >= 0)
+            phase2Init.pushPathConstraint(new IR::Neq(
+                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
         // Constrain Phase 2's table match keys to differ from Phase 1's (compatible, coexisting
         // entries). Skip size-1 tables: their entry is pre-injected.
         const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
@@ -1203,45 +1291,52 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
     while (true) {
         try {
             if (executionState.get().isTerminal()) {
-                // Only emit a test when the path covers all required nodes.
-                const auto &visited = executionState.get().getVisited();
-                bool allCovered =
-                    std::all_of(currentRequiredNodes.begin(), currentRequiredNodes.end(),
-                                [&visited, this](const IR::Node *n) {
-                                    // IR::Key nodes are never passed to markVisited; instead
-                                    // check whether the table that owns this key had its
-                                    // apply() MethodCallStatement visited.
-                                    if (n->is<IR::Key>()) {
-                                        return isTableVisited(
-                                            currentChain->sinkTableControlPlaneName, visited);
-                                    }
-                                    return visited.count(n) > 0;
-                                });
-                if (allCovered) {
-                    printInfo("[SDTrack] Test found: chain=%1% id=%2% SO=%3% (%4% nodes)",
-                                currentChainName, currentChain->id, currentChain->soName,
-                                currentRequiredNodes.size());
-                    for (const auto *node : currentRequiredNodes) {
-                        printInfo("  OK  [%1%] %2% %3%",
-                                    node->node_type_name(), node,
-                                    node->getSourceInfo().toPositionString());
-                    }
-                    bool terminate = handleTerminalState(callBack, executionState);
-                    if (terminate) return;
+                if (sharedPhase1) {
+                    // Shared Phase-1 pass: bucket this terminal into every chain whose read targets
+                    // it covers; stop once all buckets are full or the examine budget is hit.
+                    handleSharedTerminal(executionState.get());
+                    if (allPhase1BucketsFull() || phase1Examined >= phase1ExamineBudget) return;
                 } else {
-                    // DEBUG: show which required nodes were not visited so the caller can
-                    // distinguish a node-identity mismatch from a DFS coverage failure.
-                    printInfo("[SDTrack DEBUG] Terminal state reached but allCovered=false "
-                              "(%1% required nodes):", currentRequiredNodes.size());
-                    for (const auto *n : currentRequiredNodes) {
-                        bool hit = n->is<IR::Key>()
-                            ? isTableVisited(currentChain->sinkTableControlPlaneName, visited)
-                            : visited.count(n) > 0;
-                        printInfo("  %1% [%2%] %3% %4%", (hit ? "OK  " : "MISS"),
-                                  n->node_type_name(), n,
-                                  n->getSourceInfo().toPositionString());
+                    // Only emit a test when the path covers all required nodes.
+                    const auto &visited = executionState.get().getVisited();
+                    bool allCovered =
+                        std::all_of(currentRequiredNodes.begin(), currentRequiredNodes.end(),
+                                    [&visited, this](const IR::Node *n) {
+                                        // IR::Key nodes are never passed to markVisited; instead
+                                        // check whether the table that owns this key had its
+                                        // apply() MethodCallStatement visited.
+                                        if (n->is<IR::Key>()) {
+                                            return isTableVisited(
+                                                currentChain->sinkTableControlPlaneName, visited);
+                                        }
+                                        return visited.count(n) > 0;
+                                    });
+                    if (allCovered) {
+                        printInfo("[SDTrack] Test found: chain=%1% id=%2% SO=%3% (%4% nodes)",
+                                    currentChainName, currentChain->id, currentChain->soName,
+                                    currentRequiredNodes.size());
+                        for (const auto *node : currentRequiredNodes) {
+                            printInfo("  OK  [%1%] %2% %3%",
+                                        node->node_type_name(), node,
+                                        node->getSourceInfo().toPositionString());
+                        }
+                        bool terminate = handleTerminalState(callBack, executionState);
+                        if (terminate) return;
+                    } else {
+                        // DEBUG: show which required nodes were not visited so the caller can
+                        // distinguish a node-identity mismatch from a DFS coverage failure.
+                        printInfo("[SDTrack DEBUG] Terminal state reached but allCovered=false "
+                                "(%1% required nodes):", currentRequiredNodes.size());
+                        for (const auto *n : currentRequiredNodes) {
+                            bool hit = n->is<IR::Key>()
+                                ? isTableVisited(currentChain->sinkTableControlPlaneName, visited)
+                                : visited.count(n) > 0;
+                            printInfo("  %1% [%2%] %3% %4%", (hit ? "OK  " : "MISS"),
+                                    n->node_type_name(), n,
+                                    n->getSourceInfo().toPositionString());
+                        }
                     }
-                }
+                }  // end non-shared terminal handling
             } else {
                 StepResult successors = step(executionState);
                 auto next = pickSuccessor(successors);

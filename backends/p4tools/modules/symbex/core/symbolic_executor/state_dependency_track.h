@@ -165,6 +165,35 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// sink-HIT steering (which would otherwise pull Phase 1 onto HIT branches we discard).
     bool seekMiss_ = false;
 
+    // ---- Shared Phase-1 collection (one traversal for all chains) -----------------------------
+    /// True while collectPhase1Terminals runs the single shared Phase-1 DFS. In this mode runImpl
+    /// buckets each terminal into every chain it covers (instead of the single-chain allCovered),
+    /// and pickSuccessor steers/prunes toward the UNION of all chains' read targets.
+    bool sharedPhase1 = false;
+    /// All SOChains for the current program (flattened from collectChains), used by the shared pass.
+    std::vector<const P4StateDependency::DependencyGraphs::SOChain *> allChains;
+    /// Per-chain Phase-1 target node set (readNodes, or writeNodes for isUpdate chains), keyed by
+    /// chain id. Used to test coverage of a terminal against each chain.
+    std::map<size_t, P4::Coverage::CoverageSet> chainPhase1Targets;
+    /// Collected Phase-1 terminals per chain id (a terminal may appear in several chains' buckets).
+    std::map<size_t, std::vector<const FinalState *>> phase1Buckets;
+    /// Per-chain cap on collected Phase-1 terminals (covers both directions' post-filter needs).
+    size_t phase1BucketCap = 0;
+    /// Safety bound on terminals examined by the shared pass (stops runaway exploration when some
+    /// chain is single-packet-infeasible and its bucket never fills).
+    size_t phase1ExamineBudget = 0;
+    size_t phase1Examined = 0;
+
+    /// Runs the single shared Phase-1 DFS, filling phase1Buckets for every chain in allChains.
+    void collectPhase1Terminals(const ExecutionState &initState);
+    /// Shared-pass terminal handler: bucket @p es into every chain whose Phase-1 targets it covers.
+    void handleSharedTerminal(const ExecutionState &es);
+    /// True when chain @p chain's Phase-1 target nodes are all in @p visited.
+    bool chainTargetsCovered(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                             const P4::Coverage::CoverageSet &visited) const;
+    /// True when every chain's Phase-1 bucket has reached phase1BucketCap.
+    bool allPhase1BucketsFull() const;
+
     /// Name of the current chain category (e.g. "Write Condition"), set in run().
     cstring currentChainName;
 
@@ -199,10 +228,13 @@ class StateDependencyTracker : public SymbolicExecutor {
     ///                     tampered register and emit only when the sink flips MISS→HIT *and* the
     ///                     packet disposition changes (emit hit_phase=3 / miss_phase=1 + case label
     ///                     + phase3_verify).
-    /// Returns the number of sub-tests emitted for this (chain, direction).
+    /// Returns the number of sub-tests emitted for this (chain, direction). @p phase1Bucket is the
+    /// chain's share of the shared Phase-1 traversal (collectPhase1Terminals); this function applies
+    /// the direction-specific filter to it and runs Phase 2 / Phase 3.
     size_t runTamperingChain(const P4StateDependency::DependencyGraphs::SOChain &chain,
-                             const ExecutionState &initState, const TamperingCallback &callBack,
-                             size_t maxPerChain, bool missToHit);
+                             const ExecutionState &initState,
+                             const std::vector<const FinalState *> &phase1Bucket,
+                             const TamperingCallback &callBack, size_t maxPerChain, bool missToHit);
 
     /// Extracts the concrete (input, output) port pair from a final state's model.
     std::pair<int, int> getPortPair(const FinalState *fs) const;
