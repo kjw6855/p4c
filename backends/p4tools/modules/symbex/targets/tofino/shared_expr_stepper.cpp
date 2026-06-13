@@ -662,6 +662,73 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
          * ====================================================================================== */
         {"DirectRegisterAction.execute"_cs, {}, DIRECT_REGISTER_ACTION_EXECUTE},
         /* ======================================================================================
+         *  Register.read / Register.write
+         *  Direct (non-RegisterAction) register accessors. `T read(in I index)` and
+         *  `T write(in I index, in T value)` (write returns the written value in TNA). Modeled on
+         *  the same per-instance "registervalues" IndexMap as RegisterAction so a write is visible
+         *  to a later read and the (index, value) is recorded for tampering (withAttackerValues).
+         * ====================================================================================== */
+        {"Register.read"_cs, {"index"_cs},
+         [](const ExternInfo &externInfo, SharedTofinoExprStepper &stepper) {
+             const auto &receiverPath = externInfo.externObjectRef;
+             const auto *index = externInfo.externArguments.at(0)->expression;
+             auto &nextState = stepper.state.clone();
+             const auto *decl =
+                 nextState.findDecl(&receiverPath)->checkedTo<IR::Declaration_Instance>();
+             const auto *specType = receiverPath.type->checkedTo<IR::Type_SpecializedCanonical>();
+             const auto *valueType = nextState.resolveType(specType->arguments->at(0));
+             const auto regName = decl->toString();
+             const auto *registerState =
+                 stepper.state.getTestObject("registervalues"_cs, regName, false);
+             const IR::Expression *readValue = nullptr;
+             if (registerState != nullptr) {
+                 readValue =
+                     registerState->checkedTo<TofinoRegisterValue>()->getValueAtIndex(index);
+             } else {
+                 // First touch: seed the register (zero under tampering tracking, else symbolic)
+                 // and read it back.
+                 const bool useZeroInit = SymbexOptions::get().tamperingRegisterTracking &&
+                                          SymbexOptions::get().initRegZeroValue;
+                 const IR::Expression *init =
+                     useZeroInit
+                         ? static_cast<const IR::Expression *>(IR::Constant::get(valueType, 0))
+                         : static_cast<const IR::Expression *>(
+                               ToolsVariables::getSymbolicVariable(valueType, regName));
+                 auto *registerValue = new TofinoRegisterValue(decl, init, index);
+                 nextState.addTestObject("registervalues"_cs, regName, registerValue);
+                 readValue = registerValue->getValueAtIndex(index);
+             }
+             nextState.replaceTopBody(Continuation::Return(readValue));
+             stepper.result->emplace_back(nextState);
+         }},
+        {"Register.write"_cs, {"index"_cs, "value"_cs},
+         [](const ExternInfo &externInfo, SharedTofinoExprStepper &stepper) {
+             const auto &receiverPath = externInfo.externObjectRef;
+             const auto *index = externInfo.externArguments.at(0)->expression;
+             const auto *value = externInfo.externArguments.at(1)->expression;
+             auto &nextState = stepper.state.clone();
+             const auto *decl =
+                 nextState.findDecl(&receiverPath)->checkedTo<IR::Declaration_Instance>();
+             const auto *specType = receiverPath.type->checkedTo<IR::Type_SpecializedCanonical>();
+             const auto *valueType = nextState.resolveType(specType->arguments->at(0));
+             const auto regName = decl->toString();
+             const auto *registerState =
+                 stepper.state.getTestObject("registervalues"_cs, regName, false);
+             TofinoRegisterValue *registerValue = nullptr;
+             if (registerState != nullptr) {
+                 registerValue = new TofinoRegisterValue(
+                     *registerState->checkedTo<TofinoRegisterValue>());
+             } else {
+                 registerValue =
+                     new TofinoRegisterValue(decl, IR::Constant::get(valueType, 0), index);
+             }
+             registerValue->writeToIndex(index, value);
+             nextState.addTestObject("registervalues"_cs, regName, registerValue);
+             // TNA `write` returns the written value.
+             nextState.replaceTopBody(Continuation::Return(value));
+             stepper.result->emplace_back(nextState);
+         }},
+        /* ======================================================================================
          *  RegisterParam.read
          *  Construct a read-only run-time configurable parameter that can only be
          *  used by RegisterAction.
