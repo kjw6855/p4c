@@ -10,6 +10,7 @@ enum class PathSelectionPolicy {
     RandomBacktrack,
     GreedyStmtCoverage,
     StateDependencyTampering,
+    StateDependencyTamperingCond,
     StateDependencyAlteringPath,
 };
 
@@ -17,6 +18,7 @@ inline bool requiresLookahead(PathSelectionPolicy &pathSelectionPolicy) {
     static const std::set LOOKAHEAD_STRATEGYIES = {
         PathSelectionPolicy::GreedyStmtCoverage,
         PathSelectionPolicy::StateDependencyTampering,
+        PathSelectionPolicy::StateDependencyTamperingCond,
         PathSelectionPolicy::StateDependencyAlteringPath,
     };
     return LOOKAHEAD_STRATEGYIES.find(pathSelectionPolicy) != LOOKAHEAD_STRATEGYIES.end();

@@ -92,6 +92,7 @@ SymbolicExecutor *pickExecutionEngine(const SymbexOptions &symbexOptions,
         return new SelectedBranches(solver, programInfo, selectedBranchesStr);
     }
     if (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering ||
+        pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond ||
         pathSelectionPolicy == PathSelectionPolicy::StateDependencyAlteringPath) {
         const auto *stateDep = programInfo.getCompilerResult().getStateDep();
         if (stateDep == nullptr) {
@@ -100,10 +101,12 @@ SymbolicExecutor *pickExecutionEngine(const SymbexOptions &symbexOptions,
                 "Falling back to depth-first search.");
             return new DepthFirstSearch(solver, programInfo);
         }
-        StateDependencyPolicy sdPolicy =
-            (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
-                ? StateDependencyPolicy::Tampering
-                : StateDependencyPolicy::AlteringPath;
+        StateDependencyPolicy sdPolicy = StateDependencyPolicy::AlteringPath;
+        if (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering) {
+            sdPolicy = StateDependencyPolicy::Tampering;
+        } else if (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond) {
+            sdPolicy = StateDependencyPolicy::TamperingCond;
+        }
         return new StateDependencyTracker(solver, programInfo, *stateDep, sdPolicy);
     }
     return new DepthFirstSearch(solver, programInfo);
@@ -149,7 +152,9 @@ std::optional<AbstractTestList> generateAndCollectAbstractTests(
     // For the Tampering policy, use the three-phase entry point so that the test backend
     // receives all three related packet pairs as a unit.
     auto *tracker = dynamic_cast<StateDependencyTracker *>(symbolicExecutor);
-    if (tracker != nullptr && tracker->getPolicy() == StateDependencyPolicy::Tampering) {
+    if (tracker != nullptr &&
+        (tracker->getPolicy() == StateDependencyPolicy::Tampering ||
+         tracker->getPolicy() == StateDependencyPolicy::TamperingCond)) {
         tracker->runTampering([testBackend](const TamperingFinalState &ts) {
             return testBackend->runTampering(ts);
         });
@@ -204,7 +209,9 @@ int generateAndWriteAbstractTests(const SymbexOptions &symbexOptions,
     // For the Tampering policy, use the three-phase entry point so that the test backend
     // receives all three related packet pairs as a unit.
     auto *tracker = dynamic_cast<StateDependencyTracker *>(symbolicExecutor);
-    if (tracker != nullptr && tracker->getPolicy() == StateDependencyPolicy::Tampering) {
+    if (tracker != nullptr &&
+        (tracker->getPolicy() == StateDependencyPolicy::Tampering ||
+         tracker->getPolicy() == StateDependencyPolicy::TamperingCond)) {
         tracker->runTampering([testBackend](const TamperingFinalState &ts) {
             return testBackend->runTampering(ts);
         });

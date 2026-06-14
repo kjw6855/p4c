@@ -22,6 +22,7 @@
 #include "ir/irutils.h"
 #include "ir/solver.h"
 #include "ir/vector.h"
+#include "backends/p4tools/modules/symbex/lib/logging.h"
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
@@ -175,8 +176,20 @@ bool CmdStepper::preorder(const IR::EmptyStatement * /*empty*/) {
     return false;
 }
 
+const IR::StateVariable &CmdStepper::getConditionVar(const IR::IfStatement *ifStatement) {
+    // Keyed by source position so the variable survives the condition-reduction clone the stepper
+    // makes below (clone preserves SourceInfo). Mirror of TableStepper::getTableHitVar.
+    return ToolsVariables::getStateVariable(
+        IR::Type::Boolean::get(),
+        cstring("*if_cond." + ifStatement->getSourceInfo().toPositionString()));
+}
+
 bool CmdStepper::preorder(const IR::IfStatement *ifStatement) {
     logStep(ifStatement);
+    // Under the H2S2C tampering policy, record which branch was taken so the generator can detect a
+    // condition flip across phases. Gated so all other runs are byte-for-byte unchanged.
+    const bool trackCondition = SymbexOptions::get().pathSelectionPolicy ==
+                                PathSelectionPolicy::StateDependencyTamperingCond;
 
     if (!SymbolicEnv::isSymbolicValue(ifStatement->condition)) {
         // Evaluate the condition.
@@ -209,6 +222,7 @@ bool CmdStepper::preorder(const IR::IfStatement *ifStatement) {
     // Handle case where a condition is true: proceed to a body.
     {
         auto &nextState = state.clone();
+        if (trackCondition) nextState.set(getConditionVar(ifStatement), IR::BoolLiteral::get(true));
         std::vector<Continuation::Command> cmds;
         nextState.add(*new TraceEvents::IfStatementCondition(ifStatement->condition));
         cmds.emplace_back(ifStatement->ifTrue);
@@ -228,6 +242,7 @@ bool CmdStepper::preorder(const IR::IfStatement *ifStatement) {
     {
         auto *negation = new IR::LNot(IR::Type::Boolean::get(), ifStatement->condition);
         auto &nextState = state.clone();
+        if (trackCondition) nextState.set(getConditionVar(ifStatement), IR::BoolLiteral::get(false));
         nextState.add(*new TraceEvents::IfStatementCondition(ifStatement->condition));
 
         nextState.replaceTopBody((ifStatement->ifFalse == nullptr) ? new IR::BlockStatement()

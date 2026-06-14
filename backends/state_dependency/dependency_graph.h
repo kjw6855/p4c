@@ -166,6 +166,9 @@ class DependencyGraphs {
         /// corresponds to sinkNode (i.e. the key element whose expression is equiv to
         /// sinkNode.esgId.second). Empty when no matching key element is found.
         cstring sinkKeyName;
+        /// For CONDITION sinks (H2S2C): the IR::IfStatement whose condition the SO value feeds.
+        /// Resolved from (*esg)[sinkNode.esgId.first].node during construction. Null for KEY/SWITCH.
+        const IR::Node *sinkConditionNode = nullptr;
         /// Vertices on the write side: the EXIT node that writes to this SO plus its full
         /// backward-reachable context (including the update action body when isUpdate=true).
         std::unordered_set<vertex_t> writeVertices;
@@ -241,6 +244,12 @@ class DependencyGraphs {
                         break;
                     }
                 }
+            }
+            // For CONDITION sinks (H2S2C), record the IfStatement so symbex can evaluate the
+            // condition value and compare the then/else branch effects.
+            if (sinkEsgVtx < boost::num_vertices(*esg) &&
+                hasFlag((*esg)[sinkEsgVtx].flags, VertexFlags::CONDITION)) {
+                sinkConditionNode = (*esg)[sinkEsgVtx].node;
             }
         };
     };

@@ -20,7 +20,8 @@
 namespace P4::P4Tools::Symbex {
 
 enum class StateDependencyPolicy {
-    Tampering,
+    Tampering,      ///< H2S2K: register → table KEY (sink-table HIT/MISS flip).
+    TamperingCond,  ///< H2S2C: register → if CONDITION (true/false flip).
     AlteringPath,
 };
 
@@ -161,6 +162,11 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// table's HIT branch so the table lookup actually matches in Phase 1.
     const IR::P4Table *currentSinkTable_ = nullptr;
 
+    /// The current chain's sink if-condition (H2S2C / TamperingCond policy), or nullptr for Key
+    /// chains. Set per chain in runTamperingChain from SOChain::sinkConditionNode. Exactly one of
+    /// currentSinkTable_ / currentSinkCondition is non-null for a resolvable sink.
+    const IR::IfStatement *currentSinkCondition = nullptr;
+
     /// True while runMissToHitChain collects Phase-1 sink-MISS baselines. Disables pickSuccessor's
     /// sink-HIT steering (which would otherwise pull Phase 1 onto HIT branches we discard).
     bool seekMiss_ = false;
@@ -191,6 +197,11 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// True when chain @p chain's Phase-1 target nodes are all in @p visited.
     bool chainTargetsCovered(const P4StateDependency::DependencyGraphs::SOChain &chain,
                              const P4::Coverage::CoverageSet &visited) const;
+    /// True when @p chain's sink if-condition was reached on @p es's path (its branch-stamped
+    /// condition var is set). The Phase-1 baseline criterion for H2S2C chains (whose readNodes are
+    /// empty for read-modify-write SOs, so node-coverage is unusable).
+    bool conditionReached(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                          const ExecutionState &es) const;
     /// True when every chain's Phase-1 bucket has reached phase1BucketCap.
     bool allPhase1BucketsFull() const;
 
@@ -251,6 +262,27 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// Evaluates the current sink table's hit-var in @p fs's final model.
     /// Returns 1 (HIT), 0 (MISS / not reached), or -1 (unknown: no sink, or tainted/non-literal).
     int evalSinkHit(const FinalState *fs) const;
+
+    /// H2S2C analog of evalSinkHit: evaluates currentSinkCondition's condition in @p fs's final
+    /// model. Returns 1 (condition true), 0 (false), or -1 (not reached / no condition / tainted).
+    int evalCondition(const FinalState *fs) const;
+
+    /// Direction-agnostic sink-flip value: dispatches to evalSinkHit (Key sink) or evalCondition
+    /// (condition sink). Returns 1 (HIT / true), 0 (MISS / false), -1 (unreached / unknown).
+    int evalSinkFlip(const FinalState *fs) const;
+
+    /// Condition action-divergence gate (H2S2C analog of sinkActionsDiverge): true unless
+    /// currentSinkCondition's then-branch (ifTrue) and else-branch (ifFalse) are provably identical
+    /// in observable effect — i.e. flipping the condition changes nothing. Null condition ⇒ true.
+    bool sinkConditionDiverges() const;
+
+    /// Runs the H2S2C condition-chain flow for one (chain, direction): filters @p phase1Bucket by the
+    /// Phase-1 condition value, reuses the Phase-2 write DFS, then symbolically replays Phase 3 and
+    /// emits when the condition flips and the branches diverge. Returns sub-tests emitted.
+    size_t runConditionChain(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                             const ExecutionState &initState,
+                             const std::vector<const FinalState *> &phase1Bucket,
+                             const TamperingCallback &callBack, size_t maxPerChain, bool missToHit);
 
     /// Evaluates @p fs's packet disposition from its final model: sets @p dropped (packet not
     /// emitted: drop property, empty buffer, or tainted egress port) and, when not dropped,

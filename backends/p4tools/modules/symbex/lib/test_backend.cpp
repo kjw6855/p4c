@@ -236,14 +236,27 @@ TestBackEnd::TestInfo TestBackEnd::produceTestInfo(
     // Build the taint mask by dissecting the program packet variable
     const auto *evalMask = Taint::buildTaintMask(finalModel, outputPacketExpr);
 
+    // A tainted (but not UninitializedTaintExpression) egress port is UNKNOWN, not a drop: symbex
+    // can't pin it (e.g. a hash-derived port). Emit the reserved sentinel rather than a misleading
+    // concretized value; the tampering differential oracle observes the actual egress at replay.
+    bool outputPortIsUnknown = Taint::hasTaint(outputPortExpr) &&
+                               !outputPortExpr->is<IR::UninitializedTaintExpression>();
+
     // Get the input/output port integers.
     auto inputPortInt = IR::getIntFromLiteral(inputPort);
-    auto outputPortInt = IR::getIntFromLiteral(outputPortVar);
+    auto outputPortInt = outputPortIsUnknown ? SYMBEX_UNKNOWN_PORT : IR::getIntFromLiteral(outputPortVar);
 
-    return {inputPacket->checkedTo<IR::Constant>(),      inputPortInt,
-            outputPacket->checkedTo<IR::Constant>(),     outputPortInt,
-            evalMask->checkedTo<IR::Constant>(),         *programTraces,
-            executionState->getProperty<bool>("drop"_cs)};
+    // A propagated-tainted egress is "unknown — decided at replay", NOT a drop. Some targets (tna's
+    // check_tofino_drop) conservatively mark such a packet dropped; override that here so the test
+    // emits the egress packet with the unknown sentinel port instead of recording a drop. Genuine
+    // drops (UninitializedTaintExpression, drop_ctl, egress_spec==DROP_PORT) have
+    // outputPortIsUnknown=false and are unaffected.
+    bool dropped = executionState->getProperty<bool>("drop"_cs) && !outputPortIsUnknown;
+
+    return {inputPacket->checkedTo<IR::Constant>(),  inputPortInt,
+            outputPacket->checkedTo<IR::Constant>(), outputPortInt,
+            evalMask->checkedTo<IR::Constant>(),     *programTraces,
+            dropped,                                 outputPortIsUnknown};
 }
 
 bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const TestInfo &testInfo,
@@ -298,7 +311,7 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
     std::optional<int> overrideOutputPort,
     const std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
         &modelOverrides,
-    const std::vector<const IR::Expression *> &extraConstraints) {
+    const std::vector<const IR::Expression *> &extraConstraints, bool allowTaintedOutput) {
     const auto *executionState = state.getExecutionState();
     const auto *outputPacketExpr = executionState->getPacketBuffer();
     const auto *outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
@@ -344,7 +357,7 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
     const auto &finalModel = replacedState.getFinalModel();
     outputPortExpr = executionState->get(getProgramInfo().getTargetOutputPortVar());
 
-    if (Taint::hasTaint(outputPortExpr)) {
+    if (Taint::hasTaint(outputPortExpr) && !allowTaintedOutput) {
         return std::nullopt;
     }
 
@@ -376,13 +389,18 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     std::optional<int> p2in  = (state.phase2InputPort  >= 0) ? std::optional<int>(state.phase2InputPort)  : std::nullopt;
     std::optional<int> p2out = (state.phase2OutputPort >= 0) ? std::optional<int>(state.phase2OutputPort) : std::nullopt;
 
-    auto res1 = processPhase(state.phase1, p1in, p1out, {}, state.phase1ExtraConstraints);
+    // allowTaintedOutput: tampering tests are validated by the differential oracle (the harness
+    // replays and compares the two runs' actual Phase-3 outputs), so a symbex-unknown egress port is
+    // acceptable — emit the test and let runtime decide the port.
+    auto res1 = processPhase(state.phase1, p1in, p1out, {}, state.phase1ExtraConstraints,
+                             /*allowTaintedOutput=*/true);
     if (!res1.has_value()) {
         testCount++;
         return needsToTerminate(testCount);
     }
 
-    auto res2 = processPhase(state.phase2, p2in, p2out, state.phase2ModelOverrides);
+    auto res2 = processPhase(state.phase2, p2in, p2out, state.phase2ModelOverrides, {},
+                             /*allowTaintedOutput=*/true);
     if (!res2.has_value()) {
         testCount++;
         return needsToTerminate(testCount);

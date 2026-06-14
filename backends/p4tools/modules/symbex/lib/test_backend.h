@@ -91,7 +91,18 @@ class TestBackEnd {
 
         /// Indicates whether the packet is dropped.
         bool packetIsDropped = false;
+
+        /// True when the egress port is tainted but NOT a genuine drop — i.e. symbex could not pin
+        /// the port (e.g. a hash-derived egress). The port is then emitted as the reserved sentinel
+        /// SYMBEX_UNKNOWN_PORT (-1) meaning "unknown, decided at replay"; the differential oracle
+        /// observes the actual egress. Distinct from packetIsDropped (UninitializedTaintExpression /
+        /// egress_spec==DROP_PORT), which is a real drop.
+        bool outputPortIsUnknown = false;
     };
+
+    /// Reserved output-port value meaning "symbex could not determine the egress port" (tainted,
+    /// non-drop). The tampering harness ignores it and observes the actual egress at replay.
+    static constexpr int SYMBEX_UNKNOWN_PORT = -1;
 
     /// Result of processing a single phase (one packet execution) without writing output.
     struct PhaseResult {
@@ -114,13 +125,18 @@ class TestBackEnd {
     /// modelOverrides are (SymbolicVariable → Constant) pairs applied via Model::set() AFTER
     /// computeConcolicState(). For Phase 2, these inject attacker-chosen register values into
     /// the model so the emitted input packet shows the tampered field value.
+    /// @param allowTaintedOutput when true, do not reject a state whose output port is tainted
+    /// (unknown). Used by the tampering differential oracle: the real switch decides the egress at
+    /// replay and the harness compares the two runs' actual Phase-3 outputs, so a symbex-unknown
+    /// output port is fine. The output packet is emitted with its taint mask (don't-care bytes).
     [[nodiscard]] virtual std::optional<PhaseResult> processPhase(
         const FinalState &state,
         std::optional<int> overrideInputPort = std::nullopt,
         std::optional<int> overrideOutputPort = std::nullopt,
         const std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
             &modelOverrides = {},
-        const std::vector<const IR::Expression *> &extraConstraints = {});
+        const std::vector<const IR::Expression *> &extraConstraints = {},
+        bool allowTaintedOutput = false);
 
     /// @returns the test specification which is consumed by the test back ends.
     virtual const TestSpec *createTestSpec(const ExecutionState *executionState,

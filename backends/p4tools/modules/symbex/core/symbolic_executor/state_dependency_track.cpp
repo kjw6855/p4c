@@ -17,6 +17,7 @@
 #include "backends/p4tools/common/lib/variables.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/small_step/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
@@ -210,6 +211,20 @@ bool StateDependencyTracker::sinkActionsDiverge(const FinalState *fs, const IR::
     return !effectsEqual(hitEff, defEff);
 }
 
+bool StateDependencyTracker::sinkConditionDiverges() const {
+    // H2S2C analog of sinkActionsDiverge: a condition flip is observable only if the then-branch and
+    // else-branch write different output state. Compare the two branch bodies' effects locally (no
+    // params to bind, unlike actions). A null else-branch contributes an empty effect (it runs
+    // nothing), which differs from any non-empty then-branch. Sound-toward-emitting.
+    if (currentSinkCondition == nullptr) return true;
+    ActionEffect thenEff;
+    ActionEffect elseEff;
+    collectEffect(currentSinkCondition->ifTrue, thenEff);
+    if (currentSinkCondition->ifFalse != nullptr)
+        collectEffect(currentSinkCondition->ifFalse, elseEff);
+    return !effectsEqual(thenEff, elseEff);
+}
+
 StateDependencyTracker::StateDependencyTracker(
     AbstractSolver &solver, const ProgramInfo &programInfo,
     const P4StateDependency::StateDependencyResult &sdResult, StateDependencyPolicy policy)
@@ -230,6 +245,9 @@ StateDependencyTracker::collectChains() const {
         case StateDependencyPolicy::Tampering:
             addChains(sdResult.dataWriteKeyChains, "Write Key"_cs);
             break;
+        case StateDependencyPolicy::TamperingCond:
+            addChains(sdResult.dataWriteCondChains, "Write Condition"_cs);
+            break;
         case StateDependencyPolicy::AlteringPath:
             addChains(sdResult.dataWriteCondChains, "Write Condition"_cs);
             break;
@@ -242,8 +260,9 @@ P4::Coverage::CoverageSet StateDependencyTracker::buildRequiredNodes(
     P4::Coverage::CoverageSet nodes;
     switch (policy) {
         case StateDependencyPolicy::Tampering:
-            // Phase 2 targets write nodes; Phase 1 and Phase 3 target read nodes.
-            // TODO: Store if and else for IfStatement
+        case StateDependencyPolicy::TamperingCond:
+            // Phase 2 targets write nodes; Phase 1 and Phase 3 target read nodes (same staging for
+            // Key and Condition sinks — only the flip check differs, downstream).
             if (currentPhase == TamperingPhase::Phase2_Write) {
                 for (const auto &[v, node] : chain.writeNodes)
                     if (node != nullptr) nodes.insert(node);
@@ -416,6 +435,15 @@ bool StateDependencyTracker::chainTargetsCovered(
                        });
 }
 
+bool StateDependencyTracker::conditionReached(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &es) const {
+    if (chain.sinkConditionNode == nullptr) return false;
+    const auto *ifStmt = chain.sinkConditionNode->to<IR::IfStatement>();
+    if (ifStmt == nullptr) return false;
+    // The branch-stamped condition var is set iff the if-statement was reached on this path.
+    return es.get(CmdStepper::getConditionVar(ifStmt)) != nullptr;
+}
+
 bool StateDependencyTracker::allPhase1BucketsFull() const {
     for (const auto *ch : allChains) {
         auto it = phase1Buckets.find(ch->id);
@@ -430,7 +458,11 @@ void StateDependencyTracker::handleSharedTerminal(const ExecutionState &es) {
     std::vector<size_t> matched;
     for (const auto *ch : allChains) {
         if (phase1Buckets[ch->id].size() >= phase1BucketCap) continue;  // bucket already full
-        if (chainTargetsCovered(*ch, visited)) matched.push_back(ch->id);
+        // Condition chains (H2S2C): bucket iff the if-condition was reached (baseline value exists).
+        // Key chains: require read-node coverage.
+        const bool covered = (ch->sinkConditionNode != nullptr) ? conditionReached(*ch, es)
+                                                                : chainTargetsCovered(*ch, visited);
+        if (covered) matched.push_back(ch->id);
     }
     if (matched.empty()) return;
     auto sat = solver.checkSat(es.getPathConstraint());
@@ -451,6 +483,9 @@ void StateDependencyTracker::collectPhase1Terminals(const ExecutionState &initSt
     for (const auto *chain : allChains) {
         currentChain = chain;  // buildRequiredNodes consults currentPhase + chain
         auto targets = buildRequiredNodes(*chain);
+        // For condition chains also steer toward the if-statement itself, so the DFS heads to where
+        // the baseline condition value is observed (read-modify-write SOs have empty readNodes).
+        if (chain->sinkConditionNode != nullptr) targets.insert(chain->sinkConditionNode);
         for (const auto *n : targets) unionTargets.insert(n);
         chainPhase1Targets[chain->id] = std::move(targets);
     }
@@ -467,7 +502,16 @@ void StateDependencyTracker::collectPhase1Terminals(const ExecutionState &initSt
 
     // Multi-target directed search: steer toward / prune via the UNION of all chains' read targets.
     currentRequiredNodes = unionTargets;
-    buildReachingSet();
+    // Condition chains are bucketed by "the if-statement was reached", which requires the path to
+    // continue PAST the condition to a terminal (so the branch-stamped condition var survives).
+    // Reaching-set pruning cuts the path right after a target, so disable it for the condition
+    // policy — keep the (non-pruning) steering toward required nodes only.
+    if (policy == StateDependencyPolicy::TamperingCond) {
+        reachingSet_.clear();
+        reachingSetValid_ = false;
+    } else {
+        buildReachingSet();
+    }
 
     solver.checkSat({});  // clear accumulated assertions before the read pass
     sharedPhase1 = true;
@@ -508,6 +552,25 @@ int StateDependencyTracker::evalSinkHit(const FinalState *fs) const {
     const auto *hitBool = hitVal->to<IR::BoolLiteral>();
     if (hitBool == nullptr) return -1;
     return hitBool->value ? 1 : 0;
+}
+
+int StateDependencyTracker::evalCondition(const FinalState *fs) const {
+    if (currentSinkCondition == nullptr) return -1;
+    // CmdStepper stamps this boolean (under the TamperingCond policy) to true/false for the
+    // then/else branch; it is unset if the if-statement was not reached on this path.
+    const auto &condVar = CmdStepper::getConditionVar(currentSinkCondition);
+    const auto *condExpr = fs->getExecutionState()->get(condVar);
+    if (condExpr == nullptr) return -1;  // condition not reached
+    const auto *condVal = fs->getFinalModel().evaluate(condExpr, true);
+    const auto *condBool = condVal->to<IR::BoolLiteral>();
+    if (condBool == nullptr) return -1;
+    return condBool->value ? 1 : 0;  // 1 = then (true), 0 = else (false)
+}
+
+int StateDependencyTracker::evalSinkFlip(const FinalState *fs) const {
+    if (currentSinkTable_ != nullptr) return evalSinkHit(fs);
+    if (currentSinkCondition != nullptr) return evalCondition(fs);
+    return -1;
 }
 
 void StateDependencyTracker::evalDisposition(const FinalState *fs, bool &dropped,
@@ -563,8 +626,18 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
     const auto *p1PktSize = model1.evaluate(ExecutionState::getInputPacketSizeVar(), true);
 
     currentPhase = TamperingPhase::Phase3_Read;
-    currentRequiredNodes = buildRequiredNodes(chain);
-    buildReachingSet();
+    if (currentSinkCondition != nullptr) {
+        // The pinned-input replay is (almost) deterministic, so accept ANY terminal and check the
+        // condition flip externally via evalCondition. Requiring writeNode coverage would reject
+        // every terminal for update chains (their writeNodes span mutually-exclusive branches), and
+        // reaching-set pruning would cut the path before a terminal. So: no required nodes, no prune.
+        currentRequiredNodes.clear();
+        reachingSet_.clear();
+        reachingSetValid_ = false;
+    } else {
+        currentRequiredNodes = buildRequiredNodes(chain);
+        buildReachingSet();
+    }
 
     auto &phase3Init = initState.clone();
     // Pre-set the (tampered) register state the caller computed.
@@ -608,12 +681,21 @@ size_t StateDependencyTracker::runTamperingChain(
     size_t maxPerChain, bool missToHit) {
     currentChain = &chain;
 
-    // Resolve the chain's sink table so pickSuccessor can steer Phase 1 toward/away from its HIT
-    // branch. MISS→HIT observes the flip there, so it needs a resolvable sink.
+    // Resolve the chain's sink: either a table (H2S2K) or an if-condition (H2S2C). Exactly one is
+    // set. pickSuccessor / the flip checks use whichever is non-null.
     currentSinkTable_ = nullptr;
+    currentSinkCondition = nullptr;
     if (!chain.sinkTableControlPlaneName.isNullOrEmpty()) {
         auto sinkIt = tableByName_.find(chain.sinkTableControlPlaneName);
         if (sinkIt != tableByName_.end()) currentSinkTable_ = sinkIt->second;
+    } else if (chain.sinkConditionNode != nullptr) {
+        currentSinkCondition = chain.sinkConditionNode->to<IR::IfStatement>();
+    }
+
+    // H2S2C: condition sinks use a dedicated flow (symbolic Phase-3 flip confirmation for both
+    // directions). Delegate before the table-specific logic below.
+    if (currentSinkCondition != nullptr) {
+        return runConditionChain(chain, initState, phase1Bucket, callBack, maxPerChain, missToHit);
     }
     if (missToHit && currentSinkTable_ == nullptr) return 0;
 
@@ -1091,6 +1173,196 @@ size_t StateDependencyTracker::runTamperingChain(
             printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: sink MISS→HIT, %3% (P1 %4%, P3 %5%)",
                       chain.id, ts.subTestId, ts.caseLabel, p1d, p3d);
             callBack(ts);
+        }
+    }
+    return emitted;
+}
+
+// ---------------------------------------------------------------------------
+// H2S2C: condition-flip tampering (register → if-condition)
+// ---------------------------------------------------------------------------
+
+size_t StateDependencyTracker::runConditionChain(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const std::vector<const FinalState *> &phase1Bucket, const TamperingCallback &callBack,
+    size_t maxPerChain, bool missToHit) {
+    // currentChain / currentSinkCondition were set by the caller. Direction: missToHit=false means
+    // TRUE→FALSE (Phase-1 condition true, tampered Phase-3 false); missToHit=true means FALSE→TRUE.
+    solver.checkSat({});
+    const int p1Val = missToHit ? 0 : 1;
+    const int p3Target = 1 - p1Val;
+
+    // ---- Phase 1: take this chain's share of the shared traversal, keep cond == p1Val ----
+    currentPhase = TamperingPhase::Phase1_Read;
+    std::vector<const FinalState *> phase1States(phase1Bucket.begin(), phase1Bucket.end());
+    phase1States.erase(
+        std::remove_if(phase1States.begin(), phase1States.end(),
+                       [this, p1Val](const FinalState *fs) { return evalCondition(fs) != p1Val; }),
+        phase1States.end());
+    if (phase1States.empty()) return 0;
+
+    // Deduped PhaseConditions (ports + table keys). Conditions allow any disposition (drop or
+    // forward), so no forward/distinct invariant checks apply.
+    std::vector<PhaseConditions> phase1Conditions;
+    std::map<size_t, size_t> phase1StateToCondition;
+    const IR::Expression *inputPortSymExpr = nullptr;
+    for (size_t i = 0; i < phase1States.size(); ++i) {
+        const auto *fs1 = phase1States[i];
+        inputPortSymExpr = fs1->getExecutionState()->get(programInfo.getTargetInputPortVar());
+        auto cond = buildPhaseCondition(*fs1, programInfo);
+        auto it = std::find(phase1Conditions.begin(), phase1Conditions.end(), cond);
+        if (it == phase1Conditions.end()) {
+            phase1StateToCondition[i] = phase1Conditions.size();
+            phase1Conditions.push_back(cond);
+        } else {
+            phase1StateToCondition[i] = static_cast<size_t>(std::distance(phase1Conditions.begin(),
+                                                                          it));
+        }
+    }
+
+    // ---- Phase 2: write the tampered value (sinkTableControlPlaneName is empty for condition
+    // chains, so no sink table is excluded). ----
+    currentPhase = TamperingPhase::Phase2_Write;
+    currentRequiredNodes = buildRequiredNodes(chain);
+    if (currentRequiredNodes.empty()) {
+        if (!missToHit) warning("[Tampering] Chain id=%1% has no writeNodes; skipping.", chain.id);
+        return 0;
+    }
+    buildReachingSet();
+
+    std::map<size_t, std::vector<const FinalState *>> phase2StateMap;
+    size_t phase2StateNum = 0;
+    for (size_t i = 0; i < phase1Conditions.size(); ++i) {
+        const auto &cond1 = phase1Conditions[i];
+        const FinalState *repPhase1State = nullptr;
+        for (size_t k = 0; k < phase1States.size(); ++k) {
+            if (phase1StateToCondition[k] == i) {
+                repPhase1State = phase1States[k];
+                break;
+            }
+        }
+        std::vector<cstring> size1Tables;
+        for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+            auto tblIt = tableByName_.find(tblName);
+            if (tblIt == tableByName_.end()) continue;
+            const auto *sizeConst = tblIt->second->getSizeProperty();
+            if (sizeConst != nullptr && sizeConst->asInt() == 1) size1Tables.push_back(tblName);
+        }
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, chain.sinkTableControlPlaneName,
+                               size1Tables);
+        auto &phase2Init = initState.clone();
+        if (repPhase1State != nullptr) {
+            const auto &model1 = repPhase1State->getFinalModel();
+            const auto *es1 = repPhase1State->getExecutionState();
+            for (const auto &tblName : size1Tables) {
+                const auto *tblObj =
+                    es1->getTestObject("tableconfigs"_cs, tblName, /*checked=*/false);
+                if (tblObj == nullptr) continue;
+                const auto *evalCfg = tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
+                if (evalCfg != nullptr)
+                    phase2Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+            }
+            for (const auto &[regName, regObj] :
+                 es1->getTestObjectCategory("registervalues"_cs)) {
+                const auto *carried = regObj->evaluateForCarry(model1);
+                phase2Init.addTestObject("registervalues"_cs, regName, carried);
+            }
+        }
+        phase2Init.pushPathConstraint(new IR::Neq(
+            inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
+        if (cond1.outputPort >= 0)
+            phase2Init.pushPathConstraint(new IR::Neq(
+                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
+        const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
+        for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+            if (size1Set.count(tblName) > 0) continue;
+            for (const auto &[keyName, match] : keyMap)
+                phase2Init.pushPathConstraint(match->buildTableKeyNeqConstraint(tblName, keyName));
+        }
+        runPhase(phase2Init, phase2StateMap[i], maxPerChain);
+        phase2StateNum += phase2StateMap[i].size();
+    }
+    if (phase2StateNum == 0) {
+        printInfo("[Tampering H2S2C] chain id=%1% (%2%): Phase-2 write not satisfiable in a single "
+                  "packet; skipping (sound).",
+                  chain.id, currentChainName);
+        return 0;
+    }
+
+    // ---- Phase 3: symbolically replay Phase 1 with the tampered register; confirm the condition
+    // flips to p3Target AND the two branches diverge in output. ----
+    size_t emitted = 0;
+    for (size_t i = 0; i < phase1States.size() && emitted < maxPerChain; ++i) {
+        const auto *fs1 = phase1States[i];
+        const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
+        for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
+            if (emitted >= maxPerChain) break;
+            const auto &model2 = fs2->getFinalModel();
+            const auto *es2 = fs2->getExecutionState();
+            std::map<cstring, const TestObject *> carriedRegs;
+            bool carriedSo = false;
+            for (const auto &[regName, regObj] :
+                 es2->getTestObjectCategory("registervalues"_cs)) {
+                carriedRegs[regName] = regObj->evaluateForCarry(model2);
+                if (regName == chain.soName) carriedSo = true;
+            }
+            if (!carriedSo) continue;
+            const auto *fs3 = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
+                                                inputPortSymExpr, carriedRegs);
+            if (fs3 == nullptr) continue;                  // pinned input unsatisfiable
+            if (evalCondition(fs3) != p3Target) continue;  // condition did not flip
+            if (!sinkConditionDiverges()) continue;        // then/else write the same output
+
+            const auto &model3 = fs3->getFinalModel();
+            std::map<cstring, const TestObject *> attackerRegValues;
+            const auto *fs3SoReg =
+                fs3->getExecutionState()->getTestObject("registervalues"_cs, chain.soName, false);
+            if (fs3SoReg == nullptr) continue;
+            const auto *attackerReg =
+                fs3SoReg->withAttackerValues(model3, SymbexOptions::get().stateTamperValue, {})
+                    .testObject;
+            attackerRegValues[chain.soName] = attackerReg;
+
+            // Emitted output port for pinning: the concrete value if symbex pinned it, else -1
+            // meaning "don't pin / unknown". A tainted egress is NOT a drop — it just means symbex
+            // can't determine the port (e.g. a hash-derived egress); -1 keeps the emitter from
+            // pinning Equ(egress=TaintExpression, value) (which the Z3 backend cannot translate), and
+            // the test backend records it as the unknown sentinel. The differential oracle observes
+            // the actual egress at replay.
+            auto openOutputPort = [this](const FinalState *fs) -> int {
+                const auto *op = fs->getExecutionState()->get(programInfo.getTargetOutputPortVar());
+                if (op == nullptr || Taint::hasTaint(op)) return -1;  // unknown — leave open
+                return IR::getIntFromLiteral(fs->getFinalModel().evaluate(op, true));
+            };
+            int p1OutPort = openOutputPort(fs1);
+            int p2OutPort = openOutputPort(fs2);
+            int ip2 = IR::getIntFromLiteral(
+                model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
+            // Condition sink: no table, so attackerRegisterSinkTables stays empty.
+            TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
+                                   attackerRegValues, {}, {}, {}};
+            ts.chainId = chain.id;
+            ts.subTestId = ++emitted;
+            ts.missToHit = missToHit;
+            ts.caseLabel = cstring(missToHit ? "COND_FALSE_TO_TRUE" : "COND_TRUE_TO_FALSE");
+            if (int mgid = evalMulticastGroup(fs3); mgid >= 0) {
+                ts.usesMulticast = true;
+                ts.multicastGroupId = mgid;
+            } else if (int mgid1 = evalMulticastGroup(fs1); mgid1 >= 0) {
+                ts.usesMulticast = true;
+                ts.multicastGroupId = mgid1;
+            }
+            printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: condition %3% (%4%→%5%)", chain.id,
+                      ts.subTestId, ts.caseLabel, p1Val, p3Target);
+            // The concolic re-solve in the test backend can still hit a TaintExpression the Z3
+            // backend cannot translate; don't let one un-emittable candidate abort the whole run.
+            try {
+                callBack(ts);
+            } catch (const std::exception &e) {
+                if (SymbexOptions::get().strict) throw;
+                warning("[Tampering H2S2C] chain id=%1% sub=%2%: emission failed (%3%); skipping.",
+                        chain.id, ts.subTestId, e.what());
+            }
         }
     }
     return emitted;

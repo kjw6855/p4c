@@ -33,6 +33,12 @@ class CmdStepper : public AbstractStepper {
     bool preorder(const IR::ExitStatement *e) override;
     bool preorder(const IR::SwitchStatement *switchStatement) override;
 
+    /// Boolean state variable recording which branch of @p ifStatement was taken (true = then,
+    /// false = else). Keyed by the if-statement's source position so it is stable across the
+    /// condition-reduction clone the stepper makes. Stamped only under the STATE_DEP_TAMPERING_COND
+    /// policy; read by the H2S2C tampering generator (analogous to TableStepper::getTableHitVar).
+    static const IR::StateVariable &getConditionVar(const IR::IfStatement *ifStatement);
+
  protected:
     /// Initializes the given state for entry into the given parser.
     ///
