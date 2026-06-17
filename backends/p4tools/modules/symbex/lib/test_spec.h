@@ -368,6 +368,12 @@ class TamperingTestSpec {
     /// phases are expected to emit an output packet (i.e., packet is not dropped).
     bool readPathHasExit;
 
+    /// Number of times the Phase-2 (spec2) packet must be sent for the tamper to take effect.
+    /// 1 = single packet. >1 = accumulation: the identical Phase-2 packet is replayed k times so a
+    /// register increment crosses the threshold that flips the sink/condition. The emitter expands
+    /// this into k marked (tamper_only) input_packet blocks.
+    size_t phase2RepeatCount = 1;
+
     /// Attacker-chosen register values from Phase 2 (register name → concrete TestObject).
     /// Used to emit affected_register fields in the test output so the test script can
     /// verify the register was written with the expected value after Phase 2.

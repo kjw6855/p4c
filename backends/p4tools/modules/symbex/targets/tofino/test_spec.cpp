@@ -88,6 +88,13 @@ void IndexMap::writeToIndex(const IR::Expression *index, const IR::Expression *v
 
 const IR::Expression *IndexMap::getInitialValue() const { return initialValue; }
 
+std::optional<big_int> IndexMap::getCarriedScalarValue() const {
+    if (const auto *constant = initialValue->to<IR::Constant>()) {
+        return constant->value;
+    }
+    return std::nullopt;
+}
+
 const IR::Expression *IndexMap::getValueAtIndex(const IR::Expression *index) const {
     const IR::Expression *baseExpr = initialValue;
     for (const auto &indexMap : indexConditions) {
@@ -158,6 +165,12 @@ const TestObject *TofinoRegisterValue::evaluateForCarry(const Model &model) cons
         evaluatedValue = model.evaluate(finalValue, /*doComplete=*/true);
     }
     return new TofinoRegisterValue(decl, evaluatedValue, evalIndex);
+}
+
+const TestObject *TofinoRegisterValue::withCarriedScalarValue(big_int value) const {
+    // initialValue is the post-carry folded constant; replace it with a constant of the same width.
+    const auto *valueType = initialValue->type;
+    return new TofinoRegisterValue(decl, IR::Constant::get(valueType, value), initialIndex);
 }
 
 const IR::Constant *TofinoRegisterValue::getEvaluatedInitialIndex() const {

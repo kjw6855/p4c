@@ -156,6 +156,39 @@ const IR::Expression *initializeRegisterParameters(const TestObject *registerSta
                                                    bool canConfigure, const IR::Expression *index) {
     const IR::Expression *registerExpr = nullptr;
     const auto *registerParamType = registerParamRef->type;
+    // Relaxed carried read (Phase-2 precondition discovery only): a register that has a carried
+    // IndexMap normally reads back its folded constant, so a guard reg[I]==C with a carried value
+    // C'!=C is unsatisfiable and the write DFS finds nothing. In relaxed mode we instead return a
+    // FRESH symbolic value (keyed by the register instance via a "_relaxread_" infix so repeated
+    // reads agree and the value is extractable from the model by name); the relaxed terminal's
+    // model then reveals the required precondition value C. Never used for an emitted test.
+    if (registerState != nullptr && SymbexOptions::get().relaxCarriedRegisterRead) {
+        if (const auto *structType = registerParamType->to<IR::Type_StructLike>()) {
+            IR::IndexedVector<IR::NamedExpression> valueVector;
+            for (const auto *structField : structType->fields) {
+                valueVector.push_back(new IR::NamedExpression(
+                    structField->name.name,
+                    ToolsVariables::getSymbolicVariable(
+                        structField->type,
+                        externInstanceName + "_relaxread_" + structField->name.name)));
+            }
+            const auto *registerValueList = new IR::StructExpression(nullptr, valueVector);
+            std::vector<IR::StateVariable> validFields;
+            const auto fields = nextState.getFlatFields(registerParamRef, &validFields);
+            for (size_t idx = 0; idx < fields.size(); ++idx) {
+                nextState.set(fields.at(idx), registerValueList->components.at(idx)->expression);
+            }
+            for (const auto &validField : validFields) {
+                nextState.set(validField, IR::BoolLiteral::get(true));
+            }
+            registerExpr = registerValueList;
+        } else {
+            registerExpr = ToolsVariables::getSymbolicVariable(
+                registerParamType, externInstanceName + "_relaxread");
+            nextState.set(registerParamRef, registerExpr);
+        }
+        return registerExpr;
+    }
     if (registerState != nullptr) {
         if (index != nullptr) {
             const auto *existingRegVal = registerState->checkedTo<TofinoRegisterValue>();

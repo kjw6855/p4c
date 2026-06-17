@@ -416,6 +416,7 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     tamperingSpec.caseLabel = state.caseLabel;
     tamperingSpec.usesMulticast = state.usesMulticast;
     tamperingSpec.multicastGroupId = state.multicastGroupId;
+    tamperingSpec.phase2RepeatCount = state.phase2RepeatCount;
     // Phase 3 is a dynamic deviation check for both directions: the test script replays Phase 1's
     // packet and the end-to-end validator compares the Phase-3 output to the Phase-1 reference
     // (detecting drop/port/byte divergence — including non-drop table misses). p4symbex therefore

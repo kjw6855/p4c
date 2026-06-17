@@ -77,6 +77,13 @@ struct TamperingFinalState {
     /// Phase-1 × Phase-2 paths of a single SOChain. Assigned in runTamperingScenario.
     size_t subTestId = 0;
 
+    /// Number of times the Phase-2 (attacker) packet must be replayed for the tamper to take
+    /// effect. 1 = today's single packet. >1 = accumulation: the same Phase-2 packet is sent k
+    /// times so a register increment crosses the threshold that flips the downstream condition /
+    /// sink. The count is data-driven (symbex replays + Phase-3 flip check until it flips, bounded
+    /// by --max-phase2-packets). The serializer expands this into k marked input_packet blocks.
+    size_t phase2RepeatCount = 1;
+
     // ---- Tamper direction (sink-flip observable) ---------------------------------------------
     /// Tamper direction. false = HIT→MISS (Phase-1 sink HIT, Phase-3 MISS); true = MISS→HIT
     /// (Phase-1 sink MISS, Phase-3 HIT). Selects how hit_phase/miss_phase are emitted. Phase 3 is a
@@ -171,6 +178,12 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// sink-HIT steering (which would otherwise pull Phase 1 onto HIT branches we discard).
     bool seekMiss_ = false;
 
+    /// True while driveRegisterPhase2 searches for a "priming" packet. Relaxes the Phase-2 terminal
+    /// acceptance from full allCovered coverage to "wrote the SO register" so a single increment
+    /// packet (which can't reach the branch-gated write path in one shot) is still captured to
+    /// measure delta. Never set during emission of an actual test.
+    bool phase2AcceptWroteSO_ = false;
+
     // ---- Shared Phase-1 collection (one traversal for all chains) -----------------------------
     /// True while collectPhase1Terminals runs the single shared Phase-1 DFS. In this mode runImpl
     /// buckets each terminal into every chain it covers (instead of the single-chain allCovered),
@@ -254,10 +267,47 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// (the tampered state), pinning the packet bytes, size, and input port. Used by both tamper
     /// directions to compute the actual Phase-3 disposition. Returns the single Phase-3 terminal,
     /// or nullptr if the pinned input has no satisfiable terminal.
+    /// @param keepWriteCoverage when true, run the pinned replay under the Phase-2 write-coverage
+    /// criterion (currentRequiredNodes = writeNodes + allCovered acceptance) instead of the default
+    /// "accept any terminal" condition-replay. Used by the analytical drive-register path to
+    /// re-validate that the full (branch-gated) write path is covered once the register is pre-set
+    /// past the gate.
     const FinalState *runSymbolicPhase3(
         const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
-        const std::map<cstring, const TestObject *> &carriedRegs);
+        const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage = false);
+
+    /// Accumulation driver: starting from @p fs2 (a reachable Phase-2 write packet), replay the SAME
+    /// packet — carrying the register state forward each time — and re-run symbolic Phase 3 until the
+    /// sink/condition flips to @p p3Target (evalSinkFlip). Returns the flipped Phase-3 terminal and
+    /// sets @p outRepeat to the number of Phase-2 packet sends (k); returns nullptr if no count up to
+    /// --max-phase2-packets flips it (or a fixpoint is reached: the carried SO value stops changing).
+    /// k=1 reproduces today's single-packet behavior. Reuses runSymbolicPhase3 as the pin+carry+run
+    /// engine for both the packet replay and the Phase-3 flip check.
+    const FinalState *accumulatePhase2Flip(
+        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const FinalState *fs1, int inputPort1, const FinalState *fs2, int inputPort2,
+        const IR::Expression *inputPortSymExpr, int p3Target, size_t &outRepeat);
+
+    /// Analytical drive-register path (Family 1: the action runs but a register-VALUE gate on the
+    /// write path is unreached in one packet, so the single-packet allCovered DFS finds nothing).
+    /// Finds a priming packet (a terminal that wrote the SO, accepted via the relaxed "wrote-SO"
+    /// criterion), extracts (init, delta) and the threshold (op, C) from the missed gated
+    /// IfStatement, computes how many sends k drive the register past the gate, pre-sets the carried
+    /// SO to that value and RE-RUNS the real allCovered DFS (keepWriteCoverage) to validate that the
+    /// full write path is now covered, then runs Phase 3 for the flip+diverge check. On success
+    /// returns the flipped Phase-3 terminal, sets @p outFs2 to the validated covering Phase-2 write
+    /// terminal and @p outRepeat to k; returns nullptr (sound skip) on any failure/fallback.
+    /// @p phase2Init is a fresh clone already carrying Phase-1 registers + port/key constraints.
+    const FinalState *driveRegisterPhase2(
+        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
+        const IR::Expression *inputPortSymExpr, int p3Target, const FinalState *&outFs2,
+        size_t &outRepeat);
+
+    /// True when @p es's final register state recorded a write to the current chain's SO register.
+    /// The relaxed Phase-2 acceptance used to capture a priming packet (vs full allCovered coverage).
+    bool terminalWroteSO(const ExecutionState &es) const;
 
     /// Evaluates the current sink table's hit-var in @p fs's final model.
     /// Returns 1 (HIT), 0 (MISS / not reached), or -1 (unknown: no sink, or tainted/non-literal).

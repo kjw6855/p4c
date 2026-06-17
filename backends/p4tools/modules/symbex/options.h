@@ -139,6 +139,20 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// symbolic values. Must be false during Phase 2 so the write path remains reachable.
     bool initRegZeroValue = false;
 
+    /// When true, a register READ returns a FRESH symbolic variable even when a carried
+    /// register IndexMap exists, instead of the carried folded constant. Used ONLY by the
+    /// Phase-2 precondition-discovery DFS: a guard `reg[I] == C` becomes satisfiable against the
+    /// relaxed read, and the relaxed terminal's model then yields the required precondition
+    /// (regName, index I, value C). The emitted test never runs in this mode — it is a discovery
+    /// oracle, not an execution semantics change.
+    bool relaxCarriedRegisterRead = false;
+
+    /// Safety guardrail bounding the length of a multi-packet Phase-2 sequence (setup packets +
+    /// the write packet). The actual count is data-driven (the unrolling stops as soon as Z3 says
+    /// the write is satisfiable, or at a fixpoint); this cap only guarantees termination when a
+    /// precondition is never reachable. NOT a target depth. Set via --max-phase2-packets.
+    int64_t maxPhase2Packets = 64;
+
  protected:
     bool validateOptions() const override;
 };

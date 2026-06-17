@@ -92,6 +92,29 @@ class TestObject : public ICastable {
         return evaluate(model, /*doComplete=*/true);
     }
 
+    /// For a stateful object already snapshotted by evaluateForCarry(): the folded scalar value, if
+    /// it is a single concrete integer. Used by the multi-packet Phase-2 accumulation loop to detect
+    /// a fixpoint — when replaying the attacker packet stops changing this value, no further replay
+    /// will flip the downstream condition, so the loop stops. Default: nullopt (non-scalar or
+    /// unsupported ⇒ the caller falls back to the --max-phase2-packets cap for termination).
+    [[nodiscard]] virtual std::optional<big_int> getCarriedScalarValue() const {
+        return std::nullopt;
+    }
+
+    /// Returns a copy of this carry snapshot with its folded scalar value replaced by @p value
+    /// (same index, no index conditions). Used by the analytical multi-packet path to pre-set a
+    /// register to init+(k-1)*delta before re-validating the write path. Default: returns this
+    /// (only stateful scalar registers override it).
+    [[nodiscard]] virtual const TestObject *withCarriedScalarValue(big_int value) const {
+        (void)value;
+        return this;
+    }
+
+    /// True when this stateful object recorded at least one write (non-empty index conditions),
+    /// i.e. the packet actually wrote it. Used to detect a "priming" packet that advanced register
+    /// state even though it didn't cover the full (branch-gated) write path. Default: false.
+    [[nodiscard]] virtual bool wasWritten() const { return false; }
+
     DECLARE_TYPEINFO(TestObject);
 };
 

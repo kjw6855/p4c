@@ -345,22 +345,26 @@ struct ScopedSymbexOpts {
     // Phase 1 and Phase 2 (register reads in Phase 1 also update state).
     bool savedTamperingRegisterTracking;
     bool savedInitRegZeroValue;
+    bool savedRelaxCarriedRegisterRead;
     cstring sinkTableName_ = ""_cs;
     std::vector<cstring> extraSkippedTables_;
     ScopedSymbexOpts(bool setOutputPacketOnly, cstring sinkTableName = ""_cs,
                      std::vector<cstring> extraSkippedTables = {},
                      bool setRegTracking = true,
-                     bool isPhase1 = false)
+                     bool isPhase1 = false,
+                     bool relaxCarriedRead = false)
         : extraSkippedTables_(std::move(extraSkippedTables)) {
         auto &opts = SymbexOptions::get();
         savedOutputPacketOnly             = opts.outputPacketOnly;
         savedCoverStatements              = opts.coverageOptions.coverStatements;
         savedTamperingRegisterTracking    = opts.tamperingRegisterTracking;
         savedInitRegZeroValue        = opts.initRegZeroValue;
+        savedRelaxCarriedRegisterRead     = opts.relaxCarriedRegisterRead;
         opts.outputPacketOnly             = setOutputPacketOnly;
         opts.coverageOptions.coverStatements = true;
         opts.tamperingRegisterTracking    = setRegTracking;
         opts.initRegZeroValue        = isPhase1;
+        opts.relaxCarriedRegisterRead     = relaxCarriedRead;
         sinkTableName_ = sinkTableName;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.insert(sinkTableName_);
@@ -375,6 +379,7 @@ struct ScopedSymbexOpts {
         opts.coverageOptions.coverStatements     = savedCoverStatements;
         opts.tamperingRegisterTracking    = savedTamperingRegisterTracking;
         opts.initRegZeroValue        = savedInitRegZeroValue;
+        opts.relaxCarriedRegisterRead     = savedRelaxCarriedRegisterRead;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.erase(sinkTableName_);
         }
@@ -620,23 +625,35 @@ std::pair<int, int> StateDependencyTracker::getPortPair(const FinalState *fs) co
 const FinalState *StateDependencyTracker::runSymbolicPhase3(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
-    const std::map<cstring, const TestObject *> &carriedRegs) {
+    const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage) {
     const auto &model1 = fs1->getFinalModel();
     const auto *p1PktExpr = fs1->getExecutionState()->getInputPacket();
     const auto *p1PktSize = model1.evaluate(ExecutionState::getInputPacketSizeVar(), true);
 
-    currentPhase = TamperingPhase::Phase3_Read;
-    if (currentSinkCondition != nullptr) {
-        // The pinned-input replay is (almost) deterministic, so accept ANY terminal and check the
-        // condition flip externally via evalCondition. Requiring writeNode coverage would reject
-        // every terminal for update chains (their writeNodes span mutually-exclusive branches), and
-        // reaching-set pruning would cut the path before a terminal. So: no required nodes, no prune.
-        currentRequiredNodes.clear();
+    if (keepWriteCoverage) {
+        // Analytical drive-register re-validation: keep the REAL Phase-2 write-coverage ACCEPTANCE
+        // (allCovered over writeNodes) so the terminal is accepted only if the full (branch-gated)
+        // write path is now covered (the carried register was pre-set past the gate). But DISABLE
+        // reaching-set pruning — for update chains it would cut the path before a terminal (same
+        // reason the condition-replay branch below clears it).
+        currentPhase = TamperingPhase::Phase2_Write;
+        currentRequiredNodes = buildRequiredNodes(chain);
         reachingSet_.clear();
         reachingSetValid_ = false;
     } else {
-        currentRequiredNodes = buildRequiredNodes(chain);
-        buildReachingSet();
+        currentPhase = TamperingPhase::Phase3_Read;
+        if (currentSinkCondition != nullptr) {
+            // The pinned-input replay is (almost) deterministic, so accept ANY terminal and check the
+            // condition flip externally via evalCondition. Requiring writeNode coverage would reject
+            // every terminal for update chains (their writeNodes span mutually-exclusive branches),
+            // and reaching-set pruning would cut the path before a terminal. So: no required nodes.
+            currentRequiredNodes.clear();
+            reachingSet_.clear();
+            reachingSetValid_ = false;
+        } else {
+            currentRequiredNodes = buildRequiredNodes(chain);
+            buildReachingSet();
+        }
     }
 
     auto &phase3Init = initState.clone();
@@ -673,6 +690,179 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
         runPhase(phase3Init, phase3States, 1);
     }
     return phase3States.empty() ? nullptr : phase3States[0];
+}
+
+// ---------------------------------------------------------------------------
+// Multi-packet Phase 2: accumulate by replaying the SAME attacker packet until the sink/condition
+// flips. The packet count is data-driven (Z3 feasibility), not a fixed depth.
+// ---------------------------------------------------------------------------
+
+const FinalState *StateDependencyTracker::accumulatePhase2Flip(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const FinalState *fs1, int inputPort1, const FinalState *fs2, int inputPort2,
+    const IR::Expression *inputPortSymExpr, int p3Target, size_t &outRepeat) {
+    // Fold a terminal's register writes into a carry snapshot keyed by register name. Requires the
+    // SO register to be present (else the tamper can't propagate).
+    auto carryAll = [&](const FinalState *fs,
+                        std::map<cstring, const TestObject *> &out) -> bool {
+        bool hasSo = false;
+        for (const auto &[regName, regObj] :
+             fs->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
+            out[regName] = regObj->evaluateForCarry(fs->getFinalModel());
+            if (regName == chain.soName) hasSo = true;
+        }
+        return hasSo;
+    };
+    // The carried SO scalar value, used only for fixpoint detection (nullopt ⇒ rely on the cap).
+    auto soValue = [&](const std::map<cstring, const TestObject *> &regs) -> std::optional<big_int> {
+        auto it = regs.find(chain.soName);
+        if (it == regs.end()) return std::nullopt;
+        return it->second->getCarriedScalarValue();
+    };
+
+    std::map<cstring, const TestObject *> carried;
+    if (!carryAll(fs2, carried)) return nullptr;  // after the 1st send
+
+    const auto cap = static_cast<size_t>(SymbexOptions::get().maxPhase2Packets);
+    size_t k = 1;
+    const FinalState *fs3 =
+        runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, carried);
+
+    while ((fs3 == nullptr || evalSinkFlip(fs3) != p3Target) && k < cap) {
+        // Replay the SAME Phase-2 packet (fs2's pinned input) from the current carried state to
+        // apply one more increment; runSymbolicPhase3 pins the input + pre-sets the carried regs.
+        const FinalState *fs2Next =
+            runSymbolicPhase3(chain, initState, fs2, inputPort2, inputPortSymExpr, carried);
+        if (fs2Next == nullptr) break;  // packet no longer reaches a terminal — cannot progress
+        std::map<cstring, const TestObject *> nextCarried;
+        if (!carryAll(fs2Next, nextCarried)) break;
+        // Fixpoint: if a further replay does not move the SO value, no count will flip the sink.
+        auto prevVal = soValue(carried);
+        auto nextVal = soValue(nextCarried);
+        if (prevVal && nextVal && *prevVal == *nextVal) break;
+        carried = std::move(nextCarried);
+        ++k;
+        fs3 = runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, carried);
+    }
+
+    if (fs3 != nullptr && evalSinkFlip(fs3) == p3Target) {
+        outRepeat = k;
+        return fs3;
+    }
+    return nullptr;
+}
+
+bool StateDependencyTracker::terminalWroteSO(const ExecutionState &es) const {
+    if (currentChain == nullptr) return false;
+    for (const auto &[regName, regObj] : es.getTestObjectCategory("registervalues"_cs)) {
+        if (regName == currentChain->soName) return regObj->wasWritten();
+    }
+    return false;
+}
+
+const FinalState *StateDependencyTracker::driveRegisterPhase2(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
+    const IR::Expression *inputPortSymExpr, int p3Target, const FinalState *&outFs2,
+    size_t &outRepeat) {
+    // Generous cap on the computed packet count: large enough for real counter thresholds
+    // (ACC-Turbo ~10001), small enough to reject pathological extrapolations.
+    constexpr int64_t kAnalyticalCap = 1000000;
+
+    auto carrySO = [&](const FinalState *fs, std::map<cstring, const TestObject *> &out)
+        -> std::optional<big_int> {
+        std::optional<big_int> soVal;
+        for (const auto &[regName, regObj] :
+             fs->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
+            const auto *carried = regObj->evaluateForCarry(fs->getFinalModel());
+            out[regName] = carried;
+            if (regName == chain.soName) soVal = carried->getCarriedScalarValue();
+        }
+        return soVal;  // nullopt ⇒ SO absent or non-scalar ⇒ caller falls back
+    };
+
+    // 1. Priming packet: a single Phase-2 terminal that wrote the SO (accepted via the relaxed
+    //    "wrote-SO" criterion, since the branch-gated write path is unreachable in one packet).
+    std::vector<const FinalState *> primeOut;
+    {
+        phase2AcceptWroteSO_ = true;
+        currentPhase = TamperingPhase::Phase2_Write;
+        currentRequiredNodes = buildRequiredNodes(chain);
+        buildReachingSet();
+        auto &primeInit = phase2Init.clone();
+        runPhase(primeInit, primeOut, 1);
+        phase2AcceptWroteSO_ = false;
+    }
+    if (primeOut.empty()) return nullptr;
+    const FinalState *prime = primeOut[0];
+    const int ipPrime = getPortPair(prime).first;
+
+    // 2. Measure (base, delta): SO value after one priming write, then after a second replay.
+    std::map<cstring, const TestObject *> s1;
+    auto v1opt = carrySO(prime, s1);
+    if (!v1opt) return nullptr;
+    const FinalState *prime2 =
+        runSymbolicPhase3(chain, initState, prime, ipPrime, inputPortSymExpr, s1);
+    if (prime2 == nullptr) return nullptr;
+    std::map<cstring, const TestObject *> s2;
+    auto v2opt = carrySO(prime2, s2);
+    if (!v2opt) return nullptr;
+    const big_int delta = *v2opt - *v1opt;
+    if (delta <= 0) return nullptr;          // non-monotone / saturating ⇒ fall back
+    const big_int base = *v1opt - delta;     // SO value before the priming packet's write
+
+    // 3. Collect candidate read-values from the threshold gates in writeNodes (an IfStatement whose
+    //    condition is a relation with a constant operand). For an increasing counter the gate fires
+    //    once the register read reaches C (Geq/Equ) or C+1 (Grt). We try both and let the allCovered
+    //    re-validation decide, so we needn't perfectly classify the operator/operand order.
+    std::vector<big_int> candidates;
+    for (const auto &[v, node] : chain.writeNodes) {
+        const auto *ifs = node->to<IR::IfStatement>();
+        if (ifs == nullptr) continue;
+        const auto *rel = ifs->condition->to<IR::Operation_Relation>();
+        if (rel == nullptr) continue;
+        const IR::Constant *c = rel->left->to<IR::Constant>();
+        if (c == nullptr) c = rel->right->to<IR::Constant>();
+        if (c == nullptr) continue;
+        candidates.push_back(c->value + 1);  // Grt
+        candidates.push_back(c->value);       // Geq / Equ
+    }
+    if (candidates.empty()) return nullptr;
+
+    auto ceilDiv = [](const big_int &a, const big_int &b) { return (a + b - 1) / b; };
+
+    // 4. For each candidate read-value, compute the prior-packet count, pre-set the carried SO to the
+    //    value the covering packet will read, and RE-RUN the real allCovered DFS to validate.
+    for (const auto &vreg : candidates) {
+        if (vreg <= base) continue;                       // gate already satisfiable ⇒ not this path
+        const big_int kprior = ceilDiv(vreg - base, delta);
+        const big_int overrideVal = base + kprior * delta;
+        const big_int k = kprior + 1;                     // + the covering packet itself
+        if (k <= 1 || k > kAnalyticalCap) continue;
+
+        std::map<cstring, const TestObject *> overrideRegs = s1;
+        overrideRegs[chain.soName] = s1[chain.soName]->withCarriedScalarValue(overrideVal);
+        const FinalState *fs2real = runSymbolicPhase3(chain, initState, prime, ipPrime,
+                                                      inputPortSymExpr, overrideRegs,
+                                                      /*keepWriteCoverage=*/true);
+        if (fs2real == nullptr) continue;                 // full write path not covered ⇒ try next
+
+        // 5. Phase 3 flip+diverge from the covering packet's carried (tampered) register state.
+        std::map<cstring, const TestObject *> afterCover;
+        auto coverVal = carrySO(fs2real, afterCover);
+        if (!coverVal) continue;
+        const FinalState *fs3 =
+            runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, afterCover);
+        if (fs3 == nullptr || evalSinkFlip(fs3) != p3Target) continue;
+
+        outFs2 = fs2real;
+        outRepeat = static_cast<size_t>(k);
+        printInfo("[Tampering] chain id=%1% (%2%): analytical drive-register k=%3% "
+                  "(base=%4% delta=%5% read=%6%) — allCovered re-validated.",
+                  chain.id, currentChainName, outRepeat, base, delta, overrideVal);
+        return fs3;
+    }
+    return nullptr;
 }
 
 size_t StateDependencyTracker::runTamperingChain(
@@ -1085,21 +1275,16 @@ size_t StateDependencyTracker::runTamperingChain(
         for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
             if (emitted >= maxPerChain) break;
 
-            // Carry the tampered (post-Phase-2) register contents into Phase 3.
             const auto &model2 = fs2->getFinalModel();
             const auto *es2 = fs2->getExecutionState();
-            std::map<cstring, const TestObject *> carriedRegs;
-            bool carriedSo = false;
-            for (const auto &[regName, regObj] :
-                 es2->getTestObjectCategory("registervalues"_cs)) {
-                carriedRegs[regName] = regObj->evaluateForCarry(model2);
-                if (regName == chain.soName) carriedSo = true;
-            }
-            if (!carriedSo) continue;
-            const auto *fs3 = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
-                                                inputPortSymExpr, carriedRegs);
-            if (fs3 == nullptr) continue;       // pinned input had no terminal (unsatisfiable)
-            if (evalSinkHit(fs3) != 1) continue;  // sink did not flip MISS→HIT
+            int ip2 = IR::getIntFromLiteral(
+                model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
+            // Drive the sink to flip MISS→HIT: one send if it suffices, else replay the same Phase-2
+            // packet (accumulating the register) until the sink HITs. repeat = packet count.
+            size_t repeat = 1;
+            const auto *fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
+                                                   inputPortSymExpr, /*p3Target=*/1, repeat);
+            if (fs3 == nullptr) continue;  // no packet count up to the cap flips the sink MISS→HIT
             // Sink action-divergence gate (replaces the old Phase1-vs-Phase3 disposition compare):
             // a confirmed MISS→HIT flip is observable only if the sink's HIT action (now taken in
             // Phase 3) differs in effect from its default (MISS) action (taken in Phase 1). The
@@ -1141,8 +1326,6 @@ size_t StateDependencyTracker::runTamperingChain(
                                           .testObject;
             attackerRegValues[chain.soName] = attackerReg;
 
-            int ip2 = IR::getIntFromLiteral(
-                model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
             int op2 = IR::getIntFromLiteral(
                 model2.evaluate(es2->get(programInfo.getTargetOutputPortVar()), true));
             std::map<cstring, cstring> attackerRegSinkTables;
@@ -1157,8 +1340,13 @@ size_t StateDependencyTracker::runTamperingChain(
                                    attackerRegValues, {}, attackerRegSinkTables, {}};
             ts.chainId = chain.id;
             ts.subTestId = ++emitted;
+            ts.phase2RepeatCount = repeat;
             ts.missToHit = true;
             ts.caseLabel = cstring("MISS_TO_HIT/" + disp);
+            if (repeat > 1)
+                printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: accumulation needs %3% Phase-2 "
+                          "packet(s) to flip the sink.",
+                          chain.id, ts.subTestId, repeat);
             // Whichever phase forwards via multicast (Phase 3 on DROP_TO_FWD, Phase 1 on
             // FWD_TO_DROP) needs its group installed; emit the hint so the validator installs it.
             if (int mgid = evalMulticastGroup(fs3); mgid >= 0) {
@@ -1231,6 +1419,12 @@ size_t StateDependencyTracker::runConditionChain(
     buildReachingSet();
 
     std::map<size_t, std::vector<const FinalState *>> phase2StateMap;
+    // Analytical drive-register results (Family 1): when a bucket's single-packet write DFS finds
+    // nothing, driveRegisterPhase2 may produce a validated covering Phase-2 terminal with a
+    // precomputed flip terminal + packet count k, keyed by that fs2.
+    std::map<const FinalState *, const FinalState *> drivenFs3;
+    std::map<const FinalState *, size_t> drivenRepeat;
+    std::map<const FinalState *, const FinalState *> drivenFs1;
     size_t phase2StateNum = 0;
     for (size_t i = 0; i < phase1Conditions.size(); ++i) {
         const auto &cond1 = phase1Conditions[i];
@@ -1279,7 +1473,24 @@ size_t StateDependencyTracker::runConditionChain(
             for (const auto &[keyName, match] : keyMap)
                 phase2Init.pushPathConstraint(match->buildTableKeyNeqConstraint(tblName, keyName));
         }
+        // Keep a pristine clone for the analytical drive-register fallback (runPhase mutates its root).
+        auto &driveTemplate = phase2Init.clone();
         runPhase(phase2Init, phase2StateMap[i], maxPerChain);
+        if (phase2StateMap[i].empty() && repPhase1State != nullptr) {
+            // Family 1: the single-packet write DFS found nothing because a register-value gate on the
+            // write path is unreached in one packet. Try to drive the register past the gate.
+            const FinalState *fs2real = nullptr;
+            size_t kDrive = 0;
+            const FinalState *fs3Drive =
+                driveRegisterPhase2(chain, initState, driveTemplate, repPhase1State, cond1.inputPort,
+                                    inputPortSymExpr, p3Target, fs2real, kDrive);
+            if (fs3Drive != nullptr) {
+                phase2StateMap[i].push_back(fs2real);
+                drivenFs3[fs2real] = fs3Drive;
+                drivenRepeat[fs2real] = kDrive;
+                drivenFs1[fs2real] = repPhase1State;
+            }
+        }
         phase2StateNum += phase2StateMap[i].size();
     }
     if (phase2StateNum == 0) {
@@ -1299,19 +1510,24 @@ size_t StateDependencyTracker::runConditionChain(
             if (emitted >= maxPerChain) break;
             const auto &model2 = fs2->getFinalModel();
             const auto *es2 = fs2->getExecutionState();
-            std::map<cstring, const TestObject *> carriedRegs;
-            bool carriedSo = false;
-            for (const auto &[regName, regObj] :
-                 es2->getTestObjectCategory("registervalues"_cs)) {
-                carriedRegs[regName] = regObj->evaluateForCarry(model2);
-                if (regName == chain.soName) carriedSo = true;
+            if (!sinkConditionDiverges()) continue;  // then/else write the same output (count-indep.)
+            int ip2 = IR::getIntFromLiteral(
+                model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
+            // Drive the tamper to flip: one send if that suffices, else replay the same Phase-2
+            // packet (accumulating the register) until the condition flips. repeat = packet count.
+            size_t repeat = 1;
+            const FinalState *fs3 = nullptr;
+            if (auto drivenIt = drivenFs3.find(fs2); drivenIt != drivenFs3.end()) {
+                // Analytical drive-register result: precomputed flip terminal + k, valid only for the
+                // representative Phase-1 state it was derived against.
+                if (fs1 != drivenFs1[fs2]) continue;
+                fs3 = drivenIt->second;
+                repeat = drivenRepeat[fs2];
+            } else {
+                fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
+                                           inputPortSymExpr, p3Target, repeat);
             }
-            if (!carriedSo) continue;
-            const auto *fs3 = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
-                                                inputPortSymExpr, carriedRegs);
-            if (fs3 == nullptr) continue;                  // pinned input unsatisfiable
-            if (evalCondition(fs3) != p3Target) continue;  // condition did not flip
-            if (!sinkConditionDiverges()) continue;        // then/else write the same output
+            if (fs3 == nullptr) continue;  // no packet count up to the cap flips the condition
 
             const auto &model3 = fs3->getFinalModel();
             std::map<cstring, const TestObject *> attackerRegValues;
@@ -1336,15 +1552,18 @@ size_t StateDependencyTracker::runConditionChain(
             };
             int p1OutPort = openOutputPort(fs1);
             int p2OutPort = openOutputPort(fs2);
-            int ip2 = IR::getIntFromLiteral(
-                model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
             // Condition sink: no table, so attackerRegisterSinkTables stays empty.
             TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
                                    attackerRegValues, {}, {}, {}};
             ts.chainId = chain.id;
             ts.subTestId = ++emitted;
+            ts.phase2RepeatCount = repeat;
             ts.missToHit = missToHit;
             ts.caseLabel = cstring(missToHit ? "COND_FALSE_TO_TRUE" : "COND_TRUE_TO_FALSE");
+            if (repeat > 1)
+                printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: accumulation needs %3% Phase-2 "
+                          "packet(s) to flip the condition.",
+                          chain.id, ts.subTestId, repeat);
             if (int mgid = evalMulticastGroup(fs3); mgid >= 0) {
                 ts.usesMulticast = true;
                 ts.multicastGroupId = mgid;
@@ -1571,18 +1790,34 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                 } else {
                     // Only emit a test when the path covers all required nodes.
                     const auto &visited = executionState.get().getVisited();
-                    bool allCovered =
-                        std::all_of(currentRequiredNodes.begin(), currentRequiredNodes.end(),
-                                    [&visited, this](const IR::Node *n) {
-                                        // IR::Key nodes are never passed to markVisited; instead
-                                        // check whether the table that owns this key had its
-                                        // apply() MethodCallStatement visited.
-                                        if (n->is<IR::Key>()) {
-                                            return isTableVisited(
-                                                currentChain->sinkTableControlPlaneName, visited);
-                                        }
-                                        return visited.count(n) > 0;
-                                    });
+                    const auto &es = executionState.get();
+                    auto nodeCovered = [&](const IR::Node *n) -> bool {
+                        // IR::Key nodes are never passed to markVisited; instead check whether the
+                        // table that owns this key had its apply() MethodCallStatement visited.
+                        if (n->is<IR::Key>()) {
+                            return isTableVisited(currentChain->sinkTableControlPlaneName, visited);
+                        }
+                        if (visited.count(n) > 0) return true;
+                        // Under the Cond policy cmd_stepper CLONES the IfStatement (it reduces the
+                        // condition for branch stamping), so the original ESG pointer never appears in
+                        // `visited` even when the branch was taken. It does stamp a source-position-
+                        // keyed condition var when the branch is evaluated; treat that as coverage of
+                        // the IfStatement node. (H2S2K does not clone, so the pointer check above hits.)
+                        if (const auto *ifs = n->to<IR::IfStatement>()) {
+                            return es.get(CmdStepper::getConditionVar(ifs)) != nullptr;
+                        }
+                        return false;
+                    };
+                    bool allCovered = std::all_of(currentRequiredNodes.begin(),
+                                                  currentRequiredNodes.end(), nodeCovered);
+                    // Relaxed priming acceptance (driveRegisterPhase2): accept a terminal that wrote
+                    // the SO register even if the branch-gated write path isn't fully covered. This is
+                    // used ONLY to capture a priming packet for measuring the per-packet delta; the
+                    // emitted test still goes through full allCovered re-validation. allCovered itself
+                    // is unchanged.
+                    if (phase2AcceptWroteSO_ && !allCovered) {
+                        allCovered = terminalWroteSO(executionState.get());
+                    }
                     if (allCovered) {
                         printInfo("[SDTrack] Test found: chain=%1% id=%2% SO=%3% (%4% nodes)",
                                     currentChainName, currentChain->id, currentChain->soName,
@@ -1600,10 +1835,7 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                         printInfo("[SDTrack DEBUG] Terminal state reached but allCovered=false "
                                 "(%1% required nodes):", currentRequiredNodes.size());
                         for (const auto *n : currentRequiredNodes) {
-                            bool hit = n->is<IR::Key>()
-                                ? isTableVisited(currentChain->sinkTableControlPlaneName, visited)
-                                : visited.count(n) > 0;
-                            printInfo("  %1% [%2%] %3% %4%", (hit ? "OK  " : "MISS"),
+                            printInfo("  %1% [%2%] %3% %4%", (nodeCovered(n) ? "OK  " : "MISS"),
                                     n->node_type_name(), n,
                                     n->getSourceInfo().toPositionString());
                         }

@@ -126,6 +126,24 @@ SymbexOptions::SymbexOptions()
         "will generate tests until no more paths can be found.");
 
     registerOption(
+        "--max-phase2-packets", "maxPhase2Packets",
+        [this](const char *arg) {
+            try {
+                maxPhase2Packets = std::stoll(arg);
+                if (maxPhase2Packets < 1) {
+                    throw std::invalid_argument("Invalid input.");
+                }
+            } catch (std::invalid_argument &) {
+                error("Invalid value %1% for --max-phase2-packets. Expected positive integer.", arg);
+                return false;
+            }
+            return true;
+        },
+        "Safety cap on the length of a multi-packet Phase-2 tampering sequence [default: 64]. The "
+        "actual packet count is data-driven (Z3 feasibility); this only bounds non-converging "
+        "preconditions.");
+
+    registerOption(
         "--stop-metric", "stopMetric",
         [this](const char *arg) {
             stopMetric = cstring(arg).toUpper();

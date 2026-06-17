@@ -405,18 +405,19 @@ expected_output_packet {
 }
 ## endif
 
-# Phase 2: attacker writes tampered register value
+# Phase 2: attacker writes tampered register value. Sent only in the tamper run (tamper_only);
+# replayed once per block — multiple identical blocks accumulate a register increment until the
+# downstream condition/sink flips.
+## for pkt in phase2_packets
 input_packet {
-  packet: "{{phase2_send.pkt}}"
-  port: {{phase2_send.ig_port}}
-}
-## if phase2_verify
-expected_output_packet {
-  packet: "{{phase2_verify.exp_pkt}}"
-  port: {{phase2_verify.eg_port}}
-  packet_mask: "{{phase2_verify.ignore_mask}}"
-}
+  packet: "{{pkt.pkt}}"
+  port: {{pkt.ig_port}}
+  tamper_only: true
+## if pkt.repeat > 1
+  repeat_count: {{pkt.repeat}}
 ## endif
+}
+## endfor
 
 # Phase 3: replay Phase 1 input — dynamic deviation check (the validator compares the Phase-3
 # output to Phase 1's reference to detect drop/port/byte divergence).
@@ -563,6 +564,26 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     dataJson["phase1_verify"] = getVerify(testSpec->spec1);
     dataJson["phase2_send"] = getSend(testSpec->spec2);
     dataJson["phase2_verify"] = getVerify(testSpec->spec2);
+    // Multi-packet Phase 2: the SAME attacker packet is sent phase2RepeatCount times so a register
+    // increment accumulates past the threshold that flips the sink/condition. Dual-path: for small k
+    // emit k literal tamper_only blocks (readable, the requested 2-1…2-k form); for large k (e.g. a
+    // counter needing thousands of increments) emit ONE block with repeat_count=k so the file stays
+    // small. Each block carries a `repeat` field consumed by the template.
+    constexpr size_t kLiteralLimit = 16;
+    inja::json phase2Packets = inja::json::array();
+    size_t phase2Repeat = testSpec->phase2RepeatCount < 1 ? 1 : testSpec->phase2RepeatCount;
+    if (phase2Repeat <= kLiteralLimit) {
+        for (size_t r = 0; r < phase2Repeat; ++r) {
+            auto blk = dataJson["phase2_send"];
+            blk["repeat"] = 1;
+            phase2Packets.push_back(blk);
+        }
+    } else {
+        auto blk = dataJson["phase2_send"];
+        blk["repeat"] = phase2Repeat;
+        phase2Packets.push_back(blk);
+    }
+    dataJson["phase2_packets"] = phase2Packets;
     // Phase 3 replays Phase 1's input. For MISS→HIT we materialise the symbolically-verified
     // expected output so the test asserts a concrete Phase-1 ≠ Phase-3 deviation.
     dataJson["phase3_send"] = getSend(testSpec->spec1);

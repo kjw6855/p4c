@@ -97,6 +97,11 @@ class IndexMap : public TestObject {
     /// provided index.
     [[nodiscard]] const IR::Expression *getValueAtIndex(const IR::Expression *index) const;
 
+    /// For a carry snapshot (initialValue folded to a constant): the scalar value, or nullopt when
+    /// the folded value is not a single IR::Constant (struct/taint). Drives Phase-2 accumulation
+    /// fixpoint detection.
+    [[nodiscard]] std::optional<big_int> getCarriedScalarValue() const override;
+
     /// @returns the evaluated register value. This means it must be a constant.
     /// The function will throw a bug if this is not the case.
     [[nodiscard]] const IR::Expression *getEvaluatedInitialValue() const;
@@ -108,6 +113,8 @@ class IndexMap : public TestObject {
     [[nodiscard]] const std::vector<IndexExpression> &getIndexConditions() const {
         return indexConditions;
     }
+
+    [[nodiscard]] bool wasWritten() const override { return !indexConditions.empty(); }
 
     DECLARE_TYPEINFO(IndexMap, TestObject);
 };
@@ -146,6 +153,11 @@ class TofinoRegisterValue : public IndexMap {
 
     /// @returns the initial index this register is initialized with.
     [[nodiscard]] const IR::Constant *getEvaluatedInitialIndex() const;
+
+    /// Returns a carry snapshot identical to this one but with the folded scalar value replaced by
+    /// @p value (same decl/index, no index conditions). Only meaningful on a post-carry snapshot
+    /// whose initialValue is a scalar constant; used by the analytical multi-packet path.
+    [[nodiscard]] const TestObject *withCarriedScalarValue(big_int value) const override;
 
     /// Returns a copy of this register with each symbolic write value replaced by an
     /// attacker-chosen constant (random unless fixedValue is provided), together with

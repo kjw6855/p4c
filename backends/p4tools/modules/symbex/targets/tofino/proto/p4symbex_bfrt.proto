@@ -20,6 +20,15 @@ package symbex.tofino;
 message InputPacketAtPort {
     bytes packet = 1;
     int32 port = 2;
+    // True for a Phase-2 (tamper) packet in a multi-packet tampering sequence: it is sent only in
+    // the tamper run, not the legit run. The differential harness replays the legit run with the
+    // non-marked packets (Phase 1 + Phase 3) and the tamper run with all packets. Unset/false for
+    // Phase 1 and Phase 3.
+    bool tamper_only = 3;
+    // Number of times to send this packet (default 1). Used for large-k accumulation (e.g. a counter
+    // that must be incremented thousands of times to cross a threshold) so the file carries one block
+    // with repeat_count=k instead of k literal blocks. The harness sends the packet repeat_count times.
+    uint32 repeat_count = 4;
 }
 
 // Expected packet observed on a switch port (with optional don't-care mask).
