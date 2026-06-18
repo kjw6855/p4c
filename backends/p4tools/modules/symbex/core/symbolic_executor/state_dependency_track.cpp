@@ -726,11 +726,36 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
     // Replay Phase 1's exact input (bytes + size + port).
     pinPacketToPhase1(phase3Init, fs1, inputPort, inputPortSymExpr);
 
+    // Cross-phase control-plane consistency: hardware installs ONE table state for all three
+    // phases, so Phase 3 must use the SAME table entries/actions Phase 1 did — otherwise it could
+    // synthesize a *different* configuration (e.g. a fresh keyed entry) that manufactures a flip
+    // unrealizable under that single installed state (the H2S2C false positive: spreadsketch's
+    // tbl_select_level synthesised level>0 only in Phase 3). For every non-sink table: skip new
+    // synthesis (→ immutable, compile-time default — matches a Phase-1 that took the default) and,
+    // where Phase 1 chose an entry, inject it as a pre-existing config so Phase 3 evaluates the
+    // same one. The sink table is left to its own handling (the tamper acts on its key).
+    std::vector<cstring> phase3SkipTables;
+    {
+        const auto &model1 = fs1->getFinalModel();
+        const auto *es1 = fs1->getExecutionState();
+        for (const auto &[tblName, tbl] : tableByName_) {
+            if (tblName == chain.sinkTableControlPlaneName) continue;  // sink keeps its own entries
+            phase3SkipTables.push_back(tblName);
+        }
+        for (const auto &[tblName, tblObj] : es1->getTestObjectCategory("tableconfigs"_cs)) {
+            if (tblName == chain.sinkTableControlPlaneName) continue;
+            const auto *evalCfg = tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
+            if (evalCfg != nullptr)
+                phase3Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+        }
+    }
+
     std::vector<const FinalState *> phase3States;
     {
-        // Carry registers (isPhase1=false ⇒ no zero-init); the sink uses its own entries.
-        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, ""_cs, {}, /*setRegTracking=*/true,
-                               /*isPhase1=*/false);
+        // Carry registers (isPhase1=false ⇒ no zero-init); the sink uses its own entries. Non-sink
+        // tables are pinned to Phase 1's choice (skip synthesis + pre-existing configs above).
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, ""_cs, phase3SkipTables,
+                               /*setRegTracking=*/true, /*isPhase1=*/false);
         runPhase(phase3Init, phase3States, 1);
     }
     return phase3States.empty() ? nullptr : phase3States[0];
