@@ -159,6 +159,13 @@ class TofinoRegisterValue : public IndexMap {
     /// whose initialValue is a scalar constant; used by the analytical multi-packet path.
     [[nodiscard]] const TestObject *withCarriedScalarValue(big_int value) const override;
 
+    /// True when the register's access index (initialIndex, or any recorded write index) is tainted
+    /// — i.e. RANDOM-hash-derived with no recoverable operands. See TestObject::hasTaintedIndex.
+    [[nodiscard]] bool hasTaintedIndex() const override;
+
+    /// The raw initial/read index plus any recorded write indices, for index-input pinning.
+    [[nodiscard]] std::vector<const IR::Expression *> getIndexExpressions() const override;
+
     /// Returns a copy of this register with each symbolic write value replaced by an
     /// attacker-chosen constant (random unless fixedValue is provided), together with
     /// model overrides that pin each symbolic write expression to its chosen value.

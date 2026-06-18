@@ -622,14 +622,76 @@ std::pair<int, int> StateDependencyTracker::getPortPair(const FinalState *fs) co
     return {ip, op};
 }
 
+namespace {
+/// Collects the packet-field SymbolicVariable leaves of a register-index expression. An
+/// IR::ConcolicVariable (e.g. a Concolic_Hash_get of a CRC) IS-A SymbolicVariable, but the hash
+/// OPERANDS we want live in its `arguments` — so recurse into those and do NOT collect the concolic
+/// node itself. Plain SymbolicVariables (pktvar_N) are the leaves we want.
+class IndexSymVarCollector : public Inspector {
+ public:
+    std::set<const IR::SymbolicVariable *> vars;
+    bool preorder(const IR::ConcolicVariable *cv) override {
+        if (cv->arguments != nullptr) visit(cv->arguments);
+        return false;  // skip the concolic node itself; we collected its operands above
+    }
+    bool preorder(const IR::SymbolicVariable *sv) override {
+        vars.insert(sv);
+        return false;
+    }
+};
+}  // namespace
+
+std::set<const IR::SymbolicVariable *> StateDependencyTracker::collectIndexSymVars(
+    const TestObject *soReg) const {
+    IndexSymVarCollector collector;
+    if (soReg != nullptr) {
+        for (const auto *idx : soReg->getIndexExpressions()) {
+            if (idx != nullptr) idx->apply(collector);
+        }
+    }
+    return collector.vars;
+}
+
+void StateDependencyTracker::pinIndexInputsToPhase1(
+    ExecutionState &init, const FinalState *fs1,
+    const std::set<const IR::SymbolicVariable *> &symVars) {
+    const auto &model1 = fs1->getFinalModel();
+    for (const auto *sv : symVars) {
+        init.pushPathConstraint(new IR::Equ(sv, model1.evaluate(sv, true)));
+    }
+}
+
+void StateDependencyTracker::pinPacketToPhase1(ExecutionState &init, const FinalState *fs1,
+                                               int inputPort,
+                                               const IR::Expression *inputPortSymExpr) {
+    const auto &model1 = fs1->getFinalModel();
+    const auto *p1PktExpr = fs1->getExecutionState()->getInputPacket();
+    const auto *p1PktSize = model1.evaluate(ExecutionState::getInputPacketSizeVar(), true);
+    // The accumulated input-packet expression is a Concat tree rooted at a zero-width constant, which
+    // Z3 cannot translate; so pin each pktvar_N *symbolic variable* it contains to its @p fs1 model
+    // value. Cloning initState re-pulls the same pktvar_N in order, so this replays fs1's exact bytes
+    // (same header-derived hash inputs + key fields), plus the packet size and input port.
+    std::function<void(const IR::Expression *)> pinPktVars = [&](const IR::Expression *e) {
+        if (e == nullptr) return;
+        if (const auto *sv = e->to<IR::SymbolicVariable>()) {
+            init.pushPathConstraint(new IR::Equ(sv, model1.evaluate(sv, true)));
+        } else if (const auto *cc = e->to<IR::Concat>()) {
+            pinPktVars(cc->left);
+            pinPktVars(cc->right);
+        } else if (const auto *sl = e->to<IR::Slice>()) {
+            pinPktVars(sl->e0);
+        }
+    };
+    pinPktVars(p1PktExpr);
+    init.pushPathConstraint(new IR::Equ(ExecutionState::getInputPacketSizeVar(), p1PktSize));
+    init.pushPathConstraint(
+        new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
+}
+
 const FinalState *StateDependencyTracker::runSymbolicPhase3(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
     const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage) {
-    const auto &model1 = fs1->getFinalModel();
-    const auto *p1PktExpr = fs1->getExecutionState()->getInputPacket();
-    const auto *p1PktSize = model1.evaluate(ExecutionState::getInputPacketSizeVar(), true);
-
     if (keepWriteCoverage) {
         // Analytical drive-register re-validation: keep the REAL Phase-2 write-coverage ACCEPTANCE
         // (allCovered over writeNodes) so the terminal is accepted only if the full (branch-gated)
@@ -661,26 +723,8 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
     for (const auto &[regName, regObj] : carriedRegs)
         phase3Init.addTestObject("registervalues"_cs, regName, regObj);
 
-    // Replay Phase 1's exact input. The accumulated input-packet expression is a Concat rooted at a
-    // zero-width constant (the initial empty packet), which Z3 cannot translate; so instead of
-    // constraining the whole expression we pin each pktvar_N *symbolic variable* it contains to its
-    // Phase-1 value. Cloning initState re-pulls the same pktvar_N in order, so this replays
-    // Phase-1's bytes (same register index + header-derived key fields).
-    std::function<void(const IR::Expression *)> pinPktVars = [&](const IR::Expression *e) {
-        if (e == nullptr) return;
-        if (const auto *sv = e->to<IR::SymbolicVariable>()) {
-            phase3Init.pushPathConstraint(new IR::Equ(sv, model1.evaluate(sv, true)));
-        } else if (const auto *cc = e->to<IR::Concat>()) {
-            pinPktVars(cc->left);
-            pinPktVars(cc->right);
-        } else if (const auto *sl = e->to<IR::Slice>()) {
-            pinPktVars(sl->e0);
-        }
-    };
-    pinPktVars(p1PktExpr);
-    phase3Init.pushPathConstraint(new IR::Equ(ExecutionState::getInputPacketSizeVar(), p1PktSize));
-    phase3Init.pushPathConstraint(
-        new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
+    // Replay Phase 1's exact input (bytes + size + port).
+    pinPacketToPhase1(phase3Init, fs1, inputPort, inputPortSymExpr);
 
     std::vector<const FinalState *> phase3States;
     {
@@ -1051,20 +1095,42 @@ size_t StateDependencyTracker::runTamperingChain(
             }
         }
 
-        // Constrain Phase 2's input port to differ from Phase 1's input AND output. A dropped
-        // Phase-1 baseline has no output port (cond1.outputPort < 0), so only the input NEQ applies.
-        phase2Init.pushPathConstraint(new IR::Neq(
-            inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
-        if (cond1.outputPort >= 0)
+        // Hash/sketch/bloom-indexed SO register (tainted access index): pin Phase 2 to the exact
+        // Phase-1 flow so the attacker collides with the victim's bucket (equal hash inputs ⇒ equal
+        // bucket), instead of the distinctness NEQ that would move it to a different bucket.
+        // Classify the SO register's index (see plan / runConditionChain for the rationale):
+        // packet-derived index → pin only the index inputs to Phase 1 (keep port NEQ, drop table-key
+        // NEQ); tainted RANDOM-hash index → whole-packet pin; constant index → full distinctness.
+        const TestObject *soReg =
+            (repPhase1State != nullptr)
+                ? repPhase1State->getExecutionState()->getTestObject("registervalues"_cs,
+                                                                     chain.soName, /*checked=*/false)
+                : nullptr;
+        const auto indexSymVars = collectIndexSymVars(soReg);
+        if (indexSymVars.empty() && soReg != nullptr && soReg->hasTaintedIndex()) {
+            pinPacketToPhase1(phase2Init, repPhase1State, cond1.inputPort, inputPortSymExpr);
+        } else {
+            // Constrain Phase 2's input port to differ from Phase 1's input AND output. A dropped
+            // Phase-1 baseline has no output port (cond1.outputPort < 0), so only the input NEQ
+            // applies.
             phase2Init.pushPathConstraint(new IR::Neq(
-                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
-        // Constrain Phase 2's table match keys to differ from Phase 1's (compatible, coexisting
-        // entries). Skip size-1 tables: their entry is pre-injected.
-        const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
-        for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
-            if (size1Set.count(tblName) > 0) continue;
-            for (const auto &[keyName, match] : keyMap) {
-                phase2Init.pushPathConstraint(match->buildTableKeyNeqConstraint(tblName, keyName));
+                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
+            if (cond1.outputPort >= 0)
+                phase2Init.pushPathConstraint(new IR::Neq(
+                    inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
+            if (!indexSymVars.empty()) {
+                pinIndexInputsToPhase1(phase2Init, repPhase1State, indexSymVars);
+            } else {
+                // Constrain Phase 2's table match keys to differ from Phase 1's (compatible,
+                // coexisting entries). Skip size-1 tables: their entry is pre-injected.
+                const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
+                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+                    if (size1Set.count(tblName) > 0) continue;
+                    for (const auto &[keyName, match] : keyMap) {
+                        phase2Init.pushPathConstraint(
+                            match->buildTableKeyNeqConstraint(tblName, keyName));
+                    }
+                }
             }
         }
         runPhase(phase2Init, phase2StateMap[i], maxPerChain);
@@ -1462,16 +1528,42 @@ size_t StateDependencyTracker::runConditionChain(
                 phase2Init.addTestObject("registervalues"_cs, regName, carried);
             }
         }
-        phase2Init.pushPathConstraint(new IR::Neq(
-            inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
-        if (cond1.outputPort >= 0)
+        // Hash/sketch/bloom-indexed SO register: its access index is tainted, so symbex can't tell
+        // which bucket a packet maps to. The attacker packet must COLLIDE with the Phase-1 flow's
+        // bucket, so pin Phase-2 to the exact Phase-1 packet (equal hash inputs ⇒ equal bucket)
+        // instead of forcing it to differ — the distinctness NEQ would land it in a different bucket
+        // (see ACC-Turbo: dst_addr-NEQ moved the attacker off the victim's bloom slot).
+        // Classify the SO register's index and constrain Phase 2 accordingly (see plan):
+        //   - packet-derived index (e.g. a concolic CRC hash): pin ONLY the index-determining inputs
+        //     to Phase 1 so the attacker hits the victim's bucket; keep the port NEQ and DROP the
+        //     table-key NEQ (it would conflict with a pinned hash-operand key). Other fields stay free.
+        //   - tainted index (RANDOM hash, operands unrecoverable): pin the whole packet (same flow/path).
+        //   - constant index: full distinctness (port + table-key NEQ), unchanged.
+        const TestObject *soReg =
+            (repPhase1State != nullptr)
+                ? repPhase1State->getExecutionState()->getTestObject("registervalues"_cs,
+                                                                     chain.soName, /*checked=*/false)
+                : nullptr;
+        const auto indexSymVars = collectIndexSymVars(soReg);
+        if (indexSymVars.empty() && soReg != nullptr && soReg->hasTaintedIndex()) {
+            pinPacketToPhase1(phase2Init, repPhase1State, cond1.inputPort, inputPortSymExpr);
+        } else {
             phase2Init.pushPathConstraint(new IR::Neq(
-                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
-        const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
-        for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
-            if (size1Set.count(tblName) > 0) continue;
-            for (const auto &[keyName, match] : keyMap)
-                phase2Init.pushPathConstraint(match->buildTableKeyNeqConstraint(tblName, keyName));
+                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
+            if (cond1.outputPort >= 0)
+                phase2Init.pushPathConstraint(new IR::Neq(
+                    inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
+            if (!indexSymVars.empty()) {
+                pinIndexInputsToPhase1(phase2Init, repPhase1State, indexSymVars);
+            } else {
+                const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
+                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+                    if (size1Set.count(tblName) > 0) continue;
+                    for (const auto &[keyName, match] : keyMap)
+                        phase2Init.pushPathConstraint(
+                            match->buildTableKeyNeqConstraint(tblName, keyName));
+                }
+            }
         }
         // Keep a pristine clone for the analytical drive-register fallback (runPhase mutates its root).
         auto &driveTemplate = phase2Init.clone();

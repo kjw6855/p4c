@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <unordered_set>
 #include <vector>
 
@@ -276,6 +277,23 @@ class StateDependencyTracker : public SymbolicExecutor {
         const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
         const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage = false);
+
+    /// Pins @p init's input packet (every pktvar_N), packet size, and input port to @p fs1's model
+    /// values, so a cloned execution replays fs1's exact packet/flow. Used by runSymbolicPhase3 (to
+    /// replay Phase 1 in Phase 3) and as the whole-packet fallback for a RANDOM-hash (tainted) index.
+    void pinPacketToPhase1(ExecutionState &init, const FinalState *fs1, int inputPort,
+                           const IR::Expression *inputPortSymExpr);
+
+    /// Collects the packet-field SymbolicVariable leaves of @p soReg's index expression(s) — the
+    /// index-determining inputs (e.g. the operands of a concolic CRC hash). Empty when the index is a
+    /// constant or an opaque TaintExpression (RANDOM hash).
+    [[nodiscard]] std::set<const IR::SymbolicVariable *> collectIndexSymVars(
+        const TestObject *soReg) const;
+
+    /// Pins exactly @p symVars in @p init to their @p fs1 model values (index-input pinning) — the
+    /// attacker packet then hashes to the Phase-1 flow's bucket while leaving non-index fields free.
+    void pinIndexInputsToPhase1(ExecutionState &init, const FinalState *fs1,
+                                const std::set<const IR::SymbolicVariable *> &symVars);
 
     /// Accumulation driver: starting from @p fs2 (a reachable Phase-2 write packet), replay the SAME
     /// packet — carrying the register state forward each time — and re-run symbolic Phase 3 until the

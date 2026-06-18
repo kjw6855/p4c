@@ -115,6 +115,19 @@ class TestObject : public ICastable {
     /// state even though it didn't cover the full (branch-gated) write path. Default: false.
     [[nodiscard]] virtual bool wasWritten() const { return false; }
 
+    /// True when this register's access index is tainted (e.g. a RANDOM hash, which symbex cannot
+    /// resolve to a concrete value or recover the operands of). The tampering generator uses this as
+    /// the "whole-packet pin" fallback: it can't identify which fields feed the index, so the Phase-2
+    /// attacker packet is pinned entirely to Phase-1. Default: false.
+    [[nodiscard]] virtual bool hasTaintedIndex() const { return false; }
+
+    /// The register's access index expression(s) — the initial/read index plus any recorded write
+    /// indices, RAW (un-evaluated), so their packet-field SymbolicVariable leaves are intact. The
+    /// tampering generator walks these to collect the index-determining inputs (e.g. the operands of a
+    /// concolic CRC hash) and pin exactly those to Phase-1 — making the attacker packet hit the
+    /// victim's bucket while leaving other fields free. Default: none (no register index).
+    [[nodiscard]] virtual std::vector<const IR::Expression *> getIndexExpressions() const { return {}; }
+
     DECLARE_TYPEINFO(TestObject);
 };
 

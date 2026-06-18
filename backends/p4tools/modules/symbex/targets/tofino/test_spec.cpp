@@ -24,6 +24,7 @@
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_int_distribution.hpp>
 
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/variables.h"
 #include "ir/irutils.h"
 
@@ -171,6 +172,25 @@ const TestObject *TofinoRegisterValue::withCarriedScalarValue(big_int value) con
     // initialValue is the post-carry folded constant; replace it with a constant of the same width.
     const auto *valueType = initialValue->type;
     return new TofinoRegisterValue(decl, IR::Constant::get(valueType, value), initialIndex);
+}
+
+bool TofinoRegisterValue::hasTaintedIndex() const {
+    // The read/initial index (set at RegisterAction.execute) and any recorded write indices. A
+    // RANDOM-hash-indexed register carries a tainted index here (symbex can't resolve the hash).
+    if (initialIndex != nullptr && Taint::hasTaint(initialIndex)) return true;
+    for (const auto &cond : indexConditions) {
+        if (Taint::hasTaint(cond.getIndex())) return true;
+    }
+    return false;
+}
+
+std::vector<const IR::Expression *> TofinoRegisterValue::getIndexExpressions() const {
+    std::vector<const IR::Expression *> indices;
+    if (initialIndex != nullptr) indices.push_back(initialIndex);
+    for (const auto &cond : indexConditions) {
+        if (cond.getIndex() != nullptr) indices.push_back(cond.getIndex());
+    }
+    return indices;
 }
 
 const IR::Constant *TofinoRegisterValue::getEvaluatedInitialIndex() const {
