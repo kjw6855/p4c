@@ -306,6 +306,36 @@ void StateDependencyTracker::buildTableByNameMap() {
     programInfo.getP4Program().apply(col);
 }
 
+void StateDependencyTracker::buildRegisterActionBodyNodes() {
+    // Record the SOURCE POSITION of every node inside an abstract-method body (IR::Function) — i.e.
+    // a RegisterAction's `apply`. Positions (not pointers) because the chain's required nodes come
+    // from the SD dependency graph's IR, whose pointers differ from this program's. A node
+    // read/written by an SD chain can only be inside a Function if it is the SO's RegisterAction
+    // body, so over-collecting other Functions is harmless: only required nodes are looked up. The
+    // `.execute()` call site and the sink key live in the control body (different positions), so they
+    // are never excused.
+    struct Collector : Inspector {
+        std::unordered_set<cstring> &out;
+        int depth = 0;
+        explicit Collector(std::unordered_set<cstring> &o) : out(o) {}
+        bool preorder(const IR::Function *fn) override {
+            out.insert(cstring(fn->getSourceInfo().toPositionString()));
+            ++depth;
+            return true;
+        }
+        void postorder(const IR::Function *) override { --depth; }
+        bool preorder(const IR::Node *n) override {
+            if (depth > 0) out.insert(cstring(n->getSourceInfo().toPositionString()));
+            return true;
+        }
+    } col(registerActionBodyPositions_);
+    programInfo.getP4Program().apply(col);
+}
+
+bool StateDependencyTracker::isInRegisterActionBody(const IR::Node *n) const {
+    return registerActionBodyPositions_.count(cstring(n->getSourceInfo().toPositionString())) > 0;
+}
+
 bool StateDependencyTracker::isTableVisited(
         cstring controlPlaneName, const P4::Coverage::CoverageSet &visited) const {
     auto it = tableByName_.find(controlPlaneName);
@@ -394,6 +424,9 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
     // Build the controlPlanName → IR::P4Table* map once for this execution so that
     // allCovered can check whether a table's apply() was visited in visitedNodes.
     buildTableByNameMap();
+    // RegisterAction-body node set: scopes the read/write coverage relaxation to in-RegisterAction
+    // blocks only (the mutually-exclusive branch siblings); built once, like the table map.
+    buildRegisterActionBodyNodes();
 
     auto chains = collectChains();
 
@@ -429,14 +462,19 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 
 bool StateDependencyTracker::chainTargetsCovered(
     const P4StateDependency::DependencyGraphs::SOChain &chain,
-    const P4::Coverage::CoverageSet &visited) const {
+    const P4::Coverage::CoverageSet &visited, bool soRan) const {
     auto it = chainPhase1Targets.find(chain.id);
     if (it == chainPhase1Targets.end() || it->second.empty()) return false;
     return std::all_of(it->second.begin(), it->second.end(),
-                       [&visited, &chain, this](const IR::Node *n) {
+                       [&visited, &chain, soRan, this](const IR::Node *n) {
                            if (n->is<IR::Key>())
                                return isTableVisited(chain.sinkTableControlPlaneName, visited);
-                           return visited.count(n) > 0;
+                           if (visited.count(n) > 0) return true;
+                           // In-RegisterAction node: excused once the SO's RegisterAction ran, since
+                           // it may be a mutually-exclusive branch sibling no path can also cover.
+                           // Control-body nodes (incl. the .execute() call site) are not in the set,
+                           // so they stay strictly required.
+                           return soRan && isInRegisterActionBody(n);
                        });
 }
 
@@ -446,7 +484,8 @@ bool StateDependencyTracker::conditionReached(
     const auto *ifStmt = chain.sinkConditionNode->to<IR::IfStatement>();
     if (ifStmt == nullptr) return false;
     // The branch-stamped condition var is set iff the if-statement was reached on this path.
-    return es.get(CmdStepper::getConditionVar(ifStmt)) != nullptr;
+    // exists() (not get()) so an unreached if returns false instead of BUGging on the missing var.
+    return es.exists(CmdStepper::getConditionVar(ifStmt));
 }
 
 bool StateDependencyTracker::allPhase1BucketsFull() const {
@@ -464,9 +503,18 @@ void StateDependencyTracker::handleSharedTerminal(const ExecutionState &es) {
     for (const auto *ch : allChains) {
         if (phase1Buckets[ch->id].size() >= phase1BucketCap) continue;  // bucket already full
         // Condition chains (H2S2C): bucket iff the if-condition was reached (baseline value exists).
-        // Key chains: require read-node coverage.
-        const bool covered = (ch->sinkConditionNode != nullptr) ? conditionReached(*ch, es)
-                                                                : chainTargetsCovered(*ch, visited);
+        // Key chains: require read-node coverage. chainTargetsCovered excuses in-RegisterAction read
+        // nodes once the SO's RegisterAction ran (soRan): a read-modify-write action's body branches
+        // (e.g. count-sketch `if(res==0) data-1 else data+1`) are mutually exclusive, so no single
+        // path covers them all. The .execute() call site and the sink key stay strictly required.
+        bool covered;
+        if (ch->sinkConditionNode != nullptr) {
+            covered = conditionReached(*ch, es);
+        } else {
+            const bool soRan =
+                es.getTestObject("registervalues"_cs, ch->soName, /*checked=*/false) != nullptr;
+            covered = chainTargetsCovered(*ch, visited, soRan);
+        }
         if (covered) matched.push_back(ch->id);
     }
     if (matched.empty()) return;
@@ -1158,7 +1206,15 @@ size_t StateDependencyTracker::runTamperingChain(
                 }
             }
         }
+        // Accept a Phase-2 terminal that actually WROTE the SO even if not every writeNode is
+        // covered: a read-modify-write RegisterAction whose body branches (e.g. count-sketch
+        // `if(res==0) data-1 else data+1`) has mutually-exclusive write nodes, so strict allCovered
+        // over writeNodes is unsatisfiable on any single path. terminalWroteSO confirms the tampering
+        // write happened; strict allCovered still passes for non-branching writes (switchv2p/countmin
+        // unchanged), so this only ADDS the otherwise-rejected RMW SOs.
+        phase2AcceptWroteSO_ = true;
         runPhase(phase2Init, phase2StateMap[i], maxPerChain);
+        phase2AcceptWroteSO_ = false;
         phase2StateNum += phase2StateMap[i].size();
     }
     if (phase2StateNum == 0) {
@@ -1908,6 +1964,12 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                     // Only emit a test when the path covers all required nodes.
                     const auto &visited = executionState.get().getVisited();
                     const auto &es = executionState.get();
+                    // Relaxed write acceptance (Phase-2 RMW + driveRegisterPhase2 priming): when the
+                    // SO's RegisterAction wrote the SO, excuse uncovered nodes INSIDE that
+                    // RegisterAction — its body branches are mutually exclusive (count-sketch
+                    // `if(res==0) data-1 else +1`; ACC-Turbo `if(data>10000) …`), so no single path
+                    // covers them all. Nodes outside the RegisterAction stay strictly required.
+                    const bool soWrote = phase2AcceptWroteSO_ && terminalWroteSO(es);
                     auto nodeCovered = [&](const IR::Node *n) -> bool {
                         // IR::Key nodes are never passed to markVisited; instead check whether the
                         // table that owns this key had its apply() MethodCallStatement visited.
@@ -1915,26 +1977,23 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                             return isTableVisited(currentChain->sinkTableControlPlaneName, visited);
                         }
                         if (visited.count(n) > 0) return true;
+                        if (soWrote && isInRegisterActionBody(n)) return true;
                         // Under the Cond policy cmd_stepper CLONES the IfStatement (it reduces the
                         // condition for branch stamping), so the original ESG pointer never appears in
                         // `visited` even when the branch was taken. It does stamp a source-position-
                         // keyed condition var when the branch is evaluated; treat that as coverage of
                         // the IfStatement node. (H2S2K does not clone, so the pointer check above hits.)
                         if (const auto *ifs = n->to<IR::IfStatement>()) {
-                            return es.get(CmdStepper::getConditionVar(ifs)) != nullptr;
+                            // exists() (not get()) — the condition var is only stamped when the branch
+                            // is evaluated, and is absent under the Key policy / on unreached paths;
+                            // get() would BUG ("var not in symbolic environment") and skip the whole
+                            // path, which is exactly what hid every cs_action-executing terminal.
+                            return es.exists(CmdStepper::getConditionVar(ifs));
                         }
                         return false;
                     };
                     bool allCovered = std::all_of(currentRequiredNodes.begin(),
                                                   currentRequiredNodes.end(), nodeCovered);
-                    // Relaxed priming acceptance (driveRegisterPhase2): accept a terminal that wrote
-                    // the SO register even if the branch-gated write path isn't fully covered. This is
-                    // used ONLY to capture a priming packet for measuring the per-packet delta; the
-                    // emitted test still goes through full allCovered re-validation. allCovered itself
-                    // is unchanged.
-                    if (phase2AcceptWroteSO_ && !allCovered) {
-                        allCovered = terminalWroteSO(executionState.get());
-                    }
                     if (allCovered) {
                         printInfo("[SDTrack] Test found: chain=%1% id=%2% SO=%3% (%4% nodes)",
                                     currentChainName, currentChain->id, currentChain->soName,

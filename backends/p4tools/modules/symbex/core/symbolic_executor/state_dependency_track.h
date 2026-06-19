@@ -208,9 +208,13 @@ class StateDependencyTracker : public SymbolicExecutor {
     void collectPhase1Terminals(const ExecutionState &initState);
     /// Shared-pass terminal handler: bucket @p es into every chain whose Phase-1 targets it covers.
     void handleSharedTerminal(const ExecutionState &es);
-    /// True when chain @p chain's Phase-1 target nodes are all in @p visited.
+    /// True when chain @p chain's Phase-1 target nodes are all covered in @p visited. A target node
+    /// that lies inside a RegisterAction body is EXCUSED when @p soRan (the SO's RegisterAction was
+    /// executed): its read path crosses mutually-exclusive if-branches that no single path can
+    /// jointly cover. Nodes OUTSIDE the RegisterAction (incl. the .execute() call site and the sink
+    /// key) stay strictly required, so this only relaxes the in-RegisterAction blocks.
     bool chainTargetsCovered(const P4StateDependency::DependencyGraphs::SOChain &chain,
-                             const P4::Coverage::CoverageSet &visited) const;
+                             const P4::Coverage::CoverageSet &visited, bool soRan) const;
     /// True when @p chain's sink if-condition was reached on @p es's path (its branch-stamped
     /// condition var is set). The Phase-1 baseline criterion for H2S2C chains (whose readNodes are
     /// empty for read-modify-write SOs, so node-coverage is unusable).
@@ -387,6 +391,20 @@ class StateDependencyTracker : public SymbolicExecutor {
 
     /// Builds tableByName_ by traversing the P4 program once.
     void buildTableByNameMap();
+
+    /// Source positions of every node inside a RegisterAction body (its abstract `apply` method).
+    /// Keyed by position (not pointer) because the chain's required nodes come from the SD dependency
+    /// graph's IR, whose pointers differ from programInfo.getP4Program()'s — same reason getConditionVar
+    /// is position-keyed. Used to scope the read/write coverage relaxation to in-RegisterAction blocks
+    /// only: such a node may be an unreachable mutually-exclusive branch sibling, so it is excused once
+    /// the RegisterAction ran; nodes outside the RegisterAction stay strictly required.
+    std::unordered_set<cstring> registerActionBodyPositions_;
+
+    /// True if @p n's source position is inside a RegisterAction body.
+    bool isInRegisterActionBody(const IR::Node *n) const;
+
+    /// Populates registerActionBodyPositions_ by traversing the P4 program once.
+    void buildRegisterActionBodyNodes();
 
     /// Returns true if the table with the given control-plane name was visited.
     bool isTableVisited(cstring controlPlaneName,
