@@ -752,18 +752,17 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
         reachingSetValid_ = false;
     } else {
         currentPhase = TamperingPhase::Phase3_Read;
-        if (currentSinkCondition != nullptr) {
-            // The pinned-input replay is (almost) deterministic, so accept ANY terminal and check the
-            // condition flip externally via evalCondition. Requiring writeNode coverage would reject
-            // every terminal for update chains (their writeNodes span mutually-exclusive branches),
-            // and reaching-set pruning would cut the path before a terminal. So: no required nodes.
-            currentRequiredNodes.clear();
-            reachingSet_.clear();
-            reachingSetValid_ = false;
-        } else {
-            currentRequiredNodes = buildRequiredNodes(chain);
-            buildReachingSet();
-        }
+        // The pinned-input replay is (almost) deterministic, so accept ANY terminal and check the flip
+        // externally via evalSinkFlip (evalCondition for a condition sink, evalSinkHit for a table
+        // sink). Requiring read/write-node coverage would reject every terminal for a read-modify-write
+        // SO — its RegisterAction body branches are mutually exclusive (count-sketch `if(res==0) data-1
+        // else +1`), so allCovered is unsatisfiable and Phase 3 would yield no terminal — and
+        // reaching-set pruning would cut the path before a terminal. So: no required nodes for either
+        // sink kind. (Same reasoning the condition sink already used; now applied to the table sink so
+        // counter accumulation can drive a Write-Key sink across replays.)
+        currentRequiredNodes.clear();
+        reachingSet_.clear();
+        reachingSetValid_ = false;
     }
 
     auto &phase3Init = initState.clone();
