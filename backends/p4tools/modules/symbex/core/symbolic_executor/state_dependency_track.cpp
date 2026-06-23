@@ -736,6 +736,25 @@ void StateDependencyTracker::pinPacketToPhase1(ExecutionState &init, const Final
         new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
 }
 
+void StateDependencyTracker::concretizeInputPacket(ExecutionState &init, const FinalState *fs,
+                                                   int inputPort,
+                                                   const IR::Expression *inputPortSymExpr) {
+    // Fill BOTH the input packet (so the emitted/replayed test carries real bytes) and the parser
+    // buffer with @p fs's concrete packet bytes, so slicePacketBuffer slices CONSTANTS and never
+    // mints a fresh symbolic pktvar. With constant operands, Hash.get resolves eagerly to the real
+    // CRC during execution — the path follows the real hash branch (fork-free) and CRC-indexed
+    // register reads/writes land in the real cell (so the emitted affected_register, ports, and the
+    // P1/P2/P3 packets are all mutually consistent).
+    const auto &model = fs->getFinalModel();
+    const auto *pktConst = model.evaluate(fs->getExecutionState()->getInputPacket(), true);
+    const auto *pktSize = model.evaluate(ExecutionState::getInputPacketSizeVar(), true);
+    init.appendToInputPacket(pktConst);
+    init.appendToPacketBuffer(pktConst);
+    init.pushPathConstraint(new IR::Equ(ExecutionState::getInputPacketSizeVar(), pktSize));
+    init.pushPathConstraint(
+        new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
+}
+
 const FinalState *StateDependencyTracker::runSymbolicPhase3(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
@@ -770,8 +789,10 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
     for (const auto &[regName, regObj] : carriedRegs)
         phase3Init.addTestObject("registervalues"_cs, regName, regObj);
 
-    // Replay Phase 1's exact input (bytes + size + port).
-    pinPacketToPhase1(phase3Init, fs1, inputPort, inputPortSymExpr);
+    // Replay Phase 1's exact input as CONCRETE bytes, so CRC hashes resolve eagerly and the SO
+    // register is read/written at the real cell (keeps fs3's affected_register consistent with the
+    // emitted P1/P2 packets, and makes the sink-flip search follow the real hash branch).
+    concretizeInputPacket(phase3Init, fs1, inputPort, inputPortSymExpr);
 
     // Cross-phase control-plane consistency: hardware installs ONE table state for all three
     // phases, so Phase 3 must use the SAME table entries/actions Phase 1 did — otherwise it could
@@ -806,6 +827,62 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
         runPhase(phase3Init, phase3States, 1);
     }
     return phase3States.empty() ? nullptr : phase3States[0];
+}
+
+const FinalState *StateDependencyTracker::reDeriveConcretePhase(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const FinalState *fs, int inputPort, const IR::Expression *inputPortSymExpr, bool isPhase1,
+    const std::map<cstring, const TestObject *> &carriedRegs) {
+    // Accept any terminal: the concrete packet makes the path (near-)deterministic and the CRC
+    // resolves eagerly, so there is no per-cell fork to steer around.
+    currentPhase = TamperingPhase::Phase3_Read;
+    currentRequiredNodes.clear();
+    reachingSet_.clear();
+    reachingSetValid_ = false;
+
+    auto &init = initState.clone();
+    // Pre-set carried registers (Phase-2 tamper replay only; empty for the Phase-1 reference).
+    for (const auto &[regName, regObj] : carriedRegs)
+        init.addTestObject("registervalues"_cs, regName, regObj);
+
+    // Concretize the input packet so Hash.get resolves eagerly to the real CRC (fork-free path).
+    concretizeInputPacket(init, fs, inputPort, inputPortSymExpr);
+
+    // Cross-phase control-plane consistency for the tamper replay (mirror runSymbolicPhase3): pin
+    // non-sink tables to Phase 1's choice. The Phase-1 reference picks its own state (no pinning).
+    std::vector<cstring> skipTables;
+    if (!isPhase1) {
+        const auto &model = fs->getFinalModel();
+        const auto *es1 = fs->getExecutionState();
+        for (const auto &[tblName, tbl] : tableByName_) {
+            if (tblName == chain.sinkTableControlPlaneName) continue;
+            skipTables.push_back(tblName);
+        }
+        for (const auto &[tblName, tblObj] : es1->getTestObjectCategory("tableconfigs"_cs)) {
+            if (tblName == chain.sinkTableControlPlaneName) continue;
+            const auto *evalCfg = tblObj->evaluate(model, /*doComplete=*/true)->to<TableConfig>();
+            if (evalCfg != nullptr)
+                init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+        }
+    }
+
+    std::vector<const FinalState *> states;
+    {
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, ""_cs, skipTables,
+                               /*setRegTracking=*/true, /*isPhase1=*/isPhase1);
+        runPhase(init, states, 8);
+    }
+    // Pick the terminal matching @p fs's disposition (drop / output port); fall back to @p fs.
+    bool d0Drop = false;
+    int d0Port = -1;
+    evalDisposition(fs, d0Drop, d0Port);
+    for (const auto *st : states) {
+        bool dDrop = false;
+        int dPort = -1;
+        evalDisposition(st, dDrop, dPort);
+        if (dDrop == d0Drop && dPort == d0Port) return st;
+    }
+    return fs;  // no consistent terminal matched the original disposition — strictly additive fallback
 }
 
 // ---------------------------------------------------------------------------
@@ -1481,7 +1558,20 @@ size_t StateDependencyTracker::runTamperingChain(
             // Phase 3 (replay with the tampered register). The flip MISS→HIT is symbolically
             // confirmed above; the end-to-end validator observes the actual Phase-1→Phase-3 output
             // divergence (drop/port/bytes), so p4symbex does not emit a predicted phase3_verify.
-            TamperingFinalState ts{*fs1, *fs2, false,
+            // Re-derive the emitted Phase-1/Phase-2 packets with CONCRETE bytes so their CRC hashes
+            // resolve eagerly (fork-free) and processPhase re-solves them SAT (a shared-traversal
+            // terminal carries an arbitrary hash-branch fork that contradicts the real CRC). Phase-2
+            // carries the re-derived Phase-1's registers (same victim) and reuses fs2's own packet
+            // bytes, which already hash to the victim's bucket (pinIndexInputsToPhase1 at generation).
+            const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
+                                                     inputPortSymExpr, /*isPhase1=*/true, {});
+            std::map<cstring, const TestObject *> p1Carry;
+            for (const auto &[regName, regObj] :
+                 fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
+                p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
+            const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
+                                                     /*isPhase1=*/false, p1Carry);
+            TamperingFinalState ts{*fs1c, *fs2c, false,
                                    cond1.inputPort, cond1.outputPort, ip2, op2,
                                    attackerRegValues, {}, attackerRegSinkTables, {}};
             ts.chainId = chain.id;

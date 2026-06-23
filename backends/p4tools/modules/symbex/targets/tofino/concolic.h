@@ -30,7 +30,7 @@
 namespace P4::P4Tools::Symbex::Tofino {
 
 class SharedTofinoConcolic : public Concolic {
- private:
+ public:
     /// We are not using an enum class because we directly compare integers. This is because error
     /// types are converted into integers in our interpreter. If we use an enum class, we have to
     /// cast every enum access to int.
@@ -53,6 +53,7 @@ class SharedTofinoConcolic : public Concolic {
     /// size will be split into multiple chunks of size HASH_CHUNK_SIZE;
     static constexpr int HASH_CHUNK_SIZE = 64;
 
+ private:
     /// This is the list of concolic functions that are implemented in this class.
     static const ConcolicMethodImpls::ImplList SharedTofinoConcolicMethodImpls;
 

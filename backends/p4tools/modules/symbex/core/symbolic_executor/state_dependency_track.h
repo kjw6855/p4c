@@ -288,6 +288,27 @@ class StateDependencyTracker : public SymbolicExecutor {
     void pinPacketToPhase1(ExecutionState &init, const FinalState *fs1, int inputPort,
                            const IR::Expression *inputPortSymExpr);
 
+    /// Fills @p init's input packet AND parser buffer with @p fs's concrete packet bytes (and pins
+    /// size + input port), so the parser slices constants — every CRC Hash.get then resolves eagerly
+    /// during execution and CRC-indexed register accesses land in the real cell. Used to replay a
+    /// terminal with a determined (fork-free) hash path; @see reDeriveConcretePhase / runSymbolicPhase3.
+    void concretizeInputPacket(ExecutionState &init, const FinalState *fs, int inputPort,
+                               const IR::Expression *inputPortSymExpr);
+
+    /// Re-derives an emitted phase terminal whose hash inputs are CONCRETE. Pre-fills the input
+    /// packet AND the parser buffer with @p fs's concrete packet bytes (from its model), so the
+    /// parser slices constants (no fresh pktvars) — every CRC hash then resolves eagerly during
+    /// execution and the path follows the REAL hash branch, fork-free. The resulting terminal is
+    /// hash-consistent, so TestBackEnd::processPhase re-solves it SAT (an arbitrary-fork shared
+    /// terminal does not). Returns the terminal matching @p fs's disposition; falls back to @p fs if
+    /// none matches (so this is strictly additive — it can only fix the 0-emit case).
+    /// @p carriedRegs / @p sinkTableName mirror runSymbolicPhase3's Phase-2 setup (empty / "" for the
+    /// no-tamper Phase-1 reference).
+    const FinalState *reDeriveConcretePhase(
+        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const FinalState *fs, int inputPort, const IR::Expression *inputPortSymExpr, bool isPhase1,
+        const std::map<cstring, const TestObject *> &carriedRegs);
+
     /// Collects the packet-field SymbolicVariable leaves of @p soReg's index expression(s) — the
     /// index-determining inputs (e.g. the operands of a concolic CRC hash). Empty when the index is a
     /// constant or an opaque TaintExpression (RANDOM hash).

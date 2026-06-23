@@ -37,6 +37,7 @@
 #include "backends/p4tools/common/lib/trace_event_types.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "backends/p4tools/common/lib/variables.h"
+#include "frontends/p4/optimizeExpressions.h"
 #include "ir/ir-generated.h"
 #include "ir/irutils.h"
 #include "lib/cstring.h"
@@ -53,12 +54,109 @@
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/lib/packet_vars.h"
 #include "backends/p4tools/modules/symbex/lib/test_spec.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/concolic.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/constants.h"
+#include "backends/p4tools/modules/symbex/targets/tofino/hash_utils.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/shared_program_info.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/shared_table_stepper.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/test_spec.h"
 
 namespace P4::P4Tools::Symbex::Tofino {
+
+namespace {
+
+/// Detects whether an expression still contains any symbolic variable. An IR::ConcolicVariable
+/// IS-A IR::SymbolicVariable, so an unresolved nested hash is caught too.
+class HasSymbolicVar : public Inspector {
+ public:
+    bool found = false;
+    bool preorder(const IR::SymbolicVariable * /*sv*/) override {
+        found = true;
+        return false;
+    }
+};
+
+/// Eagerly compute a Tofino hash when all of its operands are already concrete (e.g. on a
+/// pinned/replayed packet). Mirrors the algorithm dispatch in SharedTofinoConcolic's Hash_get
+/// concolic impl (concolic.cpp) but operates directly on constants, so no Model is needed. Returns
+/// nullptr when the operands are not fully concrete or the input shape is unsupported — the caller
+/// then falls back to a deferred concolic variable (exact current behavior). Computing the hash here
+/// prevents a downstream `if(hash_bit==0)` from forking on a free hash and then contradicting the
+/// real CRC at concolic emission (the cause of 0-txtpb for hash-indexed sketches).
+const IR::Constant *tryComputeConcreteHash(const IR::Expression *resolvedInput, int hashAlgoIdx,
+                                           const IR::IndexedVector<IR::Node> &decls,
+                                           const IR::Expression *hashAlgoExpr,
+                                           const IR::Type *returnType) {
+    if (Taint::hasTaint(resolvedInput)) return nullptr;
+    HasSymbolicVar checker;
+    resolvedInput->apply(checker);
+    if (checker.found) return nullptr;  // operands still symbolic → defer to the concolic variable
+
+    // Flatten the hash input into a list of operands, mirroring concolic.cpp's Hash_get.
+    std::vector<const IR::Expression *> exprList;
+    if (const auto *structExpr = resolvedInput->to<IR::StructExpression>()) {
+        exprList = IR::flattenStructExpression(structExpr);
+    } else if (resolvedInput->is<IR::Literal>()) {
+        exprList.emplace_back(resolvedInput);
+    } else {
+        return nullptr;  // unsupported shape → defer
+    }
+    if (exprList.empty()) return nullptr;
+    for (const auto *e : exprList) {
+        if (!e->is<IR::Constant>()) return nullptr;  // an operand did not fold → defer
+    }
+
+    using Algo = SharedTofinoConcolic::TofinoHashAlgorithm;
+    std::vector<bool> symmetricList;
+    if (hashAlgoIdx == Algo::identity) {
+        const IR::Expression *concatExpr = exprList.at(0);
+        for (size_t idx = 1; idx < exprList.size(); idx++) {
+            const auto *e = exprList.at(idx);
+            const auto *wType =
+                IR::Type_Bits::get(concatExpr->type->width_bits() + e->type->width_bits());
+            concatExpr = new IR::Concat(wType, concatExpr, e);
+        }
+        const auto *folded = P4::optimizeExpression(concatExpr)->checkedTo<IR::Literal>();
+        return IR::Constant::get(returnType, IR::getBigIntFromLiteral(folded));
+    }
+    if (hashAlgoIdx == Algo::random) return nullptr;  // never reached (random ⇒ tainted)
+
+    // Build the chunked hash-input list (operands wider than HASH_CHUNK_SIZE are split into 64-bit
+    // chunks). Folding constant slices via optimizeExpression is the Model-free analogue of
+    // SharedTofinoConcolic::evaluateListHashExpr, so the result matches the concolic path.
+    auto *hashList = new IR::ListExpression({});
+    for (const auto *expr : exprList) {
+        int width = expr->type->width_bits();
+        if (width > SharedTofinoConcolic::HASH_CHUNK_SIZE) {
+            int chunks = width / SharedTofinoConcolic::HASH_CHUNK_SIZE;
+            int remainder = width % SharedTofinoConcolic::HASH_CHUNK_SIZE;
+            for (int i = 0; i < chunks; ++i) {
+                int hi = width - i * SharedTofinoConcolic::HASH_CHUNK_SIZE - 1;
+                int lo = hi - SharedTofinoConcolic::HASH_CHUNK_SIZE + 1;
+                auto *slice = new IR::Slice(expr, hi, lo);
+                slice->type = IR::Type_Bits::get(SharedTofinoConcolic::HASH_CHUNK_SIZE);
+                hashList->components.push_back(P4::optimizeExpression(slice));
+            }
+            if (remainder != 0) {
+                int hi = width - chunks * SharedTofinoConcolic::HASH_CHUNK_SIZE - 1;
+                auto *slice = new IR::Slice(expr, hi, 0);
+                slice->type = IR::Type_Bits::get(remainder);
+                hashList->components.push_back(P4::optimizeExpression(slice));
+            }
+        } else {
+            hashList->components.push_back(expr);
+        }
+    }
+
+    if (hashAlgoIdx == Algo::custom) {
+        BUG_CHECK(decls.size() >= 2, "Custom hash requires a CRC polynomial declaration.");
+        const auto *crcDecl = decls.at(1)->checkedTo<IR::Declaration_Instance>();
+        return HashCompute::substituteCustomHash(crcDecl, hashList, returnType, &symmetricList);
+    }
+    return HashCompute::substituteOtherHash(hashAlgoExpr, hashList, returnType, &symmetricList);
+}
+
+}  // namespace
 
 ExprStepper::PacketCursorAdvanceInfo SharedTofinoExprStepper::calculateSuccessfulParserAdvance(
     const ExecutionState &state, int advanceSize) const {
@@ -1203,10 +1301,24 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
                  if (isTainted) {
                      hashReturn = stepper.programInfo.createTargetUninitialized(returnType, true);
                  } else {
-                     const auto *concolicVar = new IR::ConcolicVariable(
-                         returnType, externName, &externInfo.externArguments,
-                         externInfo.originalCall.clone_id, 0, decls);
-                     hashReturn = concolicVar;
+                     // Eager resolution: if the operands are already concrete (a pinned/replayed
+                     // packet), compute the CRC now and return a constant so a downstream
+                     // `if(hash_bit==0)` does not fork on a free hash (which would later contradict
+                     // the real CRC at concolic emission). When operands are still symbolic (the
+                     // normal free-packet traversal), fall back to the deferred concolic variable —
+                     // so this is inert for ordinary generation.
+                     const auto *resolvedInput =
+                         P4::optimizeExpression(stepper.state.getSymbolicEnv().subst(hashInput));
+                     const auto *eager = tryComputeConcreteHash(resolvedInput, hashAlgoIdx, decls,
+                                                                hashAlgoExpr, returnType);
+                     if (eager != nullptr) {
+                         hashReturn = eager;
+                     } else {
+                         const auto *concolicVar = new IR::ConcolicVariable(
+                             returnType, externName, &externInfo.externArguments,
+                             externInfo.originalCall.clone_id, 0, decls);
+                         hashReturn = concolicVar;
+                     }
                  }
              } else {
                  SYMBEX_UNIMPLEMENTED("Hash return of type %2% not supported", returnType);
