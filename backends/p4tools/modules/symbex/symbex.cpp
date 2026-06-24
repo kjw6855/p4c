@@ -92,8 +92,7 @@ SymbolicExecutor *pickExecutionEngine(const SymbexOptions &symbexOptions,
         return new SelectedBranches(solver, programInfo, selectedBranchesStr);
     }
     if (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering ||
-        pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond ||
-        pathSelectionPolicy == PathSelectionPolicy::StateDependencyAlteringPath) {
+        pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond) {
         const auto *stateDep = programInfo.getCompilerResult().getStateDep();
         if (stateDep == nullptr) {
             error(
@@ -101,12 +100,10 @@ SymbolicExecutor *pickExecutionEngine(const SymbexOptions &symbexOptions,
                 "Falling back to depth-first search.");
             return new DepthFirstSearch(solver, programInfo);
         }
-        StateDependencyPolicy sdPolicy = StateDependencyPolicy::AlteringPath;
-        if (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering) {
-            sdPolicy = StateDependencyPolicy::Tampering;
-        } else if (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond) {
-            sdPolicy = StateDependencyPolicy::TamperingCond;
-        }
+        StateDependencyPolicy sdPolicy =
+            (pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
+                ? StateDependencyPolicy::Tampering
+                : StateDependencyPolicy::TamperingCond;
         return new StateDependencyTracker(solver, programInfo, *stateDep, sdPolicy);
     }
     return new DepthFirstSearch(solver, programInfo);
@@ -254,14 +251,16 @@ std::optional<AbstractTestList> generateTestsImpl(std::optional<std::string_view
         const auto *program = &compilerResultOpt.value().get().getProgram();
         bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
         // Only compute the chain categories the active policy actually consumes: the Tampering
-        // tracker reads only dataWriteKeyChains (SD_KEY), AlteringPath only dataWriteCondChains
+        // tracker reads only dataWriteKeyChains (SD_KEY); TamperingCond only dataWriteCondChains
         // (SD_COND). Skipping the other IFDS passes (A2S2V, H2S2V, and the unused sink) is the
-        // dominant analysis-time saving for these runs. Other policies keep the full analysis.
+        // dominant analysis-time saving for these runs — without it, TamperingCond fell through to
+        // SD_ALL and ran 4× the analysis, timing out on large programs (e.g. netlock) so no SOChain
+        // was ever produced. Other policies keep the full analysis.
         unsigned sdCats = P4StateDependency::SD_ALL;
         if (symbexOptions.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
             sdCats = P4StateDependency::SD_KEY;
         else if (symbexOptions.pathSelectionPolicy ==
-                 PathSelectionPolicy::StateDependencyAlteringPath)
+                 PathSelectionPolicy::StateDependencyTamperingCond)
             sdCats = P4StateDependency::SD_COND;
         auto *stateDep = new P4StateDependency::StateDependencyResult(
             P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1,
@@ -389,13 +388,13 @@ int Symbex::mainImpl(const CompilerResult &compilerResult) {
         const auto *program = &compilerResult.getProgram();
         bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
         // Only compute the chain categories the active policy consumes: Tampering reads only
-        // dataWriteKeyChains (SD_KEY), AlteringPath only dataWriteCondChains (SD_COND). Skipping
+        // dataWriteKeyChains (SD_KEY), TamperingCond only dataWriteCondChains (SD_COND). Skipping
         // the other IFDS passes is the dominant analysis-time saving for these runs.
         unsigned sdCats = P4StateDependency::SD_ALL;
         if (symbexOptions.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
             sdCats = P4StateDependency::SD_KEY;
         else if (symbexOptions.pathSelectionPolicy ==
-                 PathSelectionPolicy::StateDependencyAlteringPath)
+                 PathSelectionPolicy::StateDependencyTamperingCond)
             sdCats = P4StateDependency::SD_COND;
         auto *stateDep = new P4StateDependency::StateDependencyResult(
             P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1,

@@ -23,7 +23,6 @@ namespace P4::P4Tools::Symbex {
 enum class StateDependencyPolicy {
     Tampering,      ///< H2S2K: register → table KEY (sink-table HIT/MISS flip).
     TamperingCond,  ///< H2S2C: register → if CONDITION (true/false flip).
-    AlteringPath,
 };
 
 /// Tracks which phase of the three-packet tampering scenario is being executed.
@@ -114,13 +113,10 @@ using TamperingCallback = std::function<bool(const TamperingFinalState &)>;
 /// program state, preferring branches that cover the chain's required IR nodes. A test
 /// vector is emitted only when a terminal path covers ALL required nodes.
 ///
-/// Policy variants map to different chain sources and node sets:
-///   - Tampering    : dataWriteKeyChains
-///                    Three-phase execution per chain:
-///                      Phase 1 → readNodes  (read original value)
-///                      Phase 2 → writeNodes (write tampered value)
-///                      Phase 3 → readNodes  (read tampered value; register pre-set from Phase 2)
-///   - AlteringPath : dataWriteCondChains → writeNodes + readNodes
+/// Policy variants map to different chain sources and node sets, both three-phase per chain
+/// (Phase 1 → readNodes, Phase 2 → writeNodes, Phase 3 → readNodes; register pre-set from Phase 2):
+///   - Tampering     : dataWriteKeyChains  (register → table KEY, sink-table HIT/MISS flip)
+///   - TamperingCond : dataWriteCondChains (register → if CONDITION, true/false flip)
 class StateDependencyTracker : public SymbolicExecutor {
  public:
     StateDependencyTracker(AbstractSolver &solver, const ProgramInfo &programInfo,

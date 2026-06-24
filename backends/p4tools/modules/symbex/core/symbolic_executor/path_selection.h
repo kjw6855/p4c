@@ -11,7 +11,6 @@ enum class PathSelectionPolicy {
     GreedyStmtCoverage,
     StateDependencyTampering,
     StateDependencyTamperingCond,
-    StateDependencyAlteringPath,
 };
 
 inline bool requiresLookahead(PathSelectionPolicy &pathSelectionPolicy) {
@@ -19,7 +18,6 @@ inline bool requiresLookahead(PathSelectionPolicy &pathSelectionPolicy) {
         PathSelectionPolicy::GreedyStmtCoverage,
         PathSelectionPolicy::StateDependencyTampering,
         PathSelectionPolicy::StateDependencyTamperingCond,
-        PathSelectionPolicy::StateDependencyAlteringPath,
     };
     return LOOKAHEAD_STRATEGYIES.find(pathSelectionPolicy) != LOOKAHEAD_STRATEGYIES.end();
 }

@@ -248,9 +248,6 @@ StateDependencyTracker::collectChains() const {
         case StateDependencyPolicy::TamperingCond:
             addChains(sdResult.dataWriteCondChains, "Write Condition"_cs);
             break;
-        case StateDependencyPolicy::AlteringPath:
-            addChains(sdResult.dataWriteCondChains, "Write Condition"_cs);
-            break;
     }
     return result;
 }
@@ -278,12 +275,6 @@ P4::Coverage::CoverageSet StateDependencyTracker::buildRequiredNodes(
                 for (const auto &[v, node] : chain.readNodes)
                     if (node != nullptr) nodes.insert(node);
             }
-            break;
-        case StateDependencyPolicy::AlteringPath:
-            for (const auto &[v, node] : chain.writeNodes)
-                if (node != nullptr) nodes.insert(node);
-            for (const auto &[v, node] : chain.readNodes)
-                if (node != nullptr) nodes.insert(node);
             break;
     }
     return nodes;

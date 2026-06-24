@@ -354,7 +354,6 @@ SymbexOptions::SymbexOptions()
                 {"GREEDY_STATEMENT_SEARCH"_cs, PathSelectionPolicy::GreedyStmtCoverage},
                 {"STATE_DEP_TAMPERING"_cs, PathSelectionPolicy::StateDependencyTampering},
                 {"STATE_DEP_TAMPERING_COND"_cs, PathSelectionPolicy::StateDependencyTamperingCond},
-                {"STATE_DEP_ALTERING_PATH"_cs, PathSelectionPolicy::StateDependencyAlteringPath},
             };
             auto selectionString = cstring(arg).toUpper();
             auto it = PATH_SELECTION_OPTIONS.find(selectionString);
@@ -376,7 +375,7 @@ SymbexOptions::SymbexOptions()
         },
         "Selects a specific path selection strategy for test generation. Options are: "
         "DEPTH_FIRST, RANDOM_BACKTRACK, GREEDY_STATEMENT_SEARCH, "
-        "STATE_DEP_TAMPERING, STATE_DEP_TAMPERING_COND, STATE_DEP_ALTERING_PATH. "
+        "STATE_DEP_TAMPERING, STATE_DEP_TAMPERING_COND. "
         "The STATE_DEP_* policies require --state-dependency. "
         "Defaults to DEPTH_FIRST.");
 
