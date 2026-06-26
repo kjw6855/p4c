@@ -92,7 +92,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
                                                   std::filesystem::path graphsDir = {},
-                                                  unsigned categories = SD_ALL);
+                                                  unsigned categories = SD_ALL,
+                                                  bool wholePipeline = false);
 
 /// Convenience overload: builds its own lightweight midend
 /// (TypeChecking → EvaluatorPass → IFDS analysis → RemoveActionParameters → TypeChecking)
@@ -108,7 +109,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   cstring arch,
                                                   bool isv1 = false,
                                                   std::filesystem::path graphsDir = {},
-                                                  unsigned categories = SD_ALL);
+                                                  unsigned categories = SD_ALL,
+                                                  bool wholePipeline = false);
 
 }  // namespace P4::P4StateDependency
 

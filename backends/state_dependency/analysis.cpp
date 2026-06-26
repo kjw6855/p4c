@@ -17,6 +17,7 @@
 #include "frontends/p4/evaluator/evaluator.h"
 #include "frontends/p4/removeParameters.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
+#include "midend/parserUnroll.h"
 #include "ir/pass_manager.h"
 #include "lib/hvec_map.h"
 #include "lib/log.h"
@@ -32,7 +33,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   const IR::ToplevelBlock *toplevel,
                                                   cstring arch,
                                                   std::filesystem::path graphsDir,
-                                                  unsigned categories) {
+                                                  unsigned categories,
+                                                  bool wholePipeline) {
     Util::ScopedTimer sdTimer("P4SD");
     StateDependencyResult result;
     // Graph/binary mode (graphsDir set) exports every category, so it must compute them all.
@@ -46,6 +48,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     auto *cgenRaw = new ControlGraphs(refMap, typeMap, graphsDir, arch);
     ControlGraphs &cgen = *cgenRaw;
     cgen.genSupergraphs = GenSGMode::FULL;
+    cgen.wholePipeline = wholePipeline;
     toplevel->getMain()->apply(cgen);
 
     // Build IFDS supergraphs over the CFGs.
@@ -373,7 +376,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   cstring arch,
                                                   bool isv1,
                                                   std::filesystem::path graphsDir,
-                                                  unsigned categories) {
+                                                  unsigned categories,
+                                                  bool wholePipeline) {
     Util::ScopedTimer sdPrepTimer("P4SD-prep");
 
     P4::ReferenceMap refMap;
@@ -398,6 +402,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         auto *evaluator = new P4::EvaluatorPass(&refMap, &typeMap);
         PassManager prep;
         prep.setName("P4SD-prep");
+        // Whole-pipeline mode unrolls parser header-stack loops (acyclic, concrete stack indices)
+        // before evaluation so the parser CFG can be walked without special loop handling.
+        if (wholePipeline)
+            prep.addPasses({new P4::ParsersUnroll(true, &refMap, &typeMap)});
         prep.addPasses({
             new P4::TypeChecking(&refMap, &typeMap, true),
             new P4::RemoveActionParameters(&typeMap),
@@ -411,7 +419,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         return {};
 
     return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
-                                      categories);
+                                      categories, wholePipeline);
 }
 
 }  // namespace P4::P4StateDependency

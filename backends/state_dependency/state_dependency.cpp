@@ -154,7 +154,7 @@ int main(int argc, char *const argv[]) {
         if (options.genSupergraphs != P4StateDependency::GenSGMode::NONE) {
             sdResult = P4StateDependency::runStateDependencyAnalysis(
                     program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
-                    options.graphsDir);
+                    options.graphsDir, P4StateDependency::SD_ALL, options.wholePipeline);
             if (sdResult.cfgGraphs)
                 sdResult.cfgGraphs->varVis = options.varVis;
         } else {

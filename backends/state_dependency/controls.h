@@ -80,8 +80,17 @@ class ControlGraphs : public Graphs,
     // packet_in, are skipped). Also records the first header-struct param in headerVarNames[graphName].
     void addApplyParams(const IR::ParameterList *params, Graphs::vertex_t startV,
             Graphs::vertex_t exitV);
+    // Return the canonical boundary variables (Out/InOut apply params) registered at the procedure's
+    // EXIT vertex — a pipeline block's outputs, mapped to the caller's retArgs by the dummy-main.
+    std::vector<const IR::Node *> collectBoundaryRetVals(const IR::ParameterList *params,
+            Graphs::vertex_t exitV);
 
     std::vector<Graph *> controlGraphsArray{};
+
+    /// Opt-in whole-pipeline mode (set from --whole-pipeline). When true, pipeline blocks (P4Control,
+    /// P4Parser) are built as IFDS procedures (local ENTRY/EXIT + procedureGraphs) so a synthesized
+    /// dummy-main can call them in execution order. When false, the legacy per-control behavior holds.
+    bool wholePipeline = false;
 
     struct procedure_md_t {
         Graphs::vertex_t first;

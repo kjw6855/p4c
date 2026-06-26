@@ -139,7 +139,49 @@ void ControlGraphs::addApplyParams(const IR::ParameterList *params, Graphs::vert
     }
 }
 
+std::vector<const IR::Node *> ControlGraphs::collectBoundaryRetVals(
+        const IR::ParameterList *params, Graphs::vertex_t exitV) {
+    std::vector<const IR::Node *> retVals;
+    for (auto *p : params->parameters) {
+        if (p->direction == IR::Direction::Out || p->direction == IR::Direction::InOut) {
+            // add_variable_in_vertex dedups by .equiv(), so this returns the same canonical node
+            // addApplyParams already registered at exitV (no duplicate vertex variable).
+            const IR::Node *rv = add_variable_in_vertex(p, exitV, true);
+            if (rv != nullptr) retVals.push_back(rv);
+        }
+    }
+    return retVals;
+}
+
 bool ControlGraphs::preorder(const IR::P4Control *cont) {
+    if (wholePipeline) {
+        // Build the control as an IFDS procedure (a callee of the dummy-main): local ENTRY/EXIT, apply
+        // params as boundary globals, body, then register procedureGraphs so visit_call can wire the
+        // pipeline CALL/RETURN. Mirrors preorder(P4Action)/preorder(P4Parser).
+        BUG_CHECK(g != nullptr, "P4Control %1% visited without an active graph (scope contract)", cont);
+        auto name = cont->getName();
+        auto oldLocalProcFlags = localProcFlags;
+        localProcFlags = VertexFlags::NONE;
+        return_parents.clear();
+        auto start_v = add_and_connect_vertex(name, VertexFlags::ENTRY, cont);
+        parents = {{start_v, new EdgeUnconditional()}};
+        auto exit_v = add_vertex("EXIT "_cs + name, VertexFlags::EXIT);
+        addApplyParams(cont->getApplyParameters(), start_v, exit_v);
+        for (auto *decl : cont->controlLocals) {
+            if (auto *dv = decl->to<IR::Declaration_Variable>())
+                add_variable_in_vertex(dv, start_v, false);
+        }
+        visit(cont->body);
+        parents.insert(parents.end(), return_parents.begin(), return_parents.end());
+        return_parents.clear();
+        for (auto &p : parents) add_edge(p.first, exit_v, p.second->name, EdgeType::CONTROL);
+        parents = {{exit_v, new EdgeProcedural()}};
+        procedureGraphs[cont] = {start_v, exit_v,
+                collectBoundaryRetVals(cont->getApplyParameters(), exit_v)};
+        localProcFlags = oldLocalProcFlags;
+        return false;
+    }
+
     bool doPop = false;
     // instanceName == std::nullopt <=> top level
     if (instanceName != std::nullopt) {
@@ -194,8 +236,6 @@ bool ControlGraphs::preorder(const IR::P4Parser *parser) {
     // preorder(BaseAssignmentStatement); extract goes through the generic extern path). Components chain
     // via `parents` from start_v. visitDagOnce cuts any residual loop (parsers are also unrolled in the
     // SD prep). `select(...)` keysets are visited as reads. Sound over-approximation for a may-analysis.
-    // TODO(step 5): procedureGraphs[parser] = {start_v, exit_v, retVals} so the dummy-main can
-    //               visit_call this parser as a pipeline-block procedure.
     auto oldstate = state;
     if (state == SKIPPING) state = NORMAL;
     const IR::ParserState *startState = nullptr;
@@ -208,6 +248,11 @@ bool ControlGraphs::preorder(const IR::P4Parser *parser) {
     // Connect terminal states (whatever the walk left in `parents`) to the procedure EXIT.
     for (auto &p : parents) add_edge(p.first, exit_v, p.second->name, EdgeType::CONTROL);
     parents = {{exit_v, new EdgeProcedural()}};
+
+    // Register as a procedure so the dummy-main can visit_call it. retVals are the out/inout apply
+    // params (hdr/meta) — the block's boundary outputs mapped to the caller's retArgs at the EXIT.
+    procedureGraphs[parser] = {start_v, exit_v, collectBoundaryRetVals(parser->getApplyParameters(),
+                                                                       exit_v)};
     localProcFlags = oldLocalProcFlags;
     return false;
 }
