@@ -10,6 +10,7 @@
 #include "frontends/common/parseInput.h"
 #include "frontends/p4/evaluator/evaluator.h"
 #include "frontends/p4/frontend.h"
+#include "midend/parserUnroll.h"
 
 #include "backends/state_dependency/graphs.h"
 #include "ir/ir.h"
@@ -120,6 +121,15 @@ int main(int argc, char *const argv[]) {
 
     P4StateDependency::MidEnd midEnd(options);
     midEnd.addDebugHook(hook);
+    // Whole-pipeline mode: unroll parser header-stack loops into distinct, uniquely-named states
+    // (bounded by the stack size) so the parser CFG is acyclic with concrete stack indices before the
+    // analysis walks it. Opt-in; the legacy per-control path is untouched.
+    if (options.wholePipeline) {
+        Util::ScopedTimer unrollTimer("Parser unroll");
+        P4::ParsersUnroll parsersUnroll(true, &midEnd.refMap, &midEnd.typeMap);
+        program = program->apply(parsersUnroll);
+        if (program == nullptr || ::P4::errorCount() > 0) return 1;
+    }
     const IR::ToplevelBlock *top = nullptr;
     {
         Util::ScopedTimer midendTimer("P4 compile midend");

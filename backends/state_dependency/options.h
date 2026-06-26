@@ -23,6 +23,10 @@ class P4StateDependencyOptions : public CompilerOptions {
     bool jsonOut = false;
     VarVisibility varVis = VarVisibility::NONE;
     GenSGMode genSupergraphs = GenSGMode::NONE;
+    /// Opt-in whole-pipeline modeling: analyze Parser->Ingress/Egress as one IFDS supergraph (per
+    /// thread) via a synthesized dummy-main, and unroll parser loops in prep. Off by default so the
+    /// legacy per-control analysis is byte-identical unless explicitly enabled.
+    bool wholePipeline = false;
     VarEdgeVisibility varEdgeVis = VarEdgeVisibility::NONE;
 
  private:

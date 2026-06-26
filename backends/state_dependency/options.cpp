@@ -202,6 +202,14 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             },
             "Use if you want to create supergraph for IFDS.");
     registerOption(
+            "--whole-pipeline", nullptr,
+            [this](const char *) {
+                wholePipeline = true;
+                return true;
+            },
+            "Opt-in: analyze the whole pipeline (Parser->Ingress/Egress) as one IFDS supergraph per "
+            "thread via a synthesized dummy-main, unrolling parser loops. Off by default.");
+    registerOption(
             "--showVarEdge", "varEdgeVis",
             [this](const char *arg) {
                 static std::map<cstring, VarEdgeVisibility> const SHOW_VAR_EDGE_OPTIONS = {
