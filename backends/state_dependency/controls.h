@@ -41,6 +41,7 @@ class ControlGraphs : public Graphs,
     bool preorder(const IR::PackageBlock *block) override;
     bool preorder(const IR::ControlBlock *block) override;
     bool preorder(const IR::P4Control *cont) override;
+    bool preorder(const IR::P4Parser *parser) override;
     bool preorder(const IR::BlockStatement *statement) override;
     bool preorder(const IR::IfStatement *statement) override;
     bool preorder(const IR::SwitchStatement *statement) override;

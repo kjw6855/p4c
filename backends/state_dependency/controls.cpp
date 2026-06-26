@@ -167,6 +167,39 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
     return false;
 }
 
+bool ControlGraphs::preorder(const IR::P4Parser *parser) {
+    // Whole-pipeline modeling: a parser is one IFDS procedure (its states are intra-procedural basic
+    // blocks). It is only ever entered inside an active pipeline graph via the dummy-main's visit_call
+    // (a later commit) — NEVER during the legacy per-control traversal (preorder(PackageBlock) returns
+    // false and only visits ControlBlocks), so this is inert until then. Mirrors preorder(P4Action).
+    BUG_CHECK(g != nullptr, "P4Parser %1% visited without an active graph (scope contract)", parser);
+    auto name = parser->getName();
+    auto oldLocalProcFlags = localProcFlags;
+    // Parser apply params (hdr/meta/std_meta) are block-boundary variables threaded across pipeline
+    // blocks as GLOBALS, not control-plane locals — keep localProcFlags clear so addApplyParams uses
+    // add_variable_in_vertex (global) rather than the local path.
+    localProcFlags = VertexFlags::NONE;
+
+    // Procedure ENTRY (connected from the call-site parents) and a standalone EXIT created up front so
+    // out/inout apply params (e.g. `out H hdr`) can register at it.
+    auto start_v = add_and_connect_vertex(name, VertexFlags::ENTRY, parser);
+    parents = {{start_v, new EdgeUnconditional()}};
+    auto exit_v = add_vertex("EXIT "_cs + name, VertexFlags::EXIT);
+
+    addApplyParams(parser->getApplyParameters(), start_v, exit_v);
+
+    // TODO(step 3): walk parser states (extract -> hdr defs, assignments -> meta, transition selects),
+    //               threading start_v ... -> exit_v through the state CFG.
+    // TODO(step 5): procedureGraphs[parser] = {start_v, exit_v, retVals} so the dummy-main can
+    //               visit_call this parser as a pipeline-block procedure.
+
+    // Until the body is modeled, connect ENTRY straight to EXIT (empty parser procedure).
+    for (auto &p : parents) add_edge(p.first, exit_v, p.second->name, EdgeType::CONTROL);
+    parents = {{exit_v, new EdgeProcedural()}};
+    localProcFlags = oldLocalProcFlags;
+    return false;
+}
+
 bool ControlGraphs::preorder(const IR::BlockStatement *statement) {
     for (const auto component : statement->components) visit(component);
 
