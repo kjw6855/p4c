@@ -121,6 +121,12 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Indicates whether to build a dataflow dependency graph by using state_dependency module.
     bool stateDep = false;
 
+    /// Opt-in whole-pipeline state-dependency: analyze Parser->Ingress/Egress as one IFDS supergraph so
+    /// cross-block chains (header->metadata provenance set in the parser) are visible. Only affects the
+    /// in-process compute path; loading a cache built with --whole-pipeline yields cross-block chains
+    /// regardless. Off by default.
+    bool wholePipeline = false;
+
     /// When set, load pre-computed SOChains from this JSON cache (produced by p4c_state_dependency
     /// --cache-chains) instead of running the IFDS analysis in-process. Hard-errors if the file is
     /// missing or its embedded source hash / arch does not match this program.

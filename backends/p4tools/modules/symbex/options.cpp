@@ -561,6 +561,16 @@ SymbexOptions::SymbexOptions()
         "the cache is missing or does not match this program.");
 
     registerOption(
+        "--whole-pipeline", nullptr,
+        [this](const char *) {
+            wholePipeline = true;
+            return true;
+        },
+        "Opt-in: analyze the whole pipeline (Parser->Ingress/Egress) when computing state-dependency "
+        "chains in-process, so cross-block chains (parser header->metadata provenance) are found. No "
+        "effect when loading a cache (--state-dep-cache); the cache's own build mode decides.");
+
+    registerOption(
         "--state-tamper-value", "value",
         [this](const char *arg) {
             try {

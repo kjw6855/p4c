@@ -100,7 +100,8 @@ const P4StateDependency::StateDependencyResult *buildOrLoadStateDep(const Symbex
     else if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond)
         sdCats = P4StateDependency::SD_COND;
     const auto *result = new P4StateDependency::StateDependencyResult(
-        P4StateDependency::runStateDependencyAnalysis(program, cstring(opts.arch), isv1, {}, sdCats));
+        P4StateDependency::runStateDependencyAnalysis(program, cstring(opts.arch), isv1, {}, sdCats,
+                                                      opts.wholePipeline));
     return ::P4::errorCount() > 0 ? nullptr : result;
 }
 
