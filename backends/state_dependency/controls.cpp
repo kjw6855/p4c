@@ -78,6 +78,18 @@ bool ControlGraphs::isWrite(bool root_value) {
     return P4WriteContext::isWrite(root_value);
 }
 
+// Per-arch pipeline threads, as (thread-name, block-index list) into a package's block list taken in
+// constructor-argument order. v1model has one thread (Parser->Ingress->Egress; VerifyChecksum/
+// ComputeChecksum/Deparser skipped). tna has two physically-separate threads (ingress/egress), kept
+// apart so the emit+re-parse boundary is NOT modeled as a direct dataflow edge (deparsers skipped).
+static std::vector<std::pair<cstring, std::vector<size_t>>> pipelineThreadSpec(cstring arch, size_t n) {
+    if (arch == "v1model" && n >= 4)
+        return {{"v1_pipe"_cs, {0, 2, 3}}};
+    if (arch == "tna" && n >= 5)
+        return {{"ingress_pipe"_cs, {0, 1}}, {"egress_pipe"_cs, {3, 4}}};
+    return {};
+}
+
 // Apply-parameter list of a pipeline block (P4Control or P4Parser container).
 static const IR::ParameterList *blockApplyParams(const IR::Node *container) {
     if (auto *c = container->to<IR::P4Control>()) return c->getApplyParameters();
@@ -135,9 +147,9 @@ void ControlGraphs::buildPipelineThread(cstring threadName,
 
 bool ControlGraphs::preorder(const IR::PackageBlock *block) {
     if (wholePipeline) {
-        // Synthesize a dummy-main per execution thread. v1model thread = [Parser, Ingress, Egress]
-        // (package args 0,2,3; VerifyChecksum/ComputeChecksum/Deparser at 1,4,5 are skipped). tna's
-        // two threads are added in a later commit.
+        // Synthesize a dummy-main per execution thread (pipelineThreadSpec). Collect this package's
+        // parser/control blocks in constructor order; recurse into nested packages (tna's
+        // Switch->Pipeline) so the blocks are found at whichever level directly holds them.
         std::vector<const IR::Block *> blocks;
         for (auto it : block->constantValue) {
             if (!it.second) continue;
@@ -146,8 +158,11 @@ bool ControlGraphs::preorder(const IR::PackageBlock *block) {
             else if (it.second->is<IR::PackageBlock>())
                 visit(it.second->getNode());
         }
-        if (arch == "v1model" && blocks.size() >= 4)
-            buildPipelineThread("v1_pipe"_cs, {blocks[0], blocks[2], blocks[3]});
+        for (const auto &[tname, idxs] : pipelineThreadSpec(arch, blocks.size())) {
+            std::vector<const IR::Block *> thread;
+            for (auto i : idxs) thread.push_back(blocks[i]);
+            buildPipelineThread(tname, thread);
+        }
         return false;
     }
     for (auto it : block->constantValue) {
