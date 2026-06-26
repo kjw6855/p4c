@@ -78,7 +78,78 @@ bool ControlGraphs::isWrite(bool root_value) {
     return P4WriteContext::isWrite(root_value);
 }
 
+// Apply-parameter list of a pipeline block (P4Control or P4Parser container).
+static const IR::ParameterList *blockApplyParams(const IR::Node *container) {
+    if (auto *c = container->to<IR::P4Control>()) return c->getApplyParameters();
+    if (auto *p = container->to<IR::P4Parser>()) return p->getApplyParameters();
+    return nullptr;
+}
+
+// Container type-declaration (P4Control/P4Parser) of an instantiated pipeline block.
+static const IR::Node *blockContainer(const IR::Block *b) {
+    if (auto *cb = b->to<IR::ControlBlock>()) return cb->container;
+    if (auto *pb = b->to<IR::ParserBlock>()) return pb->container;
+    return nullptr;
+}
+
+void ControlGraphs::buildPipelineThread(cstring threadName,
+        const std::vector<const IR::Block *> &thread) {
+    Graph *g_ = new Graph();
+    g = g_;
+    instanceName = std::nullopt;
+    graphName = threadName.string();
+    boost::get_property(*g_, boost::graph_name) = graphName;
+    procName = "__main__"_cs;  // the synthesized dummy-main procedure
+    BUG_CHECK(controlStack.isEmpty(), "Invalid control stack state");
+    g = controlStack.pushBack(*g_, cstring::empty);
+    start_v = add_vertex("__PIPELINE_START__"_cs, VertexFlags::ENTRY);
+    exit_v = add_vertex("__PIPELINE_EXIT__"_cs, VertexFlags::EXIT);
+    parents = {{start_v, new EdgeUnconditional()}};
+
+    // CALL each block in execution order. The shared hdr/meta/std_meta are threaded as the block's
+    // in/inout params (args) and out/inout params (retArgs); .equiv() canonicalization within this one
+    // graph collapses each block's same-named params to one global, so the boundary links by identity
+    // (parser writes meta.f -> ingress reads meta.f). Each block's preorder registers it as a procedure.
+    for (const auto *blk : thread) {
+        const IR::Node *node = blockContainer(blk);
+        BUG_CHECK(node != nullptr, "pipeline block %1% has no container", blk);
+        const auto *params = blockApplyParams(node);
+        BUG_CHECK(params != nullptr, "pipeline block %1% has no apply params", node);
+        cstring blkName = node->to<IR::Type_Declaration>()->name.name;
+        std::vector<const IR::Node *> args, retArgs;
+        for (auto *p : params->parameters) {
+            if (p->direction == IR::Direction::In || p->direction == IR::Direction::InOut)
+                args.push_back(p);
+            if (p->direction == IR::Direction::Out || p->direction == IR::Direction::InOut)
+                retArgs.push_back(p);
+        }
+        visit_call(blkName, node, VertexFlags::NONE, args, retArgs);
+    }
+
+    for (auto parent : parents)
+        add_edge(parent.first, exit_v, parent.second->name, EdgeType::CONTROL);
+    BUG_CHECK((*g_).is_root(), "Invalid graph");
+    controlStack.popBack();
+    controlGraphsArray.push_back(g_);
+}
+
 bool ControlGraphs::preorder(const IR::PackageBlock *block) {
+    if (wholePipeline) {
+        // Synthesize a dummy-main per execution thread. v1model thread = [Parser, Ingress, Egress]
+        // (package args 0,2,3; VerifyChecksum/ComputeChecksum/Deparser at 1,4,5 are skipped). tna's
+        // two threads are added in a later commit.
+        std::vector<const IR::Block *> blocks;
+        for (auto it : block->constantValue) {
+            if (!it.second) continue;
+            if (it.second->is<IR::ParserBlock>() || it.second->is<IR::ControlBlock>())
+                blocks.push_back(it.second->to<IR::Block>());
+            else if (it.second->is<IR::PackageBlock>())
+                visit(it.second->getNode());
+        }
+        if (arch == "v1model" && blocks.size() >= 4)
+            buildPipelineThread("v1_pipe"_cs, {blocks[0], blocks[2], blocks[3]});
+        return false;
+    }
     for (auto it : block->constantValue) {
         if (!it.second) continue;
         if (it.second->is<IR::ControlBlock>()) {

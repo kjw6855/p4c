@@ -84,6 +84,9 @@ class ControlGraphs : public Graphs,
     // EXIT vertex — a pipeline block's outputs, mapped to the caller's retArgs by the dummy-main.
     std::vector<const IR::Node *> collectBoundaryRetVals(const IR::ParameterList *params,
             Graphs::vertex_t exitV);
+    // Whole-pipeline: build ONE graph for an execution thread (ordered pipeline blocks) whose root is
+    // a synthesized dummy-main that CALLs each block in order, threading the shared hdr/meta/std_meta.
+    void buildPipelineThread(cstring threadName, const std::vector<const IR::Block *> &thread);
 
     std::vector<Graph *> controlGraphsArray{};
 
