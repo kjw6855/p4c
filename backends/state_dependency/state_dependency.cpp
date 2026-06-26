@@ -126,9 +126,21 @@ int main(int argc, char *const argv[]) {
     // analysis walks it. Opt-in; the legacy per-control path is untouched.
     if (options.wholePipeline) {
         Util::ScopedTimer unrollTimer("Parser unroll");
-        P4::ParsersUnroll parsersUnroll(true, &midEnd.refMap, &midEnd.typeMap);
-        program = program->apply(parsersUnroll);
-        if (program == nullptr || ::P4::errorCount() > 0) return 1;
+        // ParsersUnroll's symbolic interpreter can throw (e.g. CompilerBug on Type_Newtype) or set
+        // errors on some programs. Treat unrolling as best-effort: on any failure keep the original
+        // program — the parser walk's visited-set still cuts loops (over-approximate, no crash).
+        try {
+            unsigned errBefore = ::P4::errorCount();
+            P4::ParsersUnroll parsersUnroll(true, &midEnd.refMap, &midEnd.typeMap);
+            const auto *unrolled = program->apply(parsersUnroll);
+            if (unrolled != nullptr && ::P4::errorCount() == errBefore)
+                program = unrolled;
+            else
+                ::P4::warning("whole-pipeline: parser unroll failed; using visited-set loop cut");
+        } catch (const std::exception &e) {
+            ::P4::warning("whole-pipeline: parser unroll threw (%1%); using visited-set loop cut",
+                          e.what());
+        }
     }
     const IR::ToplevelBlock *top = nullptr;
     {

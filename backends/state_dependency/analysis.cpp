@@ -398,14 +398,28 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     // is empty and ActParamToStateful returns early with no results.  That is intentional —
     // A2S2V for post-RAP IR requires updating ActParamToStateful to recognise the local-
     // variable initialisation pattern that RAP introduces.
+    // Whole-pipeline mode unrolls parser header-stack loops (acyclic, concrete stack indices) before
+    // evaluation. Best-effort and isolated in its own try/catch: ParsersUnroll's symbolic interpreter
+    // can throw (e.g. CompilerBug on Type_Newtype) — on any failure keep the original program and let
+    // the parser walk's visited-set cut loops instead (over-approximate, no crash).
+    if (wholePipeline) {
+        try {
+            unsigned errBefore = ::P4::errorCount();
+            P4::ParsersUnroll parsersUnroll(true, &refMap, &typeMap);
+            const auto *unrolled = program->apply(parsersUnroll);
+            if (unrolled != nullptr && ::P4::errorCount() == errBefore)
+                program = unrolled;
+            else
+                ::P4::warning("whole-pipeline: parser unroll failed; using visited-set loop cut");
+        } catch (const std::exception &e) {
+            ::P4::warning("whole-pipeline: parser unroll threw (%1%); using visited-set loop cut",
+                          e.what());
+        }
+    }
     {
         auto *evaluator = new P4::EvaluatorPass(&refMap, &typeMap);
         PassManager prep;
         prep.setName("P4SD-prep");
-        // Whole-pipeline mode unrolls parser header-stack loops (acyclic, concrete stack indices)
-        // before evaluation so the parser CFG can be walked without special loop handling.
-        if (wholePipeline)
-            prep.addPasses({new P4::ParsersUnroll(true, &refMap, &typeMap)});
         prep.addPasses({
             new P4::TypeChecking(&refMap, &typeMap, true),
             new P4::RemoveActionParameters(&typeMap),
