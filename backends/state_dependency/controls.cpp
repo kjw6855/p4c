@@ -188,12 +188,24 @@ bool ControlGraphs::preorder(const IR::P4Parser *parser) {
 
     addApplyParams(parser->getApplyParameters(), start_v, exit_v);
 
-    // TODO(step 3): walk parser states (extract -> hdr defs, assignments -> meta, transition selects),
-    //               threading start_v ... -> exit_v through the state CFG.
+    // Walk the state CFG from "start". preorder(PathExpression) auto-follows Type_State transitions,
+    // so the whole reachable state graph is traversed and each state's assignments/extracts run through
+    // the existing statement handlers (e.g. `meta.f = hdr.g` builds a hdr.g->meta.f dep edge via
+    // preorder(BaseAssignmentStatement); extract goes through the generic extern path). Components chain
+    // via `parents` from start_v. visitDagOnce cuts any residual loop (parsers are also unrolled in the
+    // SD prep). `select(...)` keysets are visited as reads. Sound over-approximation for a may-analysis.
     // TODO(step 5): procedureGraphs[parser] = {start_v, exit_v, retVals} so the dummy-main can
     //               visit_call this parser as a pipeline-block procedure.
+    auto oldstate = state;
+    if (state == SKIPPING) state = NORMAL;
+    const IR::ParserState *startState = nullptr;
+    for (auto *s : parser->states) {
+        if (s->name.name == "start") { startState = s; break; }
+    }
+    if (startState != nullptr) visit(startState);
+    state = oldstate;
 
-    // Until the body is modeled, connect ENTRY straight to EXIT (empty parser procedure).
+    // Connect terminal states (whatever the walk left in `parents`) to the procedure EXIT.
     for (auto &p : parents) add_edge(p.first, exit_v, p.second->name, EdgeType::CONTROL);
     parents = {{exit_v, new EdgeProcedural()}};
     localProcFlags = oldLocalProcFlags;
