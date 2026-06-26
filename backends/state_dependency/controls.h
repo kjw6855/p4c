@@ -74,6 +74,11 @@ class ControlGraphs : public Graphs,
     const P4::ExternMethod *get_extern_method(const Visitor::Context *ctxt_);
     const IR::Expression *add_variables(const IR::Expression *e, const Context *ctxt, bool isUsed,
             const IR::Node **addVar=nullptr);
+    // Register a block's apply/parser parameters as graph variables: In/InOut at the entry vertex,
+    // Out/InOut at the exit vertex. Shared by P4Control and P4Parser (params with no direction, e.g.
+    // packet_in, are skipped). Also records the first header-struct param in headerVarNames[graphName].
+    void addApplyParams(const IR::ParameterList *params, Graphs::vertex_t startV,
+            Graphs::vertex_t exitV);
 
     std::vector<Graph *> controlGraphsArray{};
 

@@ -116,25 +116,17 @@ bool ControlGraphs::preorder(const IR::ControlBlock *block) {
     return false;
 }
 
-bool ControlGraphs::preorder(const IR::P4Control *cont) {
-    bool doPop = false;
-    // instanceName == std::nullopt <=> top level
-    if (instanceName != std::nullopt) {
-        g = controlStack.pushBack(*g, instanceName.value());
-        doPop = true;
-    }
-    return_parents.clear();
-
-    // TODO: find the variable name for header
-    for (auto *p : cont->getApplyParameters()->parameters) {
+void ControlGraphs::addApplyParams(const IR::ParameterList *params, Graphs::vertex_t startV,
+        Graphs::vertex_t exitV) {
+    for (auto *p : params->parameters) {
         const IR::Node *newEntryVar = nullptr;
         if (p->direction == IR::Direction::In) {
-            newEntryVar = add_variable_in_vertex(p, start_v, false);
+            newEntryVar = add_variable_in_vertex(p, startV, false);
         } else if (p->direction == IR::Direction::Out) {
-            add_variable_in_vertex(p, exit_v, true);
+            add_variable_in_vertex(p, exitV, true);
         } else if (p->direction == IR::Direction::InOut) {
-            newEntryVar = add_variable_in_vertex(p, start_v, false);
-            add_variable_in_vertex(p, exit_v, true);
+            newEntryVar = add_variable_in_vertex(p, startV, false);
+            add_variable_in_vertex(p, exitV, true);
         }
 
         auto pType = typeMap->getType(p, true);
@@ -145,6 +137,19 @@ bool ControlGraphs::preorder(const IR::P4Control *cont) {
             headerVarNames[graphName] = get_var_name(newEntryVar);
         }
     }
+}
+
+bool ControlGraphs::preorder(const IR::P4Control *cont) {
+    bool doPop = false;
+    // instanceName == std::nullopt <=> top level
+    if (instanceName != std::nullopt) {
+        g = controlStack.pushBack(*g, instanceName.value());
+        doPop = true;
+    }
+    return_parents.clear();
+
+    // TODO: find the variable name for header
+    addApplyParams(cont->getApplyParameters(), start_v, exit_v);
 
     for (auto *decl : cont->controlLocals) {
         if (auto *dv = decl->to<IR::Declaration_Variable>()) {
