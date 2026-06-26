@@ -32,6 +32,7 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/random_backtrack.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/selected_branches.h"
+#include "backends/state_dependency/chain_cache.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/state_dependency_track.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/core/concolic_executor/concolic_executor.h"
@@ -76,6 +77,32 @@ GraphMidEnd::GraphMidEnd(ParserOptions &options) {
 }
 
 namespace {
+
+/// Produce the state-dependency result either by loading the pre-computed SOChains from
+/// --state-dep-cache (re-resolved against @p program's IR) or, when no cache is given, by running
+/// the IFDS analysis in-process. Returns nullptr on error (the caller aborts). Only the chain
+/// category the active policy consumes is computed (SD_KEY / SD_COND); the cache holds both.
+const P4StateDependency::StateDependencyResult *buildOrLoadStateDep(const SymbexOptions &opts,
+                                                                    const IR::P4Program *program) {
+    const bool isv1 = opts.langVersion == CompilerOptions::FrontendVersion::P4_14;
+    if (opts.stateDepCachePath.has_value()) {
+        cstring lang = isv1 ? cstring("p4-14") : cstring("p4-16");
+        cstring srcHash =
+            P4StateDependency::computeSourceHash(opts.file.string(), cstring(opts.arch), lang);
+        const auto *result = new P4StateDependency::StateDependencyResult(
+            P4StateDependency::loadChainCache(*opts.stateDepCachePath, program, srcHash,
+                                              cstring(opts.arch)));
+        return ::P4::errorCount() > 0 ? nullptr : result;
+    }
+    unsigned sdCats = P4StateDependency::SD_ALL;
+    if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
+        sdCats = P4StateDependency::SD_KEY;
+    else if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond)
+        sdCats = P4StateDependency::SD_COND;
+    const auto *result = new P4StateDependency::StateDependencyResult(
+        P4StateDependency::runStateDependencyAnalysis(program, cstring(opts.arch), isv1, {}, sdCats));
+    return ::P4::errorCount() > 0 ? nullptr : result;
+}
 
 /// Pick the path selection algorithm for the symbolic executor.
 SymbolicExecutor *pickExecutionEngine(const SymbexOptions &symbexOptions,
@@ -247,25 +274,10 @@ std::optional<AbstractTestList> generateTestsImpl(std::optional<std::string_view
     const auto *symbexCompilerResult =
         compilerResultOpt.value().get().checkedTo<SymbexCompilerResult>();
 
-    if (symbexOptions.stateDep) {
+    if (symbexOptions.stateDep || symbexOptions.stateDepCachePath.has_value()) {
         const auto *program = &compilerResultOpt.value().get().getProgram();
-        bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
-        // Only compute the chain categories the active policy actually consumes: the Tampering
-        // tracker reads only dataWriteKeyChains (SD_KEY); TamperingCond only dataWriteCondChains
-        // (SD_COND). Skipping the other IFDS passes (A2S2V, H2S2V, and the unused sink) is the
-        // dominant analysis-time saving for these runs — without it, TamperingCond fell through to
-        // SD_ALL and ran 4× the analysis, timing out on large programs (e.g. netlock) so no SOChain
-        // was ever produced. Other policies keep the full analysis.
-        unsigned sdCats = P4StateDependency::SD_ALL;
-        if (symbexOptions.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
-            sdCats = P4StateDependency::SD_KEY;
-        else if (symbexOptions.pathSelectionPolicy ==
-                 PathSelectionPolicy::StateDependencyTamperingCond)
-            sdCats = P4StateDependency::SD_COND;
-        auto *stateDep = new P4StateDependency::StateDependencyResult(
-            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1,
-                                                          {}, sdCats));
-        if (::P4::errorCount() > 0) return std::nullopt;
+        const auto *stateDep = buildOrLoadStateDep(symbexOptions, program);
+        if (stateDep == nullptr) return std::nullopt;
         symbexCompilerResult->setStateDep(stateDep);
     }
 
@@ -384,22 +396,10 @@ int Symbex::mainImpl(const CompilerResult &compilerResult) {
     // via GC_gcollect_and_unmap) is returned to the OS before symbex begins.
     const auto *symbexCompilerResult = compilerResult.checkedTo<SymbexCompilerResult>();
 
-    if (symbexOptions.stateDep) {
+    if (symbexOptions.stateDep || symbexOptions.stateDepCachePath.has_value()) {
         const auto *program = &compilerResult.getProgram();
-        bool isv1 = symbexOptions.langVersion == CompilerOptions::FrontendVersion::P4_14;
-        // Only compute the chain categories the active policy consumes: Tampering reads only
-        // dataWriteKeyChains (SD_KEY), TamperingCond only dataWriteCondChains (SD_COND). Skipping
-        // the other IFDS passes is the dominant analysis-time saving for these runs.
-        unsigned sdCats = P4StateDependency::SD_ALL;
-        if (symbexOptions.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
-            sdCats = P4StateDependency::SD_KEY;
-        else if (symbexOptions.pathSelectionPolicy ==
-                 PathSelectionPolicy::StateDependencyTamperingCond)
-            sdCats = P4StateDependency::SD_COND;
-        auto *stateDep = new P4StateDependency::StateDependencyResult(
-            P4StateDependency::runStateDependencyAnalysis(program, cstring(symbexOptions.arch), isv1,
-                                                          {}, sdCats));
-        if (::P4::errorCount() > 0) return 1;
+        const auto *stateDep = buildOrLoadStateDep(symbexOptions, program);
+        if (stateDep == nullptr) return 1;
         symbexCompilerResult->setStateDep(stateDep);
     }
 

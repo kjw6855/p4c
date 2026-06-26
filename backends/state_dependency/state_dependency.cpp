@@ -24,6 +24,7 @@
 #include "lib/timer.h"
 
 #include "analysis.h"
+#include "backends/state_dependency/chain_cache.h"
 #include "graphs.h"
 #include "parsers.h"
 #include "graph_visitor.h"
@@ -154,6 +155,20 @@ int main(int argc, char *const argv[]) {
             sdResult.cfgGraphs->genSupergraphs = P4StateDependency::GenSGMode::NONE;
             top->getMain()->apply(*sdResult.cfgGraphs);
         }
+    }
+
+    // Serialize the Key + Cond chains so p4symbex can reuse them (--state-dep-cache), skipping the
+    // expensive IFDS re-analysis. Requires the analysis to have run (--gen-supergraphs).
+    if (options.cacheChainsFile.has_value()) {
+        cstring lang = options.langVersion == CompilerOptions::FrontendVersion::P4_14
+                           ? cstring("p4-14")
+                           : cstring("p4-16");
+        cstring srcHash =
+            P4StateDependency::computeSourceHash(options.file.string(), options.arch, lang);
+        P4StateDependency::serializeChainCache(sdResult, *options.cacheChainsFile, srcHash,
+                                               options.arch);
+        if (::P4::errorCount() == 0)
+            std::cout << "Wrote chain cache to " << *options.cacheChainsFile << "\n";
     }
 
     // Print per-control-block and total dependency chain counts.

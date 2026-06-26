@@ -188,6 +188,12 @@ class DependencyGraphs {
         std::map<vertex_t, const IR::Node *> readNodes;
         boost::dynamic_bitset<> readNodeIds;
 
+        /// Default constructor for reconstructing a chain from a serialized cache
+        /// (chain_cache.cpp): only the symbex-consumed fields (soName, sinkTableControlPlaneName,
+        /// sinkKeyName, isUpdate, id, writeNodes, readNodes, sinkConditionNode) are set; the graph
+        /// vertices and clone_id bitsets are left default (symbex never reads them).
+        SOChain() = default;
+
         SOChain(DepGraph *depG, Graphs::Graph *esg,
                 vertex_t soVertex, cstring soName, const IR::Node *soNode,
                 std::unordered_set<vertex_t> writeVertices,

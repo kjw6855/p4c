@@ -17,6 +17,7 @@ set (STATE_DEPENDENCY_LIB_SRCS
   stateful_to_cond.cpp
   hdr_to_stateful.cpp
   utils.cpp
+  chain_cache.cpp
 )
 
 set (STATE_DEPENDENCY_LIB_HDRS

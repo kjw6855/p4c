@@ -121,6 +121,11 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Indicates whether to build a dataflow dependency graph by using state_dependency module.
     bool stateDep = false;
 
+    /// When set, load pre-computed SOChains from this JSON cache (produced by p4c_state_dependency
+    /// --cache-chains) instead of running the IFDS analysis in-process. Hard-errors if the file is
+    /// missing or its embedded source hash / arch does not match this program.
+    std::optional<std::string> stateDepCachePath;
+
     /// Attacker-chosen register value for the tampering scenario (--state-tamper-value).
     /// If set, Phase 2 writes this exact value to the register instead of a random one.
     /// Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).

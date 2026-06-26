@@ -546,6 +546,21 @@ SymbexOptions::SymbexOptions()
         " if no such chains exist in the program, no tests are generated.");
 
     registerOption(
+        "--state-dep-cache", "file",
+        [this](const char *arg) {
+            stateDepCachePath = std::string(arg);
+            // Same coverage/DCG side effects as --state-dep: the loaded chains are consumed by the
+            // tampering tracker, which needs statement/action coverage and the program DCG.
+            coverageOptions.coverStatements = true;
+            coverageOptions.coverActions = true;
+            dcg = true;
+            return true;
+        },
+        "Load pre-computed state-dependency SOChains from this JSON cache (produced by "
+        "p4c_state_dependency --cache-chains) instead of running the IFDS analysis. Hard-errors if "
+        "the cache is missing or does not match this program.");
+
+    registerOption(
         "--state-tamper-value", "value",
         [this](const char *arg) {
             try {

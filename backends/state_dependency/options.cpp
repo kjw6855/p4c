@@ -129,6 +129,14 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             "Use this directory to dump graphs in dot format "
             "(default is current working directory)\n");
     registerOption(
+            "--cache-chains", "file",
+            [this](const char *arg) {
+            cacheChainsFile = std::string(arg);
+            return true;
+            },
+            "Serialize the computed Key/Cond SOChains to this JSON file so p4symbex can load them "
+            "via --state-dep-cache instead of recomputing the analysis.\n");
+    registerOption(
             "--fromJSON", "file",
             [this](const char *arg) {
             loadIRFromJson = true;

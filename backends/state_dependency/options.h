@@ -14,6 +14,9 @@ class P4StateDependencyOptions : public CompilerOptions {
     virtual ~P4StateDependencyOptions() = default;
 
     std::filesystem::path graphsDir{"."};
+    /// When set, serialize the computed Key + Cond SOChains to this file (JSON) so p4symbex can load
+    /// them via --state-dep-cache instead of recomputing the IFDS analysis.
+    std::optional<std::string> cacheChainsFile;
     bool loadIRFromJson = false;  // read from json
     bool graphs = true;           // default behavior
     bool fullGraph = false;
