@@ -164,9 +164,20 @@ int main(int argc, char *const argv[]) {
     {
         LOG2("Generating graphs under " << options.graphsDir);
         if (options.genSupergraphs != P4StateDependency::GenSGMode::NONE) {
-            sdResult = P4StateDependency::runStateDependencyAnalysis(
-                    program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
-                    options.graphsDir, P4StateDependency::SD_ALL, options.wholePipeline);
+            // Whole-pipeline modeling of real (esp. tna) programs can still hit assertions in the
+            // block-as-procedure / var-registration machinery. Isolate it: a crash in WP mode yields
+            // an empty result (no chains for this program) rather than aborting. Per-control stays
+            // strict (no catch) so genuine regressions still surface.
+            try {
+                sdResult = P4StateDependency::runStateDependencyAnalysis(
+                        program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
+                        options.graphsDir, P4StateDependency::SD_ALL, options.wholePipeline);
+            } catch (const std::exception &bug) {
+                if (!options.wholePipeline) throw;
+                ::P4::warning("whole-pipeline analysis failed (%1%); emitting no chains for this "
+                              "program", bug.what());
+                sdResult = P4StateDependency::StateDependencyResult{};
+            }
             if (sdResult.cfgGraphs)
                 sdResult.cfgGraphs->varVis = options.varVis;
         } else {

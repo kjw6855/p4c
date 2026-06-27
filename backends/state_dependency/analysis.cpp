@@ -432,8 +432,19 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     if (program == nullptr || toplevel == nullptr || ::P4::errorCount() > 0)
         return {};
 
-    return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
-                                      categories, wholePipeline);
+    // Isolate whole-pipeline analysis failures (assertions in the block-as-procedure / var machinery
+    // on real tna programs): degrade to an empty result instead of aborting p4symbex. Per-control
+    // stays strict so genuine regressions surface.
+    if (!wholePipeline)
+        return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
+                                          categories, wholePipeline);
+    try {
+        return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
+                                          categories, wholePipeline);
+    } catch (const std::exception &bug) {
+        ::P4::warning("whole-pipeline analysis failed (%1%); proceeding with no chains", bug.what());
+        return {};
+    }
 }
 
 }  // namespace P4::P4StateDependency
