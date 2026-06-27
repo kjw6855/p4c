@@ -118,24 +118,25 @@ void ControlGraphs::buildPipelineThread(cstring threadName,
     exit_v = add_vertex("__PIPELINE_EXIT__"_cs, VertexFlags::EXIT);
     parents = {{start_v, new EdgeUnconditional()}};
 
-    // CALL each block in execution order. The shared hdr/meta/std_meta are threaded as the block's
-    // in/inout params (args) and out/inout params (retArgs); .equiv() canonicalization within this one
-    // graph collapses each block's same-named params to one global, so the boundary links by identity
-    // (parser writes meta.f -> ingress reads meta.f). Each block's preorder registers it as a procedure.
+    // CALL each block in execution order, passing the shared hdr/meta/std_meta as the block's in/inout
+    // params (args). The boundary links through GLOBALS: .equiv() canonicalization within this one graph
+    // collapses each block's same-named params (and their fields, e.g. meta.f) to a single global var,
+    // which the IFDS tabulation propagates across the block procedures automatically (parser writes
+    // meta.f -> ingress reads meta.f). We deliberately do NOT pass retArgs: the retArgEdge boundary
+    // mechanism (supergraphs.cpp) asserts a callee EXIT -> caller RETURN shape that the block-as-procedure
+    // call can violate on real programs (SIGABRT); globals carry the boundary without it.
     for (const auto *blk : thread) {
         const IR::Node *node = blockContainer(blk);
         BUG_CHECK(node != nullptr, "pipeline block %1% has no container", blk);
         const auto *params = blockApplyParams(node);
         BUG_CHECK(params != nullptr, "pipeline block %1% has no apply params", node);
         cstring blkName = node->to<IR::Type_Declaration>()->name.name;
-        std::vector<const IR::Node *> args, retArgs;
+        std::vector<const IR::Node *> args;
         for (auto *p : params->parameters) {
             if (p->direction == IR::Direction::In || p->direction == IR::Direction::InOut)
                 args.push_back(p);
-            if (p->direction == IR::Direction::Out || p->direction == IR::Direction::InOut)
-                retArgs.push_back(p);
         }
-        visit_call(blkName, node, VertexFlags::NONE, args, retArgs);
+        visit_call(blkName, node, VertexFlags::NONE, args, {});
     }
 
     for (auto parent : parents)
