@@ -78,12 +78,12 @@ class ControlGraphs : public Graphs,
     // Register a block's apply/parser parameters as graph variables: In/InOut at the entry vertex,
     // Out/InOut at the exit vertex. Shared by P4Control and P4Parser (params with no direction, e.g.
     // packet_in, are skipped). Also records the first header-struct param in headerVarNames[graphName].
-    void addApplyParams(const IR::ParameterList *params, Graphs::vertex_t startV,
-            Graphs::vertex_t exitV);
+    void addApplyParams(const IR::ParameterList *params, Graphs::vertex_t start_v,
+            Graphs::vertex_t exit_v);
     // Return the canonical boundary variables (Out/InOut apply params) registered at the procedure's
     // EXIT vertex — a pipeline block's outputs, mapped to the caller's retArgs by the dummy-main.
     std::vector<const IR::Node *> collectBoundaryRetVals(const IR::ParameterList *params,
-            Graphs::vertex_t exitV);
+            Graphs::vertex_t exit_v);
     // Whole-pipeline: build ONE graph for an execution thread (ordered pipeline blocks) whose root is
     // a synthesized dummy-main that CALLs each block in order, threading the shared hdr/meta/std_meta.
     void buildPipelineThread(cstring threadName, const std::vector<const IR::Block *> &thread);

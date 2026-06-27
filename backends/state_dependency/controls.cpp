@@ -203,17 +203,17 @@ bool ControlGraphs::preorder(const IR::ControlBlock *block) {
     return false;
 }
 
-void ControlGraphs::addApplyParams(const IR::ParameterList *params, Graphs::vertex_t startV,
-        Graphs::vertex_t exitV) {
+void ControlGraphs::addApplyParams(const IR::ParameterList *params, Graphs::vertex_t start_v,
+        Graphs::vertex_t exit_v) {
     for (auto *p : params->parameters) {
         const IR::Node *newEntryVar = nullptr;
         if (p->direction == IR::Direction::In) {
-            newEntryVar = add_variable_in_vertex(p, startV, false);
+            newEntryVar = add_variable_in_vertex(p, start_v, false);
         } else if (p->direction == IR::Direction::Out) {
-            add_variable_in_vertex(p, exitV, true);
+            add_variable_in_vertex(p, exit_v, true);
         } else if (p->direction == IR::Direction::InOut) {
-            newEntryVar = add_variable_in_vertex(p, startV, false);
-            add_variable_in_vertex(p, exitV, true);
+            newEntryVar = add_variable_in_vertex(p, start_v, false);
+            add_variable_in_vertex(p, exit_v, true);
         }
 
         auto pType = typeMap->getType(p, true);
@@ -227,13 +227,13 @@ void ControlGraphs::addApplyParams(const IR::ParameterList *params, Graphs::vert
 }
 
 std::vector<const IR::Node *> ControlGraphs::collectBoundaryRetVals(
-        const IR::ParameterList *params, Graphs::vertex_t exitV) {
+        const IR::ParameterList *params, Graphs::vertex_t exit_v) {
     std::vector<const IR::Node *> retVals;
     for (auto *p : params->parameters) {
         if (p->direction == IR::Direction::Out || p->direction == IR::Direction::InOut) {
             // add_variable_in_vertex dedups by .equiv(), so this returns the same canonical node
-            // addApplyParams already registered at exitV (no duplicate vertex variable).
-            const IR::Node *rv = add_variable_in_vertex(p, exitV, true);
+            // addApplyParams already registered at exit_v (no duplicate vertex variable).
+            const IR::Node *rv = add_variable_in_vertex(p, exit_v, true);
             if (rv != nullptr) retVals.push_back(rv);
         }
     }
