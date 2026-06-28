@@ -10,6 +10,7 @@
 #include "backends/state_dependency/controls.h"
 #include "backends/state_dependency/dependency_graph.h"
 #include "backends/state_dependency/hdr_to_stateful.h"
+#include "backends/state_dependency/parser_deps.h"
 #include "backends/state_dependency/stateful_to_cond.h"
 #include "backends/state_dependency/stateful_to_key.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
@@ -58,6 +59,10 @@ struct StateDependencyResult {
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteKeyChains;
     // Chains with data write to condition
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteCondChains;
+
+    // --parser-deps: merged parser-state dependency record (header-derived metadata -> header fields),
+    // used to seed sources and (in p4symbex) pin header values per phase. Empty otherwise.
+    ParserDepsRecord parserDepsRecord;
 };
 
 /// Bitmask of chain categories to compute. The four expensive IFDS sink passes are gated on
@@ -93,7 +98,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   cstring arch,
                                                   std::filesystem::path graphsDir = {},
                                                   unsigned categories = SD_ALL,
-                                                  bool wholePipeline = false);
+                                                  bool wholePipeline = false,
+                                                  bool parserDeps = false);
 
 /// Convenience overload: builds its own lightweight midend
 /// (TypeChecking → EvaluatorPass → IFDS analysis → RemoveActionParameters → TypeChecking)
@@ -110,7 +116,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   bool isv1 = false,
                                                   std::filesystem::path graphsDir = {},
                                                   unsigned categories = SD_ALL,
-                                                  bool wholePipeline = false);
+                                                  bool wholePipeline = false,
+                                                  bool parserDeps = false);
 
 }  // namespace P4::P4StateDependency
 

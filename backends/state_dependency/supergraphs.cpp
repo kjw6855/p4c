@@ -65,6 +65,10 @@ void SuperGraphs::create_var_vertices(const cstring &graphName) {
     auto headerVarNameIt = headerVarNames->find(graphName);
     curProp->headerVarName = headerVarNameIt != headerVarNames->end() ? headerVarNameIt->second : nullptr;
 
+    // --parser-deps: same parser-derived metadata sources for every control (cross-thread meta names
+    // don't collide, so a single shared set is sound — see plan §2).
+    if (parserMetaSources != nullptr) curProp->parserMetaSources = *parserMetaSources;
+
     auto ingressPortVarIt = ingressPortVars->find(graphName);
     curProp->ingressPortVar = ingressPortVarIt != ingressPortVars->end() ? ingressPortVarIt->second : nullptr;
 

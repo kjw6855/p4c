@@ -1,5 +1,7 @@
 #include "backends/state_dependency/analysis.h"
 
+#include <set>
+
 #include <boost/graph/graph_traits.hpp>
 
 #ifdef ENABLE_GC
@@ -19,6 +21,7 @@
 #include "frontends/p4/typeChecking/typeChecker.h"
 #include "midend/parserUnroll.h"
 #include "ir/pass_manager.h"
+#include "ir/visitor.h"
 #include "lib/hvec_map.h"
 #include "lib/log.h"
 #include "lib/timer.h"
@@ -34,7 +37,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   cstring arch,
                                                   std::filesystem::path graphsDir,
                                                   unsigned categories,
-                                                  bool wholePipeline) {
+                                                  bool wholePipeline,
+                                                  bool parserDeps) {
     Util::ScopedTimer sdTimer("P4SD");
     StateDependencyResult result;
     // Graph/binary mode (graphsDir set) exports every category, so it must compute them all.
@@ -51,6 +55,21 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     cgen.wholePipeline = wholePipeline;
     toplevel->getMain()->apply(cgen);
 
+    // --parser-deps: compute the parser-state dependency record (header-derived metadata fields) over the
+    // program's (unrolled) parsers; the union of their field-path names seeds the per-control IFDS sources.
+    std::set<cstring> parserMetaSrc;
+    if (parserDeps) {
+        forAllMatching<IR::P4Parser>(program, [&](const IR::P4Parser *p) {
+            ParserDepsRecord rec = computeParserDeps(p, refMap, typeMap);
+            for (auto &[meta, hdrs] : rec.metaToHeaders) {
+                auto &dst = result.parserDepsRecord.metaToHeaders[meta];
+                dst.insert(dst.end(), hdrs.begin(), hdrs.end());
+                result.parserDepsRecord.metaNode[meta] = rec.metaNode.at(meta);
+                parserMetaSrc.insert(meta);
+            }
+        });
+    }
+
     // Build IFDS supergraphs over the CFGs.
     SuperGraphs sg(refMap, typeMap,
             &cgen.controlGraphsArray,
@@ -64,7 +83,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             &cgen.headerVarNames,
             &cgen.ingressPortVars,
             &cgen.egressPortVars,
-            &cgen.dropVars);
+            &cgen.dropVars,
+            parserDeps ? &parserMetaSrc : nullptr);
     sg.gen_supergraphs();
 
     const size_t numGraphs = cgen.controlGraphsArray.size();
@@ -377,7 +397,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   bool isv1,
                                                   std::filesystem::path graphsDir,
                                                   unsigned categories,
-                                                  bool wholePipeline) {
+                                                  bool wholePipeline,
+                                                  bool parserDeps) {
     Util::ScopedTimer sdPrepTimer("P4SD-prep");
 
     P4::ReferenceMap refMap;
@@ -398,11 +419,11 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     // is empty and ActParamToStateful returns early with no results.  That is intentional —
     // A2S2V for post-RAP IR requires updating ActParamToStateful to recognise the local-
     // variable initialisation pattern that RAP introduces.
-    // Whole-pipeline mode unrolls parser header-stack loops (acyclic, concrete stack indices) before
-    // evaluation. Best-effort and isolated in its own try/catch: ParsersUnroll's symbolic interpreter
-    // can throw (e.g. CompilerBug on Type_Newtype) — on any failure keep the original program and let
-    // the parser walk's visited-set cut loops instead (over-approximate, no crash).
-    if (wholePipeline) {
+    // Whole-pipeline and parser-deps modes both unroll parser header-stack loops (acyclic, concrete stack
+    // indices) before evaluation. Best-effort and isolated in its own try/catch: ParsersUnroll's symbolic
+    // interpreter can throw (e.g. CompilerBug on Type_Newtype) — on any failure keep the original program
+    // (parser-deps then sees the un-unrolled parser; the may-analysis stays sound, just less precise).
+    if (wholePipeline || parserDeps) {
         try {
             unsigned errBefore = ::P4::errorCount();
             P4::ParsersUnroll parsersUnroll(true, &refMap, &typeMap);
@@ -410,10 +431,9 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             if (unrolled != nullptr && ::P4::errorCount() == errBefore)
                 program = unrolled;
             else
-                ::P4::warning("whole-pipeline: parser unroll failed; using visited-set loop cut");
+                ::P4::warning("parser unroll failed; proceeding without unrolling");
         } catch (const std::exception &e) {
-            ::P4::warning("whole-pipeline: parser unroll threw (%1%); using visited-set loop cut",
-                          e.what());
+            ::P4::warning("parser unroll threw (%1%); proceeding without unrolling", e.what());
         }
     }
     {
@@ -437,10 +457,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     // stays strict so genuine regressions surface.
     if (!wholePipeline)
         return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
-                                          categories, wholePipeline);
+                                          categories, wholePipeline, parserDeps);
     try {
         return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
-                                          categories, wholePipeline);
+                                          categories, wholePipeline, parserDeps);
     } catch (const std::exception &bug) {
         ::P4::warning("whole-pipeline analysis failed (%1%); proceeding with no chains", bug.what());
         return {};

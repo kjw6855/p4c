@@ -17,8 +17,9 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
         auto varVit = sgProp->progVarInfo[rootCFGVit][i];
         auto tabTv = tab->get_tab_vertex(varVit);
         auto varInfo = (*g)[varVit];
-        // Skip non-header variables
+        // Skip non-header variables. --parser-deps also seeds parser-derived metadata fields as sources.
         if (varInfo.name.startsWith(sgProp->headerVarName) ||
+                sgProp->parserMetaSources.count(varInfo.name) ||
                 (sgProp->ingressPortVar && sgProp->ingressPortVar->equiv(*tabTv.var))) {
             targetVars.push_back(tabTv);
             // on-the-fly create IFDS_FT edge

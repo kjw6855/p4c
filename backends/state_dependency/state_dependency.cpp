@@ -124,7 +124,7 @@ int main(int argc, char *const argv[]) {
     // Whole-pipeline mode: unroll parser header-stack loops into distinct, uniquely-named states
     // (bounded by the stack size) so the parser CFG is acyclic with concrete stack indices before the
     // analysis walks it. Opt-in; the legacy per-control path is untouched.
-    if (options.wholePipeline) {
+    if (options.wholePipeline || options.parserDeps) {
         Util::ScopedTimer unrollTimer("Parser unroll");
         // ParsersUnroll's symbolic interpreter can throw (e.g. CompilerBug on Type_Newtype) or set
         // errors on some programs. Treat unrolling as best-effort: on any failure keep the original
@@ -171,7 +171,8 @@ int main(int argc, char *const argv[]) {
             try {
                 sdResult = P4StateDependency::runStateDependencyAnalysis(
                         program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
-                        options.graphsDir, P4StateDependency::SD_ALL, options.wholePipeline);
+                        options.graphsDir, P4StateDependency::SD_ALL, options.wholePipeline,
+                        options.parserDeps);
             } catch (const std::exception &bug) {
                 if (!options.wholePipeline) throw;
                 ::P4::warning("whole-pipeline analysis failed (%1%); emitting no chains for this "

@@ -210,6 +210,15 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             "Opt-in: analyze the whole pipeline (Parser->Ingress/Egress) as one IFDS supergraph per "
             "thread via a synthesized dummy-main, unrolling parser loops. Off by default.");
     registerOption(
+            "--parser-deps", nullptr,
+            [this](const char *) {
+                parserDeps = true;
+                return true;
+            },
+            "Opt-in: record parser header->metadata dependencies (no IFDS for the parser) and seed those "
+            "metadata fields as per-control IFDS sources, so chains root at parser-derived metadata. "
+            "Lightweight alternative to --whole-pipeline. Off by default.");
+    registerOption(
             "--showVarEdge", "varEdgeVis",
             [this](const char *arg) {
                 static std::map<cstring, VarEdgeVisibility> const SHOW_VAR_EDGE_OPTIONS = {

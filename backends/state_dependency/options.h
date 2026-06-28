@@ -27,6 +27,10 @@ class P4StateDependencyOptions : public CompilerOptions {
     /// thread) via a synthesized dummy-main, and unroll parser loops in prep. Off by default so the
     /// legacy per-control analysis is byte-identical unless explicitly enabled.
     bool wholePipeline = false;
+    /// Opt-in parser-deps mode: compute the parser-state dependency record (header-derived metadata) and
+    /// seed those metadata fields as sources of the per-control IFDS, so chains root at parser-derived
+    /// metadata. Lightweight alternative to --whole-pipeline; off by default.
+    bool parserDeps = false;
     VarEdgeVisibility varEdgeVis = VarEdgeVisibility::NONE;
 
  private:

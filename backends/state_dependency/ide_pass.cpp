@@ -149,8 +149,9 @@ void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v) {
         auto varTv = TabVertex{v, var};
         auto varVit = tab->get_vertex_id(varTv);
         auto varInfo = (*g)[varVit];
-        // Skip non-header variables
+        // Skip non-header variables. --parser-deps also seeds parser-derived metadata fields as sources.
         if (varInfo.name.startsWith(sgProp->headerVarName) ||
+                sgProp->parserMetaSources.count(varInfo.name) ||
                 (sgProp->egressPortVar && sgProp->egressPortVar->equiv(*var))) {
             auto varBitMap = tab->valueMap[varTv];
             for (auto paramTv : tab->get_target_vars(varBitMap)) {

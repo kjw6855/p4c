@@ -3,6 +3,7 @@
 
 #include <optional>
 #include <functional>
+#include <set>
 
 #include "graphs.h"
 #include "ir/ir.h"
@@ -147,6 +148,9 @@ class SuperGraphProp {
 
     Graphs::vertex_t rootVar;
     cstring headerVarName;
+    // --parser-deps: metadata field-path names the parser derived from headers; seeded as IFDS sources
+    // (same as header vars) so chains root at parser-derived metadata. Empty unless --parser-deps.
+    std::set<cstring> parserMetaSources;
     const IR::Node *ingressPortVar;
     const IR::Node *egressPortVar;
     const IR::Node *dropVar;
@@ -177,7 +181,8 @@ class SuperGraphs : public Graphs {
                 hvec_map<cstring, cstring> *headerVarNames,
                 hvec_map<cstring, const IR::Node *> *ingressPortVars,
                 hvec_map<cstring, const IR::Node *> *egressPortVars,
-                hvec_map<cstring, const IR::Node *> *dropVars)
+                hvec_map<cstring, const IR::Node *> *dropVars,
+                const std::set<cstring> *parserMetaSources = nullptr)
     : refMap(refMap),
       typeMap(typeMap),
       controlGraphsArray(controlGraphsArray),
@@ -191,7 +196,8 @@ class SuperGraphs : public Graphs {
       headerVarNames(headerVarNames),
       ingressPortVars(ingressPortVars),
       egressPortVars(egressPortVars),
-      dropVars(dropVars) {}
+      dropVars(dropVars),
+      parserMetaSources(parserMetaSources) {}
 
     void gen_supergraphs();
 
@@ -218,6 +224,7 @@ class SuperGraphs : public Graphs {
     hvec_map<cstring, const IR::Node *> *ingressPortVars;
     hvec_map<cstring, const IR::Node *> *egressPortVars;
     hvec_map<cstring, const IR::Node *> *dropVars;
+    const std::set<cstring> *parserMetaSources{};
 
     SuperGraphProp *curProp{};
 
