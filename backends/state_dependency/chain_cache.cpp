@@ -131,6 +131,18 @@ std::map<cstring, std::vector<DependencyGraphs::SOChain>> resolveCategory(
                     chain.sinkConditionNode = it->second;
                 }
             }
+            // --parser-deps pins (optional; absent in baseline/WP caches). Unresolved positions are left
+            // null rather than hard-erroring (the pin is a best-effort hint for p4symbex).
+            const auto *pdField = field(co, "parserDeps");
+            const auto *pdArr = pdField != nullptr ? pdField->to<JsonVector>() : nullptr;
+            if (pdArr != nullptr) {
+                for (const auto &pdVal : *pdArr) {
+                    const auto *pdo = pdVal->to<JsonObject>();
+                    if (pdo == nullptr) continue;
+                    chain.parserDeps.push_back({strField(pdo, "meta"), strField(pdo, "hdr"),
+                                                boolField(pdo, "wp")});
+                }
+            }
             chains.push_back(std::move(chain));
         }
         out[ctrl] = std::move(chains);
@@ -177,6 +189,19 @@ void serializeChainCache(const StateDependencyResult &result, const std::string 
         }
         o->emplace("read", r);
         o->emplace("cond", cstring(posKey(chain.sinkConditionNode)));  // "" when no condition sink
+        // --parser-deps: per-chain header pins (optional/additive; absent in baseline/WP caches, so old
+        // caches still load with an empty parserDeps).
+        if (!chain.parserDeps.empty()) {
+            auto *pd = new Util::JsonArray();
+            for (const auto &dep : chain.parserDeps) {
+                auto *d = new Util::JsonObject();
+                d->emplace("meta", dep.metaPath);   // field-path strings (stable across tools/unroll)
+                d->emplace("hdr", dep.hdrPath);
+                d->emplace("wp", dep.writePath);
+                pd->append(d);
+            }
+            o->emplace("parserDeps", pd);
+        }
         return o;
     };
     auto catToJson = [&](const std::map<cstring, std::vector<DependencyGraphs::SOChain>> &cat) {

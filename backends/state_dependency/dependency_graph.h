@@ -188,6 +188,19 @@ class DependencyGraphs {
         std::map<vertex_t, const IR::Node *> readNodes;
         boost::dynamic_bitset<> readNodeIds;
 
+        /// --parser-deps: per-chain header pins. When the chain is rooted at a parser-derived metadata
+        /// field, each entry records a header field whose value (through the parser states) determines that
+        /// metadata, so p4symbex can pin it per phase (writePath=true -> write packet/phase 2;
+        /// writePath=false -> read packet/phase 1). Stored as field-path strings (e.g. "hdr.ipv4.id"),
+        /// which are stable across tools/unroll and are exactly what p4symbex needs to pin the packet
+        /// field. Empty for single-control / whole-pipeline chains.
+        struct ParserDep {
+            cstring metaPath;
+            cstring hdrPath;
+            bool writePath = false;
+        };
+        std::vector<ParserDep> parserDeps;
+
         /// Default constructor for reconstructing a chain from a serialized cache
         /// (chain_cache.cpp): only the symbex-consumed fields (soName, sinkTableControlPlaneName,
         /// sinkKeyName, isUpdate, id, writeNodes, readNodes, sinkConditionNode) are set; the graph

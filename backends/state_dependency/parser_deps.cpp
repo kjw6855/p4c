@@ -5,6 +5,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "lib/log.h"
@@ -111,6 +112,30 @@ ParserDepsRecord computeParserDeps(const IR::P4Parser *parser, P4::ReferenceMap 
         }
     }
     return out;
+}
+
+void attachParserDeps(DependencyGraphs::SOChain &chain, const ParserDepsRecord &rec) {
+    if (rec.metaToHeaders.empty()) return;
+    std::set<std::tuple<cstring, cstring, bool>> seen;
+    auto scan = [&](const auto &nodes, bool writePath) {
+        for (auto &kv : nodes) {
+            const IR::Node *node = kv.second;
+            if (node == nullptr) continue;
+            RefCollector rc;
+            node->apply(rc);
+            for (auto *r : rc.refs) {
+                cstring path = nodePath(r);
+                auto it = rec.metaToHeaders.find(path);
+                if (it == rec.metaToHeaders.end()) continue;
+                for (const auto &hd : it->second) {
+                    if (seen.insert(std::make_tuple(path, hd.headerPath, writePath)).second)
+                        chain.parserDeps.push_back({path, hd.headerPath, writePath});
+                }
+            }
+        }
+    };
+    scan(chain.writeNodes, true);
+    scan(chain.readNodes, false);
 }
 
 }  // namespace P4::P4StateDependency

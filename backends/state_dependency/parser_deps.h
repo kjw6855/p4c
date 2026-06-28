@@ -4,6 +4,7 @@
 #include <map>
 #include <vector>
 
+#include "backends/state_dependency/dependency_graph.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeMap.h"
 #include "ir/ir.h"
@@ -32,6 +33,11 @@ struct ParserDepsRecord {
 /// (acyclic); this is a flow-insensitive may-analysis (union over branches) so order does not matter.
 ParserDepsRecord computeParserDeps(const IR::P4Parser *parser, P4::ReferenceMap *refMap,
                                    P4::TypeMap *typeMap);
+
+/// Fill @chain.parserDeps from @rec: scan the chain's write/read node expressions for parser-derived
+/// metadata fields (record keys) and attach a pin per determining header (writePath set from which side
+/// the metadata appears on).
+void attachParserDeps(DependencyGraphs::SOChain &chain, const ParserDepsRecord &rec);
 
 }  // namespace P4::P4StateDependency
 

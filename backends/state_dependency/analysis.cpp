@@ -330,6 +330,15 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
 
+    // --parser-deps: attach per-chain header pins (chain.parserDeps) from the parser-state record, for
+    // chains rooted at parser-derived metadata (used by p4symbex to pin header values per phase).
+    if (parserDeps && !result.parserDepsRecord.empty()) {
+        for (auto &[g, chains] : result.dataWriteKeyChains)
+            for (auto &c : chains) attachParserDeps(c, result.parserDepsRecord);
+        for (auto &[g, chains] : result.dataWriteCondChains)
+            for (auto &c : chains) attachParserDeps(c, result.parserDepsRecord);
+    }
+
     // Export pruned dep graphs with satellite chain-category nodes (binary mode only).
     // One file per sink type; each graph is independent so add_chain_satellites mutates
     // only its own graph (no clone/snapshot needed).
