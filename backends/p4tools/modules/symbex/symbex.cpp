@@ -101,7 +101,7 @@ const P4StateDependency::StateDependencyResult *buildOrLoadStateDep(const Symbex
         sdCats = P4StateDependency::SD_COND;
     const auto *result = new P4StateDependency::StateDependencyResult(
         P4StateDependency::runStateDependencyAnalysis(program, cstring(opts.arch), isv1, {}, sdCats,
-                                                      opts.wholePipeline));
+                                                      opts.wholePipeline, opts.parserDeps));
     return ::P4::errorCount() > 0 ? nullptr : result;
 }
 

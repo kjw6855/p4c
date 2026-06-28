@@ -571,6 +571,16 @@ SymbexOptions::SymbexOptions()
         "effect when loading a cache (--state-dep-cache); the cache's own build mode decides.");
 
     registerOption(
+        "--parser-deps", nullptr,
+        [this](const char *) {
+            parserDeps = true;
+            return true;
+        },
+        "Opt-in: record parser header->metadata dependencies and seed those metadata fields as per-control "
+        "state-dependency sources, so chains root at parser-derived metadata (lightweight alternative to "
+        "--whole-pipeline). No effect when loading a cache; the cache's own build mode decides.");
+
+    registerOption(
         "--state-tamper-value", "value",
         [this](const char *arg) {
             try {

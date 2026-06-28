@@ -127,6 +127,11 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// regardless. Off by default.
     bool wholePipeline = false;
 
+    /// Opt-in parser-deps mode: compute the parser-state dependency record (header-derived metadata) and
+    /// seed those metadata fields as per-control IFDS sources, so chains root at parser-derived metadata.
+    /// Lightweight alternative to --whole-pipeline. Cache loads carry the per-chain header pins regardless.
+    bool parserDeps = false;
+
     /// When set, load pre-computed SOChains from this JSON cache (produced by p4c_state_dependency
     /// --cache-chains) instead of running the IFDS analysis in-process. Hard-errors if the file is
     /// missing or its embedded source hash / arch does not match this program.
