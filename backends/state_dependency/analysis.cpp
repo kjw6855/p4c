@@ -19,6 +19,7 @@
 #include "frontends/p4/evaluator/evaluator.h"
 #include "frontends/p4/removeParameters.h"
 #include "frontends/p4/typeChecking/typeChecker.h"
+#include "midend/eliminateSerEnums.h"
 #include "midend/parserUnroll.h"
 #include "ir/pass_manager.h"
 #include "ir/visitor.h"
@@ -435,6 +436,17 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     if (wholePipeline || parserDeps) {
         try {
             unsigned errBefore = ::P4::errorCount();
+            // Lower serializable enums to their underlying bit<> type first. ParsersUnroll's symbolic
+            // interpreter (midend/interpreter.cpp) has no Type_SerEnum case and BUGs out on it; the normal
+            // midend runs EliminateSerEnums well before any such interpreter, so mirror that ordering here.
+            // EliminateSerEnums ends with ClearTypeMap, so re-typecheck to repopulate typeMap for unroll.
+            PassManager serEnumPrep;
+            serEnumPrep.addPasses({
+                new P4::TypeChecking(&refMap, &typeMap, true),
+                new P4::EliminateSerEnums(&typeMap),
+                new P4::TypeChecking(&refMap, &typeMap, true),
+            });
+            program = program->apply(serEnumPrep);
             P4::ParsersUnroll parsersUnroll(true, &refMap, &typeMap);
             const auto *unrolled = program->apply(parsersUnroll);
             if (unrolled != nullptr && ::P4::errorCount() == errBefore)
