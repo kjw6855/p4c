@@ -190,10 +190,13 @@ class DependencyGraphs {
 
         /// --parser-deps: per-chain header pins. When the chain is rooted at a parser-derived metadata
         /// field, each entry records a header field whose value (through the parser states) determines that
-        /// metadata, so p4symbex can pin it per phase (writePath=true -> write packet/phase 2;
-        /// writePath=false -> read packet/phase 1). Stored as field-path strings (e.g. "hdr.ipv4.id"),
-        /// which are stable across tools/unroll and are exactly what p4symbex needs to pin the packet
-        /// field. Empty for single-control / whole-pipeline chains.
+        /// metadata (writePath=true -> write/phase-2 path; writePath=false -> read/phase-1 path). Stored as
+        /// field-path strings (e.g. "hdr.ipv4.id"), stable across tools/unroll. Empty for single-control /
+        /// whole-pipeline chains.
+        /// NOTE: the per-phase header pinning itself is AUTOMATIC in p4symbex — each phase's emitted input
+        /// packet is the concrete packet from that phase's model (state_dependency_track.cpp), and since
+        /// p4symbex executes the parser, the model constrains the headers so the parser produces the chain's
+        /// metadata. These pins are therefore for labeling / future explicit cross-phase coordination.
         struct ParserDep {
             cstring metaPath;
             cstring hdrPath;
