@@ -56,10 +56,18 @@ ParserDepsRecord computeParserDeps(const IR::P4Parser *parser, P4::ReferenceMap 
                                    P4::TypeMap *typeMap) {
     ParserDepsRecord out;
 
+    // The TRUE packet-header param is the FIRST parameter whose type is a header struct (mirrors the
+    // control-side headerVarName rule, controls.cpp:221). Later params that merely CONTAIN a header-typed
+    // field — e.g. tna `eg_md.key` / `ig_md.reg_idx` (a header instance living inside the metadata struct)
+    // — are metadata, and those header-typed fields are exactly the cross-block carriers we want to seed.
+    // So they must NOT be treated as header source-leaves (which would skip them at the loop below).
     std::set<std::string> headerNames;
     for (auto *p : parser->getApplyParameters()->parameters) {
         auto *t = typeMap->getType(p, true);
-        if (t != nullptr && isHeaderStruct(t, typeMap)) headerNames.insert(p->name.name.string());
+        if (t != nullptr && isHeaderStruct(t, typeMap)) {
+            headerNames.insert(p->name.name.string());
+            break;  // only the packet-header param; metadata structs with header fields stay seedable
+        }
     }
     if (headerNames.empty()) return out;  // no header param -> nothing to source
 
