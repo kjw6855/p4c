@@ -128,8 +128,10 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                     srcInfo.statefulObjectNode != nullptr && dstInfo.statefulObjectNode != nullptr) {
                 // SO --read_from--> CALL for stateful register-action calls.
                 // The CALL vertex is unique per call site, providing per-site identity.
+                // The read_from edge is added AFTER the body walk, gated on hasRead — a write-only
+                // RegisterAction (e.g. `apply(inout val){ val = hdr; }`) overwrites the cell without
+                // reading it, so it must NOT get a spurious read_from.
                 vertex_t soVertex = add_so_vertex(index, srcInfo.statefulObjectNode);
-                add_dependency_edge(index, soVertex, srcVertex, "read_from"_cs);
 
                 // Draw CFG: collect all nodes from srcVertex to dstVertex.
                 //
@@ -165,6 +167,7 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                 stk.push(srcVertex);
                 visited.insert(srcNode);
                 bool hasUpdate = false;
+                bool hasRead = false;
                 const IR::Node *regVar = nullptr;
                 while (!stk.empty()) {
                     auto curVertex = stk.top();
@@ -224,6 +227,11 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                                             isRegVarOrMember)) {
                                 hasUpdate = true;
                             }
+                            // Reads the stateful object iff a body node uses the register cell var.
+                            if (std::any_of(dEsgInfo.useVars.begin(), dEsgInfo.useVars.end(),
+                                            isRegVarOrMember)) {
+                                hasRead = true;
+                            }
                             stk.push(dVertex);
                             visited.insert(dEsgit);
                         }
@@ -233,12 +241,17 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                         if (dEsgInfo.name.startsWith("INPUT: "))
                             regVar = dEsgInfo.defVars.empty() ? nullptr : dEsgInfo.defVars[0];
                     }
-
-                    // If an internal node updates the stateful object,
-                    // add a write_to edge from it to the SO vertex.
-                    if (hasUpdate) {
-                        add_dependency_edge(index, dstVertex, soVertex, "write_to"_cs);
-                    }
+                }
+                // If an internal node updates the stateful object,
+                // add a write_to edge from it to the SO vertex.
+                if (hasUpdate) {
+                    add_dependency_edge(index, dstVertex, soVertex, "write_to"_cs);
+                }
+                // Add read_from only if the action actually reads the register cell. Write-only
+                // RegisterActions overwrite without reading, so they get write_to only (no spurious
+                // read_from to the CALL).
+                if (hasRead) {
+                    add_dependency_edge(index, soVertex, srcVertex, "read_from"_cs);
                 }
             } else {
                 cstring edgeLabel = "depends_on"_cs;
