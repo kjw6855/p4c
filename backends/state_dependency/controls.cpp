@@ -568,6 +568,40 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                 return false;
             }
 
+            // v1model/psa global hash extern:
+            //   void hash<O,T,D,M>(out O result, in HashAlgorithm algo, in T base, in D data, in M max)
+            // Unlike TNA (which computes indices via Hash<>.get() in an assignment, already
+            // header-sourced through preorder(BaseAssignmentStatement)), this is a void extern
+            // *function* that misses the ExternMethod branch and, in the generic fallthrough below,
+            // would record every argument as a plain use — never recording `result` as def'd from
+            // `data`. That leaves a hash-computed register index non-header-sourced, so H2S2K chains
+            // never anchor for v1model. Model it here as: result (def) <- base, data (uses), mirroring
+            // visit_stateful's read-data def/use split. Guard on arch so TNA (no `hash` extern) is inert.
+            if ((arch == "v1model" || arch == "psa") &&
+                    ec->method->name.name == "hash" && params.size() >= 4) {
+                auto v = add_and_connect_vertex(vName, flags, statement);
+                parents = {{v, new EdgeUnconditional()}};
+                auto prev_cur_v = cur_v;
+                cur_v = v;
+                auto oldstate = state;
+                // uses: base (params[2]) and data (params[3], typically a list/struct of headers)
+                state = READ_ONLY;
+                visit(params[2], "base", 1);
+                visit(params[3], "data", 1);
+                // def: result (params[0]) — the hash output is a function of the inputs above
+                state = WRITE_ONLY;
+                if (auto *mem = params[0]->to<IR::Member>()) {
+                    add_variables(mem, getContext(), false);
+                } else if (auto *pe = params[0]->to<IR::PathExpression>()) {
+                    add_variables(pe, getContext(), false);
+                } else {
+                    visit(params[0], "result", 0);
+                }
+                state = oldstate;
+                cur_v = prev_cur_v;
+                return false;
+            }
+
             // psa and tna set drop in meta.drop and meta.drop_ctl, respectively
             if (arch == "v1model") {
                 // v1model specific extern calls
@@ -1195,10 +1229,13 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
             BUG("%s: Member of unexpected type %s", m, m->expr->type);
         }
     } else if (auto *sl = ctxt->node->to<IR::Slice>()) {
-        // TODO: should I check overlapped slices?
-        e = add_variables(sl, ctxt->parent, isUsed, addVar);
-        BUG_CHECK(e == sl, "slice %s is not primary in ControlGraphs::add_variables", sl);
-        e = sl;
+        // A slice X[hi:lo] reads (part of) X, so it depends on the whole X. Register the sliced
+        // operand (sl->e0) rather than treating the slice as an independent variable — otherwise a
+        // value produced as the whole X (e.g. a register read `cm_v`) never reaches a use of its
+        // slice. This is what breaks ddos's H2S2V chain `hdr.val = {cm_v[7:0], cm_v[15:8]}`
+        // (read-through-slice/concat). Over-approximation (a slice use/def => whole-var use/def),
+        // which is sound for the dependency analysis.
+        return add_variables(sl->e0, ctxt->parent, isUsed, addVar);
     } else if (auto *ai = ctxt->node->to<IR::ArrayIndex>()) {
         e = get_primary(ai, ctxt->parent);
     }

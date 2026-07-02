@@ -109,14 +109,45 @@ ParserDepsRecord computeParserDeps(const IR::P4Parser *parser, P4::ReferenceMap 
         return result;
     };
 
+    // Seed `path` (and, transitively, any enclosing HEADER-typed sub-expression of `node`) as a
+    // metadata source carrying `hdrs`. The enclosing-header step matters because the midend flattens
+    // a whole-header parser copy (e.g. `eg_md.key = hdr.key`) into per-field copies, so only the
+    // FIELDS get seeded — but programs use the WHOLE header as an index (e.g. `hash(eg_md.key)`).
+    // Seeding the enclosing header lets `hash(whole header)` inherit a seeded field's provenance.
+    // (eg_md.key is a header field inside the metadata struct; eg_md itself is a struct, not seeded.)
+    auto seedPath = [&](cstring path, const IR::Node *node,
+                        const std::vector<ParserHeaderDep> &hdrs) {
+        auto &acc = out.metaToHeaders[path];
+        for (const auto &hd : hdrs) {
+            bool dup = false;
+            for (const auto &x : acc) if (x.headerPath == hd.headerPath) { dup = true; break; }
+            if (!dup) acc.push_back(hd);
+        }
+        if (out.metaNode.find(path) == out.metaNode.end()) out.metaNode[path] = node;
+    };
+
     for (auto &[lhsPath, refs] : ac.deps) {
         (void)refs;
         if (isHeaderPath(lhsPath)) continue;  // only metadata fields become sources
         auto hdrs = prov(lhsPath);
-        if (!hdrs.empty()) {
-            out.metaToHeaders[lhsPath] = hdrs;
-            out.metaNode[lhsPath] = ac.lhsNode[lhsPath];
-            LOG2("[parser-deps] " << lhsPath << " <- " << hdrs.size() << " header(s)");
+        if (hdrs.empty()) continue;
+        seedPath(lhsPath, ac.lhsNode[lhsPath], hdrs);
+        LOG2("[parser-deps] " << lhsPath << " <- " << hdrs.size() << " header(s)");
+
+        // Walk up the lhs Member chain; seed each enclosing header-typed expression.
+        const IR::Expression *e = nullptr;
+        if (const auto *n = ac.lhsNode[lhsPath]) e = n->to<IR::Expression>();
+        while (const auto *m = (e != nullptr ? e->to<IR::Member>() : nullptr)) {
+            const IR::Expression *parent = m->expr;
+            const auto *pt = parent != nullptr ? typeMap->getType(parent, true) : nullptr;
+            if (pt != nullptr && pt->is<IR::Type_Header>()) {
+                cstring pp = nodePath(parent);
+                if (!isHeaderPath(pp)) {  // never reclassify the real packet-header param
+                    seedPath(pp, parent, hdrs);
+                    LOG2("[parser-deps] " << pp << " <- (enclosing header of " << lhsPath << ")");
+                }
+            }
+            e = parent;
         }
     }
     return out;
