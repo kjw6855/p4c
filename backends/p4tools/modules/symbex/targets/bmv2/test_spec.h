@@ -112,10 +112,26 @@ class IndexMap : public TestObject {
 /// unroll the nested MUX expressions. This implicitly handles overwrites too, as the latest
 /// writes to a particular index appear the earliest in this unraveling phase..
 class Bmv2V1ModelRegisterValue : public IndexMap {
+ private:
+    /// The index at which this register was first accessed (its read/initial index), kept RAW so its
+    /// packet-field SymbolicVariable leaves (e.g. a hash ConcolicVariable's operands) stay intact for
+    /// index-input pinning in the tampering executor. Null when no access index was recorded. Mirrors
+    /// TofinoRegisterValue::initialIndex so bmv2 hash-indexed registers participate in the same
+    /// collectIndexSymVars/pinIndexInputsToPhase1 path as TNA.
+    const IR::Expression *initialIndex;
+
  public:
-    explicit Bmv2V1ModelRegisterValue(const IR::Expression *initialValue);
+    explicit Bmv2V1ModelRegisterValue(const IR::Expression *initialValue,
+                                      const IR::Expression *initialIndex = nullptr);
 
     [[nodiscard]] cstring getObjectName() const override;
+
+    /// True when the register's access index (initialIndex or any recorded write index) is tainted —
+    /// i.e. RANDOM-hash-derived with no recoverable operands. See TestObject::hasTaintedIndex.
+    [[nodiscard]] bool hasTaintedIndex() const override;
+
+    /// The raw initial/read index plus any recorded write indices, for index-input pinning.
+    [[nodiscard]] std::vector<const IR::Expression *> getIndexExpressions() const override;
 
     [[nodiscard]] const Bmv2V1ModelRegisterValue *evaluate(const Model &model,
                                                            bool doComplete) const override;

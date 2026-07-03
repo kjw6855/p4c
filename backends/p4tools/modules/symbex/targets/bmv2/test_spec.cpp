@@ -7,6 +7,7 @@
 
 #include "backends/p4tools/common/control_plane/symbolic_variables.h"
 #include "backends/p4tools/common/lib/model.h"
+#include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
 #include "ir/irutils.h"
@@ -97,15 +98,38 @@ const IR::Constant *IndexMap::getEvaluatedInitialValue() const {
  *  Bmv2V1ModelRegisterValue
  * ========================================================================================= */
 
-Bmv2V1ModelRegisterValue::Bmv2V1ModelRegisterValue(const IR::Expression *initialValue)
-    : IndexMap(initialValue) {}
+Bmv2V1ModelRegisterValue::Bmv2V1ModelRegisterValue(const IR::Expression *initialValue,
+                                                   const IR::Expression *initialIndex)
+    : IndexMap(initialValue), initialIndex(initialIndex) {}
 
 cstring Bmv2V1ModelRegisterValue::getObjectName() const { return "Bmv2V1ModelRegisterValue"_cs; }
+
+bool Bmv2V1ModelRegisterValue::hasTaintedIndex() const {
+    // The read/initial index (recorded at register.read) and any recorded write indices. A
+    // RANDOM-hash-indexed register carries a tainted index here (symbex can't resolve the hash).
+    if (initialIndex != nullptr && Taint::hasTaint(initialIndex)) return true;
+    for (const auto &cond : indexConditions) {
+        if (Taint::hasTaint(cond.getIndex())) return true;
+    }
+    return false;
+}
+
+std::vector<const IR::Expression *> Bmv2V1ModelRegisterValue::getIndexExpressions() const {
+    std::vector<const IR::Expression *> indices;
+    if (initialIndex != nullptr) indices.push_back(initialIndex);
+    for (const auto &cond : indexConditions) {
+        if (cond.getIndex() != nullptr) indices.push_back(cond.getIndex());
+    }
+    return indices;
+}
 
 const Bmv2V1ModelRegisterValue *Bmv2V1ModelRegisterValue::evaluate(const Model &model,
                                                                    bool doComplete) const {
     const auto *evaluatedValue = model.evaluate(getInitialValue(), doComplete);
-    auto *evaluatedRegisterValue = new Bmv2V1ModelRegisterValue(evaluatedValue);
+    // Preserve the access index (evaluated) so an evaluated copy keeps its index provenance.
+    const auto *evaluatedIndex =
+        initialIndex != nullptr ? model.evaluate(initialIndex, doComplete) : nullptr;
+    auto *evaluatedRegisterValue = new Bmv2V1ModelRegisterValue(evaluatedValue, evaluatedIndex);
     for (const auto &cond : indexConditions) {
         const auto *evaluatedCond = cond.evaluate(model, doComplete);
         evaluatedRegisterValue->writeToIndex(evaluatedCond->getEvaluatedIndex(),

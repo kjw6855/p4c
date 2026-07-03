@@ -570,7 +570,11 @@ const Bmv2V1ModelExprStepper::ExternMethodImpls<Bmv2V1ModelExprStepper>
              } else {
                  const auto *inputValue =
                      stepper.programInfo.createTargetUninitialized(readOutput->type, false);
-                 registerValue = new Bmv2V1ModelRegisterValue(inputValue);
+                 // Record the read index (e.g. a hash ConcolicVariable of header fields) so the
+                 // tampering executor can pin its packet-field operands (collectIndexSymVars) and make
+                 // an attacker's Phase-2 write collide with this read's bucket. Mirrors TNA, where
+                 // RegisterAction.execute seeds TofinoRegisterValue::initialIndex.
+                 registerValue = new Bmv2V1ModelRegisterValue(inputValue, index);
                  nextState.addTestObject("registervalues"_cs, externInstance->controlPlaneName(),
                                          registerValue);
              }
