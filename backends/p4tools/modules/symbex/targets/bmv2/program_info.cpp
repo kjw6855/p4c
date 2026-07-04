@@ -152,8 +152,12 @@ std::vector<Continuation::Command> Bmv2V1ModelProgramInfo::processDeclaration(
         } else if (SymbexOptions::get().maxPortNo > 0) {
             cmds.emplace_back(Continuation::Guard(getInPortConstraint(getTargetInputPortVar(),
                             1, SymbexOptions::get().maxPortNo, SymbexOptions::get().allowPorts)));
+            // Out-port lower bound is 0: v1model simple_switch treats egress_spec==0 as a real forward
+            // to port 0 (drop is egress_spec==DROP_PORT, not 0). Excluding 0 wrongly rejected packets
+            // that are not explicitly forwarded (e.g. a tampering attacker packet whose only table is
+            // the excluded sink), which is a valid disposition on this target.
             cmds.emplace_back(Continuation::Guard(getOutPortConstraint(getTargetOutputPortVar(),
-                            1, SymbexOptions::get().maxPortNo, SymbexOptions::get().allowPorts)));
+                            0, SymbexOptions::get().maxPortNo, SymbexOptions::get().allowPorts)));
         }
 
         /// If the the vector of permitted port ranges is not empty, set the restrictions on the
