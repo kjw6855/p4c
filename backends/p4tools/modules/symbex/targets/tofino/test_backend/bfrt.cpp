@@ -96,10 +96,19 @@ inja::json BfRt::getControlPlaneForTable(const TableMatchMap &matches,
             rulesJson["range_matches"].push_back(j);
             rulesJson["needs_priority"] = true;
         } else if (const auto *elem = fieldMatch->to<Ternary>()) {
+            // A ternary key field means the table needs a priority (even if this entry wildcards
+            // the field).
+            rulesJson["needs_priority"] = true;
+            // A ternary field with an all-zero mask is "don't care"; omit it instead of emitting a
+            // 0 mask. Pre-existing (cross-phase) table entries can carry such don't-care ternary
+            // keys, unlike solver-synthesized entries. (Mirrors the bmv2 backend.)
+            const auto *maskConst = elem->getEvaluatedMask()->to<IR::Constant>();
+            if (maskConst != nullptr && maskConst->value == 0) {
+                continue;
+            }
             j["value"] = formatHexExpr(elem->getEvaluatedValue()).c_str();
             j["mask"] = formatHexExpr(elem->getEvaluatedMask()).c_str();
             rulesJson["ternary_matches"].push_back(j);
-            rulesJson["needs_priority"] = true;
         } else if (const auto *elem = fieldMatch->to<LPM>()) {
             j["value"] = formatHexExpr(elem->getEvaluatedValue()).c_str();
             j["prefix_len"] = elem->getEvaluatedPrefixLength()->value.str();
@@ -645,7 +654,13 @@ void BfRt::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBr
     auto optBasePath = getTestBackendConfiguration().fileBasePath;
     BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
     auto incrementedBasePath = optBasePath.value();
-    incrementedBasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId));
+    // Include the tamper direction: HIT→MISS and MISS→HIT are generated in separate passes but
+    // reuse the same (chainId, subTestId) numbering, so without a direction tag the second pass
+    // silently overwrites the first pass's files (losing the HIT→MISS tests, whose sink entry lives
+    // in Phase 1 and is therefore replayable).
+    const std::string dir = testSpec->missToHit ? "m2h" : "h2m";
+    incrementedBasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId) +
+                               "_" + dir);
     incrementedBasePath.replace_extension(".txtpb");
     auto fileStream = std::ofstream(incrementedBasePath);
     inja::render_to(fileStream, getTamperingTestCaseTemplate(), dataJson);

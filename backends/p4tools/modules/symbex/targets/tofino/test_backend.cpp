@@ -29,6 +29,7 @@
 #include "lib/cstring.h"
 #include "lib/exceptions.h"
 
+#include "backends/p4tools/common/lib/table_utils.h"
 #include "backends/p4tools/modules/symbex/options.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/test_backend/bfrt.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/test_backend/ptf.h"
@@ -121,6 +122,34 @@ const TestSpec *TofinoTestBackend::createTestSpec(const ExecutionState *executio
         const auto *const tableConfig = uninterpretedTableConfig->evaluate(*finalModel, true);
         testSpec->addTestObject("tables"_cs, tableName, tableConfig);
     }
+
+    // Also emit "pre-existing" table configs (Phase-1 entries carried into a later phase's initial
+    // state for cross-phase tampering consistency; see state_dependency_track.cpp). They drive HIT
+    // branches in the symbex but were never registered as emittable "tableconfigs", so the assumed
+    // control-plane entries (register-write path, size-1 pins) were missing from the generated test.
+    // Promote them into "tables" so replay installs them too. (Mirrors the bmv2 backend.)
+    const auto preexistingTableConfigs =
+        executionState->getTestObjectCategory("preexisting_tableconfigs"_cs);
+    for (const auto &tablePair : preexistingTableConfigs) {
+        const auto tableName = tablePair.first;
+        // Skip if a synthesized entry was already emitted for this table (avoid duplication).
+        if (testSpec->getTestObject("tables"_cs, tableName, /*checked=*/false) != nullptr) {
+            continue;
+        }
+        const auto *tableConfig = tablePair.second->checkedTo<TableConfig>();
+        // A const-`entries` (or @hidden) table is compiled into the data plane and CANNOT be
+        // installed via the control plane; never emit it as a table entry.
+        TableUtils::TableProperties tableProperties;
+        TableUtils::checkTableImmutability(*tableConfig->getTable(), tableProperties);
+        if (tableProperties.tableIsImmutable) {
+            continue;
+        }
+        // Pre-existing configs are already concrete (evaluated with the source phase's model when
+        // injected), so add directly — re-evaluating against finalModel could re-complete unset
+        // fields under a different model and drift the pinned Phase-1 values.
+        testSpec->addTestObject("tables"_cs, tableName, tableConfig);
+    }
+
     // TODO: Move this to target specific test specification.
     const auto actionProfiles = executionState->getTestObjectCategory("action_profile"_cs);
     for (const auto &testObject : actionProfiles) {

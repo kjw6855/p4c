@@ -127,11 +127,20 @@ inja::json Protobuf::getControlPlaneForTable(cstring tableName, cstring actionNa
             // If the rule has a range match we need to add the priority.
             rulesJson["needs_priority"] = true;
         } else if (const auto *elem = fieldMatch->to<Ternary>()) {
+            // A ternary key field means the table needs a priority (even if this entry wildcards
+            // the field).
+            rulesJson["needs_priority"] = true;
+            // A ternary field with an all-zero mask is "don't care". P4Runtime rejects a match
+            // field with a 0 mask (INVALID_ARGUMENT: "omit match field instead of using 0 mask");
+            // omit the field entirely instead. Pre-existing (cross-phase) table entries can carry
+            // such don't-care ternary keys, unlike solver-synthesized entries.
+            const auto *maskConst = elem->getEvaluatedMask()->to<IR::Constant>();
+            if (maskConst != nullptr && maskConst->value == 0) {
+                continue;
+            }
             j["value"] = formatHexExpressionWithSeparators(*elem->getEvaluatedValue());
             j["mask"] = formatHexExpressionWithSeparators(*elem->getEvaluatedMask());
             rulesJson["ternary_matches"].push_back(j);
-            // If the rule has a range match we need to add the priority.
-            rulesJson["needs_priority"] = true;
         } else if (const auto *elem = fieldMatch->to<LPM>()) {
             j["value"] = formatHexExpressionWithSeparators(*elem->getEvaluatedValue());
             j["prefix_len"] = elem->getEvaluatedPrefixLength()->value.str();
@@ -717,7 +726,13 @@ void Protobuf::writeTestToFile(const TamperingTestSpec *testSpec, cstring select
     auto optBasePath = getTestBackendConfiguration().fileBasePath;
     BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
     auto incrementedbasePath = optBasePath.value();
-    incrementedbasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId));
+    // Include the tamper direction: HIT→MISS and MISS→HIT are generated in separate passes but
+    // reuse the same (chainId, subTestId) numbering, so without a direction tag the second pass
+    // silently overwrites the first pass's files (losing the HIT→MISS tests, whose sink entry lives
+    // in Phase 1 and is therefore replayable).
+    const std::string dir = testSpec->missToHit ? "m2h" : "h2m";
+    incrementedbasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId) +
+                               "_" + dir);
     incrementedbasePath.replace_extension(".txtpb");
     auto protobufFileStream = std::ofstream(incrementedbasePath);
     inja::render_to(protobufFileStream, getTamperingTestCaseTemplate(), dataJson);

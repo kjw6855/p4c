@@ -8,6 +8,7 @@
 #include <boost/multiprecision/cpp_int.hpp>
 
 #include "backends/p4tools/common/lib/model.h"
+#include "backends/p4tools/common/lib/table_utils.h"
 #include "backends/p4tools/common/lib/trace_event.h"
 #include "backends/p4tools/common/lib/util.h"
 #include "ir/ir.h"
@@ -115,6 +116,35 @@ const TestSpec *Bmv2TestBackend::createTestSpec(const ExecutionState *executionS
         const auto tableName = tablePair.first;
         const auto *uninterpretedTableConfig = tablePair.second->checkedTo<TableConfig>();
         const auto *tableConfig = uninterpretedTableConfig->evaluate(*finalModel, true);
+        testSpec->addTestObject("tables"_cs, tableName, tableConfig);
+    }
+
+    // Also emit "pre-existing" table configs (Phase-1 entries carried into a later phase's initial
+    // state for cross-phase consistency; see state_dependency_track.cpp). These drive HIT branches
+    // in the symbex (table_stepper::evalTablePreExistingConfig) but were never registered as
+    // emittable "tableconfigs", so the control-plane entries the tampering test assumes — e.g. the
+    // register-write path table — were missing from the generated test and the attack could not be
+    // reproduced on real hardware. Promote them into "tables" so the replay installs them too.
+    const auto preexistingTableConfigs =
+        executionState->getTestObjectCategory("preexisting_tableconfigs"_cs);
+    for (const auto &tablePair : preexistingTableConfigs) {
+        const auto tableName = tablePair.first;
+        // Skip if a synthesized entry was already emitted for this table (avoid duplication).
+        if (testSpec->getTestObject("tables"_cs, tableName, /*checked=*/false) != nullptr) {
+            continue;
+        }
+        const auto *tableConfig = tablePair.second->checkedTo<TableConfig>();
+        // A const-`entries` (or @hidden) table is compiled into the data plane and CANNOT be
+        // installed via the control plane; never emit it as a table_entry (the replay harness
+        // skips such tables and p4c marks P4Info.is_const_table for them).
+        TableUtils::TableProperties tableProperties;
+        TableUtils::checkTableImmutability(*tableConfig->getTable(), tableProperties);
+        if (tableProperties.tableIsImmutable) {
+            continue;
+        }
+        // Pre-existing configs are already concrete (evaluated with the source phase's model when
+        // injected), so add directly — re-evaluating against finalModel could re-complete unset
+        // fields under a different model and drift the pinned Phase-1 values.
         testSpec->addTestObject("tables"_cs, tableName, tableConfig);
     }
 
