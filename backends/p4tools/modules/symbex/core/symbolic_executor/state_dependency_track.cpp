@@ -1416,7 +1416,10 @@ size_t StateDependencyTracker::runTamperingChain(
                         for (const auto &[keyName, match2] : keyMap2) {
                             if (cond1.tableKeyMap.count(tblName) > 0) {
                                 // Phase 1 HIT this table: prevent the re-solve from picking Phase 2's
-                                // control-plane key (conflicting entries).
+                                // control-plane key (conflicting entries). NEQ is the safe default —
+                                // different keys let both phases install any actions without conflict.
+                                // (A rigorous "pin EQ when the key is register-index-related" pass is
+                                // planned; see the EQ/NEQ-completeness plan.)
                                 p1ExtraConstraints.push_back(
                                     match2->buildTableKeyNeqConstraint(tblName, keyName));
                             } else {
@@ -1435,8 +1438,19 @@ size_t StateDependencyTracker::runTamperingChain(
                                         ToolsVariables::convertReference(keyElem->expression);
                                     if (!fs1->getExecutionState()->exists(stateVar)) continue;
                                     const auto *pktField = fs1->getExecutionState()->get(stateVar);
-                                    p1ExtraConstraints.push_back(
-                                        match2->buildPacketFieldNeqConstraint(pktField));
+                                    const auto *neq =
+                                        match2->buildPacketFieldNeqConstraint(pktField);
+                                    // Skip if Phase-1's own terminal already violates this NEQ (its
+                                    // field value equals Phase-2's match, e.g. a shared
+                                    // register-index / metadata field the attacker pins to collide,
+                                    // or a don't-care ternary key): forcing it unequal is
+                                    // unsatisfiable. Evaluating the constraint under Phase-1's model
+                                    // is a target-agnostic trivial-UNSAT test.
+                                    const auto *neqLit =
+                                        fs1->getFinalModel().evaluate(neq, true)
+                                            ->to<IR::BoolLiteral>();
+                                    if (neqLit != nullptr && !neqLit->value) continue;
+                                    p1ExtraConstraints.push_back(neq);
                                 }
                             }
                         }
