@@ -18,7 +18,10 @@ namespace P4::P4StateDependency {
 
 namespace {
 
-constexpr int kSchemaVersion = 1;
+// v2: cache positions are now captured from POST-midend IR (p4symbex --dump-state-dep-cache) so they
+// re-resolve against p4symbex's lowered program. A v1 cache holds PRE-midend positions that a matching
+// srcHash would not catch, so the bump makes such caches reject cleanly as a version mismatch.
+constexpr int kSchemaVersion = 2;
 
 /// Canonical position key for a node: "line:column:file" (line/column first so the file — which may
 /// contain ':' — is the unparsed tail; the key is only ever compared, never split). Printable so the

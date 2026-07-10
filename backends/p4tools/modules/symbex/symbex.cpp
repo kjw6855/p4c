@@ -105,6 +105,36 @@ const P4StateDependency::StateDependencyResult *buildOrLoadStateDep(const Symbex
     return ::P4::errorCount() > 0 ? nullptr : result;
 }
 
+/// --dump-state-dep-cache: run the in-process state-dependency analysis on @p program (the same
+/// post-midend IR that a later --state-dep-cache load re-resolves against) and serialize both the
+/// Key and Cond SOChains. A self-check re-resolves the just-written cache against @p program so a
+/// subsequent load cannot hit "position not found in program IR". Returns an exit code; the caller
+/// exits before symbolic execution.
+int dumpStateDepCache(const SymbexOptions &opts, const IR::P4Program *program) {
+    const bool isv1 = opts.langVersion == CompilerOptions::FrontendVersion::P4_14;
+    cstring lang = isv1 ? cstring("p4-14") : cstring("p4-16");
+    cstring srcHash =
+        P4StateDependency::computeSourceHash(opts.file.string(), cstring(opts.arch), lang);
+    // SD_ALL so one cache serves both the key (STATE_DEP_TAMPERING) and cond (…_COND) policies.
+    auto result = P4StateDependency::runStateDependencyAnalysis(
+        program, cstring(opts.arch), isv1, {}, P4StateDependency::SD_ALL, opts.wholePipeline,
+        opts.parserDeps);
+    if (::P4::errorCount() > 0) return EXIT_FAILURE;
+    P4StateDependency::serializeChainCache(result, *opts.dumpStateDepCachePath, srcHash,
+                                           cstring(opts.arch));
+    if (::P4::errorCount() > 0) return EXIT_FAILURE;
+    // Self-check: the cache must fully re-resolve against this exact program.
+    P4StateDependency::loadChainCache(*opts.dumpStateDepCachePath, program, srcHash,
+                                      cstring(opts.arch));
+    if (::P4::errorCount() > 0) {
+        error("--dump-state-dep-cache: self-check failed; the written cache did not re-resolve "
+              "against the program it was built from");
+        return EXIT_FAILURE;
+    }
+    std::cout << "Wrote state-dependency cache to " << *opts.dumpStateDepCachePath << "\n";
+    return EXIT_SUCCESS;
+}
+
 /// Pick the path selection algorithm for the symbolic executor.
 SymbolicExecutor *pickExecutionEngine(const SymbexOptions &symbexOptions,
                                       const ProgramInfo &programInfo, AbstractSolver &solver) {
@@ -391,6 +421,13 @@ void Symbex::registerTarget() {
 
 int Symbex::mainImpl(const CompilerResult &compilerResult) {
     const auto &symbexOptions = SymbexOptions::get();
+
+    // --dump-state-dep-cache: build the SOChain cache from this program's post-midend IR and exit
+    // before symbolic execution (used by the nightly cache builder). It re-resolves by construction
+    // against a later --state-dep-cache load, which resolves against this same post-midend IR.
+    if (symbexOptions.dumpStateDepCachePath.has_value()) {
+        return dumpStateDepCache(symbexOptions, &compilerResult.getProgram());
+    }
 
     // Type-check early so we can inject stateDep before produceProgramInfo allocates
     // coverage sets — this ensures the IFDS heap (freed inside runStateDependencyAnalysis

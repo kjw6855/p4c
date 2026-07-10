@@ -561,6 +561,18 @@ SymbexOptions::SymbexOptions()
         "the cache is missing or does not match this program.");
 
     registerOption(
+        "--dump-state-dep-cache", "file",
+        [this](const char *arg) {
+            dumpStateDepCachePath = std::string(arg);
+            return true;
+        },
+        "Run the state-dependency analysis on this program's post-midend IR, write the resulting "
+        "SOChains to this JSON cache, and exit before symbolic execution. Unlike a "
+        "p4c_state_dependency --cache-chains cache, this is built from the same lowered IR that "
+        "--state-dep-cache re-resolves against, so it always re-resolves. Respects --whole-pipeline "
+        "and --parser-deps for the analysis mode.");
+
+    registerOption(
         "--whole-pipeline", nullptr,
         [this](const char *) {
             wholePipeline = true;

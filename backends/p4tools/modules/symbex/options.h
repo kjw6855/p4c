@@ -137,6 +137,13 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// missing or its embedded source hash / arch does not match this program.
     std::optional<std::string> stateDepCachePath;
 
+    /// When set, run the in-process state-dependency analysis on this program's post-midend IR,
+    /// serialize the resulting SOChains to this JSON path, and exit before symbolic execution. The
+    /// cache is written from the exact IR a later --state-dep-cache load re-resolves against, so it
+    /// aligns by construction (unlike a p4c_state_dependency --cache-chains cache, which is built on
+    /// pre-midend IR). Used by the nightly cache builder.
+    std::optional<std::string> dumpStateDepCachePath;
+
     /// Attacker-chosen register value for the tampering scenario (--state-tamper-value).
     /// If set, Phase 2 writes this exact value to the register instead of a random one.
     /// Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).
