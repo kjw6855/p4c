@@ -138,6 +138,16 @@ class TofinoRegisterValue : public IndexMap {
     /// The index this register is initialized at.
     const IR::Expression *initialIndex;
 
+    /// The register's instantiated cell count (the `Register<T,I>(size, ...)` ctor arg), or nullopt
+    /// if it is not a plain constant. Used to fold emitted indices into the real address space.
+    [[nodiscard]] std::optional<big_int> registerCellCount() const;
+
+    /// Fold a concrete index into `[0, cellCount)` when the register size is a power of two (Tofino
+    /// addresses a 2^k-cell array by the low k bits). Returns @p idx unchanged for non-power-of-two
+    /// sizes (hardware mapping is size-specific) or when already in range. Keeps the emitted txtpb
+    /// index on the cell the hardware actually accesses; the symbolic run still uses the raw index.
+    [[nodiscard]] const IR::Constant *maskIndex(const IR::Constant *idx) const;
+
  public:
     explicit TofinoRegisterValue(const IR::Declaration_Instance *decl,
                                  const IR::Expression *initialValue,

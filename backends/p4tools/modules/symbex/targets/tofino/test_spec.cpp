@@ -193,11 +193,34 @@ std::vector<const IR::Expression *> TofinoRegisterValue::getIndexExpressions() c
     return indices;
 }
 
+std::optional<big_int> TofinoRegisterValue::registerCellCount() const {
+    // Register<T, I>(bit<32> size [, T init]) — the first ctor arg is the cell count.
+    if (decl == nullptr || decl->arguments == nullptr || decl->arguments->empty()) {
+        return std::nullopt;
+    }
+    const auto *sizeExpr = decl->arguments->at(0)->expression;
+    if (const auto *sizeConst = sizeExpr->to<IR::Constant>()) {
+        return sizeConst->value;
+    }
+    return std::nullopt;
+}
+
+const IR::Constant *TofinoRegisterValue::maskIndex(const IR::Constant *idx) const {
+    if (idx == nullptr) return idx;
+    auto cells = registerCellCount();
+    if (!cells.has_value() || *cells <= 0) return idx;
+    big_int n = *cells;
+    // Only power-of-two sizes fold cleanly to low-bit addressing; leave other sizes raw (sound).
+    if ((n & (n - 1)) != 0) return idx;
+    if (idx->value >= 0 && idx->value < n) return idx;  // already in range
+    return IR::Constant::get(idx->type, idx->value % n);
+}
+
 const IR::Constant *TofinoRegisterValue::getEvaluatedInitialIndex() const {
     const auto *constant = initialIndex->to<IR::Constant>();
     BUG_CHECK(constant, "Variable is not a constant, has the test object %1% been evaluated?",
               getObjectName());
-    return constant;
+    return maskIndex(constant);
 }
 
 AttackerControlResult TofinoRegisterValue::withAttackerValues(
@@ -256,7 +279,9 @@ AttackerControlResult TofinoRegisterValue::withAttackerValues(
                 feasible = false;
             }
         }
-        randReg->writeToIndex(concreteIdx, attackerVal);
+        // Fold the emitted cell index into the register's real address space (the symbolic run
+        // used the raw CRC/hash index; the harness must pre-set/read the cell the hardware accesses).
+        randReg->writeToIndex(maskIndex(concreteIdx), attackerVal);
     }
     return {randReg, modelOverrides, feasible};
 }

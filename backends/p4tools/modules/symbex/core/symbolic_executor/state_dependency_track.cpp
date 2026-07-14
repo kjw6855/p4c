@@ -1389,9 +1389,61 @@ size_t StateDependencyTracker::runTamperingChain(
                 // round-robin will try the next Phase-2 packet (which may run a different action
                 // writing a flipping value). Emitting it would produce an un-replayable test.
                 if (!soFeasible) {
-                    printInfo("[Tampering] Phase 2 packet for chain id=%1%: constant register write "
-                              "does not flip sink '%2%'; trying another Phase-2 packet.",
-                              chain.id, chain.soName);
+                    // A single write does not flip the sink (its value equals the Phase-1 HIT key).
+                    // For a counter/accumulator register the value is not attacker-chosen; replaying
+                    // the same Phase-2 packet drives the register away from the HIT key until the sink
+                    // MISSes. Try to accumulate; only give up (and let the round-robin try another
+                    // packet) if no packet count up to the cap flips it. Mirrors the MISS→HIT path.
+                    auto [ipAcc, opAcc] = getPortPair(fs2);
+                    size_t repeat = 1;
+                    const auto *fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2,
+                                                           ipAcc, inputPortSymExpr, /*p3Target=*/0,
+                                                           repeat);
+                    if (fs3 == nullptr) {
+                        printInfo("[Tampering] Phase 2 packet for chain id=%1%: constant register write "
+                                  "does not flip sink '%2%' (no accumulation up to cap); trying another "
+                                  "Phase-2 packet.",
+                                  chain.id, chain.soName);
+                        continue;
+                    }
+                    // Accumulated HIT→MISS flip confirmed on fs3. Emit the real accumulated value from
+                    // fs3's SO-register read (its index conditions carry the flipped value at the
+                    // pinned index), re-deriving concrete Phase-1/Phase-2 packets so their CRC hashes
+                    // resolve eagerly and processPhase re-solves SAT — exactly as MISS→HIT does.
+                    const auto &model3 = fs3->getFinalModel();
+                    const auto *fs3SoReg = fs3->getExecutionState()->getTestObject(
+                        "registervalues"_cs, chain.soName, false);
+                    if (fs3SoReg == nullptr) continue;
+                    std::map<cstring, const TestObject *> accRegValues;
+                    accRegValues[chain.soName] =
+                        fs3SoReg->withAttackerValues(model3, SymbexOptions::get().stateTamperValue, {})
+                            .testObject;
+                    std::map<cstring, cstring> accRegSinkTables;
+                    accRegSinkTables[chain.soName] = chain.sinkTableControlPlaneName;
+                    const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
+                                                             inputPortSymExpr, /*isPhase1=*/true, {});
+                    std::map<cstring, const TestObject *> p1Carry;
+                    for (const auto &[regName, regObj] :
+                         fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
+                        p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
+                    const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ipAcc,
+                                                             inputPortSymExpr, /*isPhase1=*/false,
+                                                             p1Carry);
+                    TamperingFinalState tsAcc{*fs1c, *fs2c, false, cond1.inputPort, cond1.outputPort,
+                                              ipAcc, opAcc, accRegValues, {}, accRegSinkTables, {}};
+                    tsAcc.chainId = chain.id;
+                    tsAcc.subTestId = ++subTestId;
+                    tsAcc.phase2RepeatCount = repeat;  // HIT→MISS emits hit_phase=1 (missToHit=false)
+                    if (repeat > 1)
+                        printInfo("[Tampering HIT→MISS] chain id=%1% sub=%2%: accumulation needs %3% "
+                                  "Phase-2 packet(s) to flip the sink.",
+                                  chain.id, tsAcc.subTestId, repeat);
+                    if (int mgid = evalMulticastGroup(fs1); mgid >= 0) {
+                        tsAcc.usesMulticast = true;
+                        tsAcc.multicastGroupId = mgid;
+                    }
+                    callBack(tsAcc);
+                    if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
                     continue;
                 }
                 auto [ip2, op2] = getPortPair(fs2);
