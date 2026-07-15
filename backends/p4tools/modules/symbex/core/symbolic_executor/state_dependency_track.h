@@ -278,6 +278,18 @@ class StateDependencyTracker : public SymbolicExecutor {
         const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
         const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage = false);
 
+    /// Attack-attribution replay: runs a LEGIT Phase 3 for @p fs1 — Phase 1's OWN register writes
+    /// carried and NO attacker Phase-2 write, with Phase 1's sink-table entry pinned (see the
+    /// file-local pinSinkEntryForLegit) — and returns the sink/condition outcome via evalSinkFlip
+    /// (1 HIT/true, 0 MISS/false, -1 no legit terminal). A tampering test is attacker-attributable —
+    /// and thus emitted — only when this legit outcome differs from the tampered target: when they
+    /// match, the victim's own packet (e.g. a monotonic self-set RegisterAction) causes the flip and
+    /// the attacker write is redundant (a false positive with no hardware divergence). Shared by
+    /// runTamperingChain (Key sink) and runConditionChain (condition sink).
+    int legitPhase3Sink(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                        const ExecutionState &initState, const FinalState *fs1, int inputPort,
+                        const IR::Expression *inputPortSymExpr);
+
     /// Pins @p init's input packet (every pktvar_N), packet size, and input port to @p fs1's model
     /// values, so a cloned execution replays fs1's exact packet/flow. Used by runSymbolicPhase3 (to
     /// replay Phase 1 in Phase 3) and as the whole-packet fallback for a RANDOM-hash (tainted) index.

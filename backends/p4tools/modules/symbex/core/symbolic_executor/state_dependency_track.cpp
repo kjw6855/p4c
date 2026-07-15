@@ -746,6 +746,12 @@ void StateDependencyTracker::concretizeInputPacket(ExecutionState &init, const F
         new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
 }
 
+// Set by legitPhase3Sink around its attack-attribution replay: when true, runSymbolicPhase3 ALSO
+// pins Phase 1's SINK-table entry, so a freshly-synthesised sink entry cannot manufacture a HIT/MISS
+// unrelated to the register and defeat the check. File-local because both the setter (legitPhase3Sink)
+// and the sole reader (runSymbolicPhase3) live in this translation unit.
+static bool pinSinkEntryForLegit = false;
+
 const FinalState *StateDependencyTracker::runSymbolicPhase3(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
@@ -798,11 +804,15 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
         const auto &model1 = fs1->getFinalModel();
         const auto *es1 = fs1->getExecutionState();
         for (const auto &[tblName, tbl] : tableByName_) {
-            if (tblName == chain.sinkTableControlPlaneName) continue;  // sink keeps its own entries
+            // Normally the sink keeps its own entries (the tamper acts on its key). For an
+            // attack-attribution legit replay (pinSinkEntry) the sink must ALSO use Phase 1's exact
+            // entry, else a freshly-synthesised sink entry could manufacture a HIT/MISS unrelated to
+            // the register and defeat the check.
+            if (!pinSinkEntryForLegit && tblName == chain.sinkTableControlPlaneName) continue;
             phase3SkipTables.push_back(tblName);
         }
         for (const auto &[tblName, tblObj] : es1->getTestObjectCategory("tableconfigs"_cs)) {
-            if (tblName == chain.sinkTableControlPlaneName) continue;
+            if (!pinSinkEntryForLegit && tblName == chain.sinkTableControlPlaneName) continue;
             const auto *evalCfg = tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
             if (evalCfg != nullptr)
                 phase3Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
@@ -818,6 +828,21 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
         runPhase(phase3Init, phase3States, 1);
     }
     return phase3States.empty() ? nullptr : phase3States[0];
+}
+
+int StateDependencyTracker::legitPhase3Sink(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr) {
+    // Carry Phase 1's OWN register writes (no attacker Phase-2 write) into the replay.
+    std::map<cstring, const TestObject *> p1OwnCarry;
+    for (const auto &[regName, regObj] :
+         fs1->getExecutionState()->getTestObjectCategory("registervalues"_cs))
+        p1OwnCarry[regName] = regObj->evaluateForCarry(fs1->getFinalModel());
+    pinSinkEntryForLegit = true;
+    const auto *legit = runSymbolicPhase3(chain, initState, fs1, inputPort, inputPortSymExpr,
+                                          p1OwnCarry, /*keepWriteCoverage=*/false);
+    pinSinkEntryForLegit = false;
+    return legit == nullptr ? -1 : evalSinkFlip(legit);
 }
 
 const FinalState *StateDependencyTracker::reDeriveConcretePhase(
@@ -1313,6 +1338,7 @@ size_t StateDependencyTracker::runTamperingChain(
         // Phase-1 read-state: every Phase-1 state contributes one sub-test before any gets a second.
         size_t subTestId = 0;
         std::vector<size_t> cursor(phase1States.size(), 0);
+        std::map<size_t, int> legitSinkByP1;  // memoized attack-attribution per Phase-1 state
         bool chainCapHit = false;
         while (!chainCapHit) {
             bool emittedThisRound = false;
@@ -1321,6 +1347,26 @@ size_t StateDependencyTracker::runTamperingChain(
                 if (cursor[i] >= fs2List.size()) continue;  // Phase-1 state exhausted
                 const auto *fs1 = phase1States[i];
                 const auto &cond1 = phase1Conditions[phase1StateToCondition.at(i)];
+                // Attack-attribution gate (memoized per Phase-1 state): if the victim's OWN Phase-1
+                // register write already drives the sink to MISS when Phase 1 is replayed (a monotonic
+                // self-set RegisterAction the victim runs), the flip is NOT caused by the attacker —
+                // the Phase-2 write is redundant, so drain this bucket. This is the legit-vs-attack
+                // differential the single-run sinkActionsDiverge gate cannot see. (legitSink == -1 =
+                // no legit terminal → cannot rule out → fall through and emit.)
+                auto lsIt = legitSinkByP1.find(i);
+                int legitSink =
+                    (lsIt != legitSinkByP1.end())
+                        ? lsIt->second
+                        : (legitSinkByP1[i] =
+                               legitPhase3Sink(chain, initState, fs1, cond1.inputPort,
+                                               inputPortSymExpr));
+                if (legitSink == 0) {
+                    printInfo("[Tampering] HIT→MISS chain id=%1%: victim's own Phase-1 write already "
+                              "MISSes sink '%2%' on replay (redundant with attacker); skipping.",
+                              chain.id, chain.sinkTableControlPlaneName);
+                    cursor[i] = fs2List.size();
+                    continue;
+                }
                 const auto *fs2 = fs2List[cursor[i]++];
                 // Sink action-divergence gate: a HIT→MISS flip is observable only if the sink's HIT
                 // action (Phase 1) and its default (MISS) action write different output state. If
@@ -1551,6 +1597,17 @@ size_t StateDependencyTracker::runTamperingChain(
         bool d1Drop = false;
         int d1Port = -1;
         evalDisposition(fs1, d1Drop, d1Port);
+
+        // Attack-attribution: if the victim's OWN Phase-1 write already drives the sink to HIT when
+        // Phase 1 is replayed (a self-set RegisterAction), the MISS→HIT flip is self-induced, not
+        // attacker-caused, for every Phase-2 packet under this Phase-1 state — skip the whole state.
+        // (legitSink == -1 = no legit terminal → cannot rule out → fall through and emit.)
+        if (legitPhase3Sink(chain, initState, fs1, cond1.inputPort, inputPortSymExpr) == 1) {
+            printInfo("[Tampering] MISS→HIT chain id=%1%: victim's own Phase-1 write already HITs sink "
+                      "'%2%' on replay (redundant with attacker); skipping.",
+                      chain.id, chain.sinkTableControlPlaneName);
+            continue;
+        }
 
         for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
             if (emitted >= maxPerChain) break;
@@ -1825,6 +1882,19 @@ size_t StateDependencyTracker::runConditionChain(
     for (size_t i = 0; i < phase1States.size() && emitted < maxPerChain; ++i) {
         const auto *fs1 = phase1States[i];
         const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
+        // Attack-attribution gate (H2S2C analog of the H2S2K gate in runTamperingChain, sharing the
+        // legitPhase3Sink member): if the victim's OWN Phase-1 write already drives the condition to
+        // the tampered branch when Phase 1 is replayed (a self-set RegisterAction), the flip is
+        // self-induced, not attacker-caused, for every Phase-2 packet under this Phase-1 state — skip
+        // it. (legit == -1 = no legit terminal -> cannot rule out -> fall through and emit.) For a
+        // condition chain evalSinkFlip dispatches to evalCondition and pinSinkEntryForLegit is inert
+        // (no sink table, so runSymbolicPhase3 pins every table to Phase 1 regardless).
+        if (legitPhase3Sink(chain, initState, fs1, cond1.inputPort, inputPortSymExpr) == p3Target) {
+            printInfo("[Tampering H2S2C] chain id=%1%: victim's own Phase-1 write already flips the "
+                      "condition to the tampered branch on replay (redundant with attacker); skipping.",
+                      chain.id);
+            continue;
+        }
         for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
             if (emitted >= maxPerChain) break;
             const auto &model2 = fs2->getFinalModel();
