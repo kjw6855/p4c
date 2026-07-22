@@ -29,6 +29,39 @@
 
 namespace P4::P4StateDependency {
 
+namespace {
+/// Whole-program visitor: enumerate declared stateful objects by extern type, keyed by
+/// controlPlaneName() (the same name the dep-graph uses for an SO — see add_so_vertex). This is
+/// the authoritative D_all/D_crao/D_rao denominator, independent of any dependency chain, so it
+/// counts registers a chain never reaches (e.g. RegisterAction registers with a non-header index).
+/// RegisterAction is intentionally skipped: its SO is the backing Register it wraps (a separate
+/// Declaration_Instance we DO collect), so counting the action too would double-count the register.
+class StatefulInstanceCollector : public Inspector {
+    std::map<cstring, cstring> &out;
+ public:
+    explicit StatefulInstanceCollector(std::map<cstring, cstring> &o) : out(o) {}
+    bool preorder(const IR::Declaration_Instance *di) override {
+        const IR::Type *t = di->type;
+        if (const auto *ts = t->to<IR::Type_Specialized>()) t = ts->baseType;  // Register<T,I> etc.
+        cstring tn;
+        if (const auto *tnn = t->to<IR::Type_Name>()) tn = tnn->path->name.name;
+        else if (const auto *te = t->to<IR::Type_Extern>()) tn = te->name.name;
+        cstring type;
+        if (tn == "Register" || tn == "register") type = "Register"_cs;
+        else if (tn == "Counter") type = "Counter"_cs;
+        else if (tn == "Meter") type = "Meter"_cs;
+        if (!type.isNullOrEmpty()) out[di->controlPlaneName()] = type;
+        return true;
+    }
+    bool preorder(const IR::P4Table *tbl) override {
+        const auto *bp = tbl->getBooleanProperty("add_on_miss"_cs);  // PNA add-on-miss = stateful
+        if (bp != nullptr && bp->value) out[tbl->controlPlaneName()] = "AddOnMiss"_cs;
+        return true;
+    }
+};
+}  // namespace
+
+
 using namespace P4::literals;
 
 StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
@@ -92,8 +125,35 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     hvec_map<cstring, std::vector<TabVertex>> stateVars;
     hvec_map<cstring, IDEPass::DepEdgeMap> depEdgeMaps;
 
+    // Metrics helper (binary mode only): collect the distinct names of SO vertices that have an
+    // incoming "write_to" edge in dep-graph @index — i.e. the stateful objects written by this
+    // graph's source (action param / header). Must be called before pruning so non-sink-reaching
+    // writes are still counted.
+    auto collectWrittenSOs = [](DependencyGraphs *dg, size_t i, std::set<cstring> &out) {
+        const auto &g = dg->get_graph(i);
+        for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
+            auto v = *vit;
+            if (!g[v].isSO) continue;
+            for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                if (g[*ei].label == "write_to"_cs) { out.insert(g[v].name); break; }
+            }
+        }
+    };
+    // Every distinct SO (register) appearing in dep-graph @index, by clean SO name (g[v].name).
+    // Used for the D_all denominator — the CFG statement vertices carry per-access names, so we
+    // enumerate the dep-graph SO vertices instead.
+    auto collectAllSOs = [](DependencyGraphs *dg, size_t i, std::set<cstring> &out) {
+        const auto &g = dg->get_graph(i);
+        for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit)
+            if (g[*vit].isSO) out.insert(g[*vit].name);
+    };
+
     /* I. A2S2V: action parameter → stateful object → packet field */
     auto *a2s2vGraphs = new DependencyGraphs(numGraphs);
+    // A2S2K / A2S2C: action parameter → stateful object → {table match key, condition}. Reuse the
+    // action first-hop (base edges + stateVars/depEdgeMaps) with a KEY_ONLY / cond sink pass.
+    auto *a2s2kGraphs = new DependencyGraphs(numGraphs);
+    auto *a2s2cGraphs = new DependencyGraphs(numGraphs);
     auto *sdChecker = new ActParamToStateful(refMap, typeMap,
             &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL);
     if (categories & SD_A2S2V) {
@@ -108,6 +168,11 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                     g, sg.graphProps[i], refMap, typeMap, ptsEdgeMap, stateVarMap, true);
             a2s2vGraphs->add_dependencies_from_map(i, g, ptsEdgeMap);
             a2s2vGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            // Same base action→SO edges feed the A2S2K / A2S2C sink passes.
+            a2s2kGraphs->add_dependencies_from_map(i, g, ptsEdgeMap);
+            a2s2kGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            a2s2cGraphs->add_dependencies_from_map(i, g, ptsEdgeMap);
+            a2s2cGraphs->add_dependencies_from_map(i, g, stateVarMap);
             depEdgeMaps[graphName] = convert_dep_edges(ptsEdgeMap);
             for (const auto &ve : ptsEdgeMap)
                 for (const auto &dst : ve.second)
@@ -125,6 +190,62 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             auto graphName = cstring(boost::get_property(*g, boost::graph_name));
             a2s2vGraphs->add_dependencies_from_map(i, g,
                     a2s2vPdChecker.getFoundDepEdges(graphName), true);
+        }
+    }
+    // reg_A2S: distinct SOs written by an action param (collect from the unpruned a2s2v base graph).
+    // Also seed D_all with every SO seen on the action side.
+    if (!graphsDir.empty() && (categories & SD_A2S2V)) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            collectWrittenSOs(a2s2vGraphs, i, result.regA2S);
+            collectAllSOs(a2s2vGraphs, i, result.allStatefulObjects);
+        }
+    }
+    // A2S2K: action param → SO → table match key (KEY sinks only).
+    if (categories & SD_A2S2K) {
+        Util::ScopedTimer actSoToKeyOnlyTimer("ACT->SO->KEY");
+        StatefulToKey a2s2kPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "A2S2V"_cs, KeySinkMode::KEY_ONLY);
+        program->apply(a2s2kPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2kGraphs->add_dependencies_from_map(i, g,
+                    a2s2kPdChecker.getFoundDepEdges(graphName), true);
+        }
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (a2s2kGraphs->leaves[i].empty()) continue;
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2kGraphs->add_so_constant_edges(i, g);
+            a2s2kGraphs->merge_nodes_without_variable(i);
+            a2s2kGraphs->prune_nodes_not_reaching_leaves(i);
+            a2s2kGraphs->prune_call_nodes_without_return(i, g);
+            result.dataWriteA2SKeyChains[graphName] = a2s2kGraphs->get_data_write_so_chains(i, g);
+        }
+    }
+    // A2S2C: action param → SO → condition (new StatefulToCond pass on the action first-hop).
+    if (categories & SD_A2S2C) {
+        Util::ScopedTimer actSoToCondTimer("ACT->SO->COND");
+        StatefulToCond a2s2cPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "A2S2V"_cs);
+        program->apply(a2s2cPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2cGraphs->add_dependencies_from_map(i, g,
+                    a2s2cPdChecker.getFoundDepEdges(graphName), true);
+        }
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (a2s2cGraphs->leaves[i].empty()) continue;
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2cGraphs->add_so_constant_edges(i, g);
+            a2s2cGraphs->merge_nodes_without_variable(i);
+            a2s2cGraphs->prune_nodes_not_reaching_leaves(i);
+            a2s2cGraphs->prune_call_nodes_without_return(i, g);
+            result.dataWriteA2SCondChains[graphName] = a2s2cGraphs->get_data_write_so_chains(i, g);
         }
     }
     if (categories & SD_A2S2V) {
@@ -248,6 +369,16 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
 
+    // reg_H2S: distinct SOs written by a header (collect from the unpruned h2s2k base graph;
+    // all three h2s2* graphs share the same base HDR→SO write edges). Also seed D_all with every
+    // SO seen on the header side (covers read-only registers not written by an action param).
+    if (!graphsDir.empty() && (categories & (SD_KEY | SD_HEADER | SD_COND))) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            collectWrittenSOs(h2s2kGraphs, i, result.regH2S);
+            collectAllSOs(h2s2kGraphs, i, result.allStatefulObjects);
+        }
+    }
+
     // Merge and prune dep graphs before chain extraction.
     // prune_nodes_not_reaching_leaves must run before any category analysis.
     // Full/merged exports are emitted here when graphsDir is set (before pruning removes nodes).
@@ -330,6 +461,28 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             result.dataWriteCondChains[graphName] = h2s2cGraphs->get_data_write_so_chains(i, esg);
         }
     }
+
+    // Metrics (binary mode): distinct-SO name sets for the register report. The *2S2[KC] sets are
+    // the SOs on a chain to that sink; allStatefulObjects (D_all) is every STATEFUL vertex.
+    if (!graphsDir.empty()) {
+        auto addChainSOs = [](const std::map<cstring, std::vector<DependencyGraphs::SOChain>> &m,
+                              std::set<cstring> &out) {
+            for (const auto &[gn, chains] : m)
+                for (const auto &c : chains) out.insert(c.soName);
+        };
+        addChainSOs(result.dataWriteA2SKeyChains, result.regA2S2K);
+        addChainSOs(result.dataWriteA2SCondChains, result.regA2S2C);
+        addChainSOs(result.dataWriteKeyChains, result.regH2S2K);
+        addChainSOs(result.dataWriteCondChains, result.regH2S2C);
+        // allStatefulObjects (dep-graph SO vertices) was seeded at the reg_A2S/reg_H2S points above
+        // and is kept as a cross-check; the authoritative D_all denominator is soTypeByName below.
+        StatefulInstanceCollector soCollector(result.soTypeByName);
+        program->apply(soCollector);
+    }
+    // a2s2k/a2s2c graphs are metrics-only and never returned; their chains are already copied into
+    // result.dataWriteA2S{Key,Cond}Chains, so free them in both modes.
+    delete a2s2kGraphs;
+    delete a2s2cGraphs;
 
     // --parser-deps: attach per-chain header pins (chain.parserDeps) from the parser-state record, for
     // chains rooted at parser-derived metadata (used by p4symbex to pin header values per phase).

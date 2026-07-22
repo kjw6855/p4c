@@ -2,6 +2,8 @@
 #define BACKENDS_STATE_DEPENDENCY_ANALYSIS_H_
 
 #include <filesystem>
+#include <map>
+#include <set>
 #include <unordered_set>
 
 #include <boost/dynamic_bitset.hpp>
@@ -59,6 +61,26 @@ struct StateDependencyResult {
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteKeyChains;
     // Chains with data write to condition
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteCondChains;
+    // A2S2K: action parameter -> stateful object -> table match key
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteA2SKeyChains;
+    // A2S2C: action parameter -> stateful object -> condition
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteA2SCondChains;
+
+    // Distinct stateful-object (register) NAME sets, populated only in binary mode
+    // (graphsDir set) for the metrics report. First-hop sets (regA2S/regH2S) are the SOs
+    // written by an action param / header; the *2S2[KC] sets are the SOs lying on a chain to
+    // that sink; allStatefulObjects is every STATEFUL vertex (the D_all denominator).
+    std::set<cstring> regA2S;
+    std::set<cstring> regH2S;
+    std::set<cstring> regA2S2K;
+    std::set<cstring> regA2S2C;
+    std::set<cstring> regH2S2K;
+    std::set<cstring> regH2S2C;
+    std::set<cstring> allStatefulObjects;
+    // Declared stateful-object instances -> extern type (Register/Counter/Meter/AddOnMiss), keyed
+    // by controlPlaneName() so the names match the dep-graph SO names. This is the authoritative
+    // D_all/D_crao/D_rao denominator (a whole-program visitor, independent of any dep chain).
+    std::map<cstring, cstring> soTypeByName;
 
     // --parser-deps: merged parser-state dependency record (header-derived metadata -> header fields),
     // used to seed sources and (in p4symbex) pin header values per phase. Empty otherwise.
@@ -75,7 +97,9 @@ enum SDCategories : unsigned {
     SD_KEY = 2u,
     SD_HEADER = 4u,
     SD_COND = 8u,
-    SD_ALL = SD_A2S2V | SD_KEY | SD_HEADER | SD_COND,
+    SD_A2S2K = 16u,   // action parameter -> stateful object -> table match key
+    SD_A2S2C = 32u,   // action parameter -> stateful object -> condition
+    SD_ALL = SD_A2S2V | SD_KEY | SD_HEADER | SD_COND | SD_A2S2K | SD_A2S2C,
 };
 
 /// Run the full state-dependency analysis (A2S2V and H2S2V) on a compiled P4 program.

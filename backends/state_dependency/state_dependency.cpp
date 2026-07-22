@@ -232,6 +232,11 @@ int main(int argc, char *const argv[]) {
         size_t dataWriteToKeyTotal = 0;
         size_t dataWriteToHdrTotal = 0;
         size_t dataWriteToCondTotal = 0;
+        // A2S2K / A2S2C chain totals (sink-agnostic to the per-graph continue below).
+        size_t a2s2kTotal = 0;
+        size_t a2s2cTotal = 0;
+        for (const auto &[gn, chains] : sdResult.dataWriteA2SKeyChains) a2s2kTotal += chains.size();
+        for (const auto &[gn, chains] : sdResult.dataWriteA2SCondChains) a2s2cTotal += chains.size();
 
         std::cout << "\n================ State Dependency Counts ================\n";
         for (size_t i = 0; i < numGraphs; i++) {
@@ -259,7 +264,32 @@ int main(int argc, char *const argv[]) {
                   << "    (2) DATA writes to key:     " << dataWriteToKeyTotal << "\n"
                   << "    (3) DATA writes to header:  " << dataWriteToHdrTotal << "\n"
                   << "    (4) DATA writes to cond:    " << dataWriteToCondTotal << "\n"
-                  << "=========================================================\n\n";
+                  << "    (6) A2S2K DATA writes to key:  " << a2s2kTotal << "\n"
+                  << "    (7) A2S2C DATA writes to cond: " << a2s2cTotal << "\n";
+        // Distinct stateful-object (register) name sets — one line per relation, plus ALL (D_all).
+        // read_log parses the space-separated names after each label into a set.
+        auto printSOSet = [](const char *label, const std::set<cstring> &s) {
+            std::cout << "    SOs[" << label << "]:";
+            for (const auto &n : s) std::cout << " " << n;
+            std::cout << "\n";
+        };
+        printSOSet("A2S", sdResult.regA2S);
+        printSOSet("H2S", sdResult.regH2S);
+        printSOSet("A2S2K", sdResult.regA2S2K);
+        printSOSet("A2S2C", sdResult.regA2S2C);
+        printSOSet("H2S2K", sdResult.regH2S2K);
+        printSOSet("H2S2C", sdResult.regH2S2C);
+        printSOSet("ALL", sdResult.allStatefulObjects);
+        // Per-type declared-SO sets → the D_all/D_crao/D_rao denominators (read_log unions them).
+        // Always emit the four so the denominator columns are present even at 0.
+        std::map<cstring, std::set<cstring>> byType;
+        for (const auto &[soName, soType] : sdResult.soTypeByName) byType[soType].insert(soName);
+        for (const char *type : {"Register", "Counter", "Meter", "AddOnMiss"}) {
+            std::cout << "    SOs[TYPE:" << type << "]:";
+            for (const auto &n : byType[cstring(type)]) std::cout << " " << n;
+            std::cout << "\n";
+        }
+        std::cout << "=========================================================\n\n";
     }
 
     {
