@@ -97,8 +97,12 @@ std::map<cstring, std::vector<DependencyGraphs::SOChain>> resolveCategory(
             DependencyGraphs::SOChain chain;
             chain.id = static_cast<size_t>(intField(co, "id"));
             chain.soName = strField(co, "soName");
-            chain.sinkTableControlPlaneName = strField(co, "sinkTable");
-            chain.sinkKeyName = strField(co, "sinkKey");
+            // Older caches serialized an absent table/key as the literal "<null>" (a null cstring's
+            // stream form). Normalize it back to empty so isNullOrEmpty holds and a condition-sink
+            // chain is not misrouted into the table-sink path. See serializeChainCache.
+            auto denull = [](cstring s) { return s == cstring("<null>") ? cstring::empty : s; };
+            chain.sinkTableControlPlaneName = denull(strField(co, "sinkTable"));
+            chain.sinkKeyName = denull(strField(co, "sinkKey"));
             chain.isUpdate = boolField(co, "isUpdate");
             auto resolveList = [&](const char *key,
                                    std::map<DependencyGraphs::vertex_t, const IR::Node *> &dst) {
@@ -176,8 +180,13 @@ void serializeChainCache(const StateDependencyResult &result, const std::string 
         auto *o = new Util::JsonObject();
         o->emplace("id", chain.id);
         o->emplace("soName", chain.soName);
-        o->emplace("sinkTable", chain.sinkTableControlPlaneName);
-        o->emplace("sinkKey", chain.sinkKeyName);
+        // A null cstring streams as the literal "<null>" (lib/cstring.h), which reads back as a
+        // NON-empty string and would misroute a condition-sink chain (empty sinkTable) into the
+        // table-sink path. Emit "" for an absent table/key so the loader's isNullOrEmpty holds.
+        o->emplace("sinkTable", chain.sinkTableControlPlaneName.isNullOrEmpty()
+                                    ? cstring::empty
+                                    : chain.sinkTableControlPlaneName);
+        o->emplace("sinkKey", chain.sinkKeyName.isNullOrEmpty() ? cstring::empty : chain.sinkKeyName);
         o->emplace("isUpdate", chain.isUpdate);
         auto *w = new Util::JsonArray();
         for (const auto &[v, node] : chain.writeNodes) {

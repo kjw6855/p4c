@@ -247,14 +247,37 @@ AttackerControlResult TofinoRegisterValue::withAttackerValues(
             // it into the Phase-2 packet via a model override.
             attackerVal = [&]() -> const IR::Constant * {
                 if (fixedValue.has_value()) {
-                    if (isForbidden(*fixedValue)) {
-                        ::P4::warning(
-                            "[Tampering] --state-tamper-value 0x%1% collides with a Phase-1 "
-                            "table-key value (HIT would be preserved in Phase 3). Using it "
-                            "anyway since the value was explicitly requested.",
-                            fixedValue->str(0, std::ios_base::hex));
+                    const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
+                    if (bitsType == nullptr) {
+                        return IR::Constant::get(concreteVal->type, *fixedValue);
                     }
-                    return IR::Constant::get(concreteVal->type, *fixedValue);
+                    // The requested value is width-limited by the register cell: 0xdeadbeef on a
+                    // bit<1> lock truncates to 1. Test the TRUNCATED value against the Phase-1
+                    // HIT-key set (`forbiddenValues`) — a raw-value test wrongly passes here and
+                    // emits a non-flipping tamper (e.g. re-writing the victim's own `acquire`=1).
+                    big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());
+                    big_int truncated = *fixedValue & maxVal;
+                    if (!isForbidden(truncated)) {
+                        return IR::Constant::get(bitsType, truncated);
+                    }
+                    // The truncated request collides with a HIT-key value (HIT preserved in
+                    // Phase 3 -> no sink flip). Override it with a flipping value: only
+                    // |forbiddenValues| values are forbidden, so [0 .. |forbidden|] holds one.
+                    for (big_int cand = 0; cand <= maxVal && cand <= big_int(forbiddenValues.size());
+                         ++cand) {
+                        if (!isForbidden(cand)) {
+                            ::P4::warning(
+                                "[Tampering] --state-tamper-value 0x%1% truncates to a Phase-1 "
+                                "table-key value at width %2%; using 0x%3% instead so the sink "
+                                "actually flips.",
+                                fixedValue->str(0, std::ios_base::hex), bitsType->width_bits(),
+                                cand.str(0, std::ios_base::hex));
+                            return IR::Constant::get(bitsType, cand);
+                        }
+                    }
+                    // Register too narrow to avoid the HIT set — keep the request; the
+                    // differential oracle is the final judge.
+                    return IR::Constant::get(bitsType, truncated);
                 }
                 const auto *bitsType = concreteVal->type->to<IR::Type_Bits>();
                 big_int maxVal = IR::getMaxBvVal(bitsType->width_bits());

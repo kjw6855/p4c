@@ -605,6 +605,12 @@ int StateDependencyTracker::evalCondition(const FinalState *fs) const {
     const auto &condVar = CmdStepper::getConditionVar(currentSinkCondition);
     const auto *condExpr = fs->getExecutionState()->get(condVar);
     if (condExpr == nullptr) return -1;  // condition not reached
+    // A tainted condition (e.g. gated on a read from a RANDOM-hash-indexed sketch cell) is NOT a
+    // determined flip: evaluate(doComplete=true) would fabricate an arbitrary truth value, so the
+    // single-packet write DFS "confirms" a flip the concrete re-derivation can't reproduce (the
+    // emitted counter only reaches a small value, never the threshold). Report unresolved so the
+    // caller routes to the analytical accumulation path, which pre-sets a concrete SO value.
+    if (Taint::hasTaint(condExpr)) return -1;
     const auto *condVal = fs->getFinalModel().evaluate(condExpr, true);
     const auto *condBool = condVal->to<IR::BoolLiteral>();
     if (condBool == nullptr) return -1;
@@ -1026,15 +1032,13 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
     //    re-validation decide, so we needn't perfectly classify the operator/operand order.
     std::vector<big_int> candidates;
     for (const auto &[v, node] : chain.writeNodes) {
-        const auto *ifs = node->to<IR::IfStatement>();
-        if (ifs == nullptr) continue;
-        const auto *rel = ifs->condition->to<IR::Operation_Relation>();
-        if (rel == nullptr) continue;
-        const IR::Constant *c = rel->left->to<IR::Constant>();
-        if (c == nullptr) c = rel->right->to<IR::Constant>();
-        if (c == nullptr) continue;
-        candidates.push_back(c->value + 1);  // Grt
-        candidates.push_back(c->value);       // Geq / Equ
+        forAllMatching<IR::Operation_Relation>(node, [&](const IR::Operation_Relation *rel) {
+            const IR::Constant *c = rel->left->to<IR::Constant>();
+            if (c == nullptr) c = rel->right->to<IR::Constant>();
+            if (c == nullptr) return;
+            candidates.push_back(c->value + 1);  // Grt
+            candidates.push_back(c->value);       // Geq / Equ
+        });
     }
     if (candidates.empty()) return nullptr;
 
@@ -1852,15 +1856,33 @@ size_t StateDependencyTracker::runConditionChain(
         // Keep a pristine clone for the analytical drive-register fallback (runPhase mutates its root).
         auto &driveTemplate = phase2Init.clone();
         runPhase(phase2Init, phase2StateMap[i], maxPerChain);
-        if (phase2StateMap[i].empty() && repPhase1State != nullptr) {
-            // Family 1: the single-packet write DFS found nothing because a register-value gate on the
-            // write path is unreached in one packet. Try to drive the register past the gate.
+        // A register-threshold chain (SO read gated by `SO op CONST` in writeNodes) can only flip the
+        // sink by ACCUMULATING the counter past the constant — a single packet cannot. The single-
+        // packet DFS may still return a coverage terminal whose flip holds only on a tainted/completed
+        // condition (e.g. a RANDOM-hash-indexed sketch cell), emitting a false positive. So run the
+        // analytical driver whenever the DFS found nothing OR the chain has a constant threshold gate;
+        // when the driver needs k>1 the single-packet terminals are spurious for this chain — drop them.
+        bool hasThresholdGate = false;
+        for (const auto &[v, node] : chain.writeNodes) {
+            forAllMatching<IR::Operation_Relation>(node, [&](const IR::Operation_Relation *rel) {
+                if (rel->left->is<IR::Constant>() || rel->right->is<IR::Constant>())
+                    hasThresholdGate = true;
+            });
+            if (hasThresholdGate) break;
+        }
+        const bool singleWriteEmpty = phase2StateMap[i].empty();
+        if (repPhase1State != nullptr && (singleWriteEmpty || hasThresholdGate)) {
+            // Family 1: the single-packet write DFS found nothing (register-value gate unreached in one
+            // packet) — or the chain has a threshold gate the single packet only spuriously crossed.
             const FinalState *fs2real = nullptr;
             size_t kDrive = 0;
             const FinalState *fs3Drive =
                 driveRegisterPhase2(chain, initState, driveTemplate, repPhase1State, cond1.inputPort,
                                     inputPortSymExpr, p3Target, fs2real, kDrive);
-            if (fs3Drive != nullptr) {
+            // Adopt the accumulation result when the write path was unreachable in one packet, or when
+            // it genuinely needs k>1 (the single-packet terminals cannot flip this threshold).
+            if (fs3Drive != nullptr && (singleWriteEmpty || kDrive > 1)) {
+                if (!singleWriteEmpty) phase2StateMap[i].clear();
                 phase2StateMap[i].push_back(fs2real);
                 drivenFs3[fs2real] = fs3Drive;
                 drivenRepeat[fs2real] = kDrive;
