@@ -603,7 +603,13 @@ int StateDependencyTracker::evalCondition(const FinalState *fs) const {
     // CmdStepper stamps this boolean (under the TamperingCond policy) to true/false for the
     // then/else branch; it is unset if the if-statement was not reached on this path.
     const auto &condVar = CmdStepper::getConditionVar(currentSinkCondition);
-    const auto *condExpr = fs->getExecutionState()->get(condVar);
+    const auto *es = fs->getExecutionState();
+    // exists() BEFORE get(): an if-statement that was not reached on this path leaves the condition
+    // var unstamped, and get() does not return nullptr for a missing var — it BUGs ("Unable to find
+    // var ... in the symbolic environment") and aborts the entire run, discarding every test already
+    // found. Same hazard the isConditionReached()/nodeCovered() helpers above already guard against.
+    if (!es->exists(condVar)) return -1;  // condition not reached
+    const auto *condExpr = es->get(condVar);
     if (condExpr == nullptr) return -1;  // condition not reached
     // A tainted condition (e.g. gated on a read from a RANDOM-hash-indexed sketch cell) is NOT a
     // determined flip: evaluate(doComplete=true) would fabricate an arbitrary truth value, so the
