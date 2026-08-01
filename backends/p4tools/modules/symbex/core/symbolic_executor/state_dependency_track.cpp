@@ -17,6 +17,7 @@
 #include "backends/p4tools/common/lib/variables.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
 #include "backends/p4tools/modules/symbex/core/small_step/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
@@ -1271,6 +1272,65 @@ void StateDependencyTracker::concretizeInputPacket(ExecutionState &init, const F
         new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
 }
 
+// ---------------------------------------------------------------------------
+// --cp-annotation: attacker-port authorization LABELLING (plan T3)
+//
+// Deliberately label-only: the attacker port is never constrained at generation time. Filtering
+// generation would silently bake in "insiders are trusted" and lose the compromised-participant
+// case, so the verdict is attached to the emitted test and the triage decision stays explicit.
+// File-local (same idiom as pinSinkEntryForLegit) so this stays a .cpp-only change.
+// ---------------------------------------------------------------------------
+static std::optional<CpAnnotation> cpAnnotationCache;
+static bool cpAnnotationTried = false;
+
+static const CpAnnotation *cpAnnotation() {
+    if (!cpAnnotationTried) {
+        cpAnnotationTried = true;
+        const auto &path = SymbexOptions::get().cpAnnotationPath;
+        if (path.has_value()) cpAnnotationCache = CpAnnotation::load(*path);
+    }
+    return cpAnnotationCache.has_value() ? &cpAnnotationCache.value() : nullptr;
+}
+
+/// Emit an authorization verdict for a tampering test whose Phase-2 packet entered on
+/// @p attackerPort. Silent when no annotation is loaded, so default behaviour is unchanged.
+static void labelAttackerPort(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                              int attackerPort) {
+    const auto *ann = cpAnnotation();
+    if (ann == nullptr) return;
+    const auto *rule = ann->registerRule(chain.soName);
+    cstring verdict;
+    cstring why;
+    if (rule == nullptr) {
+        verdict = "unknown"_cs;
+        why = "state object is not annotated"_cs;
+    } else if (!rule->partitionedBy.isNullOrEmpty()) {
+        verdict = "partitioned"_cs;
+        why = "cell is indexed by an unspoofable principal; cross-principal poisoning is "
+              "structurally impossible (negative control)"_cs;
+    } else if (rule->shared) {
+        verdict = "authorized"_cs;
+        why = "protocol declares this state shared among all participants, so another party's "
+              "write is in-spec"_cs;
+    } else if (!ann->hasConcretePorts()) {
+        verdict = "unknown"_cs;
+        why = "roles are declared abstract (no concrete ports), so the attacker's port cannot be "
+              "mapped to a role"_cs;
+    } else {
+        auto roles = ann->rolesForPort(attackerPort);
+        bool ok = false;
+        for (const auto &r : rule->writableBy)
+            if (roles.count(r) > 0) ok = true;
+        verdict = ok ? "authorized"_cs : "unauthorized"_cs;
+        why = ok ? "attacker's port maps to a role permitted to write this state object"_cs
+                 : "attacker's port maps to no role permitted to write this state object "
+                   "(privilege escalation candidate)"_cs;
+    }
+    printInfo("[Tampering] Port authorization: chain id=%1% SO=%2% attacker_port=%3% verdict=%4% "
+              "(%5%)",
+              chain.id, chain.soName, attackerPort, verdict, why);
+}
+
 // Set by legitPhase3Sink around its attack-attribution replay: when true, runSymbolicPhase3 ALSO
 // pins Phase 1's SINK-table entry, so a freshly-synthesised sink entry cannot manufacture a HIT/MISS
 // unrelated to the register and defeat the check. File-local because both the setter (legitPhase3Sink)
@@ -1854,6 +1914,7 @@ size_t StateDependencyTracker::runTamperingChain(
                 printInfo("[Tampering] Phase 2 chose input_port=%1% output_port=%2% from Phase 1 "
                           "ports %3%/%4%",
                           portPair.first, portPair.second, cond1.inputPort, cond1.outputPort);
+                labelAttackerPort(chain, portPair.first);
             }
         }
 
@@ -2206,6 +2267,7 @@ size_t StateDependencyTracker::runTamperingChain(
             for (const auto &[regName, regObj] :
                  fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
                 p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
+            labelAttackerPort(chain, ip2);
             const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
                                                      /*isPhase1=*/false, p1Carry);
             TamperingFinalState ts{*fs1c, *fs2c, false,
@@ -2483,6 +2545,7 @@ size_t StateDependencyTracker::runConditionChain(
             int p1OutPort = openOutputPort(fs1);
             int p2OutPort = openOutputPort(fs2);
             // Condition sink: no table, so attackerRegisterSinkTables stays empty.
+            labelAttackerPort(chain, ip2);
             TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
                                    attackerRegValues, {}, {}, {}};
             ts.chainId = chain.id;
