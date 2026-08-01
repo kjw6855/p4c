@@ -1302,6 +1302,12 @@ static void labelAttackerPort(const P4StateDependency::DependencyGraphs::SOChain
         verdict = "authorized"_cs;
         why = "protocol declares this state shared among all participants, so another party's "
               "write is in-spec"_cs;
+    } else if (rule->writableBy.empty()) {
+        // Empty writable_by is documented as "unconstrained" (cp_annotation.h). Falling through to
+        // the role comparison below would score it "unauthorized", turning every state object with
+        // no declared owner into a privilege-escalation candidate - the opposite of the intent.
+        verdict = "unconstrained"_cs;
+        why = "state object declares no writer role, so no port is privileged over another"_cs;
     } else if (!ann->hasConcretePorts()) {
         verdict = "unknown"_cs;
         why = "roles are declared abstract (no concrete ports), so the attacker's port cannot be "
