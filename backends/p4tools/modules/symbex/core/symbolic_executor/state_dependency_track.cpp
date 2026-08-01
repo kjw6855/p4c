@@ -1280,17 +1280,7 @@ void StateDependencyTracker::concretizeInputPacket(ExecutionState &init, const F
 // case, so the verdict is attached to the emitted test and the triage decision stays explicit.
 // File-local (same idiom as pinSinkEntryForLegit) so this stays a .cpp-only change.
 // ---------------------------------------------------------------------------
-static std::optional<CpAnnotation> cpAnnotationCache;
-static bool cpAnnotationTried = false;
-
-static const CpAnnotation *cpAnnotation() {
-    if (!cpAnnotationTried) {
-        cpAnnotationTried = true;
-        const auto &path = SymbexOptions::get().cpAnnotationPath;
-        if (path.has_value()) cpAnnotationCache = CpAnnotation::load(*path);
-    }
-    return cpAnnotationCache.has_value() ? &cpAnnotationCache.value() : nullptr;
-}
+static const CpAnnotation *cpAnnotation() { return loadedCpAnnotation(); }
 
 /// Emit an authorization verdict for a tampering test whose Phase-2 packet entered on
 /// @p attackerPort. Silent when no annotation is loaded, so default behaviour is unchanged.

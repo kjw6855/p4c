@@ -3,6 +3,7 @@
 #include <fstream>
 #include <regex>
 
+#include "backends/p4tools/modules/symbex/options.h"
 #include "ir/json_parser.h"
 #include "lib/error.h"
 
@@ -182,6 +183,17 @@ std::vector<const CpAssumeClause *> CpAnnotation::clausesFor(cstring table) cons
             out.push_back(&c);
     }
     return out;
+}
+
+const CpAnnotation *loadedCpAnnotation() {
+    static std::optional<CpAnnotation> cache;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        const auto &path = SymbexOptions::get().cpAnnotationPath;
+        if (path.has_value()) cache = CpAnnotation::load(*path);
+    }
+    return cache.has_value() ? &cache.value() : nullptr;
 }
 
 }  // namespace P4::P4Tools::Symbex

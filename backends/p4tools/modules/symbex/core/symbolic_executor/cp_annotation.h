@@ -82,6 +82,11 @@ class CpAnnotation {
     std::vector<CpAssumeClause> assume_;
 };
 
+/// The annotation named by --cp-annotation, loaded once on first use, or nullptr when the flag is
+/// absent (or the file failed to load - the error is raised at that point). Shared so the tampering
+/// tracker and the table steppers see the same object.
+const CpAnnotation *loadedCpAnnotation();
+
 }  // namespace P4::P4Tools::Symbex
 
 #endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SYMBOLIC_EXECUTOR_CP_ANNOTATION_H_ */

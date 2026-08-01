@@ -1,6 +1,8 @@
 #include "backends/p4tools/modules/symbex/targets/bmv2/table_stepper.h"
 
 #include <cstddef>
+#include <set>
+#include <utility>
 #include <optional>
 #include <ostream>
 #include <vector>
@@ -27,6 +29,8 @@
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
 #include "backends/p4tools/modules/symbex/lib/test_spec.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
+#include "backends/p4tools/modules/symbex/lib/logging.h"
 #include "backends/p4tools/modules/symbex/options.h"
 #include "backends/p4tools/modules/symbex/targets/bmv2/constants.h"
 #include "backends/p4tools/modules/symbex/targets/bmv2/expr_stepper.h"
@@ -395,6 +399,38 @@ void Bmv2V1ModelTableStepper::evalTargetTable(
     if (keys == nullptr) {
         // Either override the default action or fall back to executing it.
         auto testBackend = symbexOptions.testBackend;
+        // --cp-annotation: a keyless table's action is reachable ONLY as the default action, which
+        // the controller installs at runtime. p4c emits default_action=NoAction (p4-14 conversion
+        // especially), so without this the action is dead code and any state it writes is
+        // unreachable - the netchain keyless-table case, and the same gap p4v documents for 31 of
+        // switch.p4's 120 tables. An annotated default restores the deployed configuration instead
+        // of requiring the benchmark source to be edited.
+        if (!properties.defaultIsImmutable) {
+            if (const auto *ann = loadedCpAnnotation(); ann != nullptr) {
+                for (const auto *c : ann->clausesFor(properties.tableName)) {
+                    if (c->kind != CpAssumeClause::Kind::DefaultAction) continue;
+                    std::vector<const IR::ActionListElement *> only;
+                    for (const auto *ale : tableActionList) {
+                        const auto *mce = ale->expression->to<IR::MethodCallExpression>();
+                        const auto *m = mce != nullptr ? mce->method->to<IR::PathExpression>() : nullptr;
+                        if (m != nullptr && m->path->name.name == c->action) only.push_back(ale);
+                    }
+                    if (!only.empty()) {
+                        // The stepper re-enters this table on every path, so report each
+                        // (table, action) pair once instead of thousands of identical lines.
+                        static std::set<std::pair<cstring, cstring>> reported;
+                        if (reported.emplace(properties.tableName, c->action).second) {
+                            printInfo(
+                                "[CP annotation] %1%: keyless table, installing annotated default "
+                                "action %2% (%3%)",
+                                properties.tableName, c->action, c->ref);
+                        }
+                        setTableDefaultEntries(only);
+                        return;
+                    }
+                }
+            }
+        }
         if (testBackend == "STF" && !properties.defaultIsImmutable) {
             setTableDefaultEntries(tableActionList);
             return;
