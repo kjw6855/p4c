@@ -1331,6 +1331,53 @@ static void labelAttackerPort(const P4StateDependency::DependencyGraphs::SOChain
               chain.id, chain.soName, attackerPort, verdict, why);
 }
 
+/// Compare a control-plane name against a clause name, tolerating qualification: annotations are
+/// written with the source-level table/action name ("drop_tbl", "handle_2a") while the executing
+/// IR uses control-plane names ("Ingress.drop_tbl").
+static bool cpNameMatches(cstring full, cstring want) {
+    if (full == want) return true;
+    const auto tail = [](cstring c) {
+        const std::string s(c.string_view());
+        auto p = s.find_last_of('.');
+        return p == std::string::npos ? s : s.substr(p + 1);
+    };
+    return tail(full) == tail(want);
+}
+
+/// True when this terminal's synthesized table entries contradict a declared control-plane
+/// assumption, i.e. the real controller would never install this configuration, so the test is
+/// not realizable. Used to DROP the test before emission (plan T4).
+///
+/// Under-constrains by design: only the enforceable clause kinds are checked, a table with no
+/// clause is unconstrained, and a table whose config cannot be evaluated is left alone. A wrong
+/// assumption here costs a MISSED bug (unsound), which is worse than a false positive.
+static bool violatesCpAssumptions(const FinalState *fs) {
+    const auto *ann = cpAnnotation();
+    if (ann == nullptr || fs == nullptr) return false;
+    const auto *es = fs->getExecutionState();
+    for (const auto &[tblName, tblObj] : es->getTestObjectCategory("tableconfigs"_cs)) {
+        auto clauses = ann->clausesFor(tblName);
+        if (clauses.empty()) continue;
+        const auto *cfg = tblObj->evaluate(fs->getFinalModel(), /*doComplete=*/true)->to<TableConfig>();
+        if (cfg == nullptr || cfg->getRules() == nullptr || cfg->getRules()->empty()) continue;
+        const auto *call = cfg->getRules()->front().getActionCall();
+        if (call == nullptr || call->getAction() == nullptr) continue;
+        const cstring chosen = call->getAction()->controlPlaneName();
+        for (const auto *c : clauses) {
+            const bool same = cpNameMatches(chosen, c->action);
+            const bool bad = (c->kind == CpAssumeClause::Kind::ActionEq && !same) ||
+                             (c->kind == CpAssumeClause::Kind::ActionNeq && same);
+            if (bad) {
+                printInfo("[Tampering] CP assumption prunes test: table=%1% chose %2% but "
+                          "annotation says %3% (%4%)",
+                          tblName, chosen, c->raw, c->ref);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Set by legitPhase3Sink around its attack-attribution replay: when true, runSymbolicPhase3 ALSO
 // pins Phase 1's SINK-table entry, so a freshly-synthesised sink entry cannot manufacture a HIT/MISS
 // unrelated to the register and defeat the check. File-local because both the setter (legitPhase3Sink)
@@ -2150,6 +2197,9 @@ size_t StateDependencyTracker::runTamperingChain(
                     }
                 }
 
+                // HIT->MISS has no symbolic Phase 3, so Phase 1's own HIT configuration is the
+                // one the controller would have to have installed.
+                if (violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
                 // Phase 3 is a dynamic deviation check: the test script replays Phase 1's packet
                 // after Phase 2 sets the attacker value; the observable is the sink-table HIT(Phase
                 // 1)→MISS(Phase 3) flip (emitted as hit_phase=1 / miss_phase=3).
@@ -2268,6 +2318,7 @@ size_t StateDependencyTracker::runTamperingChain(
                  fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
                 p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
             labelAttackerPort(chain, ip2);
+            if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
             const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
                                                      /*isPhase1=*/false, p1Carry);
             TamperingFinalState ts{*fs1c, *fs2c, false,
@@ -2546,6 +2597,7 @@ size_t StateDependencyTracker::runConditionChain(
             int p2OutPort = openOutputPort(fs2);
             // Condition sink: no table, so attackerRegisterSinkTables stays empty.
             labelAttackerPort(chain, ip2);
+            if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
             TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
                                    attackerRegValues, {}, {}, {}};
             ts.chainId = chain.id;
