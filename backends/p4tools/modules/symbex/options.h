@@ -146,6 +146,12 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// missing or its embedded source hash / arch does not match this program.
     std::optional<std::string> stateDepCachePath;
 
+    /// When set, load external control-plane / port annotations from this JSON file. Supplies
+    /// facts the P4 source cannot express: which principal roles may write a state object, and
+    /// control-plane assumptions about table entries (p4v-style predicates, SIGCOMM'18). Absent
+    /// => behaviour is exactly as before. Hard-errors if the file is missing or unparseable.
+    std::optional<std::string> cpAnnotationPath;
+
     /// When set, run the in-process state-dependency analysis on this program's post-midend IR,
     /// serialize the resulting SOChains to this JSON path, and exit before symbolic execution. The
     /// cache is written from the exact IR a later --state-dep-cache load re-resolves against, so it

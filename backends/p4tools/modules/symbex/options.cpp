@@ -546,6 +546,19 @@ SymbexOptions::SymbexOptions()
         " if no such chains exist in the program, no tests are generated.");
 
     registerOption(
+        "--cp-annotation", "file",
+        [this](const char *arg) {
+            cpAnnotationPath = std::string(arg);
+            return true;
+        },
+        "Load external control-plane / port annotations from this JSON file. Supplies facts the P4 "
+        "source cannot express: which principal roles may write a state object (used to LABEL a "
+        "tampering test as authorized/unauthorized, never to constrain generation), and "
+        "control-plane assumptions about table entries expressed as p4v-style predicates over "
+        "execution (default_action/action/hit/miss) rather than as entry lists. Omit the flag for "
+        "unannotated behaviour. Hard-errors if the file is missing or unparseable.");
+
+    registerOption(
         "--state-dep-cache", "file",
         [this](const char *arg) {
             stateDepCachePath = std::string(arg);
