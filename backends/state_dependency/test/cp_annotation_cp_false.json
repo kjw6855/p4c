@@ -1,0 +1,4 @@
+{ "program": "lock_flip_tna",
+  "_purpose": "a CP assumption CONTRADICTED by every candidate => all tests pruned",
+  "assume": [ {"clause":"action(lock_tbl) != allow","source":"fixture","ref":"cp_annotation_test.sh",
+               "reason":"pretend the controller never installs allow; every emitted test relies on it"} ] }

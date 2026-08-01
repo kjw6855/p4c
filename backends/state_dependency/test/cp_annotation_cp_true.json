@@ -1,0 +1,4 @@
+{ "program": "lock_flip_tna",
+  "_purpose": "a TRUTHFUL CP assumption => nothing pruned, yield unchanged",
+  "assume": [ {"clause":"action(lock_tbl) == allow","source":"fixture","ref":"cp_annotation_test.sh",
+               "reason":"matches what the sink actually resolves to at Phase 3"} ] }
