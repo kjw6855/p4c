@@ -29,6 +29,10 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Selects the path selection policy for test generation
     Symbex::PathSelectionPolicy pathSelectionPolicy = Symbex::PathSelectionPolicy::DepthFirst;
 
+    /// Which tampering search phases use a shared (global) traversal instead of a per-chain one.
+    /// Defaults to Phase1, which is the long-standing behaviour.
+    Symbex::SharedTraversalMode sharedTraversal = Symbex::SharedTraversalMode::Phase1;
+
     /// List of the supported stop metrics.
     static const std::set<cstring> SUPPORTED_STOP_METRICS;
 
@@ -126,6 +130,11 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// in-process compute path; loading a cache built with --whole-pipeline yields cross-block chains
     /// regardless. Off by default.
     bool wholePipeline = false;
+
+    /// Opt-in: process SOChains by security impact (sink reaches an enforcement primitive) instead
+    /// of by chain id. Ordering only — never changes acceptance, emission, or the solver; it decides
+    /// which chains a run cut short by a timeout gets to. Composes with any --shared-traversal value.
+    bool chainImpactOrder = false;
 
     /// Opt-in parser-deps mode: compute the parser-state dependency record (header-derived metadata) and
     /// seed those metadata fields as per-control IFDS sources, so chains root at parser-derived metadata.

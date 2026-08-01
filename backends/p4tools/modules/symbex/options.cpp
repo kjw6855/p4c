@@ -573,6 +573,18 @@ SymbexOptions::SymbexOptions()
         "and --parser-deps for the analysis mode.");
 
     registerOption(
+        "--chain-impact-order", nullptr,
+        [this](const char *) {
+            chainImpactOrder = true;
+            return true;
+        },
+        "Opt-in: process SOChains by security impact — chains whose sink can reach an enforcement "
+        "primitive (drop/egress/multicast/mirror/clone/digest), including transitively through a "
+        "metadata flag the sink branch sets, run before the rest instead of in chain-id order. "
+        "Ordering only: acceptance, emission and the solver are untouched, so it changes which "
+        "chains a run cut short by a timeout reaches, never the results. Requires --state-dep.");
+
+    registerOption(
         "--whole-pipeline", nullptr,
         [this](const char *) {
             wholePipeline = true;
@@ -613,6 +625,38 @@ SymbexOptions::SymbexOptions()
         "Attacker-chosen register value for the tampering scenario. "
         "Phase 2 writes this exact value to the register instead of a random one. "
         "Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).");
+
+    registerOption(
+        "--shared-traversal", "mode",
+        [this](const char *arg) {
+            using Symbex::SharedTraversalMode;
+
+            static std::map<cstring, SharedTraversalMode> const SHARED_TRAVERSAL_OPTIONS = {
+                {"NONE"_cs, SharedTraversalMode::None},
+                {"PHASE1"_cs, SharedTraversalMode::Phase1},
+                {"PHASE1_PHASE2"_cs, SharedTraversalMode::Phase1Phase2},
+            };
+            auto modeString = cstring(arg).toUpper();
+            auto it = SHARED_TRAVERSAL_OPTIONS.find(modeString);
+            if (it != SHARED_TRAVERSAL_OPTIONS.end()) {
+                sharedTraversal = it->second;
+                return true;
+            }
+            std::set<cstring> printSet;
+            std::transform(SHARED_TRAVERSAL_OPTIONS.cbegin(), SHARED_TRAVERSAL_OPTIONS.cend(),
+                           std::inserter(printSet, printSet.begin()),
+                           [](const std::pair<cstring, SharedTraversalMode> &mapTuple) {
+                               return mapTuple.first;
+                           });
+            error("Shared traversal mode %1% not supported. Supported modes are %2%.", modeString,
+                  Utils::containerToString(printSet));
+            return false;
+        },
+        "Which tampering search phases share one global DFS instead of traversing per chain. "
+        "NONE: per-chain Phase 1 — a measurement baseline only, it re-traverses the program once per "
+        "chain. PHASE1: one shared Phase-1 read-path traversal. PHASE1_PHASE2: additionally run a "
+        "global Phase-2 write-path pass that prunes chains whose write nodes are unreachable before "
+        "the constrained per-chain loop. Requires --state-dep. Defaults to PHASE1.");
 }
 
 bool SymbexOptions::validateOptions() const {

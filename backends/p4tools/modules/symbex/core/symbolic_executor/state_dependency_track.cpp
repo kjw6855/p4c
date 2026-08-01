@@ -135,6 +135,245 @@ void collectEffect(const IR::Statement *stmt, ActionEffect &eff) {
     eff.ok = false;
 }
 
+// ---------------------------------------------------------------------------
+// Class-A (impact) chain ranking — --chain-impact-order
+//
+// A chain is class A when its sink can reach an ENFORCEMENT PRIMITIVE: something that changes the
+// packet's fate (drop / forward / replicate), as opposed to only setting metadata. Ordering-only: it
+// decides WHICH chains a truncated run processes, never whether a test is accepted or emitted.
+// ---------------------------------------------------------------------------
+
+/// Intrinsic/standard-metadata fields whose write decides the packet's fate (v1model + TNA).
+bool isEnforcementFieldName(cstring n) {
+    return n == "drop_ctl" || n == "egress_spec" || n == "ucast_egress_port" || n == "egress_port" ||
+           n == "mcast_grp" || n == "mcast_grp_a" || n == "mcast_grp_b" || n == "multicast_group_id" ||
+           n == "mirror_type" || n == "copy_to_cpu";
+}
+
+/// Externs that drop/replicate/exfiltrate a packet outright.
+bool isEnforcementMethodName(cstring n) {
+    return n == "mark_to_drop" || n == "clone" || n == "clone3" ||
+           n == "clone_preserving_field_list" || n == "digest" || n == "mirror" ||
+           n == "mirror_packet";
+}
+
+/// Trailing component of a method call's name (`X.apply` -> "apply", `mark_to_drop` -> itself).
+cstring methodTailName(const IR::MethodCallExpression *mce) {
+    if (const auto *m = mce->method->to<IR::Member>()) return m->member.name;
+    if (const auto *p = mce->method->to<IR::PathExpression>()) return p->path->name.name;
+    return ""_cs;
+}
+
+/// Name of the object a `.apply()` is called on (`drop_tbl.apply()` -> "drop_tbl").
+cstring applyTargetName(const IR::MethodCallExpression *mce) {
+    const auto *m = mce->method->to<IR::Member>();
+    if (m == nullptr) return ""_cs;
+    if (const auto *p = m->expr->to<IR::PathExpression>()) return p->path->name.name;
+    if (const auto *mm = m->expr->to<IR::Member>()) return mm->member.name;
+    return ""_cs;
+}
+
+/// One pass over a statement subtree: does it enforce directly, which tables does it apply, and
+/// which non-enforcement fields does it assign (candidate metadata flags for the transitive step)?
+struct SinkScan : public Inspector {
+    bool enforce = false;
+    std::set<cstring> appliedTables;
+    std::set<cstring> assignedFields;
+
+    bool preorder(const IR::AssignmentStatement *a) override {
+        if (const auto *m = a->left->to<IR::Member>()) {
+            if (isEnforcementFieldName(m->member.name)) {
+                enforce = true;
+            } else {
+                assignedFields.insert(m->member.name);
+            }
+        }
+        return true;
+    }
+    bool preorder(const IR::MethodCallExpression *mce) override {
+        auto nm = methodTailName(mce);
+        if (isEnforcementMethodName(nm)) enforce = true;
+        if (nm == "apply") {
+            auto t = applyTargetName(mce);
+            if (!t.isNullOrEmpty()) appliedTables.insert(t);
+        }
+        return true;
+    }
+};
+
+/// Last component of a dotted name with the midend's `_<n>` instantiation suffix removed, so an
+/// apply site's `drop_tbl_0` matches the control-plane name `Ingress.drop_tbl`.
+std::string normalizedTail(cstring n) {
+    std::string s(n.string_view());
+    auto dot = s.find_last_of('.');
+    if (dot != std::string::npos) s = s.substr(dot + 1);
+    auto us = s.find_last_of('_');
+    if (us != std::string::npos && us + 1 < s.size() &&
+        std::all_of(s.begin() + static_cast<ptrdiff_t>(us) + 1, s.end(),
+                    [](char c) { return c >= '0' && c <= '9'; }))
+        s = s.substr(0, us);
+    return s;
+}
+
+/// Resolve a name written at a call site (`drop_tbl_0`) against a control-plane-name map
+/// (`Ingress.drop_tbl`). Exact match first, then dotted-suffix, then normalized tail.
+template <typename T>
+const T *lookupByCallSiteName(const std::unordered_map<cstring, const T *> &decls, cstring bare) {
+    auto exact = decls.find(bare);
+    if (exact != decls.end()) return exact->second;
+    const std::string suffix = "." + std::string(bare.string_view());
+    for (const auto &[nm, d] : decls) {
+        const std::string s(nm.string_view());
+        if (s.size() > suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0)
+            return d;
+    }
+    const std::string tail = normalizedTail(bare);
+    if (tail.empty()) return nullptr;
+    for (const auto &[nm, d] : decls)
+        if (normalizedTail(nm) == tail) return d;
+    return nullptr;
+}
+
+const IR::P4Table *lookupTableBySuffix(
+    const std::unordered_map<cstring, const IR::P4Table *> &tables, cstring bare) {
+    return lookupByCallSiteName(tables, bare);
+}
+
+/// Every IR::P4Action in the program, keyed by both its bare and control-plane name, so an action
+/// referenced from a table's action list can be resolved to its BODY (an ActionListElement only
+/// names the action).
+struct ActionCollector : public Inspector {
+    std::unordered_map<cstring, const IR::P4Action *> &out;
+    explicit ActionCollector(std::unordered_map<cstring, const IR::P4Action *> &o) : out(o) {}
+    bool preorder(const IR::P4Action *a) override {
+        out.emplace(a->name.name, a);
+        out.emplace(a->controlPlaneName(), a);
+        return true;
+    }
+};
+
+const IR::P4Action *lookupActionBySuffix(
+    const std::unordered_map<cstring, const IR::P4Action *> &actions, cstring bare) {
+    return lookupByCallSiteName(actions, bare);
+}
+
+/// Scan a subtree, following applied tables into their ACTION BODIES (bounded depth: an action may
+/// apply another table). Accumulates assigned fields for the transitive metadata step.
+void scanWithTables(const IR::Node *root,
+                    const std::unordered_map<cstring, const IR::P4Table *> &tables,
+                    const std::unordered_map<cstring, const IR::P4Action *> &actions, int depth,
+                    bool &enforce, std::set<cstring> &assignedFields) {
+    if (root == nullptr || enforce || depth < 0) return;
+    SinkScan scan;
+    root->apply(scan);
+    if (scan.enforce) {
+        enforce = true;
+        return;
+    }
+    assignedFields.insert(scan.assignedFields.begin(), scan.assignedFields.end());
+    for (const auto &tname : scan.appliedTables) {
+        const auto *tbl = lookupTableBySuffix(tables, tname);
+        if (tbl == nullptr) continue;
+        // The table's actions decide the fate; scan every action body it may run, plus its default.
+        const auto *al = tbl->getActionList();
+        if (al == nullptr) continue;
+        for (const auto *ale : al->actionList) {
+            const auto *mce = ale->expression->to<IR::MethodCallExpression>();
+            cstring actName;
+            if (mce != nullptr) {
+                actName = methodTailName(mce);
+            } else if (const auto *pe = ale->expression->to<IR::PathExpression>()) {
+                actName = pe->path->name.name;
+            }
+            if (actName.isNullOrEmpty()) continue;
+            const auto *act = lookupActionBySuffix(actions, actName);
+            if (act == nullptr) continue;
+            scanWithTables(act->body, tables, actions, depth - 1, enforce, assignedFields);
+            if (enforce) return;
+        }
+    }
+}
+
+/// True when @p chain's sink can reach an enforcement primitive — directly, through the actions of
+/// an applied table, or transitively through a metadata flag the sink branch sets that later gates
+/// one. Sound toward NOT ranking: an unresolvable sink simply is not class A (ordering only).
+bool chainIsClassA(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                   const IR::P4Program &program,
+                   const std::unordered_map<cstring, const IR::P4Table *> &tables,
+                   const std::unordered_map<cstring, const IR::P4Action *> &actions) {
+    bool enforce = false;
+    std::set<cstring> flags;
+
+    if (chain.sinkConditionNode != nullptr) {
+        // Condition sink: the branches the flip chooses between.
+        if (const auto *ifs = chain.sinkConditionNode->to<IR::IfStatement>()) {
+            scanWithTables(ifs->ifTrue, tables, actions, 3, enforce, flags);
+            scanWithTables(ifs->ifFalse, tables, actions, 3, enforce, flags);
+        }
+    } else if (!chain.sinkTableControlPlaneName.isNullOrEmpty()) {
+        // Table sink: the HIT/MISS actions the tampered key chooses between.
+        const auto *tbl = lookupTableBySuffix(tables, chain.sinkTableControlPlaneName);
+        if (tbl != nullptr) {
+            // Re-use the table-following scan by handing it the table's own apply site.
+            std::set<cstring> tnames;
+            const auto *al = tbl->getActionList();
+            if (al != nullptr) {
+                for (const auto *ale : al->actionList) {
+                    const auto *mce = ale->expression->to<IR::MethodCallExpression>();
+                    cstring actName;
+                    if (mce != nullptr) {
+                        actName = methodTailName(mce);
+                    } else if (const auto *pe = ale->expression->to<IR::PathExpression>()) {
+                        actName = pe->path->name.name;
+                    }
+                    if (actName.isNullOrEmpty()) continue;
+                    const auto *act = lookupActionBySuffix(actions, actName);
+                    if (act == nullptr) continue;
+                    scanWithTables(act->body, tables, actions, 3, enforce, flags);
+                    if (enforce) return true;
+                }
+            }
+        }
+    }
+    if (enforce) return true;
+    if (flags.empty()) return false;
+
+    // Transitive: a metadata flag set by the sink branch that later gates an enforcement primitive.
+    struct FlagGateFinder : public Inspector {
+        const std::set<cstring> &flags;
+        const std::unordered_map<cstring, const IR::P4Table *> &tables;
+        const std::unordered_map<cstring, const IR::P4Action *> &actions;
+        bool found = false;
+        FlagGateFinder(const std::set<cstring> &f,
+                       const std::unordered_map<cstring, const IR::P4Table *> &t,
+                       const std::unordered_map<cstring, const IR::P4Action *> &a)
+            : flags(f), tables(t), actions(a) {}
+        bool preorder(const IR::IfStatement *ifs) override {
+            if (found) return false;
+            // Does this condition mention one of the flags?
+            struct MentionsFlag : public Inspector {
+                const std::set<cstring> &flags;
+                bool hit = false;
+                explicit MentionsFlag(const std::set<cstring> &f) : flags(f) {}
+                bool preorder(const IR::Member *m) override {
+                    if (flags.count(m->member.name) > 0) hit = true;
+                    return true;
+                }
+            } mf(flags);
+            ifs->condition->apply(mf);
+            if (!mf.hit) return true;
+            bool enf = false;
+            std::set<cstring> ignored;
+            scanWithTables(ifs->ifTrue, tables, actions, 3, enf, ignored);
+            scanWithTables(ifs->ifFalse, tables, actions, 3, enf, ignored);
+            if (enf) found = true;
+            return true;
+        }
+    } fg(flags, tables, actions);
+    program.apply(fg);
+    return fg.found;
+}
+
 bool exprEquiv(const IR::Expression *a, const IR::Expression *b) {
     if (a == b) return true;
     if (a == nullptr || b == nullptr) return false;
@@ -429,22 +668,69 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 
     // One shared Phase-1 traversal of the whole program collects read-baseline terminals for EVERY
     // chain at once (bucketed per chain), instead of re-traversing the program once per chain.
-    collectPhase1Terminals(initState);
+    // --shared-traversal=NONE selects the per-chain baseline instead (collected inside the loop).
+    const bool sharedPhase1Pass =
+        SymbexOptions::get().sharedTraversal != SharedTraversalMode::None;
+    if (sharedPhase1Pass) collectPhase1Terminals(initState);
+
+    // --shared-traversal=PHASE1_PHASE2: a global write-path prefilter prunes chains whose write is
+    // unreachable BEFORE the expensive per-chain Phase-2/3 loop (empty write bucket => prune).
+    std::set<size_t> prunedChains;
+    if (SymbexOptions::get().sharedTraversal == SharedTraversalMode::Phase1Phase2)
+        prunedChains = collectPhase2Terminals(initState);
+
+    // --chain-impact-order: rank chains whose sink reaches an enforcement primitive (class A) ahead
+    // of metadata-only sinks. ORDERING ONLY — a truncated run then spends its budget on the chains
+    // whose findings matter, instead of whichever ids happened to come first.
+    std::set<size_t> classAChains;
+    if (SymbexOptions::get().chainImpactOrder) {
+        std::unordered_map<cstring, const IR::P4Action *> actionByName;
+        ActionCollector ac(actionByName);
+        programInfo.getP4Program().apply(ac);
+        for (const auto *chain : allChains)
+            if (chainIsClassA(*chain, programInfo.getP4Program(), tableByName_, actionByName))
+                classAChains.insert(chain->id);
+        printInfo("[Tampering] Chain order: %1% impact-ranked first of %2%", classAChains.size(),
+                  allChains.size());
+    }
 
     // Per-chain cap on emitted sub-tests, reusing the existing --max-tests option. Applied per chain
     // (not globally) so every SOChain produces its own tests. 0 means "unlimited".
     const size_t maxPerChain = static_cast<size_t>(SymbexOptions::get().maxTests);
+    size_t chainsCompleted = 0;
     for (const auto &[chainName, chainList] : chains) {
-        for (const auto *chain : chainList) {
+        // Stable partition keeps chain-id order WITHIN each class, so the only difference from the
+        // default schedule is that class-A chains come first (and none when the option is off).
+        std::vector<const P4StateDependency::DependencyGraphs::SOChain *> ordered(chainList.begin(),
+                                                                                 chainList.end());
+        if (SymbexOptions::get().chainImpactOrder)
+            std::stable_partition(ordered.begin(), ordered.end(),
+                                  [&classAChains](const auto *c) { return classAChains.count(c->id) > 0; });
+        for (const auto *chain : ordered) {
+            if (prunedChains.count(chain->id)) {  // write path unreachable -> Phase-2 prefilter pruned
+                printInfo("============ Chain (%1%) id=%2% %3% [Phase-2 prefilter: PRUNED] ============",
+                          chainName, chain->id, chain->soName);
+                ++chainsCompleted;
+                continue;
+            }
             currentChain = chain;
             currentChainName = chainName;
             printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
                       chainName, chain->id, chain->soName);
-            const auto &bucket = phase1Buckets[chain->id];
+            // Held by value in the NONE case; a reference would dangle past the if/else.
+            std::vector<const FinalState *> perChainBucket;
+            if (!sharedPhase1Pass) perChainBucket = collectPhase1TerminalsPerChain(*chain, initState);
+            const auto &bucket = sharedPhase1Pass ? phase1Buckets[chain->id] : perChainBucket;
+            currentChain = chain;  // collectPhase1TerminalsPerChain clears it
+            currentChainName = chainName;
             runTamperingChain(*chain, initState, bucket, callBack, maxPerChain, /*missToHit=*/false);
             runTamperingChain(*chain, initState, bucket, callBack, maxPerChain, /*missToHit=*/true);
+            ++chainsCompleted;
         }
     }
+    // Headline progress metric: on a run that is cut short by a timeout this is the only record of how
+    // far the per-chain Phase-2/3 loop actually got. Emitted in every mode so baselines are comparable.
+    printInfo("[Tampering] Chains completed: %1%/%2%", chainsCompleted, allChains.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -487,11 +773,19 @@ bool StateDependencyTracker::allPhase1BucketsFull() const {
     return true;
 }
 
+// Set by collectPhase1TerminalsPerChain (--shared-traversal=NONE) to restrict handleSharedTerminal's
+// bucketing to a single chain, so the per-chain baseline reuses the shared bucketing predicate
+// (conditionReached / chainTargetsCovered) rather than runPhase's allCovered acceptance — the latter
+// rejects every RMW read terminal (the threshold branch is unreachable in one packet). File-local
+// because both the setter and the sole reader live in this translation unit.
+static const P4StateDependency::DependencyGraphs::SOChain *phase1SingleChain = nullptr;
+
 void StateDependencyTracker::handleSharedTerminal(const ExecutionState &es) {
     ++phase1Examined;
     const auto &visited = es.getVisited();
     std::vector<size_t> matched;
     for (const auto *ch : allChains) {
+        if (phase1SingleChain != nullptr && ch != phase1SingleChain) continue;  // NONE: per-chain scope
         if (phase1Buckets[ch->id].size() >= phase1BucketCap) continue;  // bucket already full
         // Condition chains (H2S2C): bucket iff the if-condition was reached (baseline value exists).
         // Key chains: require read-node coverage. chainTargetsCovered excuses in-RegisterAction read
@@ -578,6 +872,225 @@ void StateDependencyTracker::collectPhase1Terminals(const ExecutionState &initSt
     printInfo("[Tampering] Shared Phase-1: %1% chains, %2% terminals examined, %3% bucketed "
               "(cap %4%/chain)",
               allChains.size(), phase1Examined, total, phase1BucketCap);
+}
+
+// ---------------------------------------------------------------------------
+// Shared Phase-2 write-path prefilter (--shared-traversal=PHASE1_PHASE2)
+// ---------------------------------------------------------------------------
+
+// Set by runImpl when the prefilter DFS stops on its examine budget rather than exploring the write
+// paths to exhaustion. In that case reachability is UNDETERMINED for the chains not yet reached, so
+// collectPhase2Terminals must prune nothing: "not reached within budget" != "unreachable", and
+// pruning on it would silently drop real tests on exactly the large programs this is meant to help.
+// File-local because the setter (runImpl) and the sole reader (collectPhase2Terminals) share this TU.
+static bool phase2BudgetExhausted = false;
+
+bool StateDependencyTracker::allPhase2BucketsFull() const {
+    return phase2Reached.size() >= allChains.size();
+}
+
+void StateDependencyTracker::handleSharedPhase2Terminal(const ExecutionState &es) {
+    ++phase2Examined;
+    const auto &visited = es.getVisited();
+    // Match write nodes by SOURCE POSITION, not pointer: a chain's nodes come from the SD dependency
+    // graph's IR (and, with --state-dep-cache, from a re-resolved cache), whose pointers differ from
+    // the executing program's — so visited.count(n) misses even for a node that plainly ran (the
+    // .execute() call site included). isInRegisterActionBody keys on positions for the same reason.
+    // Pointer identity is still tried first; positions are the fallback.
+    std::unordered_set<cstring> visitedPositions;
+    visitedPositions.reserve(visited.size() * 2);
+    for (const auto *v : visited) visitedPositions.insert(cstring(v->getSourceInfo().toPositionString()));
+
+    std::vector<size_t> matched;
+    for (const auto *ch : allChains) {
+        if (phase2Reached.count(ch->id)) continue;  // already known reachable
+        auto it = chainPhase2Targets.find(ch->id);
+        if (it == chainPhase2Targets.end() || it->second.empty()) continue;
+        // Write-path coverage, SOUND TOWARD KEEPING: this pass may only prune chains whose write is
+        // provably unreachable, so in-RegisterAction body nodes are excused UNCONDITIONALLY (unlike
+        // chainTargetsCovered's soRan-gated excusal). A read-modify-write body's branches are mutually
+        // exclusive — e.g. `exc = 1` under `if (v > 20)` cannot be covered by the same single packet
+        // that also runs the v==0 path — so requiring them would prune every RMW chain, dropping real
+        // tests. Only control-body nodes (the .execute() call site, outside any RegisterAction) stay
+        // strictly required; an unreachable guard around the call site is exactly what we prune on.
+        const bool covered =
+            std::all_of(it->second.begin(), it->second.end(),
+                        [&visited, &visitedPositions, &es, ch, this](const IR::Node *n) {
+                            if (n->is<IR::Key>())
+                                return isTableVisited(ch->sinkTableControlPlaneName, visited);
+                            if (visited.count(n) > 0) return true;
+                            if (visitedPositions.count(
+                                    cstring(n->getSourceInfo().toPositionString())) > 0)
+                                return true;
+                            if (isInRegisterActionBody(n)) return true;
+                            // Under the Cond policy cmd_stepper CLONES the IfStatement (it reduces
+                            // the condition for branch stamping), so neither its pointer nor its
+                            // position appears in `visited` even when the branch was taken — the sink
+                            // condition, which the write chain ends at, would MISS on every path and
+                            // prune every condition chain. It does stamp a source-position-keyed
+                            // condition var when the branch is evaluated; treat that as coverage.
+                            // exists() (not get()): get() BUGs on an unreached branch's missing var.
+                            if (const auto *ifs = n->to<IR::IfStatement>())
+                                return es.exists(CmdStepper::getConditionVar(ifs));
+                            return false;
+                        });
+        if (covered) matched.push_back(ch->id);
+    }
+    if (matched.empty()) return;
+    // One SAT check shared across every chain this terminal covers (the efficiency): an infeasible
+    // path proves nothing, so it cannot rescue a chain from pruning.
+    auto sat = solver.checkSat(es.getPathConstraint());
+    if (!sat || !*sat) return;
+    for (auto id : matched) phase2Reached.insert(id);
+}
+
+std::set<size_t> StateDependencyTracker::collectPhase2Terminals(const ExecutionState &initState) {
+    phase2Reached.clear();
+    chainPhase2Targets.clear();
+    phase2Examined = 0;
+
+    // Per-chain Phase-2 write targets (writeNodes) and their union.
+    currentPhase = TamperingPhase::Phase2_Write;
+    P4::Coverage::CoverageSet unionTargets;
+    for (const auto *chain : allChains) {
+        currentChain = chain;  // buildRequiredNodes consults currentPhase + chain
+        auto targets = buildRequiredNodes(*chain);  // Phase2_Write -> chain.writeNodes
+        for (const auto *n : targets) unionTargets.insert(n);
+        chainPhase2Targets[chain->id] = std::move(targets);
+    }
+    currentChain = nullptr;
+    if (unionTargets.empty()) return {};  // no write nodes to prove reachable -> prune nothing
+
+    const size_t base = std::max<size_t>(static_cast<size_t>(SymbexOptions::get().maxTests), 1);
+    phase2ExamineBudget = std::max<size_t>(allChains.size() * base * 4, 2000);
+
+    // Steer toward the UNION of all chains' write nodes.
+    currentRequiredNodes = unionTargets;
+    // Hazard: reaching-set pruning cuts the path right after a target and can strand a chain whose
+    // write is genuinely reachable only past that point — which would prune a real chain (unsound).
+    // Disable it here as Phase-1/Phase-3 do for the condition policy; keep only the (non-pruning)
+    // steering toward required nodes.
+    reachingSet_.clear();
+    reachingSetValid_ = false;
+
+    solver.checkSat({});  // clear accumulated assertions before the write pass
+    sharedPhase2 = true;
+    phase2BudgetExhausted = false;
+    seekMiss_ = false;
+    currentSinkTable_ = nullptr;
+    {
+        // Unconstrained: allow drops + register zero-init + register tracking, NONE of the
+        // per-(chain, terminal) machinery (no carry, index/port pinning, NEQ, size-1 configs). That
+        // cheapness is the whole point — the pass only decides reachable-or-not.
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, ""_cs, {}, /*setRegTracking=*/true,
+                               /*isPhase1=*/true);
+        unexploredBranches.clear();
+        auto &phase2Init = initState.clone();
+        // No-op callback: reachability is recorded in runImpl/handleSharedPhase2Terminal.
+        runImpl([](const FinalState &) -> bool { return false; }, phase2Init);
+    }
+    sharedPhase2 = false;
+    currentChain = nullptr;
+
+    // A chain may be pruned ONLY when the write-path search actually completed: an exhausted DFS
+    // that never reached a chain's write proves it unreachable, whereas a budget-truncated one
+    // proves nothing. Conflating the two would prune reachable chains on precisely the large
+    // programs this pass targets — inflating "chains completed" while silently losing real tests.
+    // Diagnostic: which chains' write paths the UNCONSTRAINED search actually covered. This is the
+    // probe that separates "the write is hard to reach at all" from "the per-(chain, terminal)
+    // constraints (index pinning / port NEQ / carry) are what block it" — this pass applies none.
+    for (const auto *ch : allChains) {
+        const bool hit = phase2Reached.count(ch->id) > 0;
+        cstring wpos = ""_cs;
+        auto it = chainPhase2Targets.find(ch->id);
+        if (it != chainPhase2Targets.end())
+            for (const auto *n : it->second)
+                if (!isInRegisterActionBody(n))
+                    wpos = cstring(n->getSourceInfo().toPositionString());
+        printInfo("[Tampering] Phase-2 reach: chain id=%1% SO=%2% -> %3% (write %4%)", ch->id,
+                  ch->soName, hit ? "REACHED" : "not reached", wpos);
+    }
+
+    if (phase2BudgetExhausted) {
+        printInfo("[Tampering] Phase-2 prefilter: %1% chains, %2% reached, 0 pruned, %3% terminals "
+                  "examined (budget reached before the write-path search completed; "
+                  "unreached != unreachable)",
+                  allChains.size(), phase2Reached.size(), phase2Examined);
+        return {};
+    }
+
+    std::set<size_t> pruned;
+    for (const auto *ch : allChains)
+        if (phase2Reached.find(ch->id) == phase2Reached.end()) pruned.insert(ch->id);
+
+    printInfo("[Tampering] Phase-2 prefilter: %1% chains, %2% pruned, %3% terminals examined "
+              "(search completed)",
+              allChains.size(), pruned.size(), phase2Examined);
+    return pruned;
+}
+
+std::vector<const FinalState *> StateDependencyTracker::collectPhase1TerminalsPerChain(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState) {
+    // Baseline for --shared-traversal=NONE. Deliberately mirrors collectPhase1Terminals in EVERY
+    // respect except the traversal scope (this chain's targets, not the union of all chains') and the
+    // bucketing scope (phase1SingleChain restricts handleSharedTerminal to this chain). Crucially it
+    // reuses the SAME conditionReached / chainTargetsCovered bucketing predicate via runImpl — NOT
+    // runPhase's allCovered acceptance, which rejects every RMW read terminal because the threshold
+    // branch is unreachable in one packet — so the two modes produce identical terminals for this
+    // chain. The HIT->MISS / MISS->HIT direction filters are applied downstream in runTamperingChain /
+    // runConditionChain exactly as for the shared bucket, so one pass serves both.
+    currentPhase = TamperingPhase::Phase1_Read;
+    currentChain = &chain;
+    auto targets = buildRequiredNodes(chain);
+    if (chain.sinkConditionNode != nullptr) targets.insert(chain.sinkConditionNode);
+    currentChain = nullptr;
+    if (targets.empty()) return {};
+
+    // Reset just this chain's bucket; same caps as the shared pass so bucket sizes are comparable.
+    // phase1Examined is a member shared with the shared pass and is consumed by runImpl's budget
+    // check — it MUST be zeroed per chain here, or chain 0 spends the whole budget and every later
+    // chain returns on its first terminal with an empty bucket (silently starving the baseline).
+    phase1Examined = 0;
+    phase1Buckets[chain.id].clear();
+    chainPhase1Targets[chain.id] = targets;  // chainTargetsCovered (key chains) consults this
+    const size_t base = std::max<size_t>(static_cast<size_t>(SymbexOptions::get().maxTests), 1);
+    phase1BucketCap = std::max<size_t>(base * 4, 12);
+    phase1ExamineBudget = std::max<size_t>(phase1BucketCap * allChains.size() * 4, 2000);
+
+    // Steer toward THIS chain's targets only (the scope difference from the shared union pass).
+    currentRequiredNodes = targets;
+    // Reaching-set pruning: same opt-out as the shared pass (it cuts the path right after a target,
+    // which strands condition chains that must continue past the if-statement to a terminal).
+    if (policy == StateDependencyPolicy::TamperingCond) {
+        reachingSet_.clear();
+        reachingSetValid_ = false;
+    } else {
+        buildReachingSet();
+    }
+
+    solver.checkSat({});  // clear accumulated assertions before this chain's read pass
+    sharedPhase1 = true;
+    phase1SingleChain = &chain;  // restrict handleSharedTerminal's bucketing to this chain
+    seekMiss_ = false;
+    currentSinkTable_ = nullptr;
+    {
+        // Identical guard to the shared pass: allow drops (serves both directions) + register
+        // zero-init + register tracking.
+        ScopedSymbexOpts guard(/*outputPacketOnly=*/false, ""_cs, {}, /*setRegTracking=*/true,
+                               /*isPhase1=*/true);
+        unexploredBranches.clear();
+        auto &phase1Init = initState.clone();
+        // No-op callback: bucketing happens in runImpl/handleSharedTerminal, not the callback.
+        runImpl([](const FinalState &) -> bool { return false; }, phase1Init);
+    }
+    sharedPhase1 = false;
+    phase1SingleChain = nullptr;
+    currentChain = nullptr;
+
+    auto out = phase1Buckets[chain.id];
+    printInfo("[Tampering] Per-chain Phase-1: chain id=%1%, %2% bucketed (cap %3%)", chain.id,
+              out.size(), phase1BucketCap);
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -2204,6 +2717,19 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                     // it covers; stop once all buckets are full or the examine budget is hit.
                     handleSharedTerminal(executionState.get());
                     if (allPhase1BucketsFull() || phase1Examined >= phase1ExamineBudget) return;
+                } else if (sharedPhase2) {
+                    // Shared Phase-2 write-path prefilter: mark every chain whose write nodes this
+                    // terminal covers as reached.
+                    handleSharedPhase2Terminal(executionState.get());
+                    // Every chain reached -> nothing left to prune; stop.
+                    if (allPhase2BucketsFull()) return;
+                    // Out of budget. The search did NOT complete, so an unreached chain is UNKNOWN,
+                    // not unreachable — pruning here would drop real tests. Record that and let
+                    // collectPhase2Terminals prune nothing.
+                    if (phase2Examined >= phase2ExamineBudget) {
+                        phase2BudgetExhausted = true;
+                        return;
+                    }
                 } else {
                     // Only emit a test when the path covers all required nodes.
                     const auto &visited = executionState.get().getVisited();

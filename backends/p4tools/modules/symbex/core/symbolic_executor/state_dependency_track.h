@@ -202,6 +202,11 @@ class StateDependencyTracker : public SymbolicExecutor {
 
     /// Runs the single shared Phase-1 DFS, filling phase1Buckets for every chain in allChains.
     void collectPhase1Terminals(const ExecutionState &initState);
+    /// --shared-traversal=NONE baseline: run a Phase-1 DFS for ONE chain and return its terminals,
+    /// instead of the single shared pass that buckets every chain at once. Every knob other than the
+    /// traversal scope matches collectPhase1Terminals, so the two are a controlled comparison.
+    std::vector<const FinalState *> collectPhase1TerminalsPerChain(
+        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState);
     /// Shared-pass terminal handler: bucket @p es into every chain whose Phase-1 targets it covers.
     void handleSharedTerminal(const ExecutionState &es);
     /// True when chain @p chain's Phase-1 target nodes are all covered in @p visited. A target node
@@ -218,6 +223,28 @@ class StateDependencyTracker : public SymbolicExecutor {
                           const ExecutionState &es) const;
     /// True when every chain's Phase-1 bucket has reached phase1BucketCap.
     bool allPhase1BucketsFull() const;
+
+    // --- Phase-2 write-path prefilter (--shared-traversal=PHASE1_PHASE2) ---
+    /// True while collectPhase2Terminals runs the single shared Phase-2 write-path DFS. In this mode
+    /// runImpl routes terminals to handleSharedPhase2Terminal (which marks reachable chains) instead
+    /// of the per-terminal acceptance; the Phase-2 terminals themselves are discarded.
+    bool sharedPhase2 = false;
+    /// Per-chain Phase-2 write targets (writeNodes), mirrors chainPhase1Targets.
+    std::map<size_t, P4::Coverage::CoverageSet> chainPhase2Targets;
+    /// Chain ids whose write path the prefilter reached; the complement is pruned.
+    std::set<size_t> phase2Reached;
+    size_t phase2ExamineBudget = 0;
+    size_t phase2Examined = 0;
+
+    /// Runs one shared Phase-2 write-path DFS and returns the chain ids whose write path was NOT
+    /// reached under unconstrained execution — prune these before the constrained per-chain loop.
+    /// Filter-only: a reached chain is not proven realizable (the pass over-approximates), so
+    /// survivors run the full Phase 2/3 unchanged. PHASE1_PHASE2 only.
+    std::set<size_t> collectPhase2Terminals(const ExecutionState &initState);
+    /// Marks every chain whose Phase-2 write nodes this (feasible) terminal covers as reached.
+    void handleSharedPhase2Terminal(const ExecutionState &es);
+    /// True when every chain has been marked reached (early-exit for the prefilter DFS).
+    bool allPhase2BucketsFull() const;
 
     /// Name of the current chain category (e.g. "Write Condition"), set in run().
     cstring currentChainName;
