@@ -1364,7 +1364,52 @@ static bool violatesCpAssumptions(const FinalState *fs) {
         const auto *call = cfg->getRules()->front().getActionCall();
         if (call == nullptr || call->getAction() == nullptr) continue;
         const cstring chosen = call->getAction()->controlPlaneName();
+        const auto *matches = cfg->getRules()->front().getMatches();
         for (const auto *c : clauses) {
+            if (c->kind == CpAssumeClause::Kind::WhenThen) {
+                // Concrete tier only: every `when` term is an exact key equality, so the guard can
+                // be decided against this entry without the solver. Symbolic terms are handled as
+                // path constraints at generation time, not here.
+                if (!c->isConcrete()) continue;
+                bool guardHolds = true;
+                for (const auto &t : c->when) {
+                    // Key names appear qualified ("ig_md.lock_val") in the match map but are
+                    // written bare in annotations, so compare on the trailing component too.
+                    const TableMatch *match = nullptr;
+                    if (matches != nullptr) {
+                        for (const auto &[name, m] : *matches) {
+                            if (cpNameMatches(name, t.key)) {
+                                match = m;
+                                break;
+                            }
+                        }
+                    }
+                    if (match == nullptr) {
+                        guardHolds = false;  // key absent from this entry -> guard says nothing
+                        break;
+                    }
+                    const auto *ex = match->to<Exact>();
+                    if (ex == nullptr || ex->getEvaluatedValue()->value != t.value) {
+                        guardHolds = false;
+                        break;
+                    }
+                }
+                if (!guardHolds) continue;
+                const bool violates =
+                    (!c->thenAction.isNullOrEmpty() && !cpNameMatches(chosen, c->thenAction)) ||
+                    (!c->thenActionNe.isNullOrEmpty() && cpNameMatches(chosen, c->thenActionNe));
+                if (violates) {
+                    printInfo(
+                        "[Tampering] CP assumption prunes test: table=%1% chose %2% but the "
+                        "controller pairs this key with %3% (%4%)",
+                        tblName, chosen,
+                        c->thenAction.isNullOrEmpty() ? "something other than "_cs + c->thenActionNe
+                                                      : c->thenAction,
+                        c->ref);
+                    return true;
+                }
+                continue;
+            }
             const bool same = cpNameMatches(chosen, c->action);
             const bool bad = (c->kind == CpAssumeClause::Kind::ActionEq && !same) ||
                              (c->kind == CpAssumeClause::Kind::ActionNeq && same);

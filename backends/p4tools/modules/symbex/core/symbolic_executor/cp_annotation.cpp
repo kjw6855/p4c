@@ -1,7 +1,9 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
 
+#include <cctype>
 #include <fstream>
 #include <regex>
+#include <stdexcept>
 
 #include "backends/p4tools/modules/symbex/options.h"
 #include "ir/json_parser.h"
@@ -29,6 +31,103 @@ bool boolField(const JsonObject *obj, const char *key) {
     const auto *f = field(obj, key);
     const auto *b = f != nullptr ? f->to<JsonBoolean>() : nullptr;
     return b != nullptr && b->val;
+}
+
+/// Numbers arrive as JSON numbers or as strings (dotted-quad and hex are written as strings in the
+/// artifacts). Returns false when @p key is absent or unreadable, so callers can tell "0" from
+/// "missing" - the difference between an Eq-to-zero term and a malformed one.
+bool numField(const JsonObject *obj, const char *key, big_int *out) {
+    const auto *f = field(obj, key);
+    if (f == nullptr) return false;
+    if (const auto *n = f->to<JsonNumber>(); n != nullptr) {
+        *out = big_int(static_cast<int64_t>(*n));
+        return true;
+    }
+    const auto *s = f->to<JsonString>();
+    if (s == nullptr) return false;
+    std::string v(s->c_str());
+    try {
+        if (v.rfind("0x", 0) == 0 || v.rfind("0X", 0) == 0) {
+            *out = big_int(0);
+            for (size_t i = 2; i < v.size(); ++i) {
+                const char c = v[i];
+                const int d = std::isdigit(c) ? c - '0' : std::tolower(c) - 'a' + 10;
+                if (d < 0 || d > 15) return false;
+                *out = *out * 16 + d;
+            }
+            return true;
+        }
+        if (v.find('.') != std::string::npos) {  // dotted quad -> 32-bit
+            big_int acc = 0;
+            size_t pos = 0;
+            int parts = 0;
+            while (pos <= v.size() && parts < 4) {
+                const size_t dot = v.find('.', pos);
+                const std::string oct = v.substr(pos, dot == std::string::npos ? dot : dot - pos);
+                if (oct.empty()) return false;
+                acc = acc * 256 + std::stoi(oct);
+                ++parts;
+                if (dot == std::string::npos) break;
+                pos = dot + 1;
+            }
+            if (parts != 4) return false;
+            *out = acc;
+            return true;
+        }
+        *out = big_int(v);
+        return true;
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
+CpTerm::Op parseOp(cstring s) {
+    if (s == "eq") return CpTerm::Op::Eq;
+    if (s == "neq") return CpTerm::Op::Neq;
+    if (s == "in") return CpTerm::Op::In;
+    if (s == "range") return CpTerm::Op::Range;
+    if (s == "lpm") return CpTerm::Op::Lpm;
+    if (s == "ternary") return CpTerm::Op::Ternary;
+    return CpTerm::Op::Unsupported;  // never enforced - an unknown op must constrain nothing
+}
+
+/// One `when` term. A term whose op is unrecognized, or whose operands do not parse, stays
+/// Unsupported so the clause degrades to documentation rather than to a wrong constraint.
+CpTerm parseTerm(const JsonObject *o) {
+    CpTerm t;
+    if (o == nullptr) return t;
+    t.key = strField(o, "key");
+    t.op = parseOp(strField(o, "op"));
+    numField(o, "value", &t.value);
+    numField(o, "mask", &t.mask);
+    numField(o, "lo", &t.lo);
+    numField(o, "hi", &t.hi);
+    if (big_int p; numField(o, "prefix", &p)) t.prefix = static_cast<int>(p);
+    if (const auto *vs = field(o, "values"); vs != nullptr) {
+        if (const auto *arr = vs->to<JsonVector>(); arr != nullptr) {
+            for (const auto &e : *arr) {
+                if (const auto *n = e->to<JsonNumber>(); n != nullptr) {
+                    t.values.emplace_back(static_cast<int64_t>(*n));
+                }
+            }
+        }
+    }
+    if (const auto *ad = field(o, "action_data"); ad != nullptr) {
+        if (const auto *arr = ad->to<JsonVector>(); arr != nullptr && arr->size() == 2) {
+            const auto *a0 = (*arr)[0]->to<JsonString>();
+            const auto *a1 = (*arr)[1]->to<JsonString>();
+            if (a0 != nullptr && a1 != nullptr) {
+                t.actionDataAction = cstring(a0->c_str());
+                t.actionDataArg = cstring(a1->c_str());
+            }
+        }
+    }
+    if (const auto *rhs = field(o, "rhs"); rhs != nullptr) {
+        if (const auto *ro = rhs->to<JsonObject>(); ro != nullptr) t.rhsVar = strField(ro, "var");
+    }
+    // A key term needs a key name; an action_data term needs its pair. Neither -> not enforceable.
+    if (t.key.isNullOrEmpty() && t.actionDataArg.isNullOrEmpty()) t.op = CpTerm::Op::Unsupported;
+    return t;
 }
 
 /// Parse one clause into the enforceable subset. Unrecognized text is NOT an error: the file is
@@ -136,7 +235,29 @@ std::optional<CpAnnotation> CpAnnotation::load(const std::string &path) {
                 }
                 const auto *o = e->to<JsonObject>();
                 if (o == nullptr) continue;
-                auto c = parseClause(strField(o, "clause"));
+                // Structured when/then form takes precedence; `clause` remains for legacy files.
+                CpAssumeClause c;
+                if (const auto *w = field(o, "when"); w != nullptr || field(o, "then") != nullptr) {
+                    c.kind = CpAssumeClause::Kind::WhenThen;
+                    c.table = strField(o, "table");
+                    if (const auto *arr = w != nullptr ? w->to<JsonVector>() : nullptr;
+                        arr != nullptr) {
+                        for (const auto &te : *arr) c.when.push_back(parseTerm(te->to<JsonObject>()));
+                    }
+                    if (const auto *th = field(o, "then"); th != nullptr) {
+                        if (const auto *to = th->to<JsonObject>(); to != nullptr) {
+                            c.thenAction = strField(to, "action");
+                            c.thenActionNe = strField(to, "action_ne");
+                        }
+                    }
+                    // No table, or nothing to assert about the action, means nothing to enforce.
+                    if (c.table.isNullOrEmpty() ||
+                        (c.thenAction.isNullOrEmpty() && c.thenActionNe.isNullOrEmpty())) {
+                        c.kind = CpAssumeClause::Kind::Unparsed;
+                    }
+                } else {
+                    c = parseClause(strField(o, "clause"));
+                }
                 c.source = strField(o, "source");
                 c.ref = strField(o, "ref");
                 c.reason = strField(o, "reason");

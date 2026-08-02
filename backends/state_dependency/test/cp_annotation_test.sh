@@ -89,6 +89,35 @@ else
     echo "PASS [cp-sound]: truthful assumption pruned nothing ($(count cp_true) txtpb, unchanged)"
 fi
 
+# ---- 5. KEYED (when/then) clauses: the guard must decide, not the action name alone ----
+# A table with several installed actions cannot be described by action(t)==a; these assert the
+# per-key form behaves like the coarse one when the guard holds, and is inert when it cannot parse.
+gen keyed_true  lock_flip_tna.p4 STATE_DEP_TAMPERING "$HERE/cp_annotation_keyed_true.json"     --state-tamper-value 0x1
+gen keyed_false lock_flip_tna.p4 STATE_DEP_TAMPERING "$HERE/cp_annotation_keyed_false.json"    --state-tamper-value 0x1
+gen keyed_unk   lock_flip_tna.p4 STATE_DEP_TAMPERING "$HERE/cp_annotation_keyed_unknownop.json" --state-tamper-value 0x1
+
+if [ "$(count keyed_true)" -ne "$(count cp_none)" ] || [ "$(prunes keyed_true)" -ne 0 ]; then
+    echo "FAIL [keyed-sound]: truthful keyed clause changed the yield: $(count cp_none) -> $(count keyed_true), $(prunes keyed_true) prunes"
+    fail=1
+else
+    echo "PASS [keyed-sound]: truthful keyed clause pruned nothing ($(count keyed_true) txtpb)"
+fi
+
+if [ "$(count keyed_false)" -ne 0 ] || [ "$(prunes keyed_false)" -eq 0 ]; then
+    echo "FAIL [keyed-prune]: expected 0 txtpb and >0 prunes, got $(count keyed_false) txtpb / $(prunes keyed_false) prunes"
+    fail=1
+else
+    echo "PASS [keyed-prune]: contradicted keyed clause pruned all ($(prunes keyed_false) prunes)"
+fi
+
+# An op we do not understand must never be approximated into a constraint.
+if [ "$(count keyed_unk)" -ne "$(count cp_none)" ] || [ "$(prunes keyed_unk)" -ne 0 ]; then
+    echo "FAIL [keyed-inert]: unknown op constrained the search: $(count cp_none) -> $(count keyed_unk), $(prunes keyed_unk) prunes"
+    fail=1
+else
+    echo "PASS [keyed-inert]: unrecognised op loaded inert ($(count keyed_unk) txtpb, 0 prunes)"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "FAILURES PRESENT"
 exit "$fail"

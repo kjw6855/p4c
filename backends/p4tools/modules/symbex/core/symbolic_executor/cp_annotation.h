@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "lib/big_int.h"
 #include "lib/cstring.h"
 
 namespace P4::P4Tools::Symbex {
@@ -15,6 +16,33 @@ namespace P4::P4Tools::Symbex {
 /// a symbolic predicate over data-plane execution, NOT an enumeration of forwarding rules.
 /// v1 understands the subset the tampering search can act on; anything else is retained
 /// verbatim as `raw` with kind == Unparsed so the file stays self-documenting.
+/// One term of a clause's `when` guard. A guard made only of Eq terms can be checked structurally
+/// against an emitted TableConfig; anything else has to become a path constraint, because a masked
+/// or ranged key cannot be compared for equality against a single concrete entry.
+struct CpTerm {
+    enum class Op {
+        Unsupported,  ///< loaded but never enforced - an unknown op must constrain nothing
+        Eq,           ///< key == value
+        Neq,          ///< key != value, or action_data != rhs
+        In,           ///< key in values
+        Range,        ///< lo <= key <= hi
+        Lpm,          ///< key & mask(prefix) == value & mask(prefix)
+        Ternary,      ///< key & mask == value & mask
+    };
+    Op op = Op::Unsupported;
+    cstring key;                 ///< key field name, when the term constrains a key
+    big_int value = 0;           ///< Eq/Neq/Lpm/Ternary right-hand side
+    big_int mask = 0;            ///< Ternary mask
+    int prefix = -1;             ///< Lpm prefix length
+    big_int lo = 0, hi = 0;      ///< Range bounds
+    std::vector<big_int> values;  ///< In set
+    /// Set when the term constrains action data rather than a key: action_data(<action>, <arg>).
+    cstring actionDataAction;
+    cstring actionDataArg;
+    /// Cross-field right-hand side, e.g. {"var": "ingress_port"}. Empty when the RHS is a literal.
+    cstring rhsVar;
+};
+
 struct CpAssumeClause {
     enum class Kind {
         Unparsed,       ///< kept for the record, not enforced
@@ -23,11 +51,23 @@ struct CpAssumeClause {
         ActionNeq,      ///< action(t) != a
         Hit,            ///< hit(t)
         Miss,           ///< miss(t)
+        WhenThen,       ///< structured when[]/then form (both tiers)
     };
     Kind kind = Kind::Unparsed;
     cstring table;   ///< table the clause constrains ("" when Unparsed)
     cstring action;  ///< action name, for the *Action kinds
     cstring raw;     ///< original clause text
+    /// Structured form. `when` empty => the clause applies unconditionally to the table.
+    std::vector<CpTerm> when;
+    cstring thenAction;    ///< `then.action`: the action the controller pairs with this guard
+    cstring thenActionNe;  ///< `then.action_ne`: an action the controller never pairs with it
+    /// True when every `when` term is Eq, so the clause can be checked without the solver.
+    [[nodiscard]] bool isConcrete() const {
+        for (const auto &t : when) {
+            if (t.op != CpTerm::Op::Eq) return false;
+        }
+        return true;
+    }
     // Provenance - carried through so a finding can cite why an assumption was made.
     cstring source;
     cstring ref;

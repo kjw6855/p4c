@@ -1,0 +1,11 @@
+{
+  "program": "lock_flip_tna",
+  "_purpose": "same guard, contradicted consequent => every candidate pruned",
+  "assume": [
+    { "table": "lock_tbl",
+      "when": [ { "key": "lock_val", "op": "eq", "value": 0 } ],
+      "then": { "action": "NoAction" },
+      "source": "fixture", "ref": "cp_annotation_test.sh",
+      "reason": "pretend the controller pairs key 0 with NoAction; every emitted test relies on allow." }
+  ]
+}

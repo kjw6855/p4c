@@ -1,0 +1,10 @@
+{
+  "program": "lock_flip_tna",
+  "_purpose": "unrecognised op must load inert and constrain nothing (never approximated)",
+  "assume": [
+    { "table": "lock_tbl",
+      "when": [ { "key": "lock_val", "op": "regex_matches", "value": 0 } ],
+      "then": { "action": "NoAction" },
+      "source": "fixture", "ref": "cp_annotation_test.sh" }
+  ]
+}

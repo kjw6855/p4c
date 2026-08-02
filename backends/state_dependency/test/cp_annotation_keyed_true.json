@@ -1,0 +1,11 @@
+{
+  "program": "lock_flip_tna",
+  "_purpose": "keyed guard that HOLDS and names the action the sink really resolves to => nothing pruned",
+  "assume": [
+    { "table": "lock_tbl",
+      "when": [ { "key": "lock_val", "op": "eq", "value": 0 } ],
+      "then": { "action": "allow" },
+      "source": "fixture", "ref": "cp_annotation_test.sh",
+      "reason": "Phase-1 reads 0 and HITs lock_tbl on key 0, resolving to allow." }
+  ]
+}
