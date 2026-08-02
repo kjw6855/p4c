@@ -1352,6 +1352,66 @@ static bool cpNameMatches(cstring full, cstring want) {
 /// Under-constrains by design: only the enforceable clause kinds are checked, a table with no
 /// clause is unconstrained, and a table whose config cannot be evaluated is left alone. A wrong
 /// assumption here costs a MISSED bug (unsound), which is worse than a false positive.
+/// Does @p term hold for the concrete key value of @p match in an emitted entry?
+///
+/// The plan called for symbolic terms to become path constraints at generation time. They are
+/// evaluated here against the concretised entry instead: `ControlPlaneState::getTableKey` needs the
+/// key's IR type, which is not reachable at the Phase-2 init site without threading table IR
+/// through several layers. Post-hoc evaluation prunes exactly the same tests - it only forfeits the
+/// ability to STEER the search toward satisfying entries, which is a search-efficiency property,
+/// not a correctness one. Generation-time steering can be layered on later.
+static bool cpTermHolds(const CpTerm &term, const TableMatch *match) {
+    // Read the key's concrete value whichever match kind the entry used.
+    const IR::Constant *val = nullptr;
+    const IR::Constant *mask = nullptr;
+    const IR::Constant *plen = nullptr;
+    if (const auto *ex = match->to<Exact>(); ex != nullptr) {
+        val = ex->getEvaluatedValue();
+    } else if (const auto *tern = match->to<Ternary>(); tern != nullptr) {
+        val = tern->getEvaluatedValue();
+        mask = tern->getEvaluatedMask();
+    } else if (const auto *lpm = match->to<LPM>(); lpm != nullptr) {
+        val = lpm->getEvaluatedValue();
+        plen = lpm->getEvaluatedPrefixLength();
+    }
+    if (val == nullptr) return false;
+    const big_int key = val->value;
+    const int width = val->type != nullptr ? val->type->width_bits() : 0;
+    // Explicit return type: boost expression templates otherwise deduce two different types here.
+    const auto prefixMask = [&](int len) -> big_int {
+        if (width <= 0 || len < 0 || len > width) return big_int(0);
+        big_int m = 0;
+        for (int i = 0; i < len; ++i) m = (m << 1) | 1;
+        return big_int(m << (width - len));
+    };
+    switch (term.op) {
+        case CpTerm::Op::Eq:
+            return key == term.value;
+        case CpTerm::Op::Neq:
+            return key != term.value;
+        case CpTerm::Op::In:
+            return std::find(term.values.begin(), term.values.end(), key) != term.values.end();
+        case CpTerm::Op::Range:
+            return key >= term.lo && key <= term.hi;
+        case CpTerm::Op::Lpm: {
+            // Compare under the ANNOTATION's prefix; if the entry is itself an LPM match, it must
+            // be at least as specific, otherwise it covers addresses the clause does not describe.
+            const big_int m = prefixMask(term.prefix);
+            if (m == 0) return false;
+            if (plen != nullptr && static_cast<int>(plen->value) < term.prefix) return false;
+            return (key & m) == (term.value & m);
+        }
+        case CpTerm::Op::Ternary: {
+            const big_int m = mask != nullptr ? mask->value : term.mask;
+            if (m == 0) return false;
+            return (key & m) == (term.value & m);
+        }
+        case CpTerm::Op::Unsupported:
+        default:
+            return false;  // never approximate an op we do not understand
+    }
+}
+
 static bool violatesCpAssumptions(const FinalState *fs) {
     const auto *ann = cpAnnotation();
     if (ann == nullptr || fs == nullptr) return false;
@@ -1367,10 +1427,6 @@ static bool violatesCpAssumptions(const FinalState *fs) {
         const auto *matches = cfg->getRules()->front().getMatches();
         for (const auto *c : clauses) {
             if (c->kind == CpAssumeClause::Kind::WhenThen) {
-                // Concrete tier only: every `when` term is an exact key equality, so the guard can
-                // be decided against this entry without the solver. Symbolic terms are handled as
-                // path constraints at generation time, not here.
-                if (!c->isConcrete()) continue;
                 bool guardHolds = true;
                 for (const auto &t : c->when) {
                     // Key names appear qualified ("ig_md.lock_val") in the match map but are
@@ -1388,8 +1444,7 @@ static bool violatesCpAssumptions(const FinalState *fs) {
                         guardHolds = false;  // key absent from this entry -> guard says nothing
                         break;
                     }
-                    const auto *ex = match->to<Exact>();
-                    if (ex == nullptr || ex->getEvaluatedValue()->value != t.value) {
+                    if (!cpTermHolds(t, match)) {
                         guardHolds = false;
                         break;
                     }

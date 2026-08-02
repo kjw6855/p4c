@@ -1,0 +1,11 @@
+{
+  "program": "lock_flip_tna",
+  "_purpose": "symbolic tier: an `in` guard covering the real key must behave like the eq guard",
+  "assume": [
+    { "table": "lock_tbl",
+      "when": [ { "key": "lock_val", "op": "in", "values": [0, 7, 9] } ],
+      "then": { "action": "allow" },
+      "source": "fixture", "ref": "cp_annotation_test.sh",
+      "reason": "key 0 is in the set, so the guard holds and allow is the truthful consequent." }
+  ]
+}

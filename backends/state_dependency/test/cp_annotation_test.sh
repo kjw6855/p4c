@@ -118,6 +118,24 @@ else
     echo "PASS [keyed-inert]: unrecognised op loaded inert ($(count keyed_unk) txtpb, 0 prunes)"
 fi
 
+# ---- 6. SYMBOLIC terms (in / range): guards that are not plain equalities ----
+gen sym_true  lock_flip_tna.p4 STATE_DEP_TAMPERING "$HERE/cp_annotation_keyed_symbolic.json"       --state-tamper-value 0x1
+gen sym_prune lock_flip_tna.p4 STATE_DEP_TAMPERING "$HERE/cp_annotation_keyed_symbolic_prune.json" --state-tamper-value 0x1
+
+if [ "$(count sym_true)" -ne "$(count cp_none)" ] || [ "$(prunes sym_true)" -ne 0 ]; then
+    echo "FAIL [sym-sound]: truthful `in` guard changed the yield: $(count cp_none) -> $(count sym_true), $(prunes sym_true) prunes"
+    fail=1
+else
+    echo "PASS [sym-sound]: truthful in-set guard pruned nothing ($(count sym_true) txtpb)"
+fi
+
+if [ "$(count sym_prune)" -ne 0 ] || [ "$(prunes sym_prune)" -eq 0 ]; then
+    echo "FAIL [sym-prune]: expected 0 txtpb and >0 prunes, got $(count sym_prune) txtpb / $(prunes sym_prune) prunes"
+    fail=1
+else
+    echo "PASS [sym-prune]: range guard with false consequent pruned all ($(prunes sym_prune) prunes)"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "FAILURES PRESENT"
 exit "$fail"

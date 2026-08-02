@@ -1,0 +1,11 @@
+{
+  "program": "lock_flip_tna",
+  "_purpose": "symbolic tier: same `in` guard, contradicted consequent => all pruned",
+  "assume": [
+    { "table": "lock_tbl",
+      "when": [ { "key": "lock_val", "op": "range", "lo": 0, "hi": 3 } ],
+      "then": { "action": "NoAction" },
+      "source": "fixture", "ref": "cp_annotation_test.sh",
+      "reason": "key 0 falls in [0,3], so the guard holds and the false consequent prunes." }
+  ]
+}
