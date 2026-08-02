@@ -84,6 +84,13 @@ struct CpRegisterRule {
     /// True when the protocol shares this SO among all participants (e.g. a Paxos instance),
     /// so a divergence caused by another participant is in-spec.
     bool shared = false;
+    /// Declared or deployed value of a cell before any packet writes it. symbex otherwise seeds a
+    /// first read with createTargetUninitialized (zero), which disagrees with hardware whenever the
+    /// declaration says otherwise: SwitchV2P declares Register<key_pair_t,_>(SIZE, {1,0}) keys, so
+    /// its check HITs under symbex and MISSes on the switch. Unset (hasInitialValue false) leaves
+    /// today's behaviour untouched.
+    bool hasInitialValue = false;
+    big_int initialValue = 0;
 };
 
 /// Parsed `--cp-annotation` file. External to the P4 source so shared benchmark programs stay

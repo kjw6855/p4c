@@ -213,6 +213,17 @@ std::optional<CpAnnotation> CpAnnotation::load(const std::string &path) {
                 CpRegisterRule rule;
                 rule.partitionedBy = strField(ro, "partitioned_by");
                 rule.shared = boolField(ro, "shared");
+                // Only a scalar initial value is usable: a struct initialiser such as {1, 0} needs
+                // field-wise seeding, which the register model does not expose here, so it is
+                // recorded in the annotation but deliberately left unapplied.
+                if (const auto *iv = field(ro, "initial_value"); iv != nullptr) {
+                    if (const auto *ivo = iv->to<JsonObject>(); ivo != nullptr) {
+                        if (big_int v; numField(ivo, "value", &v)) {
+                            rule.hasInitialValue = true;
+                            rule.initialValue = v;
+                        }
+                    }
+                }
                 if (const auto *wb = field(ro, "writable_by"); wb != nullptr) {
                     if (const auto *arr = wb->to<JsonVector>(); arr != nullptr) {
                         for (const auto &e : *arr)

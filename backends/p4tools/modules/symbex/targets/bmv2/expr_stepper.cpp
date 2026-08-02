@@ -31,6 +31,8 @@
 #include "backends/p4tools/modules/symbex/core/small_step/expr_stepper.h"
 #include "backends/p4tools/modules/symbex/core/small_step/small_step.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
+#include "backends/p4tools/modules/symbex/lib/logging.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
@@ -568,8 +570,25 @@ const Bmv2V1ModelExprStepper::ExternMethodImpls<Bmv2V1ModelExprStepper>
              if (registerState != nullptr) {
                  registerValue = registerState->checkedTo<Bmv2V1ModelRegisterValue>();
              } else {
-                 const auto *inputValue =
-                     stepper.programInfo.createTargetUninitialized(readOutput->type, false);
+                 // A cell no packet has written yet reads as its DECLARED value, not as zero.
+                 // createTargetUninitialized assumes zero, which disagrees with the switch whenever
+                 // the P4 or the controller says otherwise - the source of the SwitchV2P cache FP.
+                 // Only scalars are seeded; a struct initialiser needs field-wise construction.
+                 const IR::Expression *inputValue = nullptr;
+                 if (const auto *ann = loadedCpAnnotation(); ann != nullptr) {
+                     const auto *rule = ann->registerRule(externInstance->controlPlaneName());
+                     if (rule != nullptr && rule->hasInitialValue &&
+                         readOutput->type->is<IR::Type_Bits>()) {
+                         inputValue = IR::Constant::get(readOutput->type, rule->initialValue);
+                         printInfo("[CP annotation] %1%: seeding first read with declared initial "
+                                   "value %2%",
+                                   externInstance->controlPlaneName(), rule->initialValue);
+                     }
+                 }
+                 if (inputValue == nullptr) {
+                     inputValue =
+                         stepper.programInfo.createTargetUninitialized(readOutput->type, false);
+                 }
                  // Record the read index (e.g. a hash ConcolicVariable of header fields) so the
                  // tampering executor can pin its packet-field operands (collectIndexSymVars) and make
                  // an attacker's Phase-2 write collide with this read's bucket. Mirrors TNA, where
