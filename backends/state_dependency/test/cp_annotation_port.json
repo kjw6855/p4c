@@ -1,12 +1,46 @@
-{ "program": "search_opt_tna",
+{
+  "program": "search_opt_tna",
   "_purpose": "port-authorization labelling PoC: one SO per verdict class",
-  "port_roles": { "trusted": {"ports":[0,1]}, "guest": {"ports":[2,3,4]} },
-  "registers": {
-    "Ingress.regA": {"writable_by":["trusted"], "source":"fixture", "ref":"cp_annotation_test.sh",
-                     "reason":"attacker enters on a guest port => unauthorized"},
-    "Ingress.regB": {"partitioned_by":"ingress_port", "source":"fixture", "ref":"cp_annotation_test.sh",
-                     "reason":"cell indexed by an unspoofable principal => negative control"},
-    "Ingress.regC": {"shared":true, "source":"fixture", "ref":"cp_annotation_test.sh",
-                     "reason":"protocol shares this state => another party's write is in-spec"}
+  "port_roles": {
+    "trusted": {
+      "ports": [
+        0,
+        1
+      ]
+    },
+    "guest": {
+      "ports": [
+        2,
+        3,
+        4
+      ]
+    }
   },
-  "assume": [] }
+  "registers": {
+    "Ingress.regA": {
+      "writable_by": [
+        "trusted"
+      ],
+      "source": "fixture",
+      "ref": "cp_annotation_test.sh",
+      "reason": "attacker enters on a guest port => unauthorized"
+    },
+    "Ingress.regB": {
+      "partitioned_by": "ingress_port",
+      "source": "fixture",
+      "ref": "cp_annotation_test.sh",
+      "reason": "cell indexed by an unspoofable principal => negative control"
+    },
+    "Ingress.regC": {
+      "shared": true,
+      "source": "fixture",
+      "ref": "cp_annotation_test.sh",
+      "reason": "Writable by every declared role, stated as an EXPLICIT grant. Previously this relied on shared:true alone to authorize, but sharing state among participants describes reading it - P4xos's learner state is read by all participants and written only by acceptors - so `shared` no longer widens write authorization. Only a positive writable_by grant does. Ports 5+ are outside every role, so an attacker there still scores unauthorized.",
+      "writable_by": [
+        "trusted",
+        "guest"
+      ]
+    }
+  },
+  "assume": []
+}

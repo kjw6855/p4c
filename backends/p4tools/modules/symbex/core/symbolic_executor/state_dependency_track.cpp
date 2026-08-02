@@ -1298,10 +1298,6 @@ static void labelAttackerPort(const P4StateDependency::DependencyGraphs::SOChain
         verdict = "partitioned"_cs;
         why = "cell is indexed by an unspoofable principal; cross-principal poisoning is "
               "structurally impossible (negative control)"_cs;
-    } else if (rule->shared) {
-        verdict = "authorized"_cs;
-        why = "protocol declares this state shared among all participants, so another party's "
-              "write is in-spec"_cs;
     } else if (rule->writableBy.empty()) {
         // Empty writable_by is documented as "unconstrained" (cp_annotation.h). Falling through to
         // the role comparison below would score it "unauthorized", turning every state object with
@@ -1315,6 +1311,15 @@ static void labelAttackerPort(const P4StateDependency::DependencyGraphs::SOChain
     } else {
         auto roles = ann->rolesForPort(attackerPort);
         bool ok = false;
+        // `shared` means the protocol lets any declared PARTICIPANT write this state, so
+        // membership in any declared role suffices. It deliberately does not short-circuit the
+        // port check: a writer whose port maps to no declared role is an outsider, and surfacing
+        // that is the whole point of the port layer (P4xos's round register is writable by any
+        // host on the wire even though only participants are supposed to write it).
+        // writable_by is the sole authority. `shared` records that the protocol shares this state
+        // among participants, which is a statement about READING it: P4xos's learner state is read
+        // by every participant but written only by acceptors, so sharing must not widen write
+        // authorization. A participant that is not a named writer is still unauthorized.
         for (const auto &r : rule->writableBy)
             if (roles.count(r) > 0) ok = true;
         verdict = ok ? "authorized"_cs : "unauthorized"_cs;
