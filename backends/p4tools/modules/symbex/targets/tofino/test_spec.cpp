@@ -193,6 +193,40 @@ std::vector<const IR::Expression *> TofinoRegisterValue::getIndexExpressions() c
     return indices;
 }
 
+const IR::Expression *declaredRegisterInitialValue(const IR::Declaration_Instance *decl) {
+    if (decl == nullptr || decl->arguments == nullptr) {
+        return nullptr;
+    }
+    // Resolve the extern's base name through the specialization wrapper: the declaration reads
+    // `Register<key_pair_t, index_t>(CACHE_SIZE, {1, 0}) keys;`, so decl->type is a specialized
+    // type whose base carries the name.
+    cstring externName;
+    if (const auto *spec = decl->type->to<IR::Type_Specialized>();
+        spec != nullptr && spec->baseType != nullptr && spec->baseType->path != nullptr) {
+        externName = spec->baseType->path->name.name;
+    } else if (const auto *named = decl->type->to<IR::Type_Name>();
+               named != nullptr && named->path != nullptr) {
+        externName = named->path->name.name;
+    } else {
+        return nullptr;
+    }
+    // Register(size) has no init; Register(size, init) puts it second; DirectRegister(init) first.
+    size_t initIdx = 0;
+    if (externName == "Register") {
+        if (decl->arguments->size() < 2) {
+            return nullptr;
+        }
+        initIdx = 1;
+    } else if (externName == "DirectRegister") {
+        if (decl->arguments->empty()) {
+            return nullptr;
+        }
+    } else {
+        return nullptr;
+    }
+    return decl->arguments->at(initIdx)->expression;
+}
+
 std::optional<big_int> TofinoRegisterValue::registerCellCount() const {
     // Register<T, I>(bit<32> size [, T init]) — the first ctor arg is the cell count.
     if (decl == nullptr || decl->arguments == nullptr || decl->arguments->empty()) {

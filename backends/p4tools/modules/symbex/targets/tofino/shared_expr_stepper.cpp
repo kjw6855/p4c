@@ -251,7 +251,8 @@ const IR::Expression *initializeRegisterParameters(const TestObject *registerSta
                                                    const ProgramInfo &programInfo,
                                                    cstring externInstanceName,
                                                    const IR::PathExpression *registerParamRef,
-                                                   bool canConfigure, const IR::Expression *index) {
+                                                   bool canConfigure, const IR::Expression *index,
+                                                   const IR::Declaration_Instance *decl) {
     const IR::Expression *registerExpr = nullptr;
     const auto *registerParamType = registerParamRef->type;
     // Relaxed carried read (Phase-2 precondition discovery only): a register that has a carried
@@ -312,8 +313,36 @@ const IR::Expression *initializeRegisterParameters(const TestObject *registerSta
             /// Set the register parameter based on the derived register value.
             nextState.set(registerParamRef, registerExpr);
         }
+    } else if (const auto *declaredInit =
+                   (canConfigure && SymbexOptions::get().initRegZeroValue)
+                       ? declaredRegisterInitialValue(decl)
+                       : nullptr;
+               declaredInit != nullptr) {
+        // The declaration says what an untouched cell holds, so use it rather than assuming zero.
+        // SwitchV2P declares Register<key_pair_t,_>(CACHE_SIZE, {1, 0}) keys, where an empty slot
+        // carries key=1; seeding 0 lets the solver pick a packet key of 0 and score a cache HIT
+        // that hardware cannot produce.
+        //
+        // Gated on the SAME condition that would otherwise force zero: this replaces the "assume
+        // 0" heuristic, never the symbolic seed. Phase 2 must keep free symbolic values or the
+        // write path stops being reachable (see SymbexOptions::initRegZeroValue).
+        registerExpr = declaredInit;
+        if (const auto *declaredList = declaredInit->to<IR::StructExpression>()) {
+            std::vector<IR::StateVariable> validFields;
+            const auto fields = nextState.getFlatFields(registerParamRef, &validFields);
+            for (size_t idx = 0; idx < fields.size() && idx < declaredList->components.size();
+                 ++idx) {
+                nextState.set(fields.at(idx), declaredList->components.at(idx)->expression);
+            }
+            for (const auto &validField : validFields) {
+                nextState.set(validField, IR::BoolLiteral::get(true));
+            }
+        } else {
+            nextState.set(registerParamRef, registerExpr);
+        }
     } else {
-        // During tampering analysis, assume registers start at 0 (hardware default).
+        // No declared initial value: assume zero during tampering analysis. Zero is the hardware
+        // default only when the declaration omits an init - the branch above handles the rest.
         // This avoids free symbolic variables for initial register contents that would
         // be unconstrained by Z3 and produce non-zero values requiring hardware pre-seeding.
         const bool useZeroInit =
@@ -493,7 +522,8 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
         // object, if necessary.
         const auto *registerExpr = initializeRegisterParameters(
             registerState, nextState, stepper.programInfo, externInstance->toString(),
-            registerParamRef, canConfigure, index);
+            registerParamRef, canConfigure, index,
+            externInstance->to<IR::Declaration_Instance>());
 
         if (canConfigure) {
             CHECK_NULL(registerExpr);
@@ -617,7 +647,8 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
         // object, if necessary.
         const auto *registerExpr = initializeRegisterParameters(
             registerState, nextState, stepper.programInfo, externInstance->toString(),
-            registerParamRef, canConfigure, nullptr);
+            registerParamRef, canConfigure, nullptr,
+            externInstance->to<IR::Declaration_Instance>());
 
         if (canConfigure) {
             CHECK_NULL(registerExpr);
@@ -816,15 +847,22 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
                  readValue =
                      registerState->checkedTo<TofinoRegisterValue>()->getValueAtIndex(index);
              } else {
-                 // First touch: seed the register (zero under tampering tracking, else symbolic)
-                 // and read it back.
+                 // First touch: use the value the declaration gives the cell; failing that, zero
+                 // under tampering tracking (the hardware default only when no init is declared),
+                 // else symbolic.
                  const bool useZeroInit = SymbexOptions::get().tamperingRegisterTracking &&
                                           SymbexOptions::get().initRegZeroValue;
+                 // Same gating as initializeRegisterParameters: the declared value replaces the
+                 // zero assumption only, never the symbolic seed Phase 2 depends on.
                  const IR::Expression *init =
-                     useZeroInit
-                         ? static_cast<const IR::Expression *>(IR::Constant::get(valueType, 0))
-                         : static_cast<const IR::Expression *>(
-                               ToolsVariables::getSymbolicVariable(valueType, regName));
+                     useZeroInit ? declaredRegisterInitialValue(decl) : nullptr;
+                 if (init == nullptr) {
+                     init = useZeroInit
+                                ? static_cast<const IR::Expression *>(
+                                      IR::Constant::get(valueType, 0))
+                                : static_cast<const IR::Expression *>(
+                                      ToolsVariables::getSymbolicVariable(valueType, regName));
+                 }
                  auto *registerValue = new TofinoRegisterValue(decl, init, index);
                  nextState.addTestObject("registervalues"_cs, regName, registerValue);
                  readValue = registerValue->getValueAtIndex(index);

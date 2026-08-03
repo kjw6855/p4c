@@ -369,6 +369,18 @@ class Range : public TableMatch {
     DECLARE_TYPEINFO(Range, TableMatch);
 };
 
+/// The value a TNA register declaration gives its cells before any packet writes them, or nullptr
+/// when the declaration omits one.
+///
+/// `tofino1_base.p4` declares BOTH `Register(bit<32> size)` and
+/// `Register(bit<32> size, T initial_value)`, plus `DirectRegister(T initial_value)`, so the init
+/// lives at a different argument index per extern and a one-argument `Register(size)` has none at
+/// all. Arity alone cannot tell them apart, hence the type-name check.
+///
+/// Returned as-is: a scalar arrives as IR::Constant and a struct literal as IR::StructExpression,
+/// both of which IndexMap already evaluates.
+const IR::Expression *declaredRegisterInitialValue(const IR::Declaration_Instance *decl);
+
 }  // namespace P4::P4Tools::Symbex::Tofino
 
 #endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_TARGETS_TOFINO_TEST_SPEC_H_ */
