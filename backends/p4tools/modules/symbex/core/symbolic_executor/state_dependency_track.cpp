@@ -9,6 +9,7 @@
 #include "ir/ir.h"
 #include "ir/irutils.h"
 #include "ir/solver.h"
+#include "backends/p4tools/common/lib/constants.h"
 #include "lib/error.h"
 #include "lib/timer.h"
 
@@ -1433,6 +1434,112 @@ static bool cpActionDataTermHolds(const CpTerm &term, const big_int &value) {
     }
 }
 
+/// True when @p table's `const entries` exhaustively cover its key space, i.e. every reachable key
+/// combination is named by an entry, so the table can NEVER miss.
+///
+/// Such a table's key->action map is fixed in the program text: it is a deterministic selector, not
+/// a control-plane-programmable table, and a HIT->MISS tamper against it is not merely unlikely but
+/// structurally impossible. linkguardian's `era_correction` is the canonical shape -- two 1-bit
+/// exact keys with four const entries covering (0,0) (0,1) (1,0) (1,1) -- and every h2m case emitted
+/// against it is a false positive.
+///
+/// Deliberately conservative: it answers true only for all-exact keys with constant entry values and
+/// a fully enumerated product. Anything else (ternary/lpm/range keys, a non-constant entry value, a
+/// key space too large to enumerate) returns false and leaves behaviour exactly as before, because a
+/// wrong "cannot miss" would silently delete real findings.
+static bool constEntriesCoverKeySpace(const IR::P4Table *table) {
+    if (table == nullptr) return false;
+    const auto *entries = table->getEntries();
+    const auto *key = table->getKey();
+    if (entries == nullptr || key == nullptr || entries->entries.empty()) return false;
+
+    // Per-key bit widths, and the size of the whole key space. Capped: coverage is decided by
+    // enumerating the space, so a wide key must bail rather than loop forever -- and a space that
+    // large cannot be covered by an entry list anyway.
+    constexpr size_t kMaxKeySpace = 1u << 16u;
+    std::vector<int> widths;
+    size_t keySpace = 1;
+    for (const auto *ke : key->keyElements) {
+        if (ke->matchType == nullptr || ke->matchType->path == nullptr) return false;
+        const cstring matchKind = ke->matchType->path->name.name;
+        // exact and ternary are enumerable as cubes. lpm/range/optional are not handled here and
+        // must fall through to the existing behaviour.
+        if (matchKind != P4Constants::MATCH_KIND_EXACT &&
+            matchKind != P4Constants::MATCH_KIND_TERNARY)
+            return false;
+        const auto *bits = ke->expression->type->to<IR::Type_Bits>();
+        if (bits == nullptr || bits->width_bits() <= 0 || bits->width_bits() >= 32) return false;
+        const size_t domain = static_cast<size_t>(1) << bits->width_bits();
+        if (domain > kMaxKeySpace / keySpace) return false;  // too large to enumerate
+        widths.push_back(bits->width_bits());
+        keySpace *= domain;
+    }
+    if (widths.empty()) return false;
+
+    // Each const entry is a cube: (value, mask) per key, where mask 0 means "don't care". A ternary
+    // entry writes `v &&& m` (IR::Mask) or `_` (IR::DefaultExpression); an exact one is a bare
+    // constant, i.e. an all-ones mask.
+    struct Cube {
+        std::vector<big_int> value;
+        std::vector<big_int> mask;
+    };
+    std::vector<Cube> cubes;
+    for (const auto *entry : entries->entries) {
+        if (entry->keys == nullptr || entry->keys->components.size() != widths.size()) return false;
+        Cube cube;
+        for (size_t i = 0; i < widths.size(); ++i) {
+            const IR::Expression *k = entry->keys->components.at(i);
+            const big_int allOnes = (big_int(1) << widths[i]) - 1;
+            if (const auto *c = k->to<IR::Constant>()) {
+                cube.value.push_back(c->value & allOnes);
+                cube.mask.push_back(allOnes);
+            } else if (k->is<IR::DefaultExpression>()) {
+                cube.value.push_back(0);
+                cube.mask.push_back(0);  // don't care
+            } else if (const auto *m = k->to<IR::Mask>()) {
+                const auto *mv = m->left->to<IR::Constant>();
+                const auto *mm = m->right->to<IR::Constant>();
+                if (mv == nullptr || mm == nullptr) return false;
+                cube.value.push_back(mv->value & allOnes);
+                cube.mask.push_back(mm->value & allOnes);
+            } else {
+                return false;  // range/other -> not decided here
+            }
+        }
+        cubes.push_back(std::move(cube));
+    }
+
+    // Enumerate the key space and require every point to be matched by some cube. Direct rather than
+    // clever: the space is capped at 64K points and this runs once per chain setup.
+    for (size_t point = 0; point < keySpace; ++point) {
+        size_t rest = point;
+        std::vector<big_int> coords;
+        coords.reserve(widths.size());
+        for (size_t i = widths.size(); i-- > 0;) {
+            const size_t domain = static_cast<size_t>(1) << widths[i];
+            coords.push_back(big_int(rest % domain));
+            rest /= domain;
+        }
+        std::reverse(coords.begin(), coords.end());
+        bool matched = false;
+        for (const auto &cube : cubes) {
+            bool all = true;
+            for (size_t i = 0; i < widths.size(); ++i) {
+                if ((coords[i] & cube.mask[i]) != (cube.value[i] & cube.mask[i])) {
+                    all = false;
+                    break;
+                }
+            }
+            if (all) {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) return false;
+    }
+    return true;
+}
+
 static bool violatesCpAssumptions(const FinalState *fs) {
     const auto *ann = cpAnnotation();
     if (ann == nullptr || fs == nullptr) return false;
@@ -1932,6 +2039,23 @@ size_t StateDependencyTracker::runTamperingChain(
         return runConditionChain(chain, initState, phase1Bucket, callBack, maxPerChain, missToHit);
     }
     if (missToHit && currentSinkTable_ == nullptr) return 0;
+
+    // A sink whose const entries cover the whole key space cannot MISS, so the HIT->MISS direction
+    // is asking for a state the program cannot reach. Emitting it produces a test that always fails
+    // to reproduce (linkguardian's era_correction h2m class). The MISS->HIT direction is dropped for
+    // the same reason: its Phase-1 filter keeps only sink-MISS baselines, of which there are none.
+    //
+    // What is NOT suppressed is a change of ACTION within the const map -- that is a real observable
+    // difference, and it is what the Step-4 divergence matrix is for; this only removes the
+    // HIT/MISS framing that does not apply to such a table.
+    if (constEntriesCoverKeySpace(currentSinkTable_)) {
+        printInfo("[Tampering] chain id=%1% (%2%): sink '%3%' has const entries covering its entire "
+                  "key space, so it can never MISS -- skipping the %4% direction (a HIT/MISS flip is "
+                  "structurally unreachable; an action change would need the divergence matrix).",
+                  chain.id, currentChainName, chain.sinkTableControlPlaneName,
+                  missToHit ? "MISS->HIT"_cs : "HIT->MISS"_cs);
+        return 0;
+    }
 
     // Reset the incremental Z3 solver state between directions/chains. A previous Phase-2 DFS +
     // processPhase() callback leaves write-path constraints in p4Assertions; Z3's accumulated
