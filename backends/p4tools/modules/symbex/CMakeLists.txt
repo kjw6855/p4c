@@ -65,6 +65,7 @@ set(
   core/symbolic_executor/cp_annotation.cpp
   core/symbolic_executor/depth_first.cpp
   core/symbolic_executor/selected_branches.cpp
+  core/symbolic_executor/sink_divergence.cpp
   core/symbolic_executor/random_backtrack.cpp
   core/symbolic_executor/greedy_node_cov.cpp
   core/symbolic_executor/state_dependency_track.cpp

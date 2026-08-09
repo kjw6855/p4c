@@ -19,6 +19,7 @@
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/sink_divergence.h"
 #include "backends/p4tools/modules/symbex/core/small_step/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
@@ -85,57 +86,6 @@ static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramIn
 // decides the end-to-end effect; this gate only drops flips that are provably invisible.
 // Sound-toward-emitting: anything we cannot prove identical counts as divergent (emit).
 namespace {
-
-// Replaces references to an action's parameters with their bound argument expressions, so two
-// calls of the same action with different action data yield structurally different bodies.
-class ActionParamSubstitute : public Transform {
- public:
-    explicit ActionParamSubstitute(std::map<cstring, const IR::Expression *> binding)
-        : binding_(std::move(binding)) {}
-    const IR::Node *postorder(IR::PathExpression *pe) override {
-        auto it = binding_.find(pe->path->name.name);
-        if (it != binding_.end()) return it->second;
-        return pe;
-    }
-
- private:
-    std::map<cstring, const IR::Expression *> binding_;
-};
-
-// The (parameter-substituted) output-affecting effect of an action body. `ok=false` marks a body
-// we cannot summarize (control flow etc.); callers then treat the actions as divergent.
-struct ActionEffect {
-    bool ok = true;
-    std::vector<std::pair<const IR::Expression *, const IR::Expression *>> assigns;  // (lhs, rhs)
-    std::vector<const IR::Expression *> calls;  // method/extern calls (e.g. mark_to_drop)
-};
-
-void collectEffect(const IR::Statement *stmt, ActionEffect &eff) {
-    if (stmt == nullptr) return;
-    if (const auto *block = stmt->to<IR::BlockStatement>()) {
-        for (const auto *c : block->components) {
-            const auto *s = c->to<IR::Statement>();
-            if (s == nullptr) {  // a nested declaration we do not model
-                eff.ok = false;
-                return;
-            }
-            collectEffect(s, eff);
-            if (!eff.ok) return;
-        }
-        return;
-    }
-    if (const auto *asg = stmt->to<IR::AssignmentStatement>()) {
-        eff.assigns.emplace_back(asg->left, asg->right);
-        return;
-    }
-    if (const auto *mc = stmt->to<IR::MethodCallStatement>()) {
-        eff.calls.push_back(mc->methodCall);
-        return;
-    }
-    if (stmt->is<IR::EmptyStatement>()) return;
-    // if/switch/return/exit/...: cannot summarize statically -> be conservative.
-    eff.ok = false;
-}
 
 // ---------------------------------------------------------------------------
 // Class-A (impact) chain ranking — --chain-impact-order
@@ -376,41 +326,6 @@ bool chainIsClassA(const P4StateDependency::DependencyGraphs::SOChain &chain,
     return fg.found;
 }
 
-bool exprEquiv(const IR::Expression *a, const IR::Expression *b) {
-    if (a == b) return true;
-    if (a == nullptr || b == nullptr) return false;
-    return a->equiv(*b);
-}
-
-bool effectsEqual(const ActionEffect &a, const ActionEffect &b) {
-    if (!a.ok || !b.ok) return false;  // unsummarizable -> not provably equal
-    if (a.assigns.size() != b.assigns.size() || a.calls.size() != b.calls.size()) return false;
-    for (size_t i = 0; i < a.assigns.size(); ++i) {
-        if (!exprEquiv(a.assigns[i].first, b.assigns[i].first)) return false;
-        if (!exprEquiv(a.assigns[i].second, b.assigns[i].second)) return false;
-    }
-    for (size_t i = 0; i < a.calls.size(); ++i)
-        if (!exprEquiv(a.calls[i], b.calls[i])) return false;
-    return true;
-}
-
-ActionEffect summarizeAction(const IR::P4Action *action,
-                             const std::map<cstring, const IR::Expression *> &binding) {
-    ActionEffect eff;
-    if (action == nullptr || action->body == nullptr) {
-        eff.ok = false;
-        return eff;
-    }
-    ActionParamSubstitute subst(binding);
-    const auto *body = action->body->apply(subst)->to<IR::BlockStatement>();
-    if (body == nullptr) {
-        eff.ok = false;
-        return eff;
-    }
-    collectEffect(body, eff);
-    return eff;
-}
-
 }  // namespace
 
 bool StateDependencyTracker::sinkActionsDiverge(const FinalState *fs, const IR::P4Table *sink,
@@ -446,24 +361,16 @@ bool StateDependencyTracker::sinkActionsDiverge(const FinalState *fs, const IR::
     for (const auto &arg : *hitCall->getArgs())
         hitBinding[arg.getActionParamName()] = arg.getEvaluatedValue();
 
-    // Diverge unless the two action bodies are provably identical in observable effect.
-    auto hitEff = summarizeAction(hitCall->getAction(), hitBinding);
-    auto defEff = summarizeAction(defAction, defBinding);
-    return !effectsEqual(hitEff, defEff);
+    // Diverge unless the two action bodies are provably identical in observable effect. The
+    // comparison itself lives in sink_divergence, shared with the condition and const-entry sinks.
+    return outcomesDiverge(hitCall->getAction(), hitBinding, defAction, defBinding);
 }
 
 bool StateDependencyTracker::sinkConditionDiverges() const {
     // H2S2C analog of sinkActionsDiverge: a condition flip is observable only if the then-branch and
-    // else-branch write different output state. Compare the two branch bodies' effects locally (no
-    // params to bind, unlike actions). A null else-branch contributes an empty effect (it runs
-    // nothing), which differs from any non-empty then-branch. Sound-toward-emitting.
-    if (currentSinkCondition == nullptr) return true;
-    ActionEffect thenEff;
-    ActionEffect elseEff;
-    collectEffect(currentSinkCondition->ifTrue, thenEff);
-    if (currentSinkCondition->ifFalse != nullptr)
-        collectEffect(currentSinkCondition->ifFalse, elseEff);
-    return !effectsEqual(thenEff, elseEff);
+    // else-branch write different output state. Same comparison as the table sink, applied to the
+    // two branch bodies instead of two action bodies.
+    return branchesDiverge(currentSinkCondition);
 }
 
 StateDependencyTracker::StateDependencyTracker(
@@ -2049,11 +1956,21 @@ size_t StateDependencyTracker::runTamperingChain(
     // difference, and it is what the Step-4 divergence matrix is for; this only removes the
     // HIT/MISS framing that does not apply to such a table.
     if (constEntriesCoverKeySpace(currentSinkTable_)) {
+        // Two quite different situations, worth telling apart in the log: either the const map is a
+        // no-op selector (every entry has the same observable effect, so no key movement inside it
+        // can matter and the chain is dead), or its entries really do differ and only the HIT/MISS
+        // framing is inapplicable -- that residue is what deliberate action enumeration addresses.
+        const bool actionsDiffer = constEntryActionsDiverge(currentSinkTable_);
         printInfo("[Tampering] chain id=%1% (%2%): sink '%3%' has const entries covering its entire "
-                  "key space, so it can never MISS -- skipping the %4% direction (a HIT/MISS flip is "
-                  "structurally unreachable; an action change would need the divergence matrix).",
+                  "key space, so it can never MISS -- skipping the %4% direction. %5%",
                   chain.id, currentChainName, chain.sinkTableControlPlaneName,
-                  missToHit ? "MISS->HIT"_cs : "HIT->MISS"_cs);
+                  missToHit ? "MISS->HIT"_cs : "HIT->MISS"_cs,
+                  actionsDiffer
+                      ? "Its entries DO select observably different actions, so a key movement "
+                        "within the const map remains a candidate (needs deliberate action "
+                        "enumeration, not a HIT/MISS flip)."_cs
+                      : "Its entries are observably identical, so no key movement within the const "
+                        "map can change anything either."_cs);
         return 0;
     }
 
