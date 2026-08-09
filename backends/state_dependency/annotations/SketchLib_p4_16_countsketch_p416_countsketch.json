@@ -1,0 +1,88 @@
+{
+  "program": "SketchLib_p4_16_countsketch_p416_countsketch",
+  "paper": {
+    "title": "SketchLib",
+    "venue": "USENIX NSDI",
+    "year": 2022,
+    "threat_model": null,
+    "pdf": "../annotation_reference/SketchLib_NSDI2022.pdf",
+    "pdf_status": "downloaded"
+  },
+  "threat_model": {
+    "model": "compromised-host (project default): attacker controls a host and may send arbitrary packets, but cannot reconfigure the control plane or compromise the switch",
+    "source": "default-policy",
+    "evidence": "../annotation_reference/SketchLib_NSDI2022.pdf: NO threat-model section \u2014 'threat model' 0 hits, 'adversar*' 0, 'attack' 0 (measured over the full PDF text)",
+    "reason": "The paper states no explicit adversary model, so the project default applies. Findings against these programs are reported under that default, not against a model the authors declared."
+  },
+  "port_roles": {},
+  "registers": {
+    "SwitchIngress.update_1.cs_table": {
+      "writable_by": [],
+      "shared": false,
+      "sharing": "shared-across-principals",
+      "source": "p4-source+chain-cache",
+      "ref": "SketchLib_p4_16_countsketch_p416_countsketch.chains (key chain); index expression: mem_index ; hash.get({key} ; index",
+      "reason": "Chain-participating SO. Write-site index: mem_index ; hash.get({key}) ; index. Index provenance resolves to PACKET-DERIVED sources (mem_index ; hash.get({key}) ; index  <- packet-derived), so distinct principals collide in one slot: SHARED. partitioned_by stays unset - the index is attacker-influenced.",
+      "index_provenance": {
+        "index": "mem_index ; hash.get({key}) ; index",
+        "verdict": "spoofable",
+        "trace": [
+          "mem_index ; hash.get({key}) ; index  <- packet-derived"
+        ]
+      }
+    },
+    "SwitchIngress.store_flowkey.flowkey_hash_table": {
+      "writable_by": [],
+      "shared": false,
+      "sharing": "shared-across-principals",
+      "source": "p4-source+chain-cache",
+      "ref": "SketchLib_p4_16_countsketch_p416_countsketch.chains (cond chain); index expression: ig_md.res_all[15:0] ; ig_md.result_d1[15:0] ; ig_md.level_1_res_all[15:0]",
+      "reason": "Chain-participating SO. Write-site index: ig_md.res_all[15:0] ; ig_md.result_d1[15:0] ; ig_md.level_1_res_all[15:0]. Index resolves to PACKET-DERIVED sources, so distinct principals collide: SHARED. Trace: ig_md.res_all = hash.get({srcIP[31:0]})  [spoofable]; ig_md.res_all = hash.get({srcIP[31:0], dstIP[31:0]})  [spoofable]",
+      "index_provenance": {
+        "index": "ig_md.res_all[15:0] ; ig_md.result_d1[15:0] ; ig_md.level_1_res_all[15:0]",
+        "verdict": "spoofable",
+        "trace": [
+          "ig_md.res_all = hash.get({srcIP[31:0]})  [spoofable]",
+          "ig_md.res_all = hash.get({srcIP[31:0], dstIP[31:0]})  [spoofable]",
+          "ig_md.result_d1 = 0  [constant]",
+          "ig_md.result_d1 = increment_l1_d1.execute(hash_d1.get({ hdr.ipv4.src_addr })[18:0])  [spoofable]"
+        ]
+      }
+    }
+  },
+  "assume": [
+    {
+      "table": "SwitchIngress.get_threshold.tbl_get_threshold",
+      "when": [
+        {
+          "action_data": [
+            "tbl_get_threshold_act",
+            "threshold"
+          ],
+          "op": "eq",
+          "value": 30
+        }
+      ],
+      "then": {
+        "action": "tbl_get_threshold_act"
+      },
+      "source": "controller-assumption",
+      "ref": "SketchLib_p4_16_countsketch_p416_countsketch: no controller in the SketchLib artifact; threshold assumed",
+      "reason": "SketchLib ships only README.md and compile.sh -- no controller, no entry dump, no threshold value -- so no cp-artifact can be cited. The sketch counter is compared against this control-plane action parameter OUTSIDE the RegisterAction (est = est - threshold, sink keyed on the sign bit), so without pinning it the argument stays free-symbolic and no packet count can be derived. Value 30 is deliberately low: k is replayed as real packets, so a realistic threshold would demand an impractical flood."
+    }
+  ],
+  "auto_facts": {
+    "tables": 0,
+    "keyed_without_default": 0,
+    "const_entries_tables": 0,
+    "note": "no match-action tables: CP table assumptions are not applicable"
+  },
+  "todo": [],
+  "tier": "auto-generated",
+  "port_authorization": {
+    "enforced": false,
+    "evidence": "p416_countsketch.p4 never reads ingress_port",
+    "reason": "No port authorization exists in the data plane. Recorded explicitly rather than as a pseudo-role 'any': binding concrete ports to such a role would make every write 'authorized' and silently disable privilege-escalation detection."
+  },
+  "cp_entries": []
+}

@@ -1412,6 +1412,27 @@ static bool cpTermHolds(const CpTerm &term, const TableMatch *match) {
     }
 }
 
+/// cpTermHolds for a term that constrains action data rather than a key. Action arguments carry no
+/// mask or prefix, so only the value-comparison ops are meaningful; Lpm/Ternary against action data
+/// is a malformed annotation and must constrain nothing rather than be approximated.
+static bool cpActionDataTermHolds(const CpTerm &term, const big_int &value) {
+    switch (term.op) {
+        case CpTerm::Op::Eq:
+            return value == term.value;
+        case CpTerm::Op::Neq:
+            return value != term.value;
+        case CpTerm::Op::In:
+            return std::find(term.values.begin(), term.values.end(), value) != term.values.end();
+        case CpTerm::Op::Range:
+            return value >= term.lo && value <= term.hi;
+        case CpTerm::Op::Lpm:
+        case CpTerm::Op::Ternary:
+        case CpTerm::Op::Unsupported:
+        default:
+            return false;
+    }
+}
+
 static bool violatesCpAssumptions(const FinalState *fs) {
     const auto *ann = cpAnnotation();
     if (ann == nullptr || fs == nullptr) return false;
@@ -1429,6 +1450,34 @@ static bool violatesCpAssumptions(const FinalState *fs) {
             if (c->kind == CpAssumeClause::Kind::WhenThen) {
                 bool guardHolds = true;
                 for (const auto &t : c->when) {
+                    // An action_data term constrains the entry's action arguments, not its key, so
+                    // it is resolved against the ActionCall rather than the match map. Without this
+                    // it fell through to `match == nullptr` below and silently disabled the whole
+                    // clause -- the schema parsed action_data but nothing ever consumed it.
+                    if (!t.actionDataArg.isNullOrEmpty()) {
+                        // A term naming a different action says nothing about this entry.
+                        if (!t.actionDataAction.isNullOrEmpty() &&
+                            !cpNameMatches(chosen, t.actionDataAction)) {
+                            guardHolds = false;
+                            break;
+                        }
+                        const auto *args = call->getArgs();
+                        const ActionArg *arg = nullptr;
+                        if (args != nullptr) {
+                            for (const auto &a : *args) {
+                                if (cpNameMatches(a.getActionParamName(), t.actionDataArg)) {
+                                    arg = &a;
+                                    break;
+                                }
+                            }
+                        }
+                        const auto *argVal = arg != nullptr ? arg->getEvaluatedValue() : nullptr;
+                        if (argVal == nullptr || !cpActionDataTermHolds(t, argVal->value)) {
+                            guardHolds = false;
+                            break;
+                        }
+                        continue;
+                    }
                     // Key names appear qualified ("ig_md.lock_val") in the match map but are
                     // written bare in annotations, so compare on the trailing component too.
                     const TableMatch *match = nullptr;
@@ -1750,7 +1799,18 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
     auto v2opt = carrySO(prime2, s2);
     if (!v2opt) return nullptr;
     const big_int delta = *v2opt - *v1opt;
-    if (delta <= 0) return nullptr;          // non-monotone / saturating ⇒ fall back
+    if (delta <= 0) {
+        // Non-monotone or saturating: no closed-form k exists. CountSketch/UnivMon land here --
+        // their RegisterAction is `if (res == 0) data - 1 else data + 1`, so a cell walks up or down
+        // depending on a per-packet hash sign bit and replaying one packet does not drive it in a
+        // fixed direction. Logged rather than silently falling back, because it is a different
+        // limitation from "no threshold to solve against" and needs a different fix (steering the
+        // sign bit, not annotating a threshold).
+        printInfo("[Tampering] chain id=%1% (%2%): drive-register measured delta=%3% (<= 0) over one "
+                  "replay -- register is not a monotone accumulator; falling back.",
+                  chain.id, currentChainName, delta);
+        return nullptr;
+    }
     const big_int base = *v1opt - delta;     // SO value before the priming packet's write
 
     // 3. Collect candidate read-values from the threshold gates in writeNodes (an IfStatement whose
@@ -1775,6 +1835,31 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
             candidates.push_back(c->value + 1);  // Grt
             candidates.push_back(c->value);       // Geq / Equ
         });
+    }
+    // 3b. Control-plane thresholds. A sketch typically compares its counter against a value the
+    //     controller supplies as action data (SketchLib: `tbl_get_threshold_act(bit<32> threshold)`,
+    //     compared OUTSIDE the RegisterAction as `est = est - threshold` with the sink keyed on the
+    //     sign bit), so no constant relation exists in writeNodes at all and the loop above yields
+    //     nothing usable. An `assume` clause pinning that argument is the only statement of what the
+    //     deployed threshold is, so its value is admitted as a candidate here.
+    //
+    //     Deliberately NOT filtered to clauses whose table feeds this chain's sink: the connection
+    //     is a dataflow one (threshold -> est -> sign bit -> sink key) that the dependency graph does
+    //     not record, and the sink table is a different table from the one carrying the threshold. A
+    //     wrong candidate is harmless -- it simply fails the allCovered/evalSinkFlip validation below
+    //     -- whereas a too-narrow filter silently drops the only workable candidate.
+    if (const auto *ann = cpAnnotation(); ann != nullptr) {
+        for (const auto &c : ann->assumeClauses()) {
+            for (const auto &t : c.when) {
+                if (t.op != CpTerm::Op::Eq || t.actionDataArg.isNullOrEmpty()) continue;
+                printInfo("[Tampering] chain id=%1% (%2%): drive-register control-plane candidate "
+                          "%3% from assume action_data(%4%, %5%) on table %6%",
+                          chain.id, currentChainName, t.value, t.actionDataAction, t.actionDataArg,
+                          c.table);
+                candidates.push_back(t.value + 1);  // strictly-above threshold
+                candidates.push_back(t.value);      // at-threshold
+            }
+        }
     }
     if (candidates.empty()) {
         // No constant-relation gate anywhere in the write path, so k is not derivable from the
@@ -2079,6 +2164,24 @@ size_t StateDependencyTracker::runTamperingChain(
                     hasThresholdGate = true;
             });
             if (hasThresholdGate) break;
+        }
+        // A control-plane threshold counts as a gate too, even though no constant relation appears
+        // in writeNodes: for the SketchLib shape the comparison lives outside the RegisterAction
+        // entirely, so this pre-filter would otherwise skip the driver before it could consider the
+        // annotated value. Kept as a cheap pre-check that mirrors driveRegisterPhase2's own
+        // candidate collection -- the driver still re-derives and validates the value itself.
+        if (!hasThresholdGate) {
+            if (const auto *ann = cpAnnotation(); ann != nullptr) {
+                for (const auto &c : ann->assumeClauses()) {
+                    for (const auto &t : c.when) {
+                        if (t.op == CpTerm::Op::Eq && !t.actionDataArg.isNullOrEmpty()) {
+                            hasThresholdGate = true;
+                            break;
+                        }
+                    }
+                    if (hasThresholdGate) break;
+                }
+            }
         }
         const bool singleWriteEmpty = phase2StateMap[i].empty();
         if (repPhase1State != nullptr && (singleWriteEmpty || hasThresholdGate)) {

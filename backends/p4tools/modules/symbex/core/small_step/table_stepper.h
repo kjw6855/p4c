@@ -147,6 +147,22 @@ class TableStepper {
 
     void setTableDefaultEntries(const std::vector<const IR::ActionListElement *> &tableActionList);
 
+    /// @returns `actionArg == value` when a --cp-annotation `assume` clause on this table pins the
+    /// action parameter @p parameter of @p actionName to a concrete value, else nullptr.
+    ///
+    /// Synthesized action arguments are otherwise free-symbolic, so a threshold the controller
+    /// supplies as action data (SketchLib's `tbl_get_threshold_act(bit<32> threshold)`) is a value
+    /// the solver may pick arbitrarily. That makes any sink gated on it unpredictable, and leaves
+    /// the analytical drive-register with no constant to solve a packet count against. Pinning it
+    /// restores the deployed configuration, the same role the DefaultAction clause plays for a
+    /// keyless table.
+    ///
+    /// Only `op == Eq` action_data terms pin: an Neq/In/Range term narrows the value without
+    /// determining it, and binding one of its admissible values would assume more than the
+    /// annotation states.
+    const IR::Expression *cpActionArgPin(cstring actionName, const IR::Parameter *parameter,
+                                         const IR::Expression *actionArg) const;
+
  public:
     /// Table implementations in P4 are rather flexible. Eval is a delegation function that chooses
     /// the right implementation depending on the properties of the table. For example, immutable

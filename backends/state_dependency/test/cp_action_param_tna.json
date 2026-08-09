@@ -1,0 +1,27 @@
+{
+  "program": "cp_action_param_tna",
+  "threat_model": {
+    "model": "compromised-host (project default): attacker controls a host and may send arbitrary packets, but cannot reconfigure the control plane",
+    "source": "default-policy",
+    "reason": "Fixture. The point of the test is that the threshold is CONTROL-PLANE supplied and therefore NOT attacker-chosen, which is what makes pinning it sound."
+  },
+  "registers": {},
+  "assume": [
+    {
+      "table": "Ingress.tbl_get_threshold",
+      "when": [
+        {
+          "action_data": ["set_threshold", "threshold"],
+          "op": "eq",
+          "value": 20
+        }
+      ],
+      "then": { "action": "set_threshold" },
+      "source": "controller-assumption",
+      "ref": "cp_action_param_tna fixture: the deployed controller installs threshold = 20",
+      "reason": "Without this the synthesized action argument is free-symbolic, so the solver picks 0, the sink flips on the first packet, and the emitted test is a single-send false positive that cannot reproduce on hardware. Pinning it both constrains the emitted entry and gives driveRegisterPhase2 a value to solve k against. 20 is above the 16-packet boundary where the emitter switches from literal tamper_only blocks to a repeat_count block, so the test also covers that path."
+    }
+  ],
+  "todo": [],
+  "tier": "fixture"
+}

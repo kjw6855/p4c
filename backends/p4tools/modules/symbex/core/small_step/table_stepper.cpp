@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <optional>
 #include <ostream>
+#include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -12,6 +14,7 @@
 
 #include "backends/p4tools/common/control_plane/symbolic_variables.h"
 #include "backends/p4tools/common/lib/constants.h"
+#include "backends/p4tools/common/lib/logging.h"
 #include "backends/p4tools/common/lib/symbolic_env.h"
 #include "backends/p4tools/common/lib/taint.h"
 #include "backends/p4tools/common/lib/trace_event_types.h"
@@ -20,6 +23,7 @@
 #include "ir/indexed_vector.h"
 #include "ir/irutils.h"
 #include "ir/vector.h"
+#include "lib/error.h"
 #include "lib/exceptions.h"
 #include "lib/log.h"
 #include "lib/null.h"
@@ -28,6 +32,7 @@
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/core/small_step/expr_stepper.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/symbex/lib/collect_coverable_nodes.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
@@ -355,6 +360,44 @@ const IR::Expression *TableStepper::evalTablePreExistingConfig(const TableConfig
     return tableMissCondition;
 }
 
+const IR::Expression *TableStepper::cpActionArgPin(cstring actionName,
+                                                   const IR::Parameter *parameter,
+                                                   const IR::Expression *actionArg) const {
+    const auto *ann = loadedCpAnnotation();
+    if (ann == nullptr || parameter == nullptr) return nullptr;
+    // Annotations name actions and parameters as the control plane sees them ("tbl_get_threshold_act",
+    // "threshold"), while the IR carries fully qualified action names and midend-uniquified parameter
+    // names ("SwitchIngress.get_threshold.tbl_get_threshold_act", "threshold_1"). controlPlaneName()
+    // undoes the parameter renaming via the @name annotation; the trailing-component compare handles
+    // the action qualification, the same convention clausesFor uses for table names.
+    const auto tail = [](cstring c) {
+        const std::string s(c.string_view());
+        auto p = s.find_last_of('.');
+        return p == std::string::npos ? s : s.substr(p + 1);
+    };
+    const cstring paramName = parameter->controlPlaneName();
+    for (const auto *c : ann->clausesFor(properties.tableName)) {
+        for (const auto &t : c->when) {
+            if (t.op != CpTerm::Op::Eq || t.actionDataArg.isNullOrEmpty()) continue;
+            // An action_data term names the action it belongs to. A term that omits it applies to
+            // whichever action carries a parameter of that name.
+            if (!t.actionDataAction.isNullOrEmpty() && t.actionDataAction != actionName &&
+                tail(t.actionDataAction) != tail(actionName))
+                continue;
+            if (t.actionDataArg != paramName && t.actionDataArg != parameter->name.name) continue;
+            // The stepper re-enters this table on every path, so report each pin once rather than
+            // once per path.
+            static std::set<std::tuple<cstring, cstring, cstring>> reported;
+            if (reported.emplace(properties.tableName, actionName, paramName).second) {
+                printInfo("[CP annotation] %1%: pinning action data %2%(%3%) = %4% (%5%)",
+                          properties.tableName, actionName, paramName, t.value, c->ref);
+            }
+            return new IR::Equ(actionArg, IR::Constant::get(actionArg->type, t.value));
+        }
+    }
+    return nullptr;
+}
+
 void TableStepper::setTableDefaultEntries(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
     for (const auto *action : tableActionList) {
@@ -369,6 +412,7 @@ void TableStepper::setTableDefaultEntries(
         const auto &parameters = actionType->parameters;
         auto *arguments = new IR::Vector<IR::Argument>();
         std::vector<ActionArg> ctrlPlaneArgs;
+        const IR::Expression *cpPin = nullptr;
         for (const auto *parameter : *parameters) {
             // Synthesize a variable constant here that corresponds to a control plane argument.
             const auto &actionArg = ControlPlaneState::getTableActionArgument(
@@ -378,6 +422,9 @@ void TableStepper::setTableDefaultEntries(
             // We also track the argument we synthesize for the control plane.
             // Note how we use the control plane name for the parameter here.
             ctrlPlaneArgs.emplace_back(parameter, actionArg);
+            if (const auto *pin = cpActionArgPin(actionName, parameter, actionArg)) {
+                cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
+            }
         }
         const auto *ctrlPlaneActionCall = new ActionCall(actionType, ctrlPlaneArgs);
 
@@ -410,7 +457,12 @@ void TableStepper::setTableDefaultEntries(
         tableStream << "| Overriding default action: " << actionName;
         nextState.add(*new TraceEvents::Generic(tableStream.str()));
         nextState.replaceTopBody(&replacements);
-        stepper->result->emplace_back(std::nullopt, stepper->state, nextState, coveredNodes);
+        // An annotated action-data pin becomes this branch's condition: the branch is otherwise
+        // unconditional, and the pin has to constrain the synthesized argument rather than merely
+        // be recorded alongside it.
+        stepper->result->emplace_back(cpPin == nullptr ? std::optional<const IR::Expression *>()
+                                                       : std::optional(cpPin),
+                                      stepper->state, nextState, coveredNodes);
     }
 }
 
@@ -438,6 +490,7 @@ void TableStepper::evalTableControlEntries(
         const auto &parameters = actionType->parameters;
         auto *arguments = new IR::Vector<IR::Argument>();
         std::vector<ActionArg> ctrlPlaneArgs;
+        const IR::Expression *cpPin = nullptr;
         for (const auto *parameter : *parameters) {
             // Synthesize a variable constant here that corresponds to a control plane argument.
             const auto &actionArg = ControlPlaneState::getTableActionArgument(
@@ -446,6 +499,9 @@ void TableStepper::evalTableControlEntries(
             // We also track the argument we synthesize for the control plane.
             // Note how we use the control plane name for the parameter here.
             ctrlPlaneArgs.emplace_back(parameter, actionArg);
+            if (const auto *pin = cpActionArgPin(actionName, parameter, actionArg)) {
+                cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
+            }
         }
         ActionCall ctrlPlaneActionCall(actionType, ctrlPlaneArgs);
 
@@ -492,7 +548,11 @@ void TableStepper::evalTableControlEntries(
         tableStream << "| Chosen action: " << actionName;
         nextState.add(*new TraceEvents::Generic(tableStream.str()));
         nextState.replaceTopBody(&replacements);
-        stepper->result->emplace_back(hitCondition, stepper->state, nextState, coveredNodes);
+        // The annotated action-data pin rides along with the hit condition: this entry is reachable
+        // only when the table hits AND the controller supplied the assumed action data.
+        stepper->result->emplace_back(
+            cpPin == nullptr ? hitCondition : new IR::LAnd(hitCondition, cpPin), stepper->state,
+            nextState, coveredNodes);
     }
 }
 
