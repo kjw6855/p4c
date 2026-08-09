@@ -152,6 +152,13 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// => behaviour is exactly as before. Hard-errors if the file is missing or unparseable.
     std::optional<std::string> cpAnnotationPath;
 
+    /// When set, write a per-sink control-plane report to this JSON path during tampering
+    /// generation: each chain sink with its action list, const-entry status and key-space coverage,
+    /// which actions are observably distinct from the default, and a pre-filled `assume` skeleton
+    /// (both the action and the `action_data` form) ready to paste into a --cp-annotation file.
+    /// Report-only: it never changes which tests are generated.
+    std::optional<std::string> cpStubsPath;
+
     /// When set, run the in-process state-dependency analysis on this program's post-midend IR,
     /// serialize the resulting SOChains to this JSON path, and exit before symbolic execution. The
     /// cache is written from the exact IR a later --state-dep-cache load re-resolves against, so it

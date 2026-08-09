@@ -1,6 +1,7 @@
 #ifndef BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SYMBOLIC_EXECUTOR_SINK_DIVERGENCE_H_
 #define BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SYMBOLIC_EXECUTOR_SINK_DIVERGENCE_H_
 
+#include <functional>
 #include <map>
 #include <utility>
 #include <vector>
@@ -58,6 +59,11 @@ bool outcomesDiverge(const IR::P4Action *actionA,
 /// contributes an empty effect, which differs from any non-empty then-branch.
 bool branchesDiverge(const IR::IfStatement *cond);
 
+/// Resolves an action name (bare or control-plane) to its declaration. An ActionListElement only
+/// NAMES an action, so the body has to come from a program-wide map; without one, every const-entry
+/// comparison degrades to "unanalyzable" and silently reports divergence.
+using ActionResolver = std::function<const IR::P4Action *(cstring)>;
+
 /// Const-entry-sink form: do any two entries of @p table select observably different actions?
 ///
 /// For a table whose key->action map is fixed in the program, HIT-vs-MISS is the wrong question --
@@ -65,7 +71,7 @@ bool branchesDiverge(const IR::IfStatement *cond);
 /// another is a real, observable change whenever the two entries name actions that differ. False
 /// when every entry has the same observable effect, i.e. the const map is a no-op selector and no
 /// register value flowing into it can change anything.
-bool constEntryActionsDiverge(const IR::P4Table *table);
+bool constEntryActionsDiverge(const IR::P4Table *table, const ActionResolver &resolve);
 
 }  // namespace P4::P4Tools::Symbex
 

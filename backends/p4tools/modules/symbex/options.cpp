@@ -546,6 +546,19 @@ SymbexOptions::SymbexOptions()
         " if no such chains exist in the program, no tests are generated.");
 
     registerOption(
+        "--dump-cp-stubs", "file",
+        [this](const char *arg) {
+            cpStubsPath = std::string(arg);
+            return true;
+        },
+        "Write a per-sink control-plane report to this JSON file during tampering generation: for "
+        "every chain sink, its action list, whether it has const entries and whether those cover "
+        "the whole key space, which actions differ observably from the default action, and a "
+        "pre-filled `assume` skeleton (action and action_data forms) ready to paste into a "
+        "--cp-annotation file. Makes the annotation gap visible instead of silently defaulting to "
+        "free-symbolic action data. Report-only: never changes which tests are generated.");
+
+    registerOption(
         "--cp-annotation", "file",
         [this](const char *arg) {
             cpAnnotationPath = std::string(arg);

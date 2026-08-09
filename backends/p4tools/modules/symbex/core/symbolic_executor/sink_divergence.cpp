@@ -123,7 +123,7 @@ bool branchesDiverge(const IR::IfStatement *cond) {
     return !effectsEqual(thenEff, elseEff);
 }
 
-bool constEntryActionsDiverge(const IR::P4Table *table) {
+bool constEntryActionsDiverge(const IR::P4Table *table, const ActionResolver &resolve) {
     if (table == nullptr) return true;
     const auto *entries = table->getEntries();
     if (entries == nullptr || entries->entries.size() < 2) {
@@ -139,10 +139,7 @@ bool constEntryActionsDiverge(const IR::P4Table *table) {
         if (mce == nullptr) return true;  // unanalyzable -> assume observable
         const auto *path = mce->method->to<IR::PathExpression>();
         if (path == nullptr) return true;
-        const auto *decl = table->getActionList() != nullptr
-                               ? table->getActionList()->getDeclaration(path->path->name)
-                               : nullptr;
-        const auto *action = decl != nullptr ? decl->to<IR::P4Action>() : nullptr;
+        const auto *action = resolve ? resolve(path->path->name.name) : nullptr;
         if (action == nullptr) return true;
         auto binding = bindCallArgs(action, mce);
         if (firstAction == nullptr) {

@@ -9,6 +9,8 @@
 #include "ir/ir.h"
 #include "ir/irutils.h"
 #include "ir/solver.h"
+#include <fstream>
+
 #include "backends/p4tools/common/lib/constants.h"
 #include "lib/error.h"
 #include "lib/timer.h"
@@ -487,6 +489,15 @@ bool StateDependencyTracker::isTableVisited(
 // Three-phase tampering entry point
 // ---------------------------------------------------------------------------
 
+namespace {
+/// Defined below with the rest of the --dump-cp-stubs report; declared here because the chain loop
+/// that populates and flushes it comes first in this file.
+void writeCpStubs();
+void recordSinkStub(const IR::P4Table *table, cstring cpName, const IR::P4Program *program,
+                    bool isSink);
+ActionResolver actionResolverFor(const IR::P4Program *program);
+}  // namespace
+
 void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
     auto chains = collectChains();
     if (chains.empty()) {
@@ -637,9 +648,29 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             ++chainsCompleted;
         }
     }
+    // Any table with an action PARAMETER is annotatable, sink or not -- SketchLib's threshold lives
+    // in tbl_get_threshold, which is upstream of the sink and would otherwise never be reported even
+    // though it is the table that actually needed an assume clause.
+    if (SymbexOptions::get().cpStubsPath.has_value()) {
+        for (const auto &[cpName, table] : tableByName_) {
+            bool hasActionData = false;
+            const auto resolve = actionResolverFor(&programInfo.getP4Program());
+            if (const auto *al = table->getActionList()) {
+                for (const auto *ale : al->actionList) {
+                    const auto *mce = ale->expression->to<IR::MethodCallExpression>();
+                    const auto *pe = mce != nullptr ? mce->method->to<IR::PathExpression>() : nullptr;
+                    const auto *act = pe != nullptr ? resolve(pe->path->name.name) : nullptr;
+                    if (act != nullptr && !act->parameters->parameters.empty()) hasActionData = true;
+                }
+            }
+            if (hasActionData) recordSinkStub(table, cpName, &programInfo.getP4Program(), false);
+        }
+    }
+
     // Headline progress metric: on a run that is cut short by a timeout this is the only record of how
     // far the per-chain Phase-2/3 loop actually got. Emitted in every mode so baselines are comparable.
     printInfo("[Tampering] Chains completed: %1%/%2%", chainsCompleted, allChains.size());
+    writeCpStubs();
 }
 
 // ---------------------------------------------------------------------------
@@ -1447,6 +1478,188 @@ static bool constEntriesCoverKeySpace(const IR::P4Table *table) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// --dump-cp-stubs: per-sink control-plane report.
+//
+// The annotation gap is invisible by default: an un-annotated table's action data is free-symbolic,
+// the solver picks whatever satisfies the path, and nothing says a threshold was ever involved. That
+// is how SketchLib's countmin emitted `threshold = 0` tests for months. This pass names, per sink,
+// exactly what an annotation COULD pin and hands back a skeleton to paste.
+//
+// Report-only. It records what generation saw; it never changes what generation does.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct SinkStub {
+    cstring table;
+    bool hasConstEntries = false;
+    bool constEntriesCoverAll = false;
+    bool constEntryActionsDiffer = false;
+    cstring defaultAction;
+    std::vector<cstring> actions;
+    std::vector<cstring> divergingActions;   // observably different from the default action
+    std::vector<std::pair<cstring, cstring>> actionData;  // (action, parameter)
+    bool annotated = false;                  // an assume clause already names this table
+    bool isSink = false;                     // a chain's sink, vs merely annotatable
+};
+
+/// Program-wide action map, built once. An ActionListElement only NAMES an action, so both the
+/// const-entry comparison and the stub report need this to reach a body.
+const std::unordered_map<cstring, const IR::P4Action *> &programActions(const IR::P4Program *program) {
+    static std::unordered_map<cstring, const IR::P4Action *> actions;
+    static bool built = false;
+    if (!built && program != nullptr) {
+        built = true;
+        ActionCollector ac(actions);
+        program->apply(ac);
+    }
+    return actions;
+}
+
+/// Resolver over programActions, matching bare or control-plane names.
+ActionResolver actionResolverFor(const IR::P4Program *program) {
+    const auto &actions = programActions(program);
+    return [&actions](cstring name) -> const IR::P4Action * {
+        auto it = actions.find(name);
+        if (it != actions.end()) return it->second;
+        return lookupActionBySuffix(actions, name);
+    };
+}
+
+std::map<cstring, SinkStub> &cpStubRegistry() {
+    static std::map<cstring, SinkStub> registry;
+    return registry;
+}
+
+/// Record @p table under its control-plane name @p cpName. Idempotent: a sink shared by several
+/// chains is described once.
+void recordSinkStub(const IR::P4Table *table, cstring cpName, const IR::P4Program *program,
+                    bool isSink) {
+    if (!SymbexOptions::get().cpStubsPath.has_value()) return;
+    if (table == nullptr || cpName.isNullOrEmpty()) return;
+    auto &registry = cpStubRegistry();
+    if (auto it = registry.find(cpName); it != registry.end()) {
+        it->second.isSink = it->second.isSink || isSink;  // a table can be recorded both ways
+        return;
+    }
+
+    SinkStub stub;
+    stub.table = cpName;
+    const auto *entries = table->getEntries();
+    stub.hasConstEntries = entries != nullptr && !entries->entries.empty();
+    stub.constEntriesCoverAll = constEntriesCoverKeySpace(table);
+    const auto resolve = actionResolverFor(program);
+    if (stub.hasConstEntries) stub.constEntryActionsDiffer = constEntryActionsDiverge(table, resolve);
+
+    // Default action and its P4Action, for the divergence comparison below.
+    const IR::P4Action *defAction = nullptr;
+    std::map<cstring, const IR::Expression *> defBinding;
+    if (const auto *defExpr = table->getDefaultAction()) {
+        if (const auto *defMce = defExpr->to<IR::MethodCallExpression>()) {
+            if (const auto *p = defMce->method->to<IR::PathExpression>()) {
+                defAction = resolve(p->path->name.name);
+                if (defAction != nullptr) {
+                    stub.defaultAction = defAction->controlPlaneName();
+                    const auto &params = defAction->parameters->parameters;
+                    const auto *args = defMce->arguments;
+                    if (args != nullptr && params.size() == args->size())
+                        for (size_t i = 0; i < params.size(); ++i)
+                            defBinding[params.at(i)->name.name] = args->at(i)->expression;
+                }
+            }
+        }
+    }
+
+    if (const auto *al = table->getActionList()) {
+        for (const auto *ale : al->actionList) {
+            const auto *mce = ale->expression->to<IR::MethodCallExpression>();
+            const auto *p = mce != nullptr ? mce->method->to<IR::PathExpression>() : nullptr;
+            const auto *action = p != nullptr ? resolve(p->path->name.name) : nullptr;
+            if (action == nullptr) continue;
+            const cstring name = action->controlPlaneName();
+            stub.actions.push_back(name);
+            // Action parameters are what an `action_data` clause can pin -- the Step-2 mechanism.
+            for (const auto *param : action->parameters->parameters)
+                stub.actionData.emplace_back(name, param->controlPlaneName());
+            // Does choosing this action instead of the default change anything observable? Uses the
+            // same comparison the emission gate uses, so the report agrees with generation.
+            if (defAction != nullptr && action != defAction &&
+                outcomesDiverge(action, {}, defAction, defBinding))
+                stub.divergingActions.push_back(name);
+        }
+    }
+
+    stub.isSink = isSink;
+    if (const auto *ann = cpAnnotation(); ann != nullptr) stub.annotated = !ann->clausesFor(cpName).empty();
+    registry[cpName] = std::move(stub);
+}
+
+void writeCpStubs() {
+    const auto &path = SymbexOptions::get().cpStubsPath;
+    if (!path.has_value()) return;
+    const auto &registry = cpStubRegistry();
+    std::ofstream out(*path);
+    if (!out) {
+        ::P4::error("Could not open --dump-cp-stubs file %1% for writing", *path);
+        return;
+    }
+    const auto quote = [](cstring s) {
+        return std::string("\"") + std::string(s.string_view()) + "\"";
+    };
+    const auto list = [&](const std::vector<cstring> &v) {
+        std::string s = "[";
+        for (size_t i = 0; i < v.size(); ++i) s += (i ? ", " : "") + quote(v[i]);
+        return s + "]";
+    };
+    out << "{\n  \"sinks\": [\n";
+    bool firstSink = true;
+    for (const auto &[name, s] : registry) {
+        if (!firstSink) out << ",\n";
+        firstSink = false;
+        out << "    {\n";
+        out << "      \"table\": " << quote(s.table) << ",\n";
+        out << "      \"is_chain_sink\": " << (s.isSink ? "true" : "false") << ",\n";
+        out << "      \"already_annotated\": " << (s.annotated ? "true" : "false") << ",\n";
+        out << "      \"const_entries\": " << (s.hasConstEntries ? "true" : "false") << ",\n";
+        out << "      \"const_entries_cover_key_space\": "
+            << (s.constEntriesCoverAll ? "true" : "false") << ",\n";
+        out << "      \"const_entry_actions_differ\": "
+            << (s.constEntryActionsDiffer ? "true" : "false") << ",\n";
+        out << "      \"default_action\": " << quote(s.defaultAction) << ",\n";
+        out << "      \"actions\": " << list(s.actions) << ",\n";
+        out << "      \"actions_diverging_from_default\": " << list(s.divergingActions) << ",\n";
+        out << "      \"action_data_parameters\": [";
+        for (size_t i = 0; i < s.actionData.size(); ++i) {
+            out << (i ? ", " : "") << "[" << quote(s.actionData[i].first) << ", "
+                << quote(s.actionData[i].second) << "]";
+        }
+        out << "],\n";
+        // Paste-ready skeletons. Values are left null on purpose: a generated number would look
+        // like evidence. Whoever fills it in must also fill in source/ref/reason.
+        out << "      \"assume_skeleton\": [\n";
+        bool firstClause = true;
+        if (!s.divergingActions.empty()) {
+            out << "        {\"table\": " << quote(s.table) << ", \"when\": [], \"then\": {\"action\": "
+                << quote(s.divergingActions.front())
+                << "}, \"source\": \"FILL-IN\", \"ref\": \"FILL-IN\", \"reason\": \"FILL-IN\"}";
+            firstClause = false;
+        }
+        for (const auto &[act, param] : s.actionData) {
+            if (!firstClause) out << ",\n";
+            firstClause = false;
+            out << "        {\"table\": " << quote(s.table) << ", \"when\": [{\"action_data\": ["
+                << quote(act) << ", " << quote(param)
+                << "], \"op\": \"eq\", \"value\": null}], \"then\": {\"action\": " << quote(act)
+                << "}, \"source\": \"FILL-IN\", \"ref\": \"FILL-IN\", \"reason\": \"FILL-IN\"}";
+        }
+        out << "\n      ]\n    }";
+    }
+    out << "\n  ]\n}\n";
+    printInfo("[CP stubs] wrote %1% sink(s) to %2%", registry.size(), *path);
+}
+
+}  // namespace
+
 static bool violatesCpAssumptions(const FinalState *fs) {
     const auto *ann = cpAnnotation();
     if (ann == nullptr || fs == nullptr) return false;
@@ -1940,6 +2153,10 @@ size_t StateDependencyTracker::runTamperingChain(
         currentSinkCondition = chain.sinkConditionNode->to<IR::IfStatement>();
     }
 
+    // Report-only: describe this sink for --dump-cp-stubs before any direction-specific logic.
+    recordSinkStub(currentSinkTable_, chain.sinkTableControlPlaneName,
+                   &programInfo.getP4Program(), /*isSink=*/true);
+
     // H2S2C: condition sinks use a dedicated flow (symbolic Phase-3 flip confirmation for both
     // directions). Delegate before the table-specific logic below.
     if (currentSinkCondition != nullptr) {
@@ -1960,7 +2177,8 @@ size_t StateDependencyTracker::runTamperingChain(
         // no-op selector (every entry has the same observable effect, so no key movement inside it
         // can matter and the chain is dead), or its entries really do differ and only the HIT/MISS
         // framing is inapplicable -- that residue is what deliberate action enumeration addresses.
-        const bool actionsDiffer = constEntryActionsDiverge(currentSinkTable_);
+        const bool actionsDiffer = constEntryActionsDiverge(
+            currentSinkTable_, actionResolverFor(&programInfo.getP4Program()));
         printInfo("[Tampering] chain id=%1% (%2%): sink '%3%' has const entries covering its entire "
                   "key space, so it can never MISS -- skipping the %4% direction. %5%",
                   chain.id, currentChainName, chain.sinkTableControlPlaneName,
