@@ -1763,11 +1763,30 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
             const IR::Constant *c = rel->left->to<IR::Constant>();
             if (c == nullptr) c = rel->right->to<IR::Constant>();
             if (c == nullptr) return;
+            // Which constant, from which relation, at which position. A constant harvested here is
+            // only a *candidate* threshold: at this level ACC-Turbo's `data > PACKET_THRESHOLD` and
+            // SketchLib's `res == 0` sign selector are indistinguishable, and only the allCovered
+            // re-validation below tells them apart. Logged so a corpus run can be audited for chains
+            // whose "threshold" is not one.
+            printInfo("[Tampering] chain id=%1% (%2%): drive-register candidate constant %3% from "
+                      "`%4%` at %5%",
+                      chain.id, currentChainName, c->value, rel,
+                      rel->getSourceInfo().toPositionString());
             candidates.push_back(c->value + 1);  // Grt
             candidates.push_back(c->value);       // Geq / Equ
         });
     }
-    if (candidates.empty()) return nullptr;
+    if (candidates.empty()) {
+        // No constant-relation gate anywhere in the write path, so k is not derivable from the
+        // program text. This is the SketchLib shape: the threshold arrives as a control-plane action
+        // parameter (tbl_get_threshold_act) and is compared outside the RegisterAction, so wiring
+        // this driver into the key path cannot by itself recover such a chain.
+        printInfo("[Tampering] chain id=%1% (%2%): drive-register found NO constant-relation gate in "
+                  "%3% writeNodes — k is not derivable from the program (threshold likely "
+                  "control-plane supplied); falling back.",
+                  chain.id, currentChainName, chain.writeNodes.size());
+        return nullptr;
+    }
 
     auto ceilDiv = [](const big_int &a, const big_int &b) { return (a + b - 1) / b; };
 
@@ -1931,6 +1950,12 @@ size_t StateDependencyTracker::runTamperingChain(
     }
 
     std::map<size_t, std::vector<const FinalState *>> phase2StateMap;
+    // Analytical drive-register results, keyed by the Phase-2 terminal the driver validated. Same
+    // role as in runConditionChain: a precomputed Phase-3 flip terminal plus the packet count k,
+    // valid only against the representative Phase-1 state it was derived from.
+    std::map<const FinalState *, const FinalState *> drivenFs3;
+    std::map<const FinalState *, size_t> drivenRepeat;
+    std::map<const FinalState *, const FinalState *> drivenFs1;
     size_t phase2StateNum = 0;
     for (size_t i = 0; i < phase1Conditions.size(); ++i) {
         const auto &cond1 = phase1Conditions[i];
@@ -2035,9 +2060,56 @@ size_t StateDependencyTracker::runTamperingChain(
         // over writeNodes is unsatisfiable on any single path. terminalWroteSO confirms the tampering
         // write happened; strict allCovered still passes for non-branching writes (switchv2p/countmin
         // unchanged), so this only ADDS the otherwise-rejected RMW SOs.
+        // Keep a pristine clone for the analytical drive-register below (runPhase mutates its root).
+        auto &driveTemplate = phase2Init.clone();
         phase2AcceptWroteSO_ = true;
         runPhase(phase2Init, phase2StateMap[i], maxPerChain);
         phase2AcceptWroteSO_ = false;
+
+        // Analytical drive-register, mirroring runConditionChain. A key sink gated on an
+        // accumulating register only flips once the counter passes a threshold, which one packet
+        // cannot do. Until now the driver had a single call site inside runConditionChain, so every
+        // key chain fell back to accumulatePhase2Flip and its --max-phase2-packets cap (64) — far
+        // below a real counter threshold. driveRegisterPhase2 itself is already sink-agnostic: it
+        // judges the flip via evalSinkFlip, which dispatches to evalSinkHit for a table sink.
+        bool hasThresholdGate = false;
+        for (const auto &[v, node] : chain.writeNodes) {
+            forAllMatching<IR::Operation_Relation>(node, [&](const IR::Operation_Relation *rel) {
+                if (rel->left->is<IR::Constant>() || rel->right->is<IR::Constant>())
+                    hasThresholdGate = true;
+            });
+            if (hasThresholdGate) break;
+        }
+        const bool singleWriteEmpty = phase2StateMap[i].empty();
+        if (repPhase1State != nullptr && (singleWriteEmpty || hasThresholdGate)) {
+            const FinalState *fs2real = nullptr;
+            size_t kDrive = 0;
+            const FinalState *fs3Drive = driveRegisterPhase2(
+                chain, initState, driveTemplate, repPhase1State, cond1.inputPort, inputPortSymExpr,
+                /*p3Target=*/missToHit ? 1 : 0, fs2real, kDrive);
+            // Adopt the accumulation result when the write path was unreachable in one packet, or
+            // when it genuinely needs k>1 (the single-packet terminals cannot flip this threshold).
+            if (fs3Drive != nullptr && (singleWriteEmpty || kDrive > 1)) {
+                if (!singleWriteEmpty) phase2StateMap[i].clear();
+                phase2StateMap[i].push_back(fs2real);
+                drivenFs3[fs2real] = fs3Drive;
+                drivenRepeat[fs2real] = kDrive;
+                drivenFs1[fs2real] = repPhase1State;
+            }
+        } else if (repPhase1State != nullptr) {
+            // Not driven, and deliberately so: single-packet Phase-2 terminals exist AND the write
+            // path holds no constant relation for k to be solved against. Logged because silence
+            // here is indistinguishable from "the driver ran and bailed", and the two have very
+            // different fixes. This is the SketchLib shape — CM_UPDATE's RegisterAction is a bare
+            // `register_data = register_data + 1` with no relation at all, and the real threshold
+            // is a control-plane action parameter compared outside it — so the corpus count of this
+            // line measures how many key chains the driver cannot reach on program text alone.
+            printInfo("[Tampering] chain id=%1% (%2%): drive-register NOT attempted — %3% "
+                      "single-packet Phase-2 terminal(s) and no constant relation in %4% "
+                      "writeNodes; falling back to accumulatePhase2Flip.",
+                      chain.id, currentChainName, phase2StateMap[i].size(),
+                      chain.writeNodes.size());
+        }
         phase2StateNum += phase2StateMap[i].size();
     }
     if (phase2StateNum == 0) {
@@ -2166,17 +2238,30 @@ size_t StateDependencyTracker::runTamperingChain(
                 // sink (it equals the Phase-1 HIT key). This packet can't tamper — skip it; the
                 // round-robin will try the next Phase-2 packet (which may run a different action
                 // writing a flipping value). Emitting it would produce an un-replayable test.
-                if (!soFeasible) {
+                const auto drivenIt = drivenFs3.find(fs2);
+                const bool isDriven = drivenIt != drivenFs3.end();
+                if (!soFeasible || isDriven) {
                     // A single write does not flip the sink (its value equals the Phase-1 HIT key).
                     // For a counter/accumulator register the value is not attacker-chosen; replaying
                     // the same Phase-2 packet drives the register away from the HIT key until the sink
                     // MISSes. Try to accumulate; only give up (and let the round-robin try another
                     // packet) if no packet count up to the cap flips it. Mirrors the MISS→HIT path.
+                    // A driven fs2 takes this path even when soFeasible: the analytical driver
+                    // already validated the flip at k packets, so it must emit through the
+                    // accumulated branch (which carries repeat_count) rather than as a single send.
                     auto [ipAcc, opAcc] = getPortPair(fs2);
                     size_t repeat = 1;
-                    const auto *fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2,
-                                                           ipAcc, inputPortSymExpr, /*p3Target=*/0,
-                                                           repeat);
+                    const FinalState *fs3 = nullptr;
+                    if (isDriven) {
+                        // The driven result is valid only against the representative Phase-1 state
+                        // it was derived from; other Phase-1 states fall through to the next round.
+                        if (fs1 != drivenFs1[fs2]) continue;
+                        fs3 = drivenIt->second;
+                        repeat = drivenRepeat[fs2];
+                    } else {
+                        fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2,
+                                                   ipAcc, inputPortSymExpr, /*p3Target=*/0, repeat);
+                    }
                     if (fs3 == nullptr) {
                         printInfo("[Tampering] Phase 2 packet for chain id=%1%: constant register write "
                                   "does not flip sink '%2%' (no accumulation up to cap); trying another "
@@ -2354,8 +2439,17 @@ size_t StateDependencyTracker::runTamperingChain(
             // Drive the sink to flip MISS→HIT: one send if it suffices, else replay the same Phase-2
             // packet (accumulating the register) until the sink HITs. repeat = packet count.
             size_t repeat = 1;
-            const auto *fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
-                                                   inputPortSymExpr, /*p3Target=*/1, repeat);
+            const FinalState *fs3 = nullptr;
+            if (auto drivenIt = drivenFs3.find(fs2); drivenIt != drivenFs3.end()) {
+                // Analytical drive-register result: precomputed flip terminal + k, valid only for
+                // the representative Phase-1 state it was derived against.
+                if (fs1 != drivenFs1[fs2]) continue;
+                fs3 = drivenIt->second;
+                repeat = drivenRepeat[fs2];
+            } else {
+                fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
+                                           inputPortSymExpr, /*p3Target=*/1, repeat);
+            }
             if (fs3 == nullptr) continue;  // no packet count up to the cap flips the sink MISS→HIT
             // Sink action-divergence gate (replaces the old Phase1-vs-Phase3 disposition compare):
             // a confirmed MISS→HIT flip is observable only if the sink's HIT action (now taken in
