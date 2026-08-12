@@ -2650,14 +2650,7 @@ size_t StateDependencyTracker::runTamperingChain(
                     // Phase 2) cannot match exactly. That is why an accumulating register is emitted
                     // with match_kind=AT_LEAST + min_value: the harness tests the flip threshold, not
                     // this value. See TamperingFinalState::attackerRegisterMinValues.
-                    const auto &model3 = fs3->getFinalModel();
-                    const auto *fs3SoReg = fs3->getExecutionState()->getTestObject(
-                        "registervalues"_cs, chain.soName, false);
-                    if (fs3SoReg == nullptr) continue;
                     std::map<cstring, const TestObject *> accRegValues;
-                    accRegValues[chain.soName] =
-                        fs3SoReg->withAttackerValues(model3, SymbexOptions::get().stateTamperValue, {})
-                            .testObject;
                     std::map<cstring, cstring> accRegSinkTables;
                     accRegSinkTables[chain.soName] = chain.sinkTableControlPlaneName;
                     const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
@@ -2669,6 +2662,35 @@ size_t StateDependencyTracker::runTamperingChain(
                     const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ipAcc,
                                                              inputPortSymExpr, /*isPhase1=*/false,
                                                              p1Carry);
+                    // Single-send: source from the Phase-2 state (also the state emitted as the
+                    // Phase-2 packet), which is what the harness reads. Accumulation keeps Phase 3 --
+                    // one emitted packet sent k times has no single-execution state holding base+k,
+                    // and those cases are checked via AT_LEAST + min_value, not by value.
+                    {
+                        // The semantic condition is "did the ATTACKER write?", tested on the Phase-2 state
+                        // itself, independent of which state supplies the emitted value. A terminal can
+                        // VISIT the write statement without the register recording anything -- node
+                        // coverage is control flow, not effect -- and the shared-traversal collector
+                        // accepts on coverage. Such a case holds no attacker action: its only SO write is
+                        // Phase 3's, i.e. the victim's own replay, so it can never diverge.
+                        const auto *p2SoReg = fs2c->getExecutionState()->getTestObject(
+                            "registervalues"_cs, chain.soName, false);
+                        if (p2SoReg == nullptr || !p2SoReg->wasWritten()) {
+                            printInfo("[Tampering] chain id=%1% (%2%): Phase-2 terminal recorded no write "
+                                      "to '%3%' — no attacker action to emit; skipping.",
+                                      chain.id, currentChainName, chain.soName);
+                            continue;
+                        }
+                        const FinalState *regSrc = (repeat > 1) ? fs3 : fs2c;
+                        const auto *srcSoReg = regSrc->getExecutionState()->getTestObject(
+                            "registervalues"_cs, chain.soName, false);
+                        if (srcSoReg == nullptr) continue;
+                        accRegValues[chain.soName] =
+                            srcSoReg
+                                ->withAttackerValues(regSrc->getFinalModel(),
+                                                     SymbexOptions::get().stateTamperValue, {})
+                                .testObject;
+                    }
                     TamperingFinalState tsAcc{*fs1c, *fs2c, false, cond1.inputPort, cond1.outputPort,
                                               ipAcc, opAcc, accRegValues, {}, accRegSinkTables, {}};
                     // AT_LEAST bound for an analytically-driven accumulation: the value at which
@@ -2855,26 +2877,7 @@ size_t StateDependencyTracker::runTamperingChain(
                 disp = "FWD_TO_FWD";
             }
 
-            // Build the emitted attacker register from Phase 3's read of the SO register: its index
-            // conditions hold the (pinned, == Phase-1) read index, and withAttackerValues stamps the
-            // tampered value there so the emitter produces an affected_register the harness can
-            // pre-set. The carry above (evaluateForCarry) drove the symbolic run but has no index
-            // conditions, so it cannot be emitted directly -- and neither can a Phase-2 write
-            // terminal, which emits index 0 (measured).
-            const auto &model3 = fs3->getFinalModel();
             std::map<cstring, const TestObject *> attackerRegValues;
-            const auto *fs3SoReg =
-                fs3->getExecutionState()->getTestObject("registervalues"_cs, chain.soName, false);
-            if (fs3SoReg == nullptr) continue;
-            // Empty forbidden set: feasibility is always true here; the value becomes the real
-            // (carried) Phase-2 write, and the symbolic Phase-3 confirmation (evalSinkHit==HIT
-            // above) is the correctness gate. Overrides are unused for MISS→HIT (carry handles it).
-            const auto *attackerReg = fs3SoReg
-                                          ->withAttackerValues(model3,
-                                                               SymbexOptions::get().stateTamperValue,
-                                                               {})
-                                          .testObject;
-            attackerRegValues[chain.soName] = attackerReg;
 
             int op2 = IR::getIntFromLiteral(
                 model2.evaluate(es2->get(programInfo.getTargetOutputPortVar()), true));
@@ -2900,6 +2903,45 @@ size_t StateDependencyTracker::runTamperingChain(
             if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
             const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
                                                      /*isPhase1=*/false, p1Carry);
+            // The harness reads the SO register AFTER Phase 2 and BEFORE Phase 3
+            // (tofino_driver.py:704, tampering.py:1514, both "before Phase 3 overwrites it") -- the
+            // only correct moment, since Phase 3 is the victim's replay and its write is not the
+            // attacker's doing. For a SINGLE-SEND case the value must therefore come from the
+            // Phase-2 state, which is also the state whose packet bytes are emitted as Phase 2:
+            // one state, one model, index and value together.
+            //
+            // Accumulation (repeat > 1) keeps Phase 3: its emitted Phase-2 packet is ONE packet the
+            // harness sends k times, so no single-execution state holds base+k. Those cases carry
+            // match_kind=AT_LEAST + min_value and are checked against the flip threshold, so the
+            // value is not load-bearing there.
+            //
+            // Empty forbidden set: feasibility is always true here; the value is the real Phase-2
+            // write, and the symbolic Phase-3 confirmation (evalSinkHit==HIT above) is the gate.
+            {
+                // The semantic condition is "did the ATTACKER write?", tested on the Phase-2 state
+                // itself, independent of which state supplies the emitted value. A terminal can
+                // VISIT the write statement without the register recording anything -- node
+                // coverage is control flow, not effect -- and the shared-traversal collector
+                // accepts on coverage. Such a case holds no attacker action: its only SO write is
+                // Phase 3's, i.e. the victim's own replay, so it can never diverge.
+                const auto *p2SoReg = fs2c->getExecutionState()->getTestObject(
+                    "registervalues"_cs, chain.soName, false);
+                if (p2SoReg == nullptr || !p2SoReg->wasWritten()) {
+                    printInfo("[Tampering] chain id=%1% (%2%): Phase-2 terminal recorded no write "
+                              "to '%3%' — no attacker action to emit; skipping.",
+                              chain.id, currentChainName, chain.soName);
+                    continue;
+                }
+                const FinalState *regSrc = (repeat > 1) ? fs3 : fs2c;
+                const auto *srcSoReg = regSrc->getExecutionState()->getTestObject(
+                    "registervalues"_cs, chain.soName, false);
+                if (srcSoReg == nullptr) continue;
+                attackerRegValues[chain.soName] =
+                    srcSoReg
+                        ->withAttackerValues(regSrc->getFinalModel(),
+                                             SymbexOptions::get().stateTamperValue, {})
+                        .testObject;
+            }
             TamperingFinalState ts{*fs1c, *fs2c, false,
                                    cond1.inputPort, cond1.outputPort, ip2, op2,
                                    attackerRegValues, {}, attackerRegSinkTables, {}};
@@ -3167,13 +3209,33 @@ size_t StateDependencyTracker::runConditionChain(
             // Phase 3's read carries the index conditions for the pinned cell; a Phase-2 write
             // terminal does not. The emitted value is therefore post-Phase-3 and is not what the
             // harness reads -- accumulating registers carry AT_LEAST + min_value for that reason.
-            const auto &model3 = fs3->getFinalModel();
+            // Same rule as the key path: the harness reads after Phase 2, so a single-send case
+            // must be emitted from the Phase-2 state. This path has no reDeriveConcretePhase, and
+            // fs2 is exactly the state emitted as the Phase-2 packet (see the spec below), so
+            // register and packet stay consistent with each other.
+            // The semantic condition is "did the ATTACKER write?", tested on the Phase-2 state
+            // itself, independent of which state supplies the emitted value. A terminal can
+            // VISIT the write statement without the register recording anything -- node
+            // coverage is control flow, not effect -- and the shared-traversal collector
+            // accepts on coverage. Such a case holds no attacker action: its only SO write is
+            // Phase 3's, i.e. the victim's own replay, so it can never diverge.
+            const auto *p2SoReg = fs2->getExecutionState()->getTestObject(
+                "registervalues"_cs, chain.soName, false);
+            if (p2SoReg == nullptr || !p2SoReg->wasWritten()) {
+                printInfo("[Tampering] chain id=%1% (%2%): Phase-2 terminal recorded no write "
+                          "to '%3%' — no attacker action to emit; skipping.",
+                          chain.id, currentChainName, chain.soName);
+                continue;
+            }
+            const FinalState *regSrc = (repeat > 1) ? fs3 : fs2;
             std::map<cstring, const TestObject *> attackerRegValues;
-            const auto *fs3SoReg =
-                fs3->getExecutionState()->getTestObject("registervalues"_cs, chain.soName, false);
+            const auto *fs3SoReg = regSrc->getExecutionState()->getTestObject(
+                "registervalues"_cs, chain.soName, false);
             if (fs3SoReg == nullptr) continue;
             const auto *attackerReg =
-                fs3SoReg->withAttackerValues(model3, SymbexOptions::get().stateTamperValue, {})
+                fs3SoReg
+                    ->withAttackerValues(regSrc->getFinalModel(),
+                                         SymbexOptions::get().stateTamperValue, {})
                     .testObject;
             attackerRegValues[chain.soName] = attackerReg;
 
@@ -3481,6 +3543,24 @@ void StateDependencyTracker::runImpl(const Callback &callBack,
                     };
                     bool allCovered = std::all_of(currentRequiredNodes.begin(),
                                                   currentRequiredNodes.end(), nodeCovered);
+                    // A Phase-2 terminal must actually have WRITTEN the SO, not merely have visited
+                    // the write statement. allCovered is a control-flow property (nodes visited); a
+                    // path can reach `value = ...` inside a RegisterAction without the register
+                    // recording an index/value pair -- measured on countmin, where 10 of 20 MISS->HIT
+                    // Phase-2 terminals have wasWritten()==false while the statement was visited.
+                    //
+                    // Such a terminal carries no attacker action: the emitted affected_register could
+                    // only be sourced from Phase 3, i.e. from the VICTIM's own replayed write, and the
+                    // resulting case can never diverge. Reject it here rather than emitting a test
+                    // that cannot demonstrate tampering.
+                    if (allCovered && currentPhase == TamperingPhase::Phase2_Write &&
+                        !terminalWroteSO(es)) {
+                        printInfo("[SDTrack] Phase-2 terminal rejected: chain=%1% id=%2% SO=%3% "
+                                  "write path visited but the register recorded no write "
+                                  "(no attacker action to emit).",
+                                  currentChainName, currentChain->id, currentChain->soName);
+                        allCovered = false;
+                    }
                     if (allCovered) {
                         printInfo("[SDTrack] Test found: chain=%1% id=%2% SO=%3% (%4% nodes)",
                                     currentChainName, currentChain->id, currentChain->soName,
