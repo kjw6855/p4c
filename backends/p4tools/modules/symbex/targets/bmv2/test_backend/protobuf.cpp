@@ -473,6 +473,10 @@ affected_register {
   register_name: "{{reg.name}}"
   index: {{reg.index}}
   attacker_value: "{{reg.value}}"
+## if existsIn(reg, "min_value")
+  match_kind: REGISTER_MATCH_AT_LEAST
+  min_value: "{{reg.min_value}}"
+## endif
 ## if existsIn(reg, "sink_table")
   sink_table: "{{reg.sink_table}}"
   hit_phase: {{reg.hit_phase}}
@@ -691,6 +695,13 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
             j["name"] = regName.c_str();
             j["index"] = static_cast<int64_t>(static_cast<long long>(idxConst->value));
             j["value"] = formatHexExpressionWithSeparators(*valConst);
+            // AT_LEAST criterion, when the analytical driver solved a flip value. Emitted only for
+            // those cases, so an exact-match case is byte-identical to before.
+            auto minIt = testSpec->attackerRegisterMinValues.find(regName);
+            if (minIt != testSpec->attackerRegisterMinValues.end() && minIt->second > 0) {
+                const auto *minConst = IR::Constant::get(valConst->type, minIt->second);
+                j["min_value"] = formatHexExpressionWithSeparators(*minConst);
+            }
             if (!sinkTableList.isNullOrEmpty()) {
                 j["sink_table"] = sinkTableList.c_str();
                 // HIT→MISS: sink HITs in Phase 1, MISSes after tamper in Phase 3.

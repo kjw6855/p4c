@@ -402,6 +402,13 @@ class TamperingTestSpec {
     /// The concrete multicast group id to install; valid only when usesMulticast is true.
     int multicastGroupId = -1;
 
+    /// Per-register lower bound for AT_LEAST matching: the register value at which the sink /
+    /// condition flips. A register present here is emitted with match_kind=REGISTER_MATCH_AT_LEAST
+    /// + min_value, telling the harness to accept any value that crossed the flip point rather than
+    /// one exact value it cannot observe (the flood stops on reaching its target, and packet loss
+    /// moves where that lands). Absent => exact matching, as before.
+    std::map<cstring, big_int> attackerRegisterMinValues;
+
     TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, bool hasExit,
                       std::map<cstring, const TestObject *> attackerRegVals = {},
                       std::map<cstring, cstring> attackerRegSinkTables = {})

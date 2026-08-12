@@ -103,6 +103,19 @@ struct TamperingFinalState {
     /// The concrete multicast group id the packet carries on the forwarding path; valid only
     /// when usesMulticast is true.
     int multicastGroupId = -1;
+
+    /// Per-register lower bound for AT_LEAST matching: the register value at which the sink /
+    /// condition flips, as solved by driveRegisterPhase2. A register present here is emitted with
+    /// match_kind=REGISTER_MATCH_AT_LEAST + min_value; absent means exact matching.
+    ///
+    /// Only the ANALYTICAL driver populates this, because only it knows a principled threshold.
+    /// accumulatePhase2Flip finds its packet count empirically and has no flip value to report, so
+    /// its cases stay exact (unchanged behaviour).
+    ///
+    /// Declared LAST on purpose: this struct is aggregate-initialised positionally at several call
+    /// sites, so a field inserted mid-struct would silently capture the next positional argument.
+    /// Assign it by name after construction.
+    std::map<cstring, big_int> attackerRegisterMinValues;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -381,7 +394,7 @@ class StateDependencyTracker : public SymbolicExecutor {
         const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
         const IR::Expression *inputPortSymExpr, int p3Target, const FinalState *&outFs2,
-        size_t &outRepeat);
+        size_t &outRepeat, big_int &outFlipValue);
 
     /// True when @p es's final register state recorded a write to the current chain's SO register.
     /// The relaxed Phase-2 acceptance used to capture a priming packet (vs full allCovered coverage).

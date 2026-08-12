@@ -80,6 +80,73 @@ message PathCoverage {
     bytes path_size = 3;
 }
 
+// How the harness must compare the register it reads against attacker_value.
+//
+// EXACT is the default so that files predating this field keep today's meaning.
+// AT_LEAST exists because an ACCUMULATING register has no single observable
+// value: the harness drives it with k packets and stops once it reaches the
+// target, re-sending only the deficit, so packet loss changes the final value.
+// What matters for such a register is whether it crossed the value that flips
+// the sink, which is min_value.
+//
+// Field names and numbers are kept IDENTICAL to the tofino copy in
+// targets/tofino/proto/p4symbex_bfrt.proto: the same criterion has to mean the
+// same thing to the BMv2 Thrift check and the Tofino BF-Runtime check. Keep
+// them in step until the two are merged into a shared proto.
+enum RegisterMatchKind {
+    REGISTER_MATCH_EXACT = 0;
+    REGISTER_MATCH_AT_LEAST = 1;
+}
+
+// Register write that the attacker performs in Phase 2 of a tampering test.
+message AffectedRegister {
+    string register_name = 1;
+    uint64 index = 2;
+    // The value the register is expected to hold as of AFTER Phase 2 -- i.e. at
+    // the point the harness reads it, BEFORE Phase 3 is replayed. Phase 3 sends
+    // the victim's packet again, which for an accumulating register performs its
+    // own write, so a Phase-3-derived value can never be observed by the harness.
+    bytes attacker_value = 3;
+    // Comma-separated list of Phase-1 sink-table control-plane names.
+    string sink_table = 4;
+    // Phase number expected to HIT the sink table(s). 1 for Tampering.
+    uint32 hit_phase = 5;
+    // Phase number expected to MISS the sink table(s). 3 for Tampering.
+    uint32 miss_phase = 6;
+    // Comparison to apply. Unset => EXACT.
+    RegisterMatchKind match_kind = 7;
+    // Set only when match_kind == AT_LEAST: the register value at which the sink
+    // flips. The tamper succeeded if the cell reached this, regardless of how far
+    // past it the flood happened to get.
+    bytes min_value = 8;
+}
+
+// A multicast group the harness must install before replay (and remove after).
+message MulticastGroup {
+    uint32 mgid = 1;
+    repeated uint32 replica_port = 2;
+}
+
+// A three-phase tampering test case, emitted under --path-selection
+// STATE_DEP_TAMPERING[_COND]. The three input_packet blocks are:
+//   Phase 1: send packet, expect the original (pre-tamper) output.
+//   Phase 2: send packet that triggers an attacker register write.
+//   Phase 3: replay Phase 1's input -- the harness checks for deviation.
+//
+// Every emitted bmv2 tampering file has declared `proto-message:
+// TamperingTestCase` since the feature was written, while this file defined only
+// TestCase -- so the output was validated against nothing. This is that message.
+message TamperingTestCase {
+    repeated InputPacketAtPort input_packet = 1;
+    repeated OutputPacketAtPort expected_output_packet = 2;
+    repeated p4.v1.Entity entities = 3;
+    repeated AffectedRegister affected_register = 4;
+    repeated string traces = 5;
+    repeated string metadata = 6;
+    // Present only when the forwarding path is multicast.
+    repeated MulticastGroup multicast_group = 7;
+}
+
 message TestCase {
     // The input packet.
     InputPacketAtPort input_packet = 1;

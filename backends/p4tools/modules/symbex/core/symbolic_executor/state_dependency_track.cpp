@@ -1982,7 +1982,7 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
     const IR::Expression *inputPortSymExpr, int p3Target, const FinalState *&outFs2,
-    size_t &outRepeat) {
+    size_t &outRepeat, big_int &outFlipValue) {
     // Generous cap on the computed packet count: large enough for real counter thresholds
     // (ACC-Turbo ~10001), small enough to reject pathological extrapolations.
     constexpr int64_t kAnalyticalCap = 1000000;
@@ -2128,6 +2128,10 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
 
         outFs2 = fs2real;
         outRepeat = static_cast<size_t>(k);
+        // The candidate that actually validated: the register value at which the sink flips. This,
+        // not the final accumulated value, is what the harness should test against -- the flood
+        // stops as soon as it reaches its target and packet loss moves where that lands.
+        outFlipValue = vreg;
         printInfo("[Tampering] chain id=%1% (%2%): analytical drive-register k=%3% "
                   "(base=%4% delta=%5% read=%6%) — allCovered re-validated.",
                   chain.id, currentChainName, outRepeat, base, delta, overrideVal);
@@ -2300,6 +2304,10 @@ size_t StateDependencyTracker::runTamperingChain(
     std::map<const FinalState *, const FinalState *> drivenFs3;
     std::map<const FinalState *, size_t> drivenRepeat;
     std::map<const FinalState *, const FinalState *> drivenFs1;
+    /// Register value at which the sink/condition flips, per driven Phase-2 terminal. Emitted as
+    /// AffectedRegister.min_value so the harness tests "did the counter cross the flip point"
+    /// instead of an exact value it cannot observe.
+    std::map<const FinalState *, big_int> drivenFlipValue;
     size_t phase2StateNum = 0;
     for (size_t i = 0; i < phase1Conditions.size(); ++i) {
         const auto &cond1 = phase1Conditions[i];
@@ -2446,9 +2454,10 @@ size_t StateDependencyTracker::runTamperingChain(
         if (repPhase1State != nullptr && (singleWriteEmpty || hasThresholdGate)) {
             const FinalState *fs2real = nullptr;
             size_t kDrive = 0;
+            big_int flipValue = 0;
             const FinalState *fs3Drive = driveRegisterPhase2(
                 chain, initState, driveTemplate, repPhase1State, cond1.inputPort, inputPortSymExpr,
-                /*p3Target=*/missToHit ? 1 : 0, fs2real, kDrive);
+                /*p3Target=*/missToHit ? 1 : 0, fs2real, kDrive, flipValue);
             // Adopt the accumulation result when the write path was unreachable in one packet, or
             // when it genuinely needs k>1 (the single-packet terminals cannot flip this threshold).
             if (fs3Drive != nullptr && (singleWriteEmpty || kDrive > 1)) {
@@ -2457,6 +2466,7 @@ size_t StateDependencyTracker::runTamperingChain(
                 drivenFs3[fs2real] = fs3Drive;
                 drivenRepeat[fs2real] = kDrive;
                 drivenFs1[fs2real] = repPhase1State;
+                drivenFlipValue[fs2real] = flipValue;
             }
         } else if (repPhase1State != nullptr) {
             // Not driven, and deliberately so: single-packet Phase-2 terminals exist AND the write
@@ -2632,9 +2642,14 @@ size_t StateDependencyTracker::runTamperingChain(
                         continue;
                     }
                     // Accumulated HIT→MISS flip confirmed on fs3. Emit the real accumulated value from
-                    // fs3's SO-register read (its index conditions carry the flipped value at the
-                    // pinned index), re-deriving concrete Phase-1/Phase-2 packets so their CRC hashes
-                    // resolve eagerly and processPhase re-solves SAT — exactly as MISS→HIT does.
+                    // fs3's SO-register READ: only the Phase-3 read carries index conditions for the
+                    // pinned (== Phase-1) cell. A Phase-2 write terminal does not — sourcing from it
+                    // emits index 0 and drops the block entirely for some paths (measured).
+                    //
+                    // The value is therefore the post-Phase-3 one, which the harness (reading after
+                    // Phase 2) cannot match exactly. That is why an accumulating register is emitted
+                    // with match_kind=AT_LEAST + min_value: the harness tests the flip threshold, not
+                    // this value. See TamperingFinalState::attackerRegisterMinValues.
                     const auto &model3 = fs3->getFinalModel();
                     const auto *fs3SoReg = fs3->getExecutionState()->getTestObject(
                         "registervalues"_cs, chain.soName, false);
@@ -2656,6 +2671,12 @@ size_t StateDependencyTracker::runTamperingChain(
                                                              p1Carry);
                     TamperingFinalState tsAcc{*fs1c, *fs2c, false, cond1.inputPort, cond1.outputPort,
                                               ipAcc, opAcc, accRegValues, {}, accRegSinkTables, {}};
+                    // AT_LEAST bound for an analytically-driven accumulation: the value at which
+                    // the sink flips. The harness cannot observe an exact value here -- it stops
+                    // driving the register the moment it reaches its target, and packet loss moves
+                    // where that lands -- so crossing the flip point is the real success condition.
+                    if (auto fvIt = drivenFlipValue.find(fs2); fvIt != drivenFlipValue.end())
+                        tsAcc.attackerRegisterMinValues[chain.soName] = fvIt->second;
                     tsAcc.chainId = chain.id;
                     tsAcc.subTestId = ++subTestId;
                     tsAcc.phase2RepeatCount = repeat;  // HIT→MISS emits hit_phase=1 (missToHit=false)
@@ -2838,7 +2859,8 @@ size_t StateDependencyTracker::runTamperingChain(
             // conditions hold the (pinned, == Phase-1) read index, and withAttackerValues stamps the
             // tampered value there so the emitter produces an affected_register the harness can
             // pre-set. The carry above (evaluateForCarry) drove the symbolic run but has no index
-            // conditions, so it cannot be emitted directly.
+            // conditions, so it cannot be emitted directly -- and neither can a Phase-2 write
+            // terminal, which emits index 0 (measured).
             const auto &model3 = fs3->getFinalModel();
             std::map<cstring, const TestObject *> attackerRegValues;
             const auto *fs3SoReg =
@@ -2881,6 +2903,13 @@ size_t StateDependencyTracker::runTamperingChain(
             TamperingFinalState ts{*fs1c, *fs2c, false,
                                    cond1.inputPort, cond1.outputPort, ip2, op2,
                                    attackerRegValues, {}, attackerRegSinkTables, {}};
+            // AT_LEAST bound for an analytically-driven accumulation: the value at which the
+            // sink/condition flips. The harness cannot observe an exact value -- it stops driving
+            // the register once it reaches its target and packet loss moves where that lands -- so
+            // crossing the flip point is the real success condition.
+            if (auto fvIt = drivenFlipValue.find(fs2); fvIt != drivenFlipValue.end())
+                ts.attackerRegisterMinValues[chain.soName] = fvIt->second;
+           
             ts.chainId = chain.id;
             ts.subTestId = ++emitted;
             ts.phase2RepeatCount = repeat;
@@ -2968,6 +2997,10 @@ size_t StateDependencyTracker::runConditionChain(
     std::map<const FinalState *, const FinalState *> drivenFs3;
     std::map<const FinalState *, size_t> drivenRepeat;
     std::map<const FinalState *, const FinalState *> drivenFs1;
+    /// Register value at which the sink/condition flips, per driven Phase-2 terminal. Emitted as
+    /// AffectedRegister.min_value so the harness tests "did the counter cross the flip point"
+    /// instead of an exact value it cannot observe.
+    std::map<const FinalState *, big_int> drivenFlipValue;
     size_t phase2StateNum = 0;
     for (size_t i = 0; i < phase1Conditions.size(); ++i) {
         const auto &cond1 = phase1Conditions[i];
@@ -3065,9 +3098,10 @@ size_t StateDependencyTracker::runConditionChain(
             // packet) — or the chain has a threshold gate the single packet only spuriously crossed.
             const FinalState *fs2real = nullptr;
             size_t kDrive = 0;
+            big_int flipValue = 0;
             const FinalState *fs3Drive =
                 driveRegisterPhase2(chain, initState, driveTemplate, repPhase1State, cond1.inputPort,
-                                    inputPortSymExpr, p3Target, fs2real, kDrive);
+                                    inputPortSymExpr, p3Target, fs2real, kDrive, flipValue);
             // Adopt the accumulation result when the write path was unreachable in one packet, or when
             // it genuinely needs k>1 (the single-packet terminals cannot flip this threshold).
             if (fs3Drive != nullptr && (singleWriteEmpty || kDrive > 1)) {
@@ -3076,6 +3110,7 @@ size_t StateDependencyTracker::runConditionChain(
                 drivenFs3[fs2real] = fs3Drive;
                 drivenRepeat[fs2real] = kDrive;
                 drivenFs1[fs2real] = repPhase1State;
+                drivenFlipValue[fs2real] = flipValue;
             }
         }
         phase2StateNum += phase2StateMap[i].size();
@@ -3129,6 +3164,9 @@ size_t StateDependencyTracker::runConditionChain(
             }
             if (fs3 == nullptr) continue;  // no packet count up to the cap flips the condition
 
+            // Phase 3's read carries the index conditions for the pinned cell; a Phase-2 write
+            // terminal does not. The emitted value is therefore post-Phase-3 and is not what the
+            // harness reads -- accumulating registers carry AT_LEAST + min_value for that reason.
             const auto &model3 = fs3->getFinalModel();
             std::map<cstring, const TestObject *> attackerRegValues;
             const auto *fs3SoReg =
@@ -3157,6 +3195,13 @@ size_t StateDependencyTracker::runConditionChain(
             if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
             TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
                                    attackerRegValues, {}, {}, {}};
+            // AT_LEAST bound for an analytically-driven accumulation: the value at which the
+            // sink/condition flips. The harness cannot observe an exact value -- it stops driving
+            // the register once it reaches its target and packet loss moves where that lands -- so
+            // crossing the flip point is the real success condition.
+            if (auto fvIt = drivenFlipValue.find(fs2); fvIt != drivenFlipValue.end())
+                ts.attackerRegisterMinValues[chain.soName] = fvIt->second;
+           
             ts.chainId = chain.id;
             ts.subTestId = ++emitted;
             ts.phase2RepeatCount = repeat;
