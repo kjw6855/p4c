@@ -219,6 +219,16 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             "metadata fields as per-control IFDS sources, so chains root at parser-derived metadata. "
             "Lightweight alternative to --whole-pipeline. Off by default.");
     registerOption(
+            "--supergraph-only", nullptr,
+            [this](const char *) {
+                supergraphOnly = true;
+                return true;
+            },
+            "Measurement only: build the CFGs, IFDS supergraphs and parser graphs, then stop and "
+            "print their latency (P4SD.CFG / P4SD.Supergraph / Parser graphs) with "
+            "--print-performance-report. Skips all chain passes and DOT drawing, so it emits NO "
+            "dependency counts. Off by default.");
+    registerOption(
             "--showVarEdge", "varEdgeVis",
             [this](const char *arg) {
                 static std::map<cstring, VarEdgeVisibility> const SHOW_VAR_EDGE_OPTIONS = {

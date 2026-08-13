@@ -115,6 +115,9 @@ enum SDCategories : unsigned {
 /// @param arch      Architecture name (e.g. "v1model", "tna").
 /// @param graphsDir If non-empty, export intermediate and final dep-graphs as DOT files
 ///                  into this directory (full/merged/pruned variants). Pass {} to skip.
+/// @param supergraphOnly Stop after CFG + IFDS supergraph generation and return a result whose
+///                  chain containers are all empty. Only for latency measurement of that stage
+///                  (timers "P4SD.CFG" / "P4SD.Supergraph"); never read counts from such a result.
 StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::ReferenceMap *refMap,
                                                   P4::TypeMap *typeMap,
@@ -123,7 +126,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   std::filesystem::path graphsDir = {},
                                                   unsigned categories = SD_ALL,
                                                   bool wholePipeline = false,
-                                                  bool parserDeps = false);
+                                                  bool parserDeps = false,
+                                                  bool supergraphOnly = false);
 
 /// Convenience overload: builds its own lightweight midend
 /// (TypeChecking → EvaluatorPass → IFDS analysis → RemoveActionParameters → TypeChecking)
@@ -141,7 +145,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   std::filesystem::path graphsDir = {},
                                                   unsigned categories = SD_ALL,
                                                   bool wholePipeline = false,
-                                                  bool parserDeps = false);
+                                                  bool parserDeps = false,
+                                                  bool supergraphOnly = false);
 
 }  // namespace P4::P4StateDependency
 

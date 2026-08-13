@@ -72,7 +72,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   std::filesystem::path graphsDir,
                                                   unsigned categories,
                                                   bool wholePipeline,
-                                                  bool parserDeps) {
+                                                  bool parserDeps,
+                                                  bool supergraphOnly) {
     Util::ScopedTimer sdTimer("P4SD");
     StateDependencyResult result;
     // Graph/binary mode (graphsDir set) exports every category, so it must compute them all.
@@ -87,7 +88,12 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     ControlGraphs &cgen = *cgenRaw;
     cgen.genSupergraphs = GenSGMode::FULL;
     cgen.wholePipeline = wholePipeline;
-    toplevel->getMain()->apply(cgen);
+    {
+        // CFG construction over the evaluated pipeline — the input to the IFDS supergraphs below.
+        // Reported as "P4SD.CFG" in the performance report.
+        Util::ScopedTimer cfgTimer("CFG");
+        toplevel->getMain()->apply(cgen);
+    }
 
     // --parser-deps: compute the parser-state dependency record (header-derived metadata fields) over the
     // program's (unrolled) parsers; the union of their field-path names seeds the per-control IFDS sources.
@@ -104,7 +110,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         });
     }
 
-    // Build IFDS supergraphs over the CFGs.
+    // Build IFDS supergraphs over the CFGs. Reported as "P4SD.Supergraph" in the performance
+    // report; --supergraph-only stops right after this, so the timer is measurable in isolation.
     SuperGraphs sg(refMap, typeMap,
             &cgen.controlGraphsArray,
             &cgen.graphVars,
@@ -119,7 +126,21 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             &cgen.egressPortVars,
             &cgen.dropVars,
             parserDeps ? &parserMetaSrc : nullptr);
-    sg.gen_supergraphs();
+    {
+        Util::ScopedTimer sgTimer("Supergraph");
+        sg.gen_supergraphs();
+    }
+
+    // --supergraph-only: measure CFG + supergraph generation without paying for any of the IFDS
+    // chain passes. Hand back the CFGs in binary mode (the caller owns/deletes them); every chain
+    // container stays empty, so callers must not read counts from a supergraph-only result.
+    if (supergraphOnly) {
+        if (!graphsDir.empty())
+            result.cfgGraphs = cgenRaw;
+        else
+            delete cgenRaw;
+        return result;
+    }
 
     const size_t numGraphs = cgen.controlGraphsArray.size();
     hvec_map<cstring, std::vector<TabVertex>> stateVars;
@@ -561,7 +582,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   std::filesystem::path graphsDir,
                                                   unsigned categories,
                                                   bool wholePipeline,
-                                                  bool parserDeps) {
+                                                  bool parserDeps,
+                                                  bool supergraphOnly) {
     Util::ScopedTimer sdPrepTimer("P4SD-prep");
 
     P4::ReferenceMap refMap;
@@ -631,10 +653,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     // stays strict so genuine regressions surface.
     if (!wholePipeline)
         return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
-                                          categories, wholePipeline, parserDeps);
+                                          categories, wholePipeline, parserDeps, supergraphOnly);
     try {
         return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
-                                          categories, wholePipeline, parserDeps);
+                                          categories, wholePipeline, parserDeps, supergraphOnly);
     } catch (const std::exception &bug) {
         ::P4::warning("whole-pipeline analysis failed (%1%); proceeding with no chains", bug.what());
         return {};

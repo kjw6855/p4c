@@ -184,7 +184,7 @@ int main(int argc, char *const argv[]) {
                 sdResult = P4StateDependency::runStateDependencyAnalysis(
                         program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
                         options.graphsDir, P4StateDependency::SD_ALL, options.wholePipeline,
-                        options.parserDeps);
+                        options.parserDeps, options.supergraphOnly);
             } catch (const std::exception &bug) {
                 if (!options.wholePipeline) throw;
                 ::P4::warning("whole-pipeline analysis failed (%1%); emitting no chains for this "
@@ -205,6 +205,13 @@ int main(int argc, char *const argv[]) {
 
     // Serialize the Key + Cond chains so p4symbex can reuse them (--state-dep-cache), skipping the
     // expensive IFDS re-analysis. Requires the analysis to have run (--gen-supergraphs).
+    if (options.cacheChainsFile.has_value() && options.supergraphOnly) {
+        // --supergraph-only produces no chains; writing the cache here would silently truncate an
+        // existing one to zero entries. Refuse instead of clobbering it.
+        ::P4::error("--cache-chains cannot be combined with --supergraph-only (no chains are "
+                    "computed in measurement-only mode); the cache was left untouched");
+        return 1;
+    }
     if (options.cacheChainsFile.has_value()) {
         cstring lang = options.langVersion == CompilerOptions::FrontendVersion::P4_14
                            ? cstring("p4-14")
@@ -293,13 +300,17 @@ int main(int argc, char *const argv[]) {
     }
 
     {
+        // Runs in --supergraph-only too: ParserGraphs only builds the parser graphs in memory
+        // (DOT writing happens in the drawing pass below), so it belongs to the graph-generation
+        // latency being measured.
         Util::ScopedTimer parserTimer("Parser graphs");
         LOG2("Generating parser graphs");
         pgg = new P4StateDependency::ParserGraphs(&midEnd.refMap, options.graphsDir);
         program->apply(*pgg);
     }
 
-    {
+    // Drawing is disk output, not graph generation — skipped in the measurement-only mode.
+    if (!options.supergraphOnly) {
         Util::ScopedTimer drawTimer("Drawing graphs");
         if (sdResult.sdChecker &&
                 (options.varEdgeVis == VarEdgeVisibility::ACTION_PARAM ||

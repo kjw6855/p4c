@@ -31,6 +31,11 @@ class P4StateDependencyOptions : public CompilerOptions {
     /// seed those metadata fields as sources of the per-control IFDS, so chains root at parser-derived
     /// metadata. Lightweight alternative to --whole-pipeline; off by default.
     bool parserDeps = false;
+    /// Measurement-only mode: build the CFGs, the IFDS supergraphs and the parser graphs, report
+    /// their latency ("P4SD.CFG" / "P4SD.Supergraph" / "Parser graphs" in the performance report),
+    /// and skip every chain pass plus DOT drawing. Produces no chain counts — do not use it to
+    /// generate analysis results.
+    bool supergraphOnly = false;
     VarEdgeVisibility varEdgeVis = VarEdgeVisibility::NONE;
 
  private:
