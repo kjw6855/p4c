@@ -1,0 +1,33 @@
+{
+  "program": "cp_action_param_keyless_tna",
+  "threat_model": {
+    "model": "compromised-host (project default): attacker controls a host and may send arbitrary packets, but cannot reconfigure the control plane",
+    "source": "default-policy",
+    "reason": "Fixture. The point of the test is that the threshold is CONTROL-PLANE supplied and therefore NOT attacker-chosen, which is what makes pinning it sound."
+  },
+  "registers": {},
+  "assume": [
+    {
+      "clause": "default_action(Ingress.tbl_get_threshold) == set_threshold",
+      "source": "controller-assumption",
+      "ref": "cp_action_param_keyless_tna fixture: the deployed controller installs set_threshold as the default entry",
+      "reason": "The table is keyless, so set_threshold is reachable ONLY as the default action. p4c defaults it to NoAction, which leaves the threshold at 0 and makes every emitted case a single-send false positive. This clause is also the one that must reach TNA: it used to be honoured by the bmv2 table stepper alone."
+    },
+    {
+      "table": "Ingress.tbl_get_threshold",
+      "when": [
+        {
+          "action_data": ["set_threshold", "threshold"],
+          "op": "eq",
+          "value": 20
+        }
+      ],
+      "then": { "action": "set_threshold" },
+      "source": "controller-assumption",
+      "ref": "cp_action_param_keyless_tna fixture: the deployed controller installs threshold = 20",
+      "reason": "Without this the synthesized action argument is free-symbolic, so the solver picks 0 and the sink flips on the first packet. On a keyless table the argument is minted by setTableDefaultEntries rather than by evalTableControlEntries, which is the pin path this fixture covers."
+    }
+  ],
+  "todo": [],
+  "tier": "fixture"
+}
