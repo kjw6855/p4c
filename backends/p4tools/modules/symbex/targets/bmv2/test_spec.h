@@ -97,6 +97,15 @@ class IndexMap : public TestObject {
         return indexConditions;
     }
 
+    /// True when this index map recorded at least one write, i.e. the packet actually wrote it.
+    /// See TestObject::wasWritten. Identical to the Tofino IndexMap's definition: the two targets
+    /// carry unrelated copies of this class (different namespaces, no common base beyond
+    /// TestObject), so the one-liner is mirrored rather than shared. Without it the tampering
+    /// executor's "did the ATTACKER write?" checks — the Phase-2 terminal filter and the Defect-A
+    /// index gate — fall back to TestObject's `return false` on v1model and reject every Phase-2
+    /// terminal, silently disabling tampering generation on BMv2.
+    [[nodiscard]] bool wasWritten() const override { return !indexConditions.empty(); }
+
     DECLARE_TYPEINFO(IndexMap, TestObject);
 };
 

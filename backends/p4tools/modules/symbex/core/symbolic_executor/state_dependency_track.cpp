@@ -1,6 +1,8 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/state_dependency_track.h"
 
 #include <algorithm>
+#include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <variant>
@@ -10,6 +12,7 @@
 #include "ir/irutils.h"
 #include "ir/solver.h"
 #include <fstream>
+#include <sstream>
 
 #include "backends/p4tools/common/lib/constants.h"
 #include "lib/error.h"
@@ -24,6 +27,7 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/sink_divergence.h"
 #include "backends/p4tools/modules/symbex/core/small_step/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
+#include "backends/p4tools/modules/symbex/lib/concolic.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
@@ -33,11 +37,91 @@
 
 namespace P4::P4Tools::Symbex {
 
+/// Trailing-component control-plane name comparison. Defined further down (the annotation helpers
+/// own it); forward-declared because the cross-phase default-action helpers below need it first.
+static bool cpNameMatches(cstring full, cstring want);
+
+/// One phase's default-action override for one table.
+struct DefaultActionRecord {
+    /// The evaluated override: which action this phase installed and the action data its model
+    /// chose for it.
+    const ActionCall *call = nullptr;
+    /// Control-plane names of the arguments whose symbol appears in THIS phase's path constraint,
+    /// i.e. the ones the path actually branched on. An argument outside this set was never read:
+    /// its value in the model is Z3's arbitrary completion of a free symbol, and the phase stays
+    /// satisfiable under any other value. A cross-phase difference there is vacuous rather than
+    /// contradictory, which is why the consistency check below ignores it.
+    std::set<cstring> constrainedArgs;
+};
+
+/// One KEYED table entry a phase installed: the evaluated match values that select it, plus the
+/// action and action data installed behind them. tableKeyMap below keeps only the match values,
+/// which is all the NEQ/EQ steering needs but leaves the entry's *contents* uncompared — and an
+/// entry is what the harness installs, key and action data together.
+struct TableEntryRecord {
+    /// keyName → concrete evaluated match (all match kinds).
+    TableMatchMap matches;
+    int priority = 0;
+    const ActionCall *call = nullptr;
+    /// Same provenance as DefaultActionRecord::constrainedArgs, and read for the same reason.
+    std::set<cstring> constrainedArgs;
+};
+
+/// Two evaluated ActionCalls install the same thing: same action, same data for every argument.
+/// Positional comparison, because both calls were built from the same IR::P4Action's parameter
+/// list and therefore carry their arguments in that order.
+static bool sameEvaluatedActionCall(const ActionCall *a, const ActionCall *b) {
+    if (a == nullptr || b == nullptr) return a == b;
+    if (a->getActionName() != b->getActionName()) return false;
+    const auto *args = a->getArgs();
+    const auto *otherArgs = b->getArgs();
+    if ((args == nullptr) != (otherArgs == nullptr)) return false;
+    if (args == nullptr) return true;
+    if (args->size() != otherArgs->size()) return false;
+    for (size_t i = 0; i < args->size(); ++i) {
+        if ((*args)[i].getActionParamName() != (*otherArgs)[i].getActionParamName()) return false;
+        if ((*args)[i].getEvaluatedValue()->value != (*otherArgs)[i].getEvaluatedValue()->value) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// True when two records describe the SAME installed entry — identical match values on every key at
+/// the same priority — so one device cannot hold both unless their contents agree.
+///
+/// Different KEYS are deliberately NOT a conflict. The tampering generator drives Phase 2's key
+/// away from Phase 1's on purpose (buildTableKeyNeqConstraint), and two distinct entries of one
+/// table may legitimately carry different actions and different action data; only entries the
+/// control plane cannot tell apart have to agree.
+static bool sameInstalledEntry(const TableEntryRecord &a, const TableEntryRecord &b) {
+    if (a.priority != b.priority) return false;
+    if (a.matches.size() != b.matches.size()) return false;
+    for (const auto &[keyName, match] : a.matches) {
+        auto it = b.matches.find(keyName);
+        if (it == b.matches.end()) return false;
+        // isEqualTo compares the whole match: value for exact, value+mask for ternary,
+        // value+prefix for LPM, and a mismatched match kind compares unequal.
+        if (!match->isEqualTo(it->second)) return false;
+    }
+    return true;
+}
+
 struct PhaseConditions {
     int inputPort = -1;
     int outputPort = -1;
     // tableName → keyName → concrete evaluated match (all match kinds)
     std::map<cstring, std::map<cstring, const TableMatch *>> tableKeyMap;
+    // tableName → the evaluated default-action override this phase installed. A table resolved via
+    // setTableDefaultEntries (every keyless table) yields a TableConfig with ZERO rules and this
+    // property instead, so the tableKeyMap loop above can never see it — which is exactly how
+    // keyless tables escaped every cross-phase pin.
+    std::map<cstring, DefaultActionRecord> tableDefaultActionMap;
+    // tableName → the KEYED entries this phase installed, whole. tableKeyMap flattens the rules of
+    // a table into one keyName → match map, which loses both the entry boundaries and the action
+    // data; this keeps them so a later phase's entry can be matched against the Phase-1 entry that
+    // carries the same key.
+    std::map<cstring, std::vector<TableEntryRecord>> tableEntryMap;
 
     bool operator==(const PhaseConditions &other) const {
         if (inputPort != other.inputPort || outputPort != other.outputPort) return false;
@@ -52,9 +136,144 @@ struct PhaseConditions {
                 if (!match->isEqualTo(kit->second)) return false;
             }
         }
+        // Two Phase-1 states that installed DIFFERENT default action data are different device
+        // configurations, so they must bucket separately: the bucket's representative is what the
+        // cross-phase consistency check compares later phases against, and lumping states with
+        // different defaults together would check Phase 2 against a default its own Phase 1 never
+        // installed.
+        if (tableDefaultActionMap.size() != other.tableDefaultActionMap.size()) return false;
+        for (const auto &[tblName, rec] : tableDefaultActionMap) {
+            auto it = other.tableDefaultActionMap.find(tblName);
+            if (it == other.tableDefaultActionMap.end()) return false;
+            if (!sameEvaluatedActionCall(rec.call, it->second.call)) return false;
+        }
+        // Same argument one level down, for KEYED entries: two Phase-1 states whose entries carry
+        // the same keys but different action data are different device configurations. Without
+        // this they share a bucket, and the bucket's representative — the state every later phase
+        // is checked against — would speak for an entry its bucket mates never installed.
+        if (tableEntryMap.size() != other.tableEntryMap.size()) return false;
+        for (const auto &[tblName, entries] : tableEntryMap) {
+            auto it = other.tableEntryMap.find(tblName);
+            if (it == other.tableEntryMap.end()) return false;
+            if (entries.size() != it->second.size()) return false;
+            for (size_t i = 0; i < entries.size(); ++i) {
+                if (!sameInstalledEntry(entries[i], it->second[i])) return false;
+                if (!sameEvaluatedActionCall(entries[i].call, it->second[i].call)) return false;
+            }
+        }
         return true;
     }
 };
+
+/// True when a --cp-annotation `action_data` clause fixed (@p tableName, @p actionName, @p arg) to a
+/// literal value. This is the ONLY provenance that licenses carrying a control-plane action-data
+/// value from one phase into another: the annotation states what the controller installs, so every
+/// phase reaches that same value on its own (TableStepper::cpActionArgPin re-applies the clause in
+/// each phase's query) and nothing is invented. Matching mirrors cpActionArgPin exactly, including
+/// the hasValue requirement — a `"value": null` stub pins nothing.
+static bool argIsAnnotationBacked(cstring tableName, cstring actionName, const ActionArg &arg) {
+    const auto *ann = loadedCpAnnotation();
+    if (ann == nullptr) return false;
+    const auto *param = arg.getActionParam();
+    if (param == nullptr) return false;
+    const cstring cpName = arg.getActionParamName();
+    for (const auto *c : ann->clausesFor(tableName)) {
+        for (const auto &t : c->when) {
+            if (t.op != CpTerm::Op::Eq || t.actionDataArg.isNullOrEmpty() || !t.hasValue) continue;
+            if (!t.actionDataAction.isNullOrEmpty() &&
+                !cpNameMatches(actionName, t.actionDataAction)) {
+                continue;
+            }
+            if (t.actionDataArg != cpName && t.actionDataArg != param->name.name) continue;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The annotation-backed subset of @p call: only the arguments a --cp-annotation `action_data`
+/// clause fixed. nullptr when the call carries no such argument, in which case NOTHING from it may
+/// be propagated to another phase — the remaining values are free symbols whose model assignment is
+/// an arbitrary solver pick, not a control-plane fact.
+static const ActionCall *annotationBackedSubset(cstring tableName, const ActionCall *call) {
+    if (call == nullptr) return nullptr;
+    const auto *args = call->getArgs();
+    if (args == nullptr) return nullptr;
+    std::vector<ActionArg> pinnable;
+    for (const auto &arg : *args) {
+        if (argIsAnnotationBacked(tableName, call->getActionName(), arg)) pinnable.push_back(arg);
+    }
+    if (pinnable.empty()) return nullptr;
+    return new ActionCall(call->getActionName(), call->getAction(), pinnable);
+}
+
+/// The control-plane configuration one phase's terminal describes: the default-action override it
+/// installed per table, and the keyed entries it installed per table.
+struct PhaseCpState {
+    std::map<cstring, DefaultActionRecord> defaults;
+    std::map<cstring, std::vector<TableEntryRecord>> entries;
+};
+
+/// Everything a phase installed on the control plane, with the provenance needed to tell a real
+/// cross-phase contradiction from an irrelevant difference between two arbitrary model completions.
+///
+/// Both halves are read from the same evaluated TableConfig: a default-action override lives in the
+/// "overriden_default_action" property and carries no rules, while a keyed entry IS a rule. One
+/// table can only ever be one of the two on a given path, but the loop does not need to care.
+static PhaseCpState collectCpState(const FinalState &fs) {
+    PhaseCpState out;
+    const auto &model = fs.getFinalModel();
+    const auto *es = fs.getExecutionState();
+    // Symbols this phase's path actually branched on. Collected once for the whole path constraint
+    // rather than per table, which would rescan it for every installed action.
+    std::set<cstring> constrained;
+    for (const auto *pc : es->getPathConstraint()) {
+        if (pc == nullptr) continue;
+        forAllMatching<IR::SymbolicVariable>(
+            pc, [&](const IR::SymbolicVariable *var) { constrained.insert(var->label); });
+    }
+    // Which of @p call's arguments this path branched on. Both the keyed and the keyless producer
+    // mint the symbol through ControlPlaneState::getTableActionArgument(table, action,
+    // parameter->name, type), which labels it "<table>_<action>_arg_<param>", so one reconstruction
+    // serves both.
+    auto collectConstrainedArgs = [&constrained](cstring tblName, const ActionCall *call) {
+        std::set<cstring> out;
+        const auto *args = call->getArgs();
+        if (args == nullptr) return out;
+        for (const auto &arg : *args) {
+            const auto *param = arg.getActionParam();
+            if (param == nullptr) continue;
+            const cstring label =
+                tblName + "_" + call->getActionName() + "_arg_" + param->name.name;
+            if (constrained.count(label) != 0) out.insert(arg.getActionParamName());
+        }
+        return out;
+    };
+    for (const auto &[tblName, tblObj] : es->getTestObjectCategory("tableconfigs"_cs)) {
+        const auto *evaluated = tblObj->evaluate(model, /*doComplete=*/true);
+        const auto *cfg = evaluated->to<TableConfig>();
+        if (cfg == nullptr) continue;
+        for (const auto &rule : *cfg->getRules()) {
+            const auto *call = rule.getActionCall();
+            if (call == nullptr) continue;
+            TableEntryRecord rec;
+            rec.matches = *rule.getMatches();
+            rec.priority = rule.getPriority();
+            rec.call = call;
+            rec.constrainedArgs = collectConstrainedArgs(tblName, call);
+            out.entries[tblName].push_back(rec);
+        }
+        const auto *defProperty = cfg->getProperty("overriden_default_action"_cs, /*checked=*/false);
+        if (defProperty == nullptr) continue;
+        const auto *call = defProperty->to<ActionCall>();
+        if (call == nullptr) continue;
+        DefaultActionRecord rec;
+        rec.call = call;
+        rec.constrainedArgs = collectConstrainedArgs(tblName, call);
+        out.defaults[tblName] = rec;
+    }
+    return out;
+}
 
 // Build a PhaseConditions from a terminal FinalState, extracting concrete port values and
 // all table key concrete matches (any match kind) from the evaluated tableconfigs test objects.
@@ -66,17 +285,206 @@ static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramIn
         model.evaluate(es->get(programInfo.getTargetInputPortVar()),  true));
     cond.outputPort = IR::getIntFromLiteral(
         model.evaluate(es->get(programInfo.getTargetOutputPortVar()), true));
-    for (const auto &[tblName, tblObj] : es->getTestObjectCategory("tableconfigs"_cs)) {
-        const auto *evaluated = tblObj->evaluate(model, /*doComplete=*/true);
-        const auto *cfg = evaluated->to<TableConfig>();
-        if (cfg == nullptr) continue;
-        for (const auto &rule : *cfg->getRules()) {
-            for (const auto &[keyName, match] : *rule.getMatches()) {
+    // One pass over the evaluated tableconfigs yields both halves: the keyed entries (rules) and
+    // the default-action overrides, which carry no rules at all because their action and data live
+    // in a table property instead.
+    auto cpState = collectCpState(fs);
+    cond.tableDefaultActionMap = std::move(cpState.defaults);
+    cond.tableEntryMap = std::move(cpState.entries);
+    // The flattened key view the NEQ/EQ steering and the size-1 detection read. Entries are visited
+    // in rule order, so a table with several entries keeps the last one's match per key — exactly
+    // what this loop produced before the entry records existed.
+    for (const auto &[tblName, entries] : cond.tableEntryMap) {
+        for (const auto &entry : entries) {
+            for (const auto &[keyName, match] : entry.matches) {
                 cond.tableKeyMap[tblName][keyName] = match;
             }
         }
     }
     return cond;
+}
+
+/// Carry a table's default-action override into a later phase's initial state — but ONLY the part
+/// of it that a --cp-annotation clause fixed. The device installs ONE default action per table for
+/// all three phases, and the action-data symbols (`<table>_<action>_arg_<param>`) are not
+/// phase-scoped while every phase is a SEPARATE solver query, so the phases can disagree on the very
+/// action data the attack depends on. The answer is NOT to propagate whichever value Z3 happened to
+/// pick for a free symbol: that manufactures a control-plane state nobody asked for and may not even
+/// be deployable (SwitchV2P's switch_type is `enum bit<3>` with five declared roles, so a propagated
+/// 6 is merely representable, not installable). Only an annotation knows what the controller
+/// installs, so only an annotation-backed value is carried; everything else is left free and checked
+/// afterwards by crossPhaseCpAgrees, which drops the candidate when the phases contradict.
+/// Consumed by TableStepper::setTableDefaultEntries, the single producer of those symbols on both
+/// targets. Kept out of "preexisting_tableconfigs": that category is read only on the keyed path,
+/// and a keyless table — the whole point here — never gets there.
+static void injectPinnedDefaultAction(ExecutionState &init, cstring tableName,
+                                      const TableConfig *cfg) {
+    if (!SymbexOptions::get().crossPhaseDefaultActionPin || cfg == nullptr) return;
+    const auto *defProperty = cfg->getProperty("overriden_default_action"_cs, /*checked=*/false);
+    if (defProperty == nullptr) return;
+    const auto *pinnable = annotationBackedSubset(tableName, defProperty->to<ActionCall>());
+    if (pinnable != nullptr) {
+        init.addTestObject("pinned_default_actions"_cs, tableName, pinnable);
+    }
+}
+
+/// Same pin, driven from an already-built PhaseConditions: for EVERY table that carries a default
+/// override, not just the size-1 tables — a keyless table has no key and so never appears there.
+static void injectPinnedDefaultActions(ExecutionState &init, const PhaseConditions &cond) {
+    if (!SymbexOptions::get().crossPhaseDefaultActionPin) return;
+    for (const auto &[tableName, rec] : cond.tableDefaultActionMap) {
+        const auto *pinnable = annotationBackedSubset(tableName, rec.call);
+        if (pinnable != nullptr) {
+            init.addTestObject("pinned_default_actions"_cs, tableName, pinnable);
+        }
+    }
+}
+
+/// Per-argument half of the cross-phase check, shared by the keyless (default-action) and the keyed
+/// (entry) comparison: the two calls are already known to be the same installed thing, so every
+/// argument they both name has to carry the same value.
+///
+/// @p what names the thing in the diagnostic ("default action data" / "entry action data").
+/// @returns false — after reporting — on the first argument BOTH paths branched on and disagree
+/// about; true when every difference is vacuous.
+static bool actionDataAgrees(const char *what, cstring tblName, const ActionCall *call1,
+                             const std::set<cstring> &constrained1, const ActionCall *call2,
+                             const std::set<cstring> &constrained2, size_t chainId,
+                             cstring chainName, const char *phaseLabel) {
+    const auto *args1 = call1->getArgs();
+    const auto *args2 = call2->getArgs();
+    if (args1 == nullptr || args2 == nullptr) return true;
+    for (const auto &a1 : *args1) {
+        const cstring argName = a1.getActionParamName();
+        for (const auto &a2 : *args2) {
+            if (a2.getActionParamName() != argName) continue;
+            if (a1.getEvaluatedValue()->value == a2.getEvaluatedValue()->value) break;
+            // Both paths branched on it, and they need different values.
+            if (constrained1.count(argName) == 0 || constrained2.count(argName) == 0) break;
+            printInfo("[Tampering] chain id=%1% (%2%): table '%3%' %4% %5%(%6%) must be %7% for "
+                      "Phase 1 and %8% for %9%; the control plane installs one value for all "
+                      "phases and no annotation fixes it, so this candidate is unrealizable — "
+                      "skipping.",
+                      chainId, chainName, tblName, what, call1->getActionName(), argName,
+                      a1.getEvaluatedValue()->value, a2.getEvaluatedValue()->value, phaseLabel);
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Cross-phase control-plane consistency CHECK — the destructive half of "annotation-backed ⇒ pin,
+/// unconstrained ⇒ verify and drop".
+///
+/// Hardware installs ONE control-plane configuration for all three phases: one default action per
+/// table, and one set of entries. An annotation-backed value is identical in every phase by
+/// construction, so it never trips this check — the keyless path is pinned by
+/// injectPinnedDefaultAction, and the keyed path needs no pin at all because TableStepper's
+/// cpActionArgPin re-applies the very same clause inside every phase's own query. An UNCONSTRAINED
+/// action-data symbol, by contrast, is a free variable in three independent solver queries: the
+/// models legitimately disagree, and there is no sound way to elect a winner — so a disagreement
+/// means the candidate needs a device configuration that cannot exist, and it is dropped.
+///
+/// Keyed entries are compared ENTRY-WISE, matched by their match values (sameInstalledEntry): two
+/// entries the control plane can tell apart may carry whatever they like, and Phase 2's key is
+/// often deliberately driven away from Phase 1's. Only entries that collapse onto one installed
+/// entry have to agree.
+///
+/// A value the other phase never branched on is NOT a disagreement here: that phase is satisfiable
+/// under any assignment to the symbol, so one installed value serves both. Only a difference that
+/// BOTH paths constrain is contradictory. Likewise a table only one phase reached is not compared:
+/// its installed configuration simply was not exercised there.
+///
+/// This is the early, cheap half of the check and it deliberately under-drops, because the models
+/// compared here are not the ones that get written out: TestBackEnd::processPhase re-solves each
+/// phase separately, and an unconstrained symbol can be re-rolled to a different value in that
+/// re-solve. The emitted artifact is guaranteed self-consistent by emittedControlPlaneAgrees in
+/// lib/test_backend.cpp, which compares the final specs with no such allowance. Dropping here saves
+/// the emission work for candidates that are already provably contradictory.
+static bool crossPhaseCpAgrees(
+    const PhaseConditions &cond1,
+    const std::vector<std::pair<const char *, const FinalState *>> &laterPhases, size_t chainId,
+    cstring chainName) {
+    if (!SymbexOptions::get().crossPhaseDefaultActionPin) return true;
+    if (cond1.tableDefaultActionMap.empty() && cond1.tableEntryMap.empty()) return true;
+    for (const auto &[phaseLabel, fs] : laterPhases) {
+        if (fs == nullptr) continue;
+        const auto other = collectCpState(*fs);
+        for (const auto &[tblName, rec1] : cond1.tableDefaultActionMap) {
+            auto it = other.defaults.find(tblName);
+            if (it == other.defaults.end()) continue;
+            const auto &rec2 = it->second;
+            if (!cpNameMatches(rec1.call->getActionName(), rec2.call->getActionName())) {
+                printInfo("[Tampering] chain id=%1% (%2%): %3% installs default action '%4%' on "
+                          "table '%5%' while Phase 1 installs '%6%'; one device cannot hold both, "
+                          "so this candidate is unrealizable — skipping.",
+                          chainId, chainName, phaseLabel, rec2.call->getActionName(), tblName,
+                          rec1.call->getActionName());
+                return false;
+            }
+            if (!actionDataAgrees("default action data", tblName, rec1.call, rec1.constrainedArgs,
+                                  rec2.call, rec2.constrainedArgs, chainId, chainName,
+                                  phaseLabel)) {
+                return false;
+            }
+        }
+        for (const auto &[tblName, entries1] : cond1.tableEntryMap) {
+            auto it = other.entries.find(tblName);
+            if (it == other.entries.end()) continue;
+            for (const auto &e1 : entries1) {
+                for (const auto &e2 : it->second) {
+                    // Not the same installed entry: two entries the control plane distinguishes,
+                    // which may hold different actions and different data. Nothing to check.
+                    if (!sameInstalledEntry(e1, e2)) continue;
+                    if (e1.call == nullptr || e2.call == nullptr) continue;
+                    if (!cpNameMatches(e1.call->getActionName(), e2.call->getActionName())) {
+                        printInfo("[Tampering] chain id=%1% (%2%): %3% installs action '%4%' on "
+                                  "table '%5%' behind the same match key that Phase 1 gives "
+                                  "'%6%'; one entry cannot run two actions, so this candidate is "
+                                  "unrealizable — skipping.",
+                                  chainId, chainName, phaseLabel, e2.call->getActionName(), tblName,
+                                  e1.call->getActionName());
+                        return false;
+                    }
+                    if (!actionDataAgrees("entry action data", tblName, e1.call, e1.constrainedArgs,
+                                          e2.call, e2.constrainedArgs, chainId, chainName,
+                                          phaseLabel)) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+/// The tampering serializers merge table RULES only, so a default-action override — pinned across
+/// the phases by the two helpers above — still never reaches the emitted `entities`. Emitting it
+/// needs a proto/harness change that is deliberately deferred, so report the gap once per emitted
+/// test: a silent omission reads as "this table did not matter", which is the opposite of true.
+static void reportUnserializedDefaultActions(const PhaseConditions &cond, size_t chainId,
+                                             size_t subTestId) {
+    if (cond.tableDefaultActionMap.empty()) return;
+    std::stringstream list;
+    bool isFirst = true;
+    for (const auto &[tableName, rec] : cond.tableDefaultActionMap) {
+        if (!isFirst) list << ", ";
+        isFirst = false;
+        list << tableName << ": " << rec.call->getActionName() << "(";
+        const auto *args = rec.call->getArgs();
+        if (args != nullptr) {
+            bool isFirstArg = true;
+            for (const auto &arg : *args) {
+                if (!isFirstArg) list << ", ";
+                isFirstArg = false;
+                list << arg.getActionParamName() << "=" << arg.getEvaluatedValue()->value;
+            }
+        }
+        list << ")";
+    }
+    printInfo("[Tampering] chain id=%1% sub=%2%: default-action override(s) NOT serialized into the "
+              "test case (the emitters merge table rules only) — install out of band: %3%",
+              chainId, subTestId, list.str());
 }
 
 // ---------------------------------------------------------------------------
@@ -1143,10 +1551,13 @@ class IndexSymVarCollector : public Inspector {
         return false;
     }
 };
-}  // namespace
 
-std::set<const IR::SymbolicVariable *> StateDependencyTracker::collectIndexSymVars(
-    const TestObject *soReg) const {
+// The three pins below are `this`-free, so their bodies live here as file-local statics and the
+// member functions are one-line forwarders. That lets applyPhase2IndexPolicy — which has no `this`,
+// because keeping it out of the header avoids a whole-tree rebuild through lib/test_backend.h —
+// share exactly the same code as the members' external callers.
+
+std::set<const IR::SymbolicVariable *> collectIndexSymVarsImpl(const TestObject *soReg) {
     IndexSymVarCollector collector;
     if (soReg != nullptr) {
         for (const auto *idx : soReg->getIndexExpressions()) {
@@ -1156,18 +1567,16 @@ std::set<const IR::SymbolicVariable *> StateDependencyTracker::collectIndexSymVa
     return collector.vars;
 }
 
-void StateDependencyTracker::pinIndexInputsToPhase1(
-    ExecutionState &init, const FinalState *fs1,
-    const std::set<const IR::SymbolicVariable *> &symVars) {
+void pinIndexInputsToPhase1Impl(ExecutionState &init, const FinalState *fs1,
+                                const std::set<const IR::SymbolicVariable *> &symVars) {
     const auto &model1 = fs1->getFinalModel();
     for (const auto *sv : symVars) {
         init.pushPathConstraint(new IR::Equ(sv, model1.evaluate(sv, true)));
     }
 }
 
-void StateDependencyTracker::pinPacketToPhase1(ExecutionState &init, const FinalState *fs1,
-                                               int inputPort,
-                                               const IR::Expression *inputPortSymExpr) {
+void pinPacketToPhase1Impl(ExecutionState &init, const FinalState *fs1, int inputPort,
+                           const IR::Expression *inputPortSymExpr) {
     const auto &model1 = fs1->getFinalModel();
     const auto *p1PktExpr = fs1->getExecutionState()->getInputPacket();
     const auto *p1PktSize = model1.evaluate(ExecutionState::getInputPacketSizeVar(), true);
@@ -1190,6 +1599,544 @@ void StateDependencyTracker::pinPacketToPhase1(ExecutionState &init, const Final
     init.pushPathConstraint(new IR::Equ(ExecutionState::getInputPacketSizeVar(), p1PktSize));
     init.pushPathConstraint(
         new IR::Equ(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, inputPort)));
+}
+
+/// Classifies the Phase-1 index of state object @p soName and constrains @p phase2Init so Phase 2
+/// writes the cell Phase 1 read:
+///   - packet-derived index (e.g. a concolic CRC hash): pin ONLY the index-determining inputs to
+///     Phase 1 so the attacker hits the victim's bucket; keep the port NEQ and DROP the table-key
+///     NEQ (it would conflict with a pinned hash-operand key). Other fields stay free.
+///   - tainted index (RANDOM hash, operands unrecoverable): pin the whole packet (same flow/path).
+///   - constant index: full distinctness (port + table-key NEQ), i.e. two coexisting entries.
+/// The port NEQ makes Phase 2 enter on a port that is neither Phase 1's ingress nor its egress; a
+/// dropped Phase-1 baseline has no output port (@p cond1 .outputPort < 0), so only the input NEQ
+/// applies. Table-key NEQs skip @p size1Tables, whose single entry is pre-injected from Phase 1.
+///
+/// The key (H2S2K) and condition (H2S2C) chains ran byte-identical copies of this; an index policy
+/// that drifts between the two is a silent unsoundness, so both go through this one helper.
+///
+/// @p skipIndexPin keeps the port NEQ but drops the index-input pin, for a caller that constrains
+/// the index itself and must not inherit Phase 1's hash-operand pktvar equalities as an extra
+/// constraint that can make its query UNSAT.
+/// Sets @p indexIsPacketDerived when the index resolved to packet-field leaves (the first case
+/// above) and returns Phase 1's register test object, so the caller can inspect the very index
+/// expressions the policy classified.
+const TestObject *applyPhase2IndexPolicy(
+    ExecutionState &phase2Init, const FinalState *repPhase1State, const PhaseConditions &cond1,
+    const IR::Expression *inputPortSymExpr, const std::vector<cstring> &size1Tables, cstring soName,
+    [[maybe_unused]] const std::unordered_map<cstring, const IR::P4Table *> &tableByName,
+    bool skipIndexPin, /*out*/ bool &indexIsPacketDerived) {
+    const TestObject *soReg =
+        (repPhase1State != nullptr)
+            ? repPhase1State->getExecutionState()->getTestObject("registervalues"_cs, soName,
+                                                                 /*checked=*/false)
+            : nullptr;
+    const auto indexSymVars = collectIndexSymVarsImpl(soReg);
+    indexIsPacketDerived = !indexSymVars.empty();
+    if (indexSymVars.empty() && soReg != nullptr && soReg->hasTaintedIndex()) {
+        pinPacketToPhase1Impl(phase2Init, repPhase1State, cond1.inputPort, inputPortSymExpr);
+        return soReg;
+    }
+    phase2Init.pushPathConstraint(
+        new IR::Neq(inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
+    if (cond1.outputPort >= 0)
+        phase2Init.pushPathConstraint(new IR::Neq(
+            inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
+    if (indexIsPacketDerived) {
+        if (!skipIndexPin) pinIndexInputsToPhase1Impl(phase2Init, repPhase1State, indexSymVars);
+    } else {
+        const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
+        for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
+            if (size1Set.count(tblName) > 0) continue;
+            for (const auto &[keyName, match] : keyMap)
+                phase2Init.pushPathConstraint(match->buildTableKeyNeqConstraint(tblName, keyName));
+        }
+    }
+    return soReg;
+}
+
+// ---------------------------------------------------------------------------
+// Phase-2 write-cell soundness: concrete cells, hash compatibility, steer-else-drop
+//
+// A tampering case is realizable only if the attacker's Phase-2 packet writes the very register
+// cell the victim's Phase-1 packet read. pinIndexInputsToPhase1 pins the index-determining
+// SymbolicVariable LEAVES, which is variable-wise rather than value-wise: it means "same cell" only
+// when both phases index through the same hash over the same fields. Phases that hash DIFFERENT
+// fields — or the same field bound to different pktvars because Phase 2 took another parse path —
+// satisfy that pin and still land in different buckets. So the cells are compared CONCRETELY here,
+// and a mismatch is first steered (re-derive Phase 2 with the victim's hash operands), then dropped
+// if steering is impossible, out of budget, or still lands elsewhere.
+// ---------------------------------------------------------------------------
+
+/// Every IR::ConcolicVariable directly reachable in an expression. ConcolicVariable::visit_children
+/// only visits the type, so hash arguments are not descended into — the same scope the concolic
+/// resolver itself operates at, which is what makes the collected nodes the actual hash call sites.
+class ConcolicVarCollector : public Inspector {
+ public:
+    std::vector<const IR::ConcolicVariable *> vars;
+    bool preorder(const IR::ConcolicVariable *cv) override {
+        vars.push_back(cv);
+        return false;
+    }
+};
+
+std::vector<const IR::ConcolicVariable *> collectConcolicVars(const IR::Expression *expr) {
+    ConcolicVarCollector collector;
+    if (expr != nullptr) expr->apply(collector);
+    return collector.vars;
+}
+
+/// Argument layout of a concolic hash call, keyed by concolic method name so core stays
+/// target-agnostic (it never mentions Tofino's Hash or v1model's hash extern, only their concolic
+/// names). @c dataSlots hold the hashed input — the operands steering re-derives — and
+/// @c paramSlots the structural parameters two call sites must agree on to compute the same
+/// function. Unlisted positions are deliberately ignored: `*method_hash`'s slot 0 is the output
+/// lvalue, which names the destination field and says nothing about the function computed.
+struct HashArgLayout {
+    std::vector<size_t> dataSlots;
+    std::vector<size_t> paramSlots;
+};
+
+const std::map<cstring, HashArgLayout> &hashArgLayouts() {
+    static const std::map<cstring, HashArgLayout> LAYOUTS{
+        // Tofino/TNA: Hash<W>(algo[, poly]).get(data) — targets/tofino/concolic.cpp.
+        {"Hash_get"_cs, HashArgLayout{{0}, {}}},
+        // bmv2/v1model: hash(result, algo, base, data, max) — targets/bmv2/concolic.cpp.
+        {"*method_hash"_cs, HashArgLayout{{3}, {1, 2, 4}}},
+    };
+    return LAYOUTS;
+}
+
+/// The individual operands a hash's data argument is built from. Both targets accept either a
+/// struct expression (the usual `{f1, f2}` field list) or a single scalar.
+std::vector<const IR::Expression *> flattenHashData(const IR::Expression *dataExpr) {
+    if (dataExpr == nullptr) return {};
+    if (const auto *structExpr = dataExpr->to<IR::StructExpression>()) {
+        return IR::flattenStructExpression(structExpr);
+    }
+    return {dataExpr};
+}
+
+/// A COPY of @p fs's final model with a binding added for every concolic variable that @p exprs
+/// resolve to under it, @p resolvedAny reporting whether any binding was actually added.
+///
+/// Binding them is what makes an index expression evaluable at all. A hash index is an
+/// IR::ConcolicVariable, and unless something on the path had to read the hash the solver never
+/// assigned its label — so `evaluate(idx, /*doComplete=*/true)` substitutes the type's default and
+/// every hash-indexed register reads cell 0. Resolution goes through the registered concolic
+/// implementations, which both targets have, so a CRC index folds on bmv2 (`*method_hash`) and on
+/// Tofino (`Hash_get`) without core knowing either extern; Tofino's eager folding
+/// (tryComputeConcreteHash) is target-private and unreachable from here.
+///
+/// The bindings are computed FROM this model, so they resolve the index rather than choose it: the
+/// cell is the hash of the packet the model has already fixed. Throws whatever the concolic
+/// implementation throws on an unimplemented flavour or an untranslatable operand.
+Model &modelWithResolvedConcolics(const FinalState *fs,
+                                  const std::vector<const IR::Expression *> &exprs,
+                                  const ProgramInfo &programInfo, bool &resolvedAny) {
+    const auto &model = fs->getFinalModel();
+    auto *resolved = new Model(model);
+    resolvedAny = false;
+    ConcolicResolver resolver(model, *fs->getExecutionState(),
+                              *programInfo.getConcolicMethodImpls());
+    for (const auto *expr : exprs) {
+        if (expr == nullptr || Taint::hasTaint(expr)) continue;
+        expr->apply(resolver);
+    }
+    for (const auto &[var, value] : *resolver.getResolvedConcolicVariables()) {
+        // Only a concolic variable carries a label the model can be keyed by; a whole-expression
+        // key has no symbol to bind.
+        if (!std::holds_alternative<IR::ConcolicVariable>(var)) continue;
+        resolved->set(std::get<IR::ConcolicVariable>(var).clone(), value);
+        resolvedAny = true;
+    }
+    return *resolved;
+}
+
+/// The concrete register cell @p idx addresses in @p fs, RAW (unmasked).
+/// nullopt on taint, on an unresolvable method, or on anything that does not fold to a constant.
+///
+/// RAW is deliberate. maskIndex (the register's real address space) is applied only when the test
+/// is emitted, and raw equality is exactly what the steering constraint produces — accepting on the
+/// same criterion we enforce is the only self-consistent choice. Raw equality implies masked
+/// equality, so the gate is a sound under-approximation of "same cell".
+std::optional<big_int> evalConcreteIndex(const FinalState *fs, const IR::Expression *idx,
+                                         const ProgramInfo &programInfo) {
+    if (fs == nullptr || idx == nullptr) return std::nullopt;
+    if (Taint::hasTaint(idx)) return std::nullopt;
+    try {
+        bool resolvedAny = false;
+        const auto &idxModel = modelWithResolvedConcolics(fs, {idx}, programInfo, resolvedAny);
+        if (const auto *folded = idxModel.evaluate(idx, /*doComplete=*/true)->to<IR::Constant>()) {
+            return folded->value;
+        }
+    } catch (const std::exception &) {
+        // An unimplemented hash flavour, an untranslatable operand, or an expression that does not
+        // fold: unknown, which is not the same as unequal — the caller treats it as a match.
+    }
+    return std::nullopt;
+}
+
+/// The register test object @p fs holds for state object @p soName, or nullptr.
+const TestObject *soRegisterOf(const FinalState *fs, cstring soName) {
+    if (fs == nullptr) return nullptr;
+    return fs->getExecutionState()->getTestObject("registervalues"_cs, soName, /*checked=*/false);
+}
+
+/// @p soReg's access-index expressions, nullptr slots removed; with @p writesOnly, only the ones it
+/// was WRITTEN at.
+///
+/// getIndexExpressions() has a positional contract: slot 0 is the read/initial index — a nullptr
+/// placeholder when the register has none — and every later slot is a recorded write index. So the
+/// writes are exactly "everything past slot 0", unconditionally. Do NOT make the head-drop depend on
+/// how many slots came back: a v1model `register.write(i1, ..); register.write(i2, ..)` with no
+/// preceding read returns {nullptr, i1, i2}, and a size-based rule would drop i1 and let a write to
+/// the wrong cell through the gate. (Tofino never showed this: a RegisterAction always reads before
+/// it writes, so its slot 0 is always a real index.)
+///
+/// The read/write distinction matters for the split-access shape (`register.read(v, i1)` then
+/// `register.write(i2, v)`), where accepting on the read index would let a write elsewhere pass; a
+/// RegisterAction reads and writes one index, so there the two views coincide.
+std::vector<const IR::Expression *> indexExpressionsOf(const TestObject *soReg, bool writesOnly) {
+    if (soReg == nullptr) return {};
+    auto idxExprs = soReg->getIndexExpressions();
+    if (writesOnly && !idxExprs.empty()) idxExprs.erase(idxExprs.begin());
+    idxExprs.erase(std::remove(idxExprs.begin(), idxExprs.end(), nullptr), idxExprs.end());
+    return idxExprs;
+}
+
+/// Every concrete cell @p fs WRITES for @p soName. nullopt means "unknown" — no index at all, or
+/// one that does not resolve — which callers treat as a match: an unresolvable (tainted) index
+/// already took the whole-packet pin, which guarantees the same cell, and dropping those would zero
+/// every RANDOM-hash-indexed program.
+std::optional<std::set<big_int>> concreteWriteCells(const FinalState *fs, cstring soName,
+                                                    const ProgramInfo &programInfo) {
+    const auto idxExprs = indexExpressionsOf(soRegisterOf(fs, soName), /*writesOnly=*/true);
+    if (idxExprs.empty()) return std::nullopt;
+    std::set<big_int> cells;
+    for (const auto *idx : idxExprs) {
+        auto cell = evalConcreteIndex(fs, idx, programInfo);
+        if (!cell.has_value()) return std::nullopt;
+        cells.insert(*cell);
+    }
+    return cells;
+}
+
+/// Phase 1's READ index expression: slot 0 of getIndexExpressions() is the initial/read index, which
+/// for the victim is the cell whose value reaches the sink. A register written without ever being
+/// read has no slot-0 index; there the first write index is the best available answer, and for the
+/// read-modify-write shape it is the same expression anyway.
+const IR::Expression *readIndexExpression(const FinalState *fs, cstring soName) {
+    const auto idxExprs = indexExpressionsOf(soRegisterOf(fs, soName), /*writesOnly=*/false);
+    return idxExprs.empty() ? nullptr : idxExprs.front();
+}
+
+/// The model to fold state object @p soName's register through when the attacker test object is
+/// built: @p fs's final model plus a binding for every concolic variable its index expressions
+/// resolve to.
+///
+/// THIS is what puts a real cell in the emitted `affected_register.index`. That field is
+/// concretised by TestObject::withAttackerValues(), which evaluates the index against whatever
+/// model it is handed — and that call happens while the tampering final state is being built, long
+/// before the test backend re-solves the phase. Resolving the index anywhere downstream of here
+/// cannot reach it.
+///
+/// Bindings are set(), not mergeMap()'d: when the path did branch on the hash, the solver's own
+/// assignment is whatever satisfied that branch, while the concolic implementation gives the cell
+/// the packet genuinely addresses — and the cell the hardware will touch is the one the harness
+/// needs. Such a case is exactly the one the emission side reports as not enforced.
+const Model &modelWithResolvedIndices(const FinalState *fs, cstring soName,
+                                      const ProgramInfo &programInfo) {
+    const auto idxExprs = indexExpressionsOf(soRegisterOf(fs, soName), /*writesOnly=*/false);
+    if (idxExprs.empty()) return fs->getFinalModel();
+    try {
+        bool resolvedAny = false;
+        const auto &resolved = modelWithResolvedConcolics(fs, idxExprs, programInfo, resolvedAny);
+        if (resolvedAny) return resolved;
+    } catch (const std::exception &) {
+        // An unimplemented hash flavour or an untranslatable operand: fall through and leave the
+        // model alone. The emitted index is then whatever the solver reported, exactly as before.
+    }
+    return fs->getFinalModel();
+}
+
+/// Two hash call sites are interchangeable when equal inputs imply equal outputs, so steering one
+/// onto the other's operand values really lands in the same cell. Structural, on the concolic
+/// nodes: same method, same result type, same argument count, every structural parameter
+/// equivalent, the hashed input of the same shape, and every associated declaration (the extern
+/// instance, plus a CRCPolynomial for a custom algorithm) built from equivalent constructor
+/// arguments.
+///
+/// srcIdentifier is deliberately NOT compared: two instances with identical parameters *are* the
+/// same function, which is the entire point — it is what makes SwitchV2P's two
+/// `Hash<index_t>(CRC32)` instances interchangeable while a differing polynomial stays unequal.
+bool hashesAreInterchangeable(const IR::ConcolicVariable *a, const IR::ConcolicVariable *b) {
+    if (a == nullptr || b == nullptr) return false;
+    if (a->concolicMethodName != b->concolicMethodName) return false;
+    const auto &layouts = hashArgLayouts();
+    auto layoutIt = layouts.find(a->concolicMethodName);
+    if (layoutIt == layouts.end()) return false;  // unknown method ⇒ not steerable ⇒ drop
+    if (a->type == nullptr || b->type == nullptr || !a->type->equiv(*b->type)) return false;
+    if (a->arguments == nullptr || b->arguments == nullptr) return false;
+    if (a->arguments->size() != b->arguments->size()) return false;
+    for (auto slot : layoutIt->second.paramSlots) {
+        if (slot >= a->arguments->size()) return false;
+        const auto *pa = a->arguments->at(slot)->expression;
+        const auto *pb = b->arguments->at(slot)->expression;
+        if (pa == nullptr || pb == nullptr || !pa->equiv(*pb)) return false;
+    }
+    // The hashed input must have the same SHAPE (component count and types). Its values are what
+    // steering equates, so comparing them here would reject exactly the cases worth steering.
+    for (auto slot : layoutIt->second.dataSlots) {
+        if (slot >= a->arguments->size()) return false;
+        const auto dataA = flattenHashData(a->arguments->at(slot)->expression);
+        const auto dataB = flattenHashData(b->arguments->at(slot)->expression);
+        if (dataA.empty() || dataA.size() != dataB.size()) return false;
+        for (size_t i = 0; i < dataA.size(); ++i) {
+            // Equivalent types, not merely equal widths: steering emits an Equ over these two
+            // operands, and the solver backend needs both sides to be the same sort.
+            if (dataA[i]->type == nullptr || dataB[i]->type == nullptr) return false;
+            if (!dataA[i]->type->equiv(*dataB[i]->type)) return false;
+        }
+    }
+    if (a->associatedNodes.size() != b->associatedNodes.size()) return false;
+    for (size_t i = 0; i < a->associatedNodes.size(); ++i) {
+        const auto *declA = a->associatedNodes.at(i)->to<IR::Declaration_Instance>();
+        const auto *declB = b->associatedNodes.at(i)->to<IR::Declaration_Instance>();
+        if (declA == nullptr || declB == nullptr) return false;
+        if (declA->arguments == nullptr || declB->arguments == nullptr) return false;
+        if (declA->arguments->size() != declB->arguments->size()) return false;
+        for (size_t k = 0; k < declA->arguments->size(); ++k) {
+            const auto *argA = declA->arguments->at(k)->expression;
+            const auto *argB = declB->arguments->at(k)->expression;
+            if (argA == nullptr || argB == nullptr || !argA->equiv(*argB)) return false;
+        }
+    }
+    return true;
+}
+
+/// Equalities that force @p target's hash operands to the values @p sourceModel assigns
+/// @p source's, i.e. "the attacker's key field takes the victim's key value". Empty when any
+/// target operand is tainted (the Z3 backend cannot translate an equality over taint), the layout
+/// is unknown, or a source operand does not evaluate — all of which mean "not steerable", which
+/// the caller turns into a drop rather than a wrong-cell acceptance.
+std::vector<const IR::Expression *> buildHashInputPins(const IR::ConcolicVariable *target,
+                                                       const IR::ConcolicVariable *source,
+                                                       const Model &sourceModel) {
+    auto layoutIt = hashArgLayouts().find(target->concolicMethodName);
+    if (layoutIt == hashArgLayouts().end()) return {};
+    std::vector<const IR::Expression *> pins;
+    try {
+        for (auto slot : layoutIt->second.dataSlots) {
+            const auto dataTarget = flattenHashData(target->arguments->at(slot)->expression);
+            const auto dataSource = flattenHashData(source->arguments->at(slot)->expression);
+            if (dataTarget.size() != dataSource.size()) return {};
+            for (size_t i = 0; i < dataTarget.size(); ++i) {
+                if (Taint::hasTaint(dataTarget[i]) || Taint::hasTaint(dataSource[i])) return {};
+                pins.push_back(
+                    new IR::Equ(dataTarget[i], sourceModel.evaluate(dataSource[i], true)));
+            }
+        }
+    } catch (const std::exception &) {
+        // A victim operand that does not fold to a literal (an unmodelled nested expression):
+        // there is no concrete value to steer the attacker onto.
+        return {};
+    }
+    return pins;
+}
+
+/// Drops every Phase-2 terminal in @p phase2Terminals whose write lands in a register cell Phase 1
+/// never read, after trying to STEER it there: the attacker's hash operands are pinned to the
+/// victim's values and the Phase-2 DFS is re-run from @p steerTemplate (a pristine clone — runPhase
+/// mutates its root — built with skipIndexPin so it does not inherit Phase 1's operand pin, which
+/// for a phase hashing another field is an unrelated extra constraint that can make the retry
+/// UNSAT). Budgeted by --max-index-steer-retries, one retry per distinct hash call site, since a
+/// program writing the register from several sites needs one steer per site.
+///
+/// A retry terminal is never trusted on the pushed equality alone: a retry that takes a different
+/// parse path binds different pktvars to the same header field, making the equality vacuous. Every
+/// retry terminal therefore goes back through the same concrete-cell check.
+///
+/// Terminals in @p drivenTerminals are accept-or-drop with no retry: a k-packet accumulation into
+/// the wrong cell is unambiguously unsound, and re-running the DFS would discard the analytical k.
+void gatePhase2ByIndex(const P4StateDependency::DependencyGraphs::SOChain &chain, cstring chainName,
+                       const ProgramInfo &programInfo, const FinalState *repPhase1State,
+                       std::vector<const FinalState *> &phase2Terminals,
+                       ExecutionState &steerTemplate,
+                       const std::function<void(ExecutionState &,
+                                                std::vector<const FinalState *> &, size_t)>
+                           &runPhase2,
+                       size_t maxPerChain,
+                       const std::map<const FinalState *, const FinalState *> &drivenTerminals) {
+    if (phase2Terminals.empty()) return;
+    // What Phase 3's replay reads back is the cell Phase 1 READ, so that is the cell the attacker
+    // has to write. For a RegisterAction the read and the write index are one expression, so the
+    // distinction only bites on the split `read(v, i)` / `write(j, v)` shape — where writing j
+    // leaves the value the replay reads at i untouched, i.e. no tampering at all.
+    const auto *p1Index = readIndexExpression(repPhase1State, chain.soName);
+    const auto p1ReadCell = evalConcreteIndex(repPhase1State, p1Index, programInfo);
+    // Unknown Phase-1 cell (no index, taint, or an unresolvable hash flavour): accept the bucket.
+    // A tainted index already took the whole-packet pin, which guarantees the same cell, and
+    // dropping those would zero every RANDOM-hash-indexed program.
+    if (!p1ReadCell.has_value()) return;
+    const std::set<big_int> p1Cells{*p1ReadCell};
+    const auto p1Hashes = collectConcolicVars(p1Index);
+
+    /// True when @p fs2 writes one of Phase 1's cells, or when there is nothing to gate.
+    auto writesPhase1Cell = [&](const FinalState *fs2) {
+        const auto *soReg = soRegisterOf(fs2, chain.soName);
+        // No write of its own: the object is Phase 1's carried snapshot, and the emission loop
+        // drops such a terminal anyway ("recorded no write"). Gating it only burns steer budget.
+        if (soReg == nullptr || !soReg->wasWritten()) return true;
+        const auto p2Cells = concreteWriteCells(fs2, chain.soName, programInfo);
+        if (!p2Cells.has_value()) return true;
+        return std::any_of(p2Cells->begin(), p2Cells->end(),
+                           [&](const big_int &c) { return p1Cells.count(c) > 0; });
+    };
+
+    /// The first written index expression of @p fs2 that addresses none of Phase 1's cells — the
+    /// write steering has to move.
+    auto mismatchedIndex = [&](const FinalState *fs2) -> const IR::Expression * {
+        for (const auto *idx :
+             indexExpressionsOf(soRegisterOf(fs2, chain.soName), /*writesOnly=*/true)) {
+            auto cell = evalConcreteIndex(fs2, idx, programInfo);
+            if (cell.has_value() && p1Cells.count(*cell) == 0) return idx;
+        }
+        return nullptr;
+    };
+
+    int64_t budget = SymbexOptions::get().maxIndexSteerRetries;
+    std::set<cstring> steeredSites;
+    // Operand pins accumulate across retries: steering a second call site must not undo the first,
+    // and the pins cannot contradict each other because every one of them names a victim value.
+    std::vector<const IR::Expression *> steerPins;
+    std::vector<const FinalState *> accepted;
+    std::vector<const FinalState *> pending = phase2Terminals;
+    size_t dropped = 0;
+    while (!pending.empty()) {
+        std::vector<const FinalState *> mismatched;
+        for (const auto *fs2 : pending) {
+            if (writesPhase1Cell(fs2)) {
+                accepted.push_back(fs2);
+            } else {
+                mismatched.push_back(fs2);
+            }
+        }
+        pending.clear();
+        dropped += mismatched.size();
+        bool retried = false;
+        for (const auto *fs2 : mismatched) {
+            if (budget <= 0 || drivenTerminals.count(fs2) > 0) continue;
+            const auto *p2Index = mismatchedIndex(fs2);
+            if (p2Index == nullptr) continue;
+            const auto p2Hashes = collectConcolicVars(p2Index);
+            // Two shapes are steerable. A concolic hash on both sides: pin the attacker's operands
+            // to the victim's operand values, which is what actually moves the packet. A plain
+            // arithmetic index on both sides (no concolic node anywhere): pin the index expression
+            // itself to the victim's cell. Anything else — notably an opaque hash label on one side
+            // only — cannot be steered: pinning a concolic label constrains no packet field.
+            std::vector<const IR::Expression *> pins;
+            const IR::Expression *valuePin = nullptr;
+            cstring site;
+            if (!p2Hashes.empty() && !p1Hashes.empty()) {
+                if (!hashesAreInterchangeable(p2Hashes.front(), p1Hashes.front())) continue;
+                pins = buildHashInputPins(p2Hashes.front(), p1Hashes.front(),
+                                          repPhase1State->getFinalModel());
+                if (pins.empty()) continue;
+                site = p2Hashes.front()->label;
+            } else if (p2Hashes.empty() && p1Hashes.empty()) {
+                site = cstring(p2Index->toString());
+            } else {
+                continue;
+            }
+            if (steeredSites.count(site) > 0) continue;
+            // Value pin (Step 3's pattern one level down): when the phases share a hash call site,
+            // asserting the index itself steers the DFS straight at the victim's cell. It is only
+            // an accelerator — the concrete-cell check below is what accepts or drops — so an
+            // attempt that yields no terminal simply falls back to the operand pins alone.
+            // Bit types only: the cell is a bit pattern, and width_bits() is a BUG on the
+            // width-less types (Type_InfInt) an unlowered index could still carry.
+            const auto *p2IndexType =
+                p2Index->type != nullptr ? p2Index->type->to<IR::Type_Bits>() : nullptr;
+            const auto *p1IndexType =
+                p1Index->type != nullptr ? p1Index->type->to<IR::Type_Bits>() : nullptr;
+            if (p2IndexType != nullptr && p1IndexType != nullptr &&
+                p2IndexType->width_bits() == p1IndexType->width_bits()) {
+                valuePin = new IR::Equ(p2Index, IR::Constant::get(p2IndexType, *p1ReadCell));
+            }
+            if (pins.empty() && valuePin == nullptr) continue;  // nothing to steer with
+            steeredSites.insert(site);
+            --budget;
+            std::vector<const IR::Expression *> attemptPins = steerPins;
+            attemptPins.insert(attemptPins.end(), pins.begin(), pins.end());
+            // Enforce the value pin if the path admits it, else fall back to the operand pins
+            // alone, so a value pin the path cannot satisfy costs a retry rather than the case.
+            std::vector<std::vector<const IR::Expression *>> attempts;
+            if (valuePin != nullptr) {
+                auto withValuePin = attemptPins;
+                withValuePin.push_back(valuePin);
+                attempts.push_back(withValuePin);
+            }
+            if (!pins.empty()) attempts.push_back(attemptPins);
+            std::vector<const FinalState *> retryTerminals;
+            for (const auto &constraints : attempts) {
+                if (!retryTerminals.empty()) break;
+                auto &retryInit = steerTemplate.clone();
+                for (const auto *pin : constraints) retryInit.pushPathConstraint(pin);
+                runPhase2(retryInit, retryTerminals, maxPerChain);
+            }
+            printInfo("[Tampering] chain id=%1% (%2%): Phase-2 wrote a cell Phase 1 never read; "
+                      "steered hash call site '%3%' to the victim's operands — %4% retry "
+                      "terminal(s), %5% retry budget left.",
+                      chain.id, chainName, site, retryTerminals.size(), budget);
+            steerPins = attemptPins;
+            pending.insert(pending.end(), retryTerminals.begin(), retryTerminals.end());
+            retried = true;
+            // Classify what this retry produced before spending more budget: its terminals may
+            // already be on the victim's cell, or may expose the next call site to steer.
+            break;
+        }
+        if (!retried) break;
+    }
+    if (dropped > 0) {
+        printInfo("[Tampering] chain id=%1% (%2%): dropped %3% Phase-2 terminal(s) writing a cell "
+                  "of '%4%' that Phase 1 never read (unrealizable tampering); %5% kept.",
+                  chain.id, chainName, dropped, chain.soName, accepted.size());
+    }
+    phase2Terminals = accepted;
+}
+
+/// Re-check, on the pair actually being emitted, that Phase 2 writes the cell Phase 1 read.
+/// reDeriveConcretePhase substitutes terminals the Phase-2 gate never saw, and the gate ran against
+/// one representative Phase-1 state per condition bucket while emission iterates over every Phase-1
+/// state in it — two packets can share ports and table keys and still hash to different cells.
+/// Unknown (tainted/unresolvable) cells count as a match, exactly as in the gate.
+bool phasesShareIndexCell(const FinalState *fs1, const FinalState *fs2, cstring soName,
+                          const ProgramInfo &programInfo) {
+    const auto *soReg2 = soRegisterOf(fs2, soName);
+    if (soReg2 == nullptr || !soReg2->wasWritten()) return true;
+    const auto p1ReadCell = evalConcreteIndex(fs1, readIndexExpression(fs1, soName), programInfo);
+    const auto p2Cells = concreteWriteCells(fs2, soName, programInfo);
+    if (!p1ReadCell.has_value() || !p2Cells.has_value()) return true;
+    return p2Cells->count(*p1ReadCell) > 0;
+}
+}  // namespace
+
+std::set<const IR::SymbolicVariable *> StateDependencyTracker::collectIndexSymVars(
+    const TestObject *soReg) const {
+    return collectIndexSymVarsImpl(soReg);
+}
+
+void StateDependencyTracker::pinIndexInputsToPhase1(
+    ExecutionState &init, const FinalState *fs1,
+    const std::set<const IR::SymbolicVariable *> &symVars) {
+    pinIndexInputsToPhase1Impl(init, fs1, symVars);
+}
+
+void StateDependencyTracker::pinPacketToPhase1(ExecutionState &init, const FinalState *fs1,
+                                               int inputPort,
+                                               const IR::Expression *inputPortSymExpr) {
+    pinPacketToPhase1Impl(init, fs1, inputPort, inputPortSymExpr);
 }
 
 void StateDependencyTracker::concretizeInputPacket(ExecutionState &init, const FinalState *fs,
@@ -1284,6 +2231,21 @@ static bool cpNameMatches(cstring full, cstring want) {
     return tail(full) == tail(want);
 }
 
+/// A term whose op reads `value` is enforceable only if the file really carried one. CpTerm::value
+/// defaults to 0 and --dump-cp-stubs writes skeletons with "value": null, so without this an
+/// unfilled stub would read as "== 0" and prune (or admit) tests on a constraint nobody wrote.
+static bool cpTermValueIsUsable(const CpTerm &term) {
+    switch (term.op) {
+        case CpTerm::Op::Eq:
+        case CpTerm::Op::Neq:
+        case CpTerm::Op::Lpm:
+        case CpTerm::Op::Ternary:
+            return term.hasValue;
+        default:
+            return true;
+    }
+}
+
 /// True when this terminal's synthesized table entries contradict a declared control-plane
 /// assumption, i.e. the real controller would never install this configuration, so the test is
 /// not realizable. Used to DROP the test before emission (plan T4).
@@ -1300,6 +2262,9 @@ static bool cpNameMatches(cstring full, cstring want) {
 /// ability to STEER the search toward satisfying entries, which is a search-efficiency property,
 /// not a correctness one. Generation-time steering can be layered on later.
 static bool cpTermHolds(const CpTerm &term, const TableMatch *match) {
+    // An unfilled value makes the term say nothing; "says nothing" is a guard that does not hold,
+    // which leaves the test alone - the safe direction for a prune (see the header comment).
+    if (!cpTermValueIsUsable(term)) return false;
     // Read the key's concrete value whichever match kind the entry used.
     const IR::Constant *val = nullptr;
     const IR::Constant *mask = nullptr;
@@ -1355,6 +2320,7 @@ static bool cpTermHolds(const CpTerm &term, const TableMatch *match) {
 /// mask or prefix, so only the value-comparison ops are meaningful; Lpm/Ternary against action data
 /// is a malformed annotation and must constrain nothing rather than be approximated.
 static bool cpActionDataTermHolds(const CpTerm &term, const big_int &value) {
+    if (!cpTermValueIsUsable(term)) return false;
     switch (term.op) {
         case CpTerm::Op::Eq:
             return value == term.value;
@@ -1668,11 +2634,24 @@ static bool violatesCpAssumptions(const FinalState *fs) {
         auto clauses = ann->clausesFor(tblName);
         if (clauses.empty()) continue;
         const auto *cfg = tblObj->evaluate(fs->getFinalModel(), /*doComplete=*/true)->to<TableConfig>();
-        if (cfg == nullptr || cfg->getRules() == nullptr || cfg->getRules()->empty()) continue;
-        const auto *call = cfg->getRules()->front().getActionCall();
+        if (cfg == nullptr) continue;
+        // A default-action override has NO rules -- its action and data sit in a table property --
+        // so the old "empty rules ⇒ skip" guard meant a keyless table was never checked against its
+        // annotation at all. Take the call from wherever this config actually keeps it; everything
+        // below is written against the ActionCall and works unchanged (a default override simply has
+        // no match map, which the key terms already treat as "the guard says nothing").
+        const bool hasRules = cfg->getRules() != nullptr && !cfg->getRules()->empty();
+        const ActionCall *call = nullptr;
+        const TableMatchMap *matches = nullptr;
+        if (hasRules) {
+            call = cfg->getRules()->front().getActionCall();
+            matches = cfg->getRules()->front().getMatches();
+        } else if (const auto *defProperty =
+                       cfg->getProperty("overriden_default_action"_cs, /*checked=*/false)) {
+            call = defProperty->to<ActionCall>();
+        }
         if (call == nullptr || call->getAction() == nullptr) continue;
         const cstring chosen = call->getAction()->controlPlaneName();
-        const auto *matches = cfg->getRules()->front().getMatches();
         for (const auto *c : clauses) {
             if (c->kind == CpAssumeClause::Kind::WhenThen) {
                 bool guardHolds = true;
@@ -1823,8 +2802,12 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
         for (const auto &[tblName, tblObj] : es1->getTestObjectCategory("tableconfigs"_cs)) {
             if (!pinSinkEntryForLegit && tblName == chain.sinkTableControlPlaneName) continue;
             const auto *evalCfg = tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
-            if (evalCfg != nullptr)
+            if (evalCfg != nullptr) {
                 phase3Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+                // Skipping synthesis does not reach a keyless table (its stepper returns before the
+                // immutability check), so its default action + data need their own pin.
+                injectPinnedDefaultAction(phase3Init, tblName, evalCfg);
+            }
         }
     }
 
@@ -1886,8 +2869,11 @@ const FinalState *StateDependencyTracker::reDeriveConcretePhase(
         for (const auto &[tblName, tblObj] : es1->getTestObjectCategory("tableconfigs"_cs)) {
             if (tblName == chain.sinkTableControlPlaneName) continue;
             const auto *evalCfg = tblObj->evaluate(model, /*doComplete=*/true)->to<TableConfig>();
-            if (evalCfg != nullptr)
+            if (evalCfg != nullptr) {
                 init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+                // Same keyless-table gap as runSymbolicPhase3: pin the default action + data.
+                injectPinnedDefaultAction(init, tblName, evalCfg);
+            }
         }
     }
 
@@ -2078,7 +3064,10 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
     if (const auto *ann = cpAnnotation(); ann != nullptr) {
         for (const auto &c : ann->assumeClauses()) {
             for (const auto &t : c.when) {
-                if (t.op != CpTerm::Op::Eq || t.actionDataArg.isNullOrEmpty()) continue;
+                // hasValue: an unfilled --dump-cp-stubs skeleton ("value": null) carries value 0,
+                // which would otherwise enter the candidate list as a threshold of 0/1.
+                if (t.op != CpTerm::Op::Eq || t.actionDataArg.isNullOrEmpty() || !t.hasValue)
+                    continue;
                 printInfo("[Tampering] chain id=%1% (%2%): drive-register control-plane candidate "
                           "%3% from assume action_data(%4%, %5%) on table %6%",
                           chain.id, currentChainName, t.value, t.actionDataAction, t.actionDataArg,
@@ -2368,44 +3357,29 @@ size_t StateDependencyTracker::runTamperingChain(
             }
         }
 
+        // Pin every table whose Phase-1 state was a default-action override to that same action and
+        // data. Independent of size1Tables above: a keyless table has no key, so it never appears in
+        // cond1.tableKeyMap and no size/skip mechanism reaches it.
+        injectPinnedDefaultActions(phase2Init, cond1);
+
         // Hash/sketch/bloom-indexed SO register (tainted access index): pin Phase 2 to the exact
         // Phase-1 flow so the attacker collides with the victim's bucket (equal hash inputs ⇒ equal
-        // bucket), instead of the distinctness NEQ that would move it to a different bucket.
-        // Classify the SO register's index (see plan / runConditionChain for the rationale):
-        // packet-derived index → pin only the index inputs to Phase 1 (keep port NEQ, drop table-key
-        // NEQ); tainted RANDOM-hash index → whole-packet pin; constant index → full distinctness.
-        const TestObject *soReg =
-            (repPhase1State != nullptr)
-                ? repPhase1State->getExecutionState()->getTestObject("registervalues"_cs,
-                                                                     chain.soName, /*checked=*/false)
-                : nullptr;
-        const auto indexSymVars = collectIndexSymVars(soReg);
-        if (indexSymVars.empty() && soReg != nullptr && soReg->hasTaintedIndex()) {
-            pinPacketToPhase1(phase2Init, repPhase1State, cond1.inputPort, inputPortSymExpr);
-        } else {
-            // Constrain Phase 2's input port to differ from Phase 1's input AND output. A dropped
-            // Phase-1 baseline has no output port (cond1.outputPort < 0), so only the input NEQ
-            // applies.
-            phase2Init.pushPathConstraint(new IR::Neq(
-                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
-            if (cond1.outputPort >= 0)
-                phase2Init.pushPathConstraint(new IR::Neq(
-                    inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
-            if (!indexSymVars.empty()) {
-                pinIndexInputsToPhase1(phase2Init, repPhase1State, indexSymVars);
-            } else {
-                // Constrain Phase 2's table match keys to differ from Phase 1's (compatible,
-                // coexisting entries). Skip size-1 tables: their entry is pre-injected.
-                const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
-                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
-                    if (size1Set.count(tblName) > 0) continue;
-                    for (const auto &[keyName, match] : keyMap) {
-                        phase2Init.pushPathConstraint(
-                            match->buildTableKeyNeqConstraint(tblName, keyName));
-                    }
-                }
-            }
-        }
+        // bucket), instead of the distinctness NEQ that would move it to a different bucket. The
+        // full classification, shared with runConditionChain, lives in applyPhase2IndexPolicy.
+        //
+        // The index-steering retry (gatePhase2ByIndex below) needs its own root, cloned before the
+        // policy so it can take the skipIndexPin variant: Phase 1's hash-operand pin fixes the
+        // victim's index fields, which for a Phase-2 path hashing OTHER fields is an unrelated
+        // extra constraint that can make the retry UNSAT.
+        auto &steerTemplate = phase2Init.clone();
+        bool indexIsPacketDerived = false;
+        applyPhase2IndexPolicy(phase2Init, repPhase1State, cond1, inputPortSymExpr, size1Tables,
+                               chain.soName, tableByName_, /*skipIndexPin=*/false,
+                               indexIsPacketDerived);
+        bool steerIndexIsPacketDerived = false;
+        applyPhase2IndexPolicy(steerTemplate, repPhase1State, cond1, inputPortSymExpr, size1Tables,
+                               chain.soName, tableByName_, /*skipIndexPin=*/true,
+                               steerIndexIsPacketDerived);
         // Accept a Phase-2 terminal that actually WROTE the SO even if not every writeNode is
         // covered: a read-modify-write RegisterAction whose body branches (e.g. count-sketch
         // `if(res==0) data-1 else data+1`) has mutually-exclusive write nodes, so strict allCovered
@@ -2441,7 +3415,8 @@ size_t StateDependencyTracker::runTamperingChain(
             if (const auto *ann = cpAnnotation(); ann != nullptr) {
                 for (const auto &c : ann->assumeClauses()) {
                     for (const auto &t : c.when) {
-                        if (t.op == CpTerm::Op::Eq && !t.actionDataArg.isNullOrEmpty()) {
+                        if (t.op == CpTerm::Op::Eq && !t.actionDataArg.isNullOrEmpty() &&
+                            t.hasValue) {
                             hasThresholdGate = true;
                             break;
                         }
@@ -2482,6 +3457,28 @@ size_t StateDependencyTracker::runTamperingChain(
                       chain.id, currentChainName, phase2StateMap[i].size(),
                       chain.writeNodes.size());
         }
+        // Index soundness, last in the bucket so the analytical driver's adopted terminal is gated
+        // too: a Phase-2 packet that writes a register cell Phase 1 never read cannot tamper with
+        // what Phase 3 reads back, however convincing the rest of the scenario looks.
+        gatePhase2ByIndex(chain, currentChainName, programInfo, repPhase1State, phase2StateMap[i],
+                          steerTemplate,
+                          [this, &chain](ExecutionState &init,
+                                         std::vector<const FinalState *> &out, size_t cap) {
+                              // driveRegisterPhase2 may have run in between, and its Phase-3 replay
+                              // leaves currentPhase/currentRequiredNodes/reachingSet_ pointing at
+                              // the read path — a retry started from there would accept any
+                              // terminal instead of a write-covering one. Restore the Phase-2
+                              // context first.
+                              currentPhase = TamperingPhase::Phase2_Write;
+                              currentRequiredNodes = buildRequiredNodes(chain);
+                              buildReachingSet();
+                              // Same acceptance rule as the bucket's own DFS above: a branching RMW
+                              // write path never covers every writeNode on one path.
+                              phase2AcceptWroteSO_ = true;
+                              runPhase(init, out, cap);
+                              phase2AcceptWroteSO_ = false;
+                          },
+                          maxPerChain, drivenFs3);
         phase2StateNum += phase2StateMap[i].size();
     }
     if (phase2StateNum == 0) {
@@ -2577,11 +3574,16 @@ size_t StateDependencyTracker::runTamperingChain(
                     }
                 }
                 bool soFeasible = true;
+                // The index concolic bindings have to be in the model BEFORE the fold: this is the
+                // call that concretises affected_register.index, and it happens long before the
+                // emission backend re-solves the phase.
+                const auto &p2FoldModel =
+                    modelWithResolvedIndices(fs2, chain.soName, programInfo);
                 for (const auto &[regName, regObj] :
                      fs2->getExecutionState()->getTestObjectCategory("registervalues"_cs)) {
                     if (regName != chain.soName) continue;
                     auto attackerResult = regObj->withAttackerValues(
-                        fs2->getFinalModel(), SymbexOptions::get().stateTamperValue, forbiddenValues);
+                        p2FoldModel, SymbexOptions::get().stateTamperValue, forbiddenValues);
                     const auto *attackerValue = attackerResult.testObject;
                     const auto &overrides = attackerResult.modelOverrides;
                     soFeasible = attackerResult.feasible;
@@ -2662,6 +3664,27 @@ size_t StateDependencyTracker::runTamperingChain(
                     const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ipAcc,
                                                              inputPortSymExpr, /*isPhase1=*/false,
                                                              p1Carry);
+                    // The Phase-2 gate never saw this pair: reDeriveConcretePhase re-ran both
+                    // phases with concrete packets and substituted fresh terminals, and fs1 is any
+                    // state of the bucket rather than the representative the gate compared against.
+                    // Re-check the cells here so a swapped terminal cannot smuggle back the very
+                    // unsoundness the gate exists to remove.
+                    if (!phasesShareIndexCell(fs1c, fs2c, chain.soName, programInfo)) {
+                        printInfo("[Tampering] chain id=%1% (%2%): re-derived Phase-2 packet "
+                                  "writes a cell of '%3%' the re-derived Phase 1 does not read; "
+                                  "skipping.",
+                                  chain.id, currentChainName, chain.soName);
+                        continue;
+                    }
+                    // Same argument for the control plane: the concrete re-derivation re-ran both
+                    // phases and could have installed a different default action, a different
+                    // entry action, or different action data than Phase 1 recorded.
+                    if (!crossPhaseCpAgrees(cond1,
+                                            {{"the re-derived Phase 1", fs1c},
+                                             {"the re-derived Phase 2", fs2c}},
+                                            chain.id, currentChainName)) {
+                        continue;
+                    }
                     // Single-send: source from the Phase-2 state (also the state emitted as the
                     // Phase-2 packet), which is what the harness reads. Accumulation keeps Phase 3 --
                     // one emitted packet sent k times has no single-execution state holding base+k,
@@ -2687,8 +3710,9 @@ size_t StateDependencyTracker::runTamperingChain(
                         if (srcSoReg == nullptr) continue;
                         accRegValues[chain.soName] =
                             srcSoReg
-                                ->withAttackerValues(regSrc->getFinalModel(),
-                                                     SymbexOptions::get().stateTamperValue, {})
+                                ->withAttackerValues(
+                                    modelWithResolvedIndices(regSrc, chain.soName, programInfo),
+                                    SymbexOptions::get().stateTamperValue, {})
                                 .testObject;
                     }
                     TamperingFinalState tsAcc{*fs1c, *fs2c, false, cond1.inputPort, cond1.outputPort,
@@ -2710,6 +3734,7 @@ size_t StateDependencyTracker::runTamperingChain(
                         tsAcc.usesMulticast = true;
                         tsAcc.multicastGroupId = mgid;
                     }
+                    reportUnserializedDefaultActions(cond1, chain.id, tsAcc.subTestId);
                     callBack(tsAcc);
                     if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
                     continue;
@@ -2791,6 +3816,22 @@ size_t StateDependencyTracker::runTamperingChain(
                 // HIT->MISS has no symbolic Phase 3, so Phase 1's own HIT configuration is the
                 // one the controller would have to have installed.
                 if (violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
+                // The Phase-2 gate compared against the bucket's representative Phase-1 state; this
+                // emission pairs fs2 with an arbitrary state of the same bucket, and two packets
+                // can share ports and table keys yet hash to different cells. Re-check that pair.
+                if (!phasesShareIndexCell(fs1, fs2, chain.soName, programInfo)) {
+                    printInfo("[Tampering] chain id=%1% (%2%): Phase-2 packet writes a cell of "
+                              "'%3%' that this Phase-1 packet does not read; skipping.",
+                              chain.id, currentChainName, chain.soName);
+                    continue;
+                }
+                // Cross-phase control-plane consistency: one installed default action per table,
+                // and one entry per match key, has to serve both emitted phases. Nothing was
+                // propagated unless an annotation fixed it, so a difference here is a real
+                // contradiction, not a pinning artefact.
+                if (!crossPhaseCpAgrees(cond1, {{"Phase 2", fs2}}, chain.id, currentChainName)) {
+                    continue;
+                }
                 // Phase 3 is a dynamic deviation check: the test script replays Phase 1's packet
                 // after Phase 2 sets the attacker value; the observable is the sink-table HIT(Phase
                 // 1)→MISS(Phase 3) flip (emitted as hit_phase=1 / miss_phase=3).
@@ -2805,6 +3846,7 @@ size_t StateDependencyTracker::runTamperingChain(
                     ts.usesMulticast = true;
                     ts.multicastGroupId = mgid;
                 }
+                reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
                 callBack(ts);
                 if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
             }
@@ -2903,6 +3945,24 @@ size_t StateDependencyTracker::runTamperingChain(
             if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
             const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
                                                      /*isPhase1=*/false, p1Carry);
+            // Same re-check as the HIT→MISS paths: the concrete re-derivation substituted terminals
+            // the Phase-2 gate never saw, so confirm the emitted pair still shares the cell.
+            if (!phasesShareIndexCell(fs1c, fs2c, chain.soName, programInfo)) {
+                printInfo("[Tampering] chain id=%1% (%2%): re-derived Phase-2 packet writes a cell "
+                          "of '%3%' the re-derived Phase 1 does not read; skipping.",
+                          chain.id, currentChainName, chain.soName);
+                continue;
+            }
+            // MISS→HIT emits all three phases, so all three have to agree on every table's default
+            // action, entries and action data — one control-plane state is installed for the whole
+            // replay.
+            if (!crossPhaseCpAgrees(cond1,
+                                    {{"the re-derived Phase 1", fs1c},
+                                     {"the re-derived Phase 2", fs2c},
+                                     {"Phase 3", fs3}},
+                                    chain.id, currentChainName)) {
+                continue;
+            }
             // The harness reads the SO register AFTER Phase 2 and BEFORE Phase 3
             // (tofino_driver.py:704, tampering.py:1514, both "before Phase 3 overwrites it") -- the
             // only correct moment, since Phase 3 is the victim's replay and its write is not the
@@ -2938,8 +3998,9 @@ size_t StateDependencyTracker::runTamperingChain(
                 if (srcSoReg == nullptr) continue;
                 attackerRegValues[chain.soName] =
                     srcSoReg
-                        ->withAttackerValues(regSrc->getFinalModel(),
-                                             SymbexOptions::get().stateTamperValue, {})
+                        ->withAttackerValues(
+                            modelWithResolvedIndices(regSrc, chain.soName, programInfo),
+                            SymbexOptions::get().stateTamperValue, {})
                         .testObject;
             }
             TamperingFinalState ts{*fs1c, *fs2c, false,
@@ -2974,6 +4035,7 @@ size_t StateDependencyTracker::runTamperingChain(
             std::string p3d = d3Drop ? std::string("drop") : ("port=" + std::to_string(d3Port));
             printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: sink MISS→HIT, %3% (P1 %4%, P3 %5%)",
                       chain.id, ts.subTestId, ts.caseLabel, p1d, p3d);
+            reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
             callBack(ts);
         }
     }
@@ -3080,43 +4142,27 @@ size_t StateDependencyTracker::runConditionChain(
                 phase2Init.addTestObject("registervalues"_cs, regName, carried);
             }
         }
+        // Same cross-phase default-action pin as the key path: every table carrying a default
+        // override, keyless tables included (they never show up in cond1.tableKeyMap).
+        injectPinnedDefaultActions(phase2Init, cond1);
         // Hash/sketch/bloom-indexed SO register: its access index is tainted, so symbex can't tell
         // which bucket a packet maps to. The attacker packet must COLLIDE with the Phase-1 flow's
         // bucket, so pin Phase-2 to the exact Phase-1 packet (equal hash inputs ⇒ equal bucket)
         // instead of forcing it to differ — the distinctness NEQ would land it in a different bucket
-        // (see ACC-Turbo: dst_addr-NEQ moved the attacker off the victim's bloom slot).
-        // Classify the SO register's index and constrain Phase 2 accordingly (see plan):
-        //   - packet-derived index (e.g. a concolic CRC hash): pin ONLY the index-determining inputs
-        //     to Phase 1 so the attacker hits the victim's bucket; keep the port NEQ and DROP the
-        //     table-key NEQ (it would conflict with a pinned hash-operand key). Other fields stay free.
-        //   - tainted index (RANDOM hash, operands unrecoverable): pin the whole packet (same flow/path).
-        //   - constant index: full distinctness (port + table-key NEQ), unchanged.
-        const TestObject *soReg =
-            (repPhase1State != nullptr)
-                ? repPhase1State->getExecutionState()->getTestObject("registervalues"_cs,
-                                                                     chain.soName, /*checked=*/false)
-                : nullptr;
-        const auto indexSymVars = collectIndexSymVars(soReg);
-        if (indexSymVars.empty() && soReg != nullptr && soReg->hasTaintedIndex()) {
-            pinPacketToPhase1(phase2Init, repPhase1State, cond1.inputPort, inputPortSymExpr);
-        } else {
-            phase2Init.pushPathConstraint(new IR::Neq(
-                inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.inputPort)));
-            if (cond1.outputPort >= 0)
-                phase2Init.pushPathConstraint(new IR::Neq(
-                    inputPortSymExpr, IR::Constant::get(inputPortSymExpr->type, cond1.outputPort)));
-            if (!indexSymVars.empty()) {
-                pinIndexInputsToPhase1(phase2Init, repPhase1State, indexSymVars);
-            } else {
-                const std::set<cstring> size1Set(size1Tables.begin(), size1Tables.end());
-                for (const auto &[tblName, keyMap] : cond1.tableKeyMap) {
-                    if (size1Set.count(tblName) > 0) continue;
-                    for (const auto &[keyName, match] : keyMap)
-                        phase2Init.pushPathConstraint(
-                            match->buildTableKeyNeqConstraint(tblName, keyName));
-                }
-            }
-        }
+        // (see ACC-Turbo: dst_addr-NEQ moved the attacker off the victim's bloom slot). The full
+        // classification, shared with runTamperingChain, lives in applyPhase2IndexPolicy.
+        //
+        // The index-steering retry (gatePhase2ByIndex below) needs its own root, cloned before the
+        // policy so it can take the skipIndexPin variant — see the same comment on the key path.
+        auto &steerTemplate = phase2Init.clone();
+        bool indexIsPacketDerived = false;
+        applyPhase2IndexPolicy(phase2Init, repPhase1State, cond1, inputPortSymExpr, size1Tables,
+                               chain.soName, tableByName_, /*skipIndexPin=*/false,
+                               indexIsPacketDerived);
+        bool steerIndexIsPacketDerived = false;
+        applyPhase2IndexPolicy(steerTemplate, repPhase1State, cond1, inputPortSymExpr, size1Tables,
+                               chain.soName, tableByName_, /*skipIndexPin=*/true,
+                               steerIndexIsPacketDerived);
         // Keep a pristine clone for the analytical drive-register fallback (runPhase mutates its root).
         auto &driveTemplate = phase2Init.clone();
         runPhase(phase2Init, phase2StateMap[i], maxPerChain);
@@ -3155,6 +4201,21 @@ size_t StateDependencyTracker::runConditionChain(
                 drivenFlipValue[fs2real] = flipValue;
             }
         }
+        // Index soundness, last in the bucket so the analytical driver's adopted terminal is gated
+        // too: a Phase-2 packet that writes a register cell Phase 1 never read cannot flip the
+        // condition Phase 3 evaluates.
+        gatePhase2ByIndex(chain, currentChainName, programInfo, repPhase1State, phase2StateMap[i],
+                          steerTemplate,
+                          [this, &chain](ExecutionState &init,
+                                         std::vector<const FinalState *> &out, size_t cap) {
+                              // Restore the Phase-2 context first: driveRegisterPhase2's Phase-3
+                              // replay leaves the read path selected — see the key path's note.
+                              currentPhase = TamperingPhase::Phase2_Write;
+                              currentRequiredNodes = buildRequiredNodes(chain);
+                              buildReachingSet();
+                              runPhase(init, out, cap);
+                          },
+                          maxPerChain, drivenFs3);
         phase2StateNum += phase2StateMap[i].size();
     }
     if (phase2StateNum == 0) {
@@ -3234,8 +4295,9 @@ size_t StateDependencyTracker::runConditionChain(
             if (fs3SoReg == nullptr) continue;
             const auto *attackerReg =
                 fs3SoReg
-                    ->withAttackerValues(regSrc->getFinalModel(),
-                                         SymbexOptions::get().stateTamperValue, {})
+                    ->withAttackerValues(
+                        modelWithResolvedIndices(regSrc, chain.soName, programInfo),
+                        SymbexOptions::get().stateTamperValue, {})
                     .testObject;
             attackerRegValues[chain.soName] = attackerReg;
 
@@ -3255,6 +4317,20 @@ size_t StateDependencyTracker::runConditionChain(
             // Condition sink: no table, so attackerRegisterSinkTables stays empty.
             labelAttackerPort(chain, ip2);
             if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
+            // The Phase-2 gate compared against the bucket's representative Phase-1 state; this
+            // emission pairs fs2 with an arbitrary state of the same bucket, and two packets can
+            // share ports and table keys yet hash to different cells. Re-check the emitted pair.
+            if (!phasesShareIndexCell(fs1, fs2, chain.soName, programInfo)) {
+                printInfo("[Tampering H2S2C] chain id=%1% (%2%): Phase-2 packet writes a cell of "
+                          "'%3%' that this Phase-1 packet does not read; skipping.",
+                          chain.id, currentChainName, chain.soName);
+                continue;
+            }
+            // One installed control-plane state has to serve all three phases of the replay.
+            if (!crossPhaseCpAgrees(cond1, {{"Phase 2", fs2}, {"Phase 3", fs3}}, chain.id,
+                                    currentChainName)) {
+                continue;
+            }
             TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
                                    attackerRegValues, {}, {}, {}};
             // AT_LEAST bound for an analytically-driven accumulation: the value at which the
@@ -3282,6 +4358,7 @@ size_t StateDependencyTracker::runConditionChain(
             }
             printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: condition %3% (%4%→%5%)", chain.id,
                       ts.subTestId, ts.caseLabel, p1Val, p3Target);
+            reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
             // The concolic re-solve in the test backend can still hit a TaintExpression the Z3
             // backend cannot translate; don't let one un-emittable candidate abort the whole run.
             try {

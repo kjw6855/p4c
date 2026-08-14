@@ -360,6 +360,74 @@ const IR::Expression *TableStepper::evalTablePreExistingConfig(const TableConfig
     return tableMissCondition;
 }
 
+namespace {
+
+/// Trailing component of a dotted control-plane name ("SwitchIngress.tbl.act" -> "act").
+std::string cpNameTail(cstring name) {
+    const std::string s(name.string_view());
+    auto pos = s.find_last_of('.');
+    return pos == std::string::npos ? s : s.substr(pos + 1);
+}
+
+/// Control-plane names reach this file at different qualification levels: the IR carries the fully
+/// qualified action name ("SwitchIngress.get_threshold.tbl_get_threshold_act") while annotations and
+/// recorded ActionCalls may carry only the trailing component. Compare on both, the same convention
+/// clausesFor uses for table names. (state_dependency_track.cpp has its own copy, cpNameMatches; it
+/// is a file-static there and deliberately not exported.)
+bool sameCpName(cstring a, cstring b) { return a == b || cpNameTail(a) == cpNameTail(b); }
+
+/// Phase 1's default-action override for @p tableName, injected by the tampering executor as a
+/// "pinned_default_actions" test object. A separate category from "preexisting_tableconfigs"
+/// because that one is consumed only on the keyed path (evalTablePreExistingConfig BUG_CHECKs on a
+/// null key), while a keyless table has no key at all and never reaches it.
+///
+/// The injected call carries ONLY arguments a --cp-annotation `action_data` clause fixed to a
+/// literal (state_dependency_track.cpp's annotationBackedSubset): a value nobody constrained is
+/// whatever the earlier phase's solver happened to pick, and forcing a later phase to it invents a
+/// control-plane state that may not be deployable. Unconstrained data is left free here and the
+/// tampering executor drops the candidate afterwards if the phases turn out to contradict.
+const ActionCall *pinnedDefaultActionFor(const ExecutionState &state, cstring tableName) {
+    const auto *obj = state.getTestObject("pinned_default_actions"_cs, tableName, /*checked=*/false);
+    return obj == nullptr ? nullptr : obj->to<ActionCall>();
+}
+
+/// Equality tying the freshly synthesized action-argument symbol @p actionArg to the value the
+/// pinned call recorded for the same parameter; nullptr when @p pinned does not cover @p parameter,
+/// or when @p actionName is a different action than the one the pin was recorded for (each fork
+/// mints its own symbols, so a same-named parameter of another action is a different variable).
+const IR::Expression *pinnedDefaultArgPin(const ActionCall *pinned, cstring actionName,
+                                          const IR::Parameter *parameter,
+                                          const IR::Expression *actionArg) {
+    if (pinned == nullptr || parameter == nullptr) return nullptr;
+    if (!sameCpName(actionName, pinned->getActionName())) return nullptr;
+    const auto *args = pinned->getArgs();
+    if (args == nullptr) return nullptr;
+    for (const auto &arg : *args) {
+        const auto *param = arg.getActionParam();
+        if (param == nullptr) continue;
+        // The symbol below is built from (table, action, parameter->name, type) and ActionArg keeps
+        // that very same IR::Parameter, so pointer identity is the normal case; the name compare
+        // covers a re-resolved IR (e.g. a cache-loaded chain matched against a fresh program).
+        if (param != parameter && param->name != parameter->name) continue;
+        const auto *value = arg.getEvaluatedValue();
+        if (value == nullptr) return nullptr;
+        // getEvaluatedValue() turns a BoolLiteral into a bit<1> Constant, which does not type
+        // against a bool parameter -- the same restoration evalTablePreExistingConfig does.
+        if (parameter->type->is<IR::Type_Boolean>()) {
+            return new IR::Equ(actionArg, IR::BoolLiteral::get(value->value != 0));
+        }
+        // Re-type the constant to the symbol's own type: the recorded value came out of a different
+        // phase's model and only its numeric value is meaningful here.
+        if (const auto *bits = actionArg->type->to<IR::Type_Bits>()) {
+            return new IR::Equ(actionArg, IR::Constant::get(bits, value->value));
+        }
+        return new IR::Equ(actionArg, value);
+    }
+    return nullptr;
+}
+
+}  // namespace
+
 const IR::Expression *TableStepper::cpActionArgPin(cstring actionName,
                                                    const IR::Parameter *parameter,
                                                    const IR::Expression *actionArg) const {
@@ -368,21 +436,19 @@ const IR::Expression *TableStepper::cpActionArgPin(cstring actionName,
     // Annotations name actions and parameters as the control plane sees them ("tbl_get_threshold_act",
     // "threshold"), while the IR carries fully qualified action names and midend-uniquified parameter
     // names ("SwitchIngress.get_threshold.tbl_get_threshold_act", "threshold_1"). controlPlaneName()
-    // undoes the parameter renaming via the @name annotation; the trailing-component compare handles
-    // the action qualification, the same convention clausesFor uses for table names.
-    const auto tail = [](cstring c) {
-        const std::string s(c.string_view());
-        auto p = s.find_last_of('.');
-        return p == std::string::npos ? s : s.substr(p + 1);
-    };
+    // undoes the parameter renaming via the @name annotation; sameCpName handles the action
+    // qualification, the same convention clausesFor uses for table names.
     const cstring paramName = parameter->controlPlaneName();
     for (const auto *c : ann->clausesFor(properties.tableName)) {
         for (const auto &t : c->when) {
-            if (t.op != CpTerm::Op::Eq || t.actionDataArg.isNullOrEmpty()) continue;
+            // hasValue, not `value != 0`: a term whose "value" is absent or unreadable pins
+            // nothing. --dump-cp-stubs writes skeletons with "value": null, and CpTerm::value
+            // defaults to 0, so without this an unfilled stub would silently pin the argument to 0
+            // and every generated test would inherit a constraint nobody wrote.
+            if (t.op != CpTerm::Op::Eq || t.actionDataArg.isNullOrEmpty() || !t.hasValue) continue;
             // An action_data term names the action it belongs to. A term that omits it applies to
             // whichever action carries a parameter of that name.
-            if (!t.actionDataAction.isNullOrEmpty() && t.actionDataAction != actionName &&
-                tail(t.actionDataAction) != tail(actionName))
+            if (!t.actionDataAction.isNullOrEmpty() && !sameCpName(actionName, t.actionDataAction))
                 continue;
             if (t.actionDataArg != paramName && t.actionDataArg != parameter->name.name) continue;
             // The stepper re-enters this table on every path, so report each pin once rather than
@@ -392,6 +458,14 @@ const IR::Expression *TableStepper::cpActionArgPin(cstring actionName,
                 printInfo("[CP annotation] %1%: pinning action data %2%(%3%) = %4% (%5%)",
                           properties.tableName, actionName, paramName, t.value, c->ref);
             }
+            // A bool parameter needs a BoolLiteral - Constant::get would mint a bool-typed integer
+            // constant, which has no bitvector translation. An `enum bit<N>` parameter needs no
+            // such care: MidEnd::addDefaultPasses runs P4::EliminateSerEnums, which rewrites the
+            // parameter's Type_Name to the underlying Type_Bits before symbolic execution ever
+            // sees it, so no Type_SerEnum reaches this point on any target.
+            if (parameter->type->is<IR::Type_Boolean>()) {
+                return new IR::Equ(actionArg, IR::BoolLiteral::get(t.value != 0));
+            }
             return new IR::Equ(actionArg, IR::Constant::get(actionArg->type, t.value));
         }
     }
@@ -400,7 +474,48 @@ const IR::Expression *TableStepper::cpActionArgPin(cstring actionName,
 
 void TableStepper::setTableDefaultEntries(
     const std::vector<const IR::ActionListElement *> &tableActionList) {
-    for (const auto *action : tableActionList) {
+    // --cp-annotation `default_action(T) == A`: the controller installs A, so a fork into any other
+    // action describes a device configuration that does not exist. The FILTER lives here, not in a
+    // target's evalTargetTable, because the clause is not architecture-specific: tofino,
+    // tofino-v1model and PNA all reach their keyless path through this function and inherit it,
+    // while a target keeps only the DECISION to override (bmv2 refuses to override outside STF).
+    // It runs BEFORE the cross-phase pin below so the two agree by construction - Phase 1's
+    // recorded default action came out of this very filter.
+    std::vector<const IR::ActionListElement *> annotatedActions;
+    if (const auto *ann = loadedCpAnnotation(); ann != nullptr) {
+        for (const auto *action : tableActionList) {
+            const auto *tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
+            const cstring actionName = stepper->state.getP4Action(tableAction)->controlPlaneName();
+            const auto *c = ann->defaultActionClause(properties.tableName, actionName);
+            if (c == nullptr) {
+                continue;
+            }
+            annotatedActions.push_back(action);
+            // The stepper re-enters this table on every path, so report each (table, action) pair
+            // once instead of thousands of identical lines.
+            static std::set<std::pair<cstring, cstring>> reported;
+            if (reported.emplace(properties.tableName, actionName).second) {
+                printInfo("[CP annotation] %1%: installing annotated default action %2% (%3%)",
+                          properties.tableName, actionName, c->ref);
+            }
+        }
+    }
+    // An annotation naming an action this table does not offer must not silence the table: fall
+    // back to the full list rather than emitting no branch at all.
+    const auto &actionList = annotatedActions.empty() ? tableActionList : annotatedActions;
+
+    // Cross-phase control-plane consistency, constructive half. The device installs ONE default
+    // action per table for every phase, but this function mints a fresh
+    // `<table>_<action>_arg_<param>` symbol on each phase's own solver query, so the phases can
+    // disagree on the default action's data. Only an ANNOTATION-BACKED value is carried over from
+    // the recorded phase (the injector filters to those): it is a stated control-plane fact, and
+    // the annotation filter/cpActionArgPin re-derive the same value in every phase anyway, so the
+    // pin only restates what is already true. A value nobody constrained is deliberately NOT
+    // carried -- propagating one phase's arbitrary model pick would invent a device configuration
+    // -- and the ACTION CHOICE is likewise not forced here; both are checked after the fact by the
+    // tampering executor, which drops a candidate whose phases contradict each other.
+    const auto *pinnedDefault = pinnedDefaultActionFor(stepper->state, properties.tableName);
+    for (const auto *action : actionList) {
         const auto *tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
         const auto *actionType = stepper->state.getP4Action(tableAction);
 
@@ -408,6 +523,7 @@ void TableStepper::setTableDefaultEntries(
 
         // We get the control plane name of the action we are calling.
         cstring actionName = actionType->controlPlaneName();
+
         // Synthesize arguments for the call based on the action parameters.
         const auto &parameters = actionType->parameters;
         auto *arguments = new IR::Vector<IR::Argument>();
@@ -423,6 +539,10 @@ void TableStepper::setTableDefaultEntries(
             // Note how we use the control plane name for the parameter here.
             ctrlPlaneArgs.emplace_back(parameter, actionArg);
             if (const auto *pin = cpActionArgPin(actionName, parameter, actionArg)) {
+                cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
+            }
+            if (const auto *pin =
+                    pinnedDefaultArgPin(pinnedDefault, actionName, parameter, actionArg)) {
                 cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
             }
         }
@@ -457,9 +577,9 @@ void TableStepper::setTableDefaultEntries(
         tableStream << "| Overriding default action: " << actionName;
         nextState.add(*new TraceEvents::Generic(tableStream.str()));
         nextState.replaceTopBody(&replacements);
-        // An annotated action-data pin becomes this branch's condition: the branch is otherwise
-        // unconditional, and the pin has to constrain the synthesized argument rather than merely
-        // be recorded alongside it.
+        // An annotated (or cross-phase pinned) action-data pin becomes this branch's condition: the
+        // branch is otherwise unconditional, and the pin has to constrain the synthesized argument
+        // rather than merely be recorded alongside it.
         stepper->result->emplace_back(cpPin == nullptr ? std::optional<const IR::Expression *>()
                                                        : std::optional(cpPin),
                                       stepper->state, nextState, coveredNodes);

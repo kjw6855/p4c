@@ -98,7 +98,9 @@ CpTerm parseTerm(const JsonObject *o) {
     if (o == nullptr) return t;
     t.key = strField(o, "key");
     t.op = parseOp(strField(o, "op"));
-    numField(o, "value", &t.value);
+    // Record whether "value" was really there: consumers must not confuse a missing value with a
+    // deliberate 0 (--dump-cp-stubs emits "value": null, which reads as absent here).
+    t.hasValue = numField(o, "value", &t.value);
     numField(o, "mask", &t.mask);
     numField(o, "lo", &t.lo);
     numField(o, "hi", &t.hi);
@@ -315,6 +317,21 @@ std::vector<const CpAssumeClause *> CpAnnotation::clausesFor(cstring table) cons
             out.push_back(&c);
     }
     return out;
+}
+
+const CpAssumeClause *CpAnnotation::defaultActionClause(cstring table, cstring action) const {
+    const auto tail = [](const std::string &s) {
+        auto p = s.find_last_of('.');
+        return p == std::string::npos ? s : s.substr(p + 1);
+    };
+    const std::string wantAction = tail(std::string(action.string_view()));
+    for (const auto *c : clausesFor(table)) {
+        if (c->kind != CpAssumeClause::Kind::DefaultAction) continue;
+        if (c->action == action || tail(std::string(c->action.string_view())) == wantAction) {
+            return c;
+        }
+    }
+    return nullptr;
 }
 
 const CpAnnotation *loadedCpAnnotation() {

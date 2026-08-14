@@ -32,6 +32,11 @@ struct CpTerm {
     Op op = Op::Unsupported;
     cstring key;                 ///< key field name, when the term constrains a key
     big_int value = 0;           ///< Eq/Neq/Lpm/Ternary right-hand side
+    /// True only when the file really carried a readable `value`. `value` alone cannot express
+    /// "absent": it defaults to 0, and --dump-cp-stubs deliberately writes skeletons with
+    /// "value": null, so an unfilled stub would otherwise read as a pin/guard against 0 - a wrong
+    /// constraint dressed up as a deliberate one. Every consumer of `value` must require this.
+    bool hasValue = false;
     big_int mask = 0;            ///< Ternary mask
     int prefix = -1;             ///< Lpm prefix length
     big_int lo = 0, hi = 0;      ///< Range bounds
@@ -119,6 +124,13 @@ class CpAnnotation {
 
     /// Clauses that constrain @p table, filtered to the enforceable kinds.
     [[nodiscard]] std::vector<const CpAssumeClause *> clausesFor(cstring table) const;
+
+    /// The `default_action(<table>) == <action>` clause naming @p action on @p table, or nullptr.
+    /// Action names are compared on the trailing dotted component as well, the same convention
+    /// clausesFor uses for table names: the IR carries fully qualified action names
+    /// ("SwitchV2PIngress.set_config") while annotations name actions as the control plane sees
+    /// them ("set_config").
+    [[nodiscard]] const CpAssumeClause *defaultActionClause(cstring table, cstring action) const;
 
  private:
     cstring program_;

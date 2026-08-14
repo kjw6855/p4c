@@ -185,10 +185,16 @@ bool TofinoRegisterValue::hasTaintedIndex() const {
 }
 
 std::vector<const IR::Expression *> TofinoRegisterValue::getIndexExpressions() const {
+    // POSITIONAL CONTRACT: slot 0 is always the read/initial index and every later slot is a
+    // recorded WRITE index, so a caller can tell the two apart by position alone. Slot 0 is
+    // therefore emitted even when the register has no read index, as a nullptr placeholder --
+    // dropping it would silently promote the first write into the read slot, and a caller asking
+    // "which cells does this packet write?" would then miss that write. Every caller already skips
+    // nullptr entries.
     std::vector<const IR::Expression *> indices;
-    if (initialIndex != nullptr) indices.push_back(initialIndex);
+    indices.push_back(initialIndex);
     for (const auto &cond : indexConditions) {
-        if (cond.getIndex() != nullptr) indices.push_back(cond.getIndex());
+        indices.push_back(cond.getIndex());
     }
     return indices;
 }

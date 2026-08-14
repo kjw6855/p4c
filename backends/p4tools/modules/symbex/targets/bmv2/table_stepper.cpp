@@ -405,27 +405,20 @@ void Bmv2V1ModelTableStepper::evalTargetTable(
         // unreachable - the netchain keyless-table case, and the same gap p4v documents for 31 of
         // switch.p4's 120 tables. An annotated default restores the deployed configuration instead
         // of requiring the benchmark source to be edited.
+        //
+        // Only the DECISION to override lives here; the restriction of the action list to the
+        // annotated action is done by TableStepper::setTableDefaultEntries, so every target gets
+        // it. bmv2 cannot simply inherit the decision as well: it refuses to override a default
+        // action outside STF (below), and an annotated default is exactly the case where it must.
         if (!properties.defaultIsImmutable) {
             if (const auto *ann = loadedCpAnnotation(); ann != nullptr) {
-                for (const auto *c : ann->clausesFor(properties.tableName)) {
-                    if (c->kind != CpAssumeClause::Kind::DefaultAction) continue;
-                    std::vector<const IR::ActionListElement *> only;
-                    for (const auto *ale : tableActionList) {
-                        const auto *mce = ale->expression->to<IR::MethodCallExpression>();
-                        const auto *m = mce != nullptr ? mce->method->to<IR::PathExpression>() : nullptr;
-                        if (m != nullptr && m->path->name.name == c->action) only.push_back(ale);
-                    }
-                    if (!only.empty()) {
-                        // The stepper re-enters this table on every path, so report each
-                        // (table, action) pair once instead of thousands of identical lines.
-                        static std::set<std::pair<cstring, cstring>> reported;
-                        if (reported.emplace(properties.tableName, c->action).second) {
-                            printInfo(
-                                "[CP annotation] %1%: keyless table, installing annotated default "
-                                "action %2% (%3%)",
-                                properties.tableName, c->action, c->ref);
-                        }
-                        setTableDefaultEntries(only);
+                for (const auto *ale : tableActionList) {
+                    const auto *mce = ale->expression->to<IR::MethodCallExpression>();
+                    if (mce == nullptr) continue;
+                    const auto *actionType = getExecutionState()->getP4Action(mce);
+                    if (ann->defaultActionClause(properties.tableName,
+                                                 actionType->controlPlaneName()) != nullptr) {
+                        setTableDefaultEntries(tableActionList);
                         return;
                     }
                 }

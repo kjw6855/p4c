@@ -115,10 +115,17 @@ bool Bmv2V1ModelRegisterValue::hasTaintedIndex() const {
 }
 
 std::vector<const IR::Expression *> Bmv2V1ModelRegisterValue::getIndexExpressions() const {
+    // POSITIONAL CONTRACT: slot 0 is always the read/initial index and every later slot is a
+    // recorded WRITE index, so a caller can tell the two apart by position alone. Slot 0 is
+    // therefore emitted even when the register has no read index, as a nullptr placeholder --
+    // dropping it would silently promote the first write into the read slot, and a caller asking
+    // "which cells does this packet write?" would then miss that write. This matters far more on
+    // v1model than on Tofino: `register.write(i, v)` with no preceding read is the ordinary shape
+    // here, whereas a Tofino RegisterAction always reads before it writes.
     std::vector<const IR::Expression *> indices;
-    if (initialIndex != nullptr) indices.push_back(initialIndex);
+    indices.push_back(initialIndex);
     for (const auto &cond : indexConditions) {
-        if (cond.getIndex() != nullptr) indices.push_back(cond.getIndex());
+        indices.push_back(cond.getIndex());
     }
     return indices;
 }

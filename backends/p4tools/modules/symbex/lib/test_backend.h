@@ -110,6 +110,11 @@ class TestBackEnd {
         const TestSpec *testSpec;
         /// Whether the packet was dropped during this phase.
         bool packetIsDropped;
+        /// True when this phase's register index was reported but not enforced: asserting the real
+        /// hash value contradicted the path (a program branching on hash bits has already committed
+        /// to an arbitrary cell), so the emitted index describes the model rather than constraining
+        /// it. Surfaced in the emitted metadata so triage can tell the two kinds of case apart.
+        bool indexReportedNotEnforced = false;
     };
 
     /// Resolves concolic variables, produces TestInfo, and creates a TestSpec for one phase
