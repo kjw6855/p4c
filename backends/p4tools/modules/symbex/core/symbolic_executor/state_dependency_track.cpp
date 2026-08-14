@@ -3735,7 +3735,18 @@ size_t StateDependencyTracker::runTamperingChain(
                         tsAcc.multicastGroupId = mgid;
                     }
                     reportUnserializedDefaultActions(cond1, chain.id, tsAcc.subTestId);
-                    callBack(tsAcc);
+                    // Same guard as runConditionChain: the concolic re-solve in the test backend
+                    // can hit an expression the Z3 backend cannot translate (a TaintExpression, or
+                    // a SizedVarbit whose actual and declared widths disagree). One un-emittable
+                    // candidate must not abort the whole run.
+                    try {
+                        callBack(tsAcc);
+                    } catch (const std::exception &e) {
+                        if (SymbexOptions::get().strict) throw;
+                        warning("[Tampering HIT→MISS] chain id=%1% sub=%2%: emission failed (%3%); "
+                                "skipping.",
+                                chain.id, tsAcc.subTestId, e.what());
+                    }
                     if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
                     continue;
                 }
@@ -3847,7 +3858,15 @@ size_t StateDependencyTracker::runTamperingChain(
                     ts.multicastGroupId = mgid;
                 }
                 reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
-                callBack(ts);
+                // See the accumulated branch above: an un-emittable candidate is skipped, not fatal.
+                try {
+                    callBack(ts);
+                } catch (const std::exception &e) {
+                    if (SymbexOptions::get().strict) throw;
+                    warning("[Tampering HIT→MISS] chain id=%1% sub=%2%: emission failed (%3%); "
+                            "skipping.",
+                            chain.id, ts.subTestId, e.what());
+                }
                 if (maxPerChain != 0 && subTestId >= maxPerChain) chainCapHit = true;
             }
             if (!emittedThisRound) break;  // every Phase-1 state's Phase-2 paths exhausted
@@ -4036,7 +4055,15 @@ size_t StateDependencyTracker::runTamperingChain(
             printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: sink MISS→HIT, %3% (P1 %4%, P3 %5%)",
                       chain.id, ts.subTestId, ts.caseLabel, p1d, p3d);
             reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
-            callBack(ts);
+            // See runTamperingChain's HIT→MISS branch: an un-emittable candidate is skipped.
+            try {
+                callBack(ts);
+            } catch (const std::exception &e) {
+                if (SymbexOptions::get().strict) throw;
+                warning("[Tampering MISS→HIT] chain id=%1% sub=%2%: emission failed (%3%); "
+                        "skipping.",
+                        chain.id, ts.subTestId, e.what());
+            }
         }
     }
     return emitted;
