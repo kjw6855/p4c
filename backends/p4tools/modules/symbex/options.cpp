@@ -144,6 +144,30 @@ SymbexOptions::SymbexOptions()
         "preconditions.");
 
     registerOption(
+        "--max-index-steer-retries", "maxIndexSteerRetries",
+        [this](const char *arg) {
+            try {
+                maxIndexSteerRetries = std::stoll(arg);
+                if (maxIndexSteerRetries < 0) {
+                    throw std::invalid_argument("Invalid input.");
+                }
+            } catch (std::invalid_argument &) {
+                error(
+                    "Invalid value %1% for --max-index-steer-retries. Expected non-negative "
+                    "integer.",
+                    arg);
+                return false;
+            }
+            return true;
+        },
+        "Bound on the Phase-2 index-steering retries per Phase-1 condition bucket [default: 2]. "
+        "When a tampering candidate writes a different register cell than the one Phase 1 read, "
+        "the attacker packet's hash inputs are re-derived from the victim's values and Phase 2 is "
+        "re-run; one retry is spent per distinct hash call site, so programs writing the register "
+        "from several sites need a larger budget. Setting 0 disables steering, so a mismatched "
+        "cell is dropped outright instead of being steered first.");
+
+    registerOption(
         "--stop-metric", "stopMetric",
         [this](const char *arg) {
             stopMetric = cstring(arg).toUpper();
@@ -683,6 +707,31 @@ SymbexOptions::SymbexOptions()
         "chain. PHASE1: one shared Phase-1 read-path traversal. PHASE1_PHASE2: additionally run a "
         "global Phase-2 write-path pass that prunes chains whose write nodes are unreachable before "
         "the constrained per-chain loop. Requires --state-dep. Defaults to PHASE1.");
+
+    registerOption(
+        "--no-cross-phase-default-action-pin", nullptr,
+        [this](const char *) {
+            crossPhaseDefaultActionPin = false;
+            return true;
+        },
+        "Do not pin a table's overridden default action (and its action data) from Phase 1 into "
+        "Phases 2 and 3 of a tampering scenario. Each phase is a separate solver query, so without "
+        "the pin the phases can pick different control-plane configurations for the same table and "
+        "the emitted test is not replayable as one scenario. Use this to A/B whether the pin is "
+        "what removed a phase disagreement, at the cost of restoring that unsoundness.");
+
+    registerOption(
+        "--no-pin-index-value", nullptr,
+        [this](const char *) {
+            pinIndexValue = false;
+            return true;
+        },
+        "Do not assert that a written register index evaluates to the cell recorded in the emitted "
+        "test; report the cell instead of enforcing it. The enforced pin makes the packet, the "
+        "ports and affected_register.index mutually consistent, but it is unsatisfiable on paths "
+        "that already branched on hash bits, which then take the report-only fallback anyway. Use "
+        "this to force every case onto that fallback and count how many the enforced pin holds "
+        "for.");
 }
 
 bool SymbexOptions::validateOptions() const {

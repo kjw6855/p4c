@@ -198,6 +198,31 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// precondition is never reachable. NOT a target depth. Set via --max-phase2-packets.
     int64_t maxPhase2Packets = 64;
 
+    /// Bound on how many times a Phase-2 tampering candidate whose write cell does not match the
+    /// cell Phase 1 read may be re-derived by steering the attacker packet's hash inputs to the
+    /// victim's values. Budget is per Phase-1 condition bucket and one retry is spent per distinct
+    /// hash call site, so a program writing the register from several sites needs several retries.
+    /// 0 disables steering entirely, degrading "steer, else drop" to plain "drop" -- the A/B lever
+    /// that separates how many cases steering rescues from how many were already on the right cell.
+    /// Set via --max-index-steer-retries.
+    int64_t maxIndexSteerRetries = 2;
+
+    /// When true, a table whose default action Phase 1 overrode is pinned to that same action and
+    /// action data in Phases 2 and 3. Without it the phases are independent Z3 queries that share
+    /// action-argument symbol names by accident, so they may disagree on the control-plane
+    /// configuration the emitted test is replayed under. Cleared by
+    /// --no-cross-phase-default-action-pin, which restores the unpinned behaviour for A/B runs.
+    bool crossPhaseDefaultActionPin = true;
+
+    /// When true, the emission solve additionally asserts that each written register index really
+    /// evaluates to the cell recorded in the test, so the packet, the ports and
+    /// affected_register.index are consistent by construction. Programs that branch on hash bits
+    /// have already committed to an arbitrary cell along the path, so the assert can be UNSAT;
+    /// those cases fall back to reporting the index without enforcing it. Cleared by
+    /// --no-pin-index-value, which forces every case onto that report-only fallback -- the A/B
+    /// lever that counts how many cases the enforced pin actually holds for.
+    bool pinIndexValue = true;
+
  protected:
     bool validateOptions() const override;
 };
