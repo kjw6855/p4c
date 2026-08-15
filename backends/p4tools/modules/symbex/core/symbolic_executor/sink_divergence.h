@@ -73,6 +73,44 @@ using ActionResolver = std::function<const IR::P4Action *(cstring)>;
 /// register value flowing into it can change anything.
 bool constEntryActionsDiverge(const IR::P4Table *table, const ActionResolver &resolve);
 
+/// True iff the small-step stepper evaluates @p table through its `const entries` list, i.e. the
+/// key -> (action, args) map is fixed by the program and p4symbex synthesises nothing for it.
+///
+/// Mirrors TableStepper::evalTargetTable's own test, and the immutability half is load-bearing
+/// rather than decorative: a NON-const `entries = {...}` initial-entry list makes the stepper
+/// synthesise control-plane entries instead, at which point the action arguments are tool-chosen and
+/// every soundness argument for comparing two entries collapses.
+bool tableHasConstEntries(const IR::P4Table *table);
+
+/// Which const entry ONE execution selected at a sink table. Three-way on purpose:
+///
+///   readable = false                -> no claim. The sink was not applied on this path, the key was
+///                                      tainted, or the state could not be read. This is NOT a claim
+///                                      of divergence -- treating "unknown" as "differs" is exactly
+///                                      the mistake that made the previous, whole-sink generalisation
+///                                      of this comparison fire unconditionally.
+///   readable, matchedEntry = false  -> the table's default action ran, i.e. a real MISS. That is the
+///                                      HIT/MISS passes' business, not this one's.
+///   readable, matchedEntry = true   -> `key` names the selected entry's (action, args).
+struct ConstEntryOutcome {
+    bool readable = false;
+    bool matchedEntry = false;
+    cstring key = ""_cs;
+};
+
+/// Renders an entry's (or a default action's) call as "action(param=value,...)" -- the outcome
+/// identity two runs are compared on. The arguments of a const entry are compile-time constants, so
+/// this string is a property of the PROGRAM; @p resolve supplies the callee only to recover parameter
+/// names. THE single renderer, so two outcomes can never disagree merely on formatting.
+cstring constEntryOutcomeKey(const IR::MethodCallExpression *call, const ActionResolver &resolve);
+
+/// Did two executions select observably different const entries?
+///
+/// Reflexive by construction, unlike a comparison over summarized action bodies: identical outcomes
+/// render identical strings. Requires both sides to have matched an ENTRY, which is also what keeps
+/// this mode disjoint from HIT->MISS (entry -> default) and MISS->HIT (default -> entry).
+bool constEntryOutcomesDiverge(const ConstEntryOutcome &a, const ConstEntryOutcome &b);
+
 }  // namespace P4::P4Tools::Symbex
 
 #endif /* BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SYMBOLIC_EXECUTOR_SINK_DIVERGENCE_H_ */

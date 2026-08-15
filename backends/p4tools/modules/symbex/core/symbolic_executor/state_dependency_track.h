@@ -14,6 +14,7 @@
 
 #include "backends/state_dependency/analysis.h"
 #include "backends/state_dependency/dependency_graph.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/sink_divergence.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/lib/final_state.h"
 #include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
@@ -302,21 +303,38 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// and fires callBack.
     void runTamperingScenario(const TamperingCallback &callBack, const ExecutionState &initState);
 
-    /// Runs the three-phase scenario for one SOChain in one tamper direction, sharing the Phase-1
-    /// collection and Phase-2 write between directions. @p missToHit selects the direction:
-    ///   false (HIT→MISS): keep Phase-1 sink-HIT terminals; Phase 3 is a dynamic deviation check
-    ///                     (emit hit_phase=1 / miss_phase=3).
-    ///   true  (MISS→HIT): keep reached-sink-MISS terminals; symbolically replay Phase 1 with the
-    ///                     tampered register and emit only when the sink flips MISS→HIT *and* the
-    ///                     packet disposition changes (emit hit_phase=3 / miss_phase=1 + case label
-    ///                     + phase3_verify).
-    /// Returns the number of sub-tests emitted for this (chain, direction). @p phase1Bucket is the
+    /// Which question one pass over a chain asks. The first two are the long-standing directions and
+    /// are unchanged; the third is an ADDITIVE opt-in pass (--const-entry-action-divergence) that
+    /// applies only to a sink table with `const entries`.
+    enum class TamperPass : uint8_t {
+        HitToMiss,
+        MissToHit,
+        /// The sink is reached in both replays but selects a DIFFERENT const entry. Deliberately a
+        /// separate pass rather than a branch inside HitToMiss: that keeps "the HIT/MISS passes are
+        /// untouched" a property of the call graph instead of something a reviewer has to re-derive
+        /// from the body. It is also nearly free on programs it does not apply to, since it returns
+        /// after one IR predicate, and it reuses the same shared Phase-1 bucket.
+        ConstEntryActionDiverge,
+    };
+
+    /// Runs the three-phase scenario for one SOChain in one pass, sharing the Phase-1 collection and
+    /// Phase-2 write between passes. @p pass selects the question:
+    ///   HitToMiss:  keep Phase-1 sink-HIT terminals; Phase 3 is a dynamic deviation check
+    ///               (emit hit_phase=1 / miss_phase=3).
+    ///   MissToHit:  keep reached-sink-MISS terminals; symbolically replay Phase 1 with the
+    ///               tampered register and emit only when the sink flips MISS→HIT *and* the
+    ///               packet disposition changes (emit hit_phase=3 / miss_phase=1 + case label
+    ///               + phase3_verify).
+    ///   ConstEntryActionDiverge: keep Phase-1 terminals that matched a const entry, and emit when
+    ///               the attack Phase 3 matches a DIFFERENT one (emit neither phase; the two
+    ///               outcomes are named in sink_outcome_legit / sink_outcome_attack).
+    /// Returns the number of sub-tests emitted for this (chain, pass). @p phase1Bucket is the
     /// chain's share of the shared Phase-1 traversal (collectPhase1Terminals); this function applies
-    /// the direction-specific filter to it and runs Phase 2 / Phase 3.
+    /// the pass-specific filter to it and runs Phase 2 / Phase 3.
     size_t runTamperingChain(const P4StateDependency::DependencyGraphs::SOChain &chain,
                              const ExecutionState &initState,
                              const std::vector<const FinalState *> &phase1Bucket,
-                             const TamperingCallback &callBack, size_t maxPerChain, bool missToHit);
+                             const TamperingCallback &callBack, size_t maxPerChain, TamperPass pass);
 
     /// Extracts the concrete (input, output) port pair from a final state's model.
     std::pair<int, int> getPortPair(const FinalState *fs) const;
@@ -335,17 +353,32 @@ class StateDependencyTracker : public SymbolicExecutor {
         const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
         const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage = false);
 
-    /// Attack-attribution replay: runs a LEGIT Phase 3 for @p fs1 — Phase 1's OWN register writes
-    /// carried and NO attacker Phase-2 write, with Phase 1's sink-table entry pinned (see the
-    /// file-local pinSinkEntryForLegit) — and returns the sink/condition outcome via evalSinkFlip
-    /// (1 HIT/true, 0 MISS/false, -1 no legit terminal). A tampering test is attacker-attributable —
-    /// and thus emitted — only when this legit outcome differs from the tampered target: when they
-    /// match, the victim's own packet (e.g. a monotonic self-set RegisterAction) causes the flip and
-    /// the attacker write is redundant (a false positive with no hardware divergence). Shared by
-    /// runTamperingChain (Key sink) and runConditionChain (condition sink).
+    /// The attack-attribution replay itself: a LEGIT Phase 3 for @p fs1 — Phase 1's OWN register
+    /// writes carried and NO attacker Phase-2 write, with Phase 1's sink-table entry pinned (see the
+    /// file-local pinSinkEntryForLegit). Returns the legit Phase-3 terminal, or nullptr if the
+    /// pinned replay has none. The two readers below differ only in what they read off it.
+    const FinalState *runLegitPhase3(const P4StateDependency::DependencyGraphs::SOChain &chain,
+                                     const ExecutionState &initState, const FinalState *fs1,
+                                     int inputPort, const IR::Expression *inputPortSymExpr);
+
+    /// runLegitPhase3 read through evalSinkFlip: 1 HIT/true, 0 MISS/false, -1 no legit terminal. A
+    /// tampering test is attacker-attributable — and thus emitted — only when this legit outcome
+    /// differs from the tampered target: when they match, the victim's own packet (e.g. a monotonic
+    /// self-set RegisterAction) causes the flip and the attacker write is redundant (a false positive
+    /// with no hardware divergence). Shared by runTamperingChain (Key sink) and runConditionChain
+    /// (condition sink).
     int legitPhase3Sink(const P4StateDependency::DependencyGraphs::SOChain &chain,
                         const ExecutionState &initState, const FinalState *fs1, int inputPort,
                         const IR::Expression *inputPortSymExpr);
+
+    /// runLegitPhase3 read as a const-entry selection, for the ConstEntryActionDiverge pass. Attack
+    /// attribution is subsumed rather than bolted on here: the pass's goal compares this outcome
+    /// against the attack Phase 3's directly, so a legit run that already selects the "tampered"
+    /// entry simply fails to differ.
+    ConstEntryOutcome legitPhase3ConstEntry(
+        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
+        const ActionResolver &resolve);
 
     /// Pins @p init's input packet (every pktvar_N), packet size, and input port to @p fs1's model
     /// values, so a cloned execution replays fs1's exact packet/flow. Used by runSymbolicPhase3 (to

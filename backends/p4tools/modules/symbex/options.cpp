@@ -732,6 +732,22 @@ SymbexOptions::SymbexOptions()
         "that already branched on hash bits, which then take the report-only fallback anyway. Use "
         "this to force every case onto that fallback and count how many the enforced pin holds "
         "for.");
+
+    registerOption(
+        "--const-entry-action-divergence", nullptr,
+        [this](const char *) {
+            constEntryActionDivergence = true;
+            return true;
+        },
+        "Additionally emit a tampering case when the attacker's write moves a sink table from one "
+        "of its `const entries` to another -- a different action, or the same action under "
+        "different compile-time action data. Such a table can be total over its key bits and so "
+        "never MISS, which is precisely the divergence the HIT/MISS passes cannot express. "
+        "Restricted to const-entry tables on purpose: there the key -> (action, args) map comes "
+        "from the P4 program, so a difference between two entries is a property of the program "
+        "rather than of a control plane p4symbex invented; on an open table both sides of the "
+        "comparison would be tool-chosen. Purely additive -- the HIT->MISS and MISS->HIT passes "
+        "are unchanged, and with this off generation is byte-identical.");
 }
 
 bool SymbexOptions::validateOptions() const {

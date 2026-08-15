@@ -1,12 +1,15 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/sink_divergence.h"
 
 #include <map>
+#include <sstream>
 #include <utility>
 #include <vector>
 
 #include "ir/ir.h"
 #include "ir/visitor.h"
 #include "lib/cstring.h"
+
+#include "backends/p4tools/common/lib/table_utils.h"
 
 namespace P4::P4Tools::Symbex {
 
@@ -150,6 +153,55 @@ bool constEntryActionsDiverge(const IR::P4Table *table, const ActionResolver &re
         if (outcomesDiverge(firstAction, firstBinding, action, binding)) return true;
     }
     return false;
+}
+
+bool tableHasConstEntries(const IR::P4Table *table) {
+    if (table == nullptr) return false;
+    const auto *entries = table->getEntries();
+    if (entries == nullptr || entries->entries.empty()) return false;
+    // Same test TableStepper::evalTargetTable applies before taking the const-entries branch. Without
+    // the immutability half a table carrying a non-const `entries = {...}` initial-entry list would
+    // qualify, and the stepper synthesises control-plane entries for those.
+    TableUtils::TableProperties properties;
+    TableUtils::checkTableImmutability(*table, properties);
+    return properties.tableIsImmutable;
+}
+
+cstring constEntryOutcomeKey(const IR::MethodCallExpression *call, const ActionResolver &resolve) {
+    if (call == nullptr) return ""_cs;
+    const auto *pe = call->method->to<IR::PathExpression>();
+    const auto *action = (pe != nullptr && resolve) ? resolve(pe->path->name.name) : nullptr;
+    // The stamp is spelled with the same function the stepper writes into <table>.*action, so a key
+    // built here and a stamp read back out of an execution state agree by construction.
+    const auto binding = bindCallArgs(action, call);
+
+    std::stringstream ss;
+    ss << call->method->toString() << "(";
+    bool first = true;
+    for (const auto &[name, value] : binding) {
+        if (!first) ss << ",";
+        first = false;
+        ss << name << "=";
+        if (const auto *c = value->to<IR::Constant>()) {
+            ss << c->value;
+        } else if (const auto *b = value->to<IR::BoolLiteral>()) {
+            ss << (b->value ? "true" : "false");
+        } else {
+            // Not a literal. Print the expression rather than a placeholder: a placeholder would
+            // render two entries carrying DIFFERENT non-literal arguments identically and silently
+            // drop a real divergence. A const entry's arguments are compile-time constants, so this
+            // branch should be unreachable for the sinks this is used on.
+            ss << value;
+        }
+    }
+    ss << ")";
+    return cstring(ss.str());
+}
+
+bool constEntryOutcomesDiverge(const ConstEntryOutcome &a, const ConstEntryOutcome &b) {
+    if (!a.readable || !b.readable) return false;        // no claim either way
+    if (!a.matchedEntry || !b.matchedEntry) return false;  // a MISS belongs to the HIT/MISS passes
+    return a.key != b.key;
 }
 
 }  // namespace P4::P4Tools::Symbex

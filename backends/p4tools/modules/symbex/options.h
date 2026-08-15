@@ -223,6 +223,27 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// lever that counts how many cases the enforced pin actually holds for.
     bool pinIndexValue = true;
 
+    /// When true, run an ADDITIONAL tampering pass that looks for a sink table moving from one of
+    /// its `const entries` to another — a different action, or the same action under different
+    /// compile-time action data. Restricted to const-entry tables on purpose: there the
+    /// key -> (action, args) map comes from the P4 program, so a difference between two entries is a
+    /// property of the program. On an open (control-plane) table p4symbex synthesises the entries
+    /// itself, so both sides of such a comparison would be tool-chosen and the question degenerates;
+    /// that is why the mode never applies there. Purely additive — the HIT->MISS and MISS->HIT
+    /// passes are untouched, and with this off generation is byte-identical. Set via
+    /// --const-entry-action-divergence.
+    ///
+    /// KNOWN LIMITATION: the search reaches the attack Phase-3 outcome through the ACCUMULATION
+    /// driver, which replays the same Phase-2 packet. That finds a divergence when replaying changes
+    /// the register (a counter, or a read-modify-write RegisterAction), but not when the attacker
+    /// writes a value of its own choosing with a plain `write()`: replaying an idempotent write can
+    /// never move the value off whatever the Phase-2 solver happened to pick, so the goal fails even
+    /// though the emission path would have forced the packet to carry --state-tamper-value. Making
+    /// that shape work needs the written VALUE steered toward a value selecting a different const
+    /// entry (they are statically known) rather than accumulated -- the driveRegisterPhase2
+    /// "pre-set the carried SO and re-validate the write path" pattern.
+    bool constEntryActionDivergence = false;
+
  protected:
     bool validateOptions() const override;
 };

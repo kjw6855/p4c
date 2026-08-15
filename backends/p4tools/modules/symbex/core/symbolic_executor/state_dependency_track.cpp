@@ -1051,8 +1051,15 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             const auto &bucket = sharedPhase1Pass ? phase1Buckets[chain->id] : perChainBucket;
             currentChain = chain;  // collectPhase1TerminalsPerChain clears it
             currentChainName = chainName;
-            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain, /*missToHit=*/false);
-            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain, /*missToHit=*/true);
+            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain,
+                              TamperPass::HitToMiss);
+            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain,
+                              TamperPass::MissToHit);
+            // Gated HERE rather than by an early return inside the pass, so that "the option is off
+            // ⇒ generation is byte-identical" holds by the shape of the call graph.
+            if (SymbexOptions::get().constEntryActionDivergence)
+                runTamperingChain(*chain, initState, bucket, callBack, maxPerChain,
+                                  TamperPass::ConstEntryActionDiverge);
             ++chainsCompleted;
         }
     }
@@ -2350,6 +2357,201 @@ static bool cpActionDataTermHolds(const CpTerm &term, const big_int &value) {
     }
 }
 
+namespace {
+
+/// One const entry read as a cube: (value, mask) per key element, mask 0 meaning "don't care".
+struct EntryCube {
+    std::vector<big_int> value;
+    std::vector<big_int> mask;
+};
+
+/// Per-key-element bit widths of @p table, or nullopt when some key element is not an exact/ternary
+/// match over a bounded bit type. Those are the only shapes the cube reading below can interpret;
+/// lpm/range/optional and unbounded widths are deliberately left undecided.
+std::optional<std::vector<int>> constEntryKeyWidths(const IR::P4Table *table) {
+    if (table == nullptr) return std::nullopt;
+    const auto *key = table->getKey();
+    if (key == nullptr) return std::nullopt;
+    std::vector<int> widths;
+    for (const auto *ke : key->keyElements) {
+        if (ke->matchType == nullptr || ke->matchType->path == nullptr) return std::nullopt;
+        const cstring matchKind = ke->matchType->path->name.name;
+        if (matchKind != P4Constants::MATCH_KIND_EXACT &&
+            matchKind != P4Constants::MATCH_KIND_TERNARY)
+            return std::nullopt;
+        const auto *bits = ke->expression->type->to<IR::Type_Bits>();
+        if (bits == nullptr || bits->width_bits() <= 0 || bits->width_bits() >= 32)
+            return std::nullopt;
+        widths.push_back(bits->width_bits());
+    }
+    if (widths.empty()) return std::nullopt;
+    return widths;
+}
+
+/// Reads @p entry's key list as a cube over @p widths, or nullopt when a component is not one of the
+/// three constant forms. A ternary entry writes `v &&& m` (IR::Mask) or `_` (IR::DefaultExpression);
+/// an exact one is a bare constant, i.e. an all-ones mask.
+std::optional<EntryCube> constEntryCubeOf(const IR::Entry *entry, const std::vector<int> &widths) {
+    if (entry == nullptr || entry->keys == nullptr ||
+        entry->keys->components.size() != widths.size())
+        return std::nullopt;
+    EntryCube cube;
+    for (size_t i = 0; i < widths.size(); ++i) {
+        const IR::Expression *k = entry->keys->components.at(i);
+        const big_int allOnes = (big_int(1) << widths[i]) - 1;
+        if (const auto *c = k->to<IR::Constant>()) {
+            cube.value.push_back(c->value & allOnes);
+            cube.mask.push_back(allOnes);
+        } else if (k->is<IR::DefaultExpression>()) {
+            cube.value.push_back(0);
+            cube.mask.push_back(0);  // don't care
+        } else if (const auto *m = k->to<IR::Mask>()) {
+            const auto *mv = m->left->to<IR::Constant>();
+            const auto *mm = m->right->to<IR::Constant>();
+            if (mv == nullptr || mm == nullptr) return std::nullopt;
+            cube.value.push_back(mv->value & allOnes);
+            cube.mask.push_back(mm->value & allOnes);
+        } else {
+            return std::nullopt;  // range/other -> not decided here
+        }
+    }
+    return cube;
+}
+
+/// True when the concrete key tuple @p point falls inside @p cube.
+bool cubeContains(const EntryCube &cube, const std::vector<big_int> &point) {
+    for (size_t i = 0; i < point.size(); ++i)
+        if ((point[i] & cube.mask[i]) != (cube.value[i] & cube.mask[i])) return false;
+    return true;
+}
+
+/// Evaluates @p sink's key elements to a concrete tuple in @p fs's final model, or nullopt when any
+/// of them cannot be read. Used only to disambiguate two const entries that name the same action
+/// with different arguments; the action stamp settles every other case without a model lookup.
+std::optional<std::vector<big_int>> concreteSinkKey(const FinalState *fs, const IR::P4Table *sink,
+                                                    const std::vector<int> &widths) {
+    const auto *key = sink->getKey();
+    if (key == nullptr || key->keyElements.size() != widths.size()) return std::nullopt;
+    const auto *es = fs->getExecutionState();
+    std::vector<big_int> point;
+    for (size_t i = 0; i < widths.size(); ++i) {
+        const auto *expr = key->keyElements.at(i)->expression;
+        // ToolsVariables::convertReference ends in checkedTo<IR::PathExpression> and BUGs on
+        // anything else, so a computed key expression has to be rejected here rather than there.
+        if (expr == nullptr || !(expr->is<IR::Member>() || expr->is<IR::PathExpression>() ||
+                                 expr->is<IR::ArrayIndex>()))
+            return std::nullopt;
+        const auto &sv = ToolsVariables::convertReference(expr);
+        if (!es->exists(sv)) return std::nullopt;
+        const auto *val = es->get(sv);
+        if (val == nullptr || Taint::hasTaint(val)) return std::nullopt;
+        const auto *c = fs->getFinalModel().evaluate(val, true)->to<IR::Constant>();
+        if (c == nullptr) return std::nullopt;
+        point.push_back(c->value & ((big_int(1) << widths[i]) - 1));
+    }
+    return point;
+}
+
+/// Which const entry @p fs's execution selected at @p sink: the outcome identity the const-entry
+/// action-divergence mode compares between the legit and the attack Phase 3.
+///
+/// The obvious mechanism is NOT usable. evalTableConstEntries marks the chosen IR::Entry visited
+/// (table_stepper.cpp), but ExecutionState::markVisited drops every IR::Entry unless
+/// coverageOptions.coverTableEntries, which only --track-coverage TABLE_ENTRIES sets -- and every
+/// recipe that runs tampering passes STATEMENTS. The visited set would be silently empty and every
+/// outcome would read "not readable". Forcing that coverage flag on is not an option either: it
+/// changes CoverableNodesScanner's output and therefore lookahead-driven path selection, which would
+/// move the legacy HIT/MISS counts this mode must leave alone.
+///
+/// So: read the hit bit, then the action stamp, and fall back to the concrete key only when two
+/// entries name the same action with different arguments. Every failure answers "not readable",
+/// which is never a claim of divergence.
+///
+/// Known limitation, shared with evalSinkHit: a sink applied twice on one path leaves only the last
+/// stamp, so this describes the last apply.
+ConstEntryOutcome readConstEntrySelection(const FinalState *fs, const IR::P4Table *sink,
+                                          const ActionResolver &resolve) {
+    if (fs == nullptr || sink == nullptr) return {};
+    const auto *entries = sink->getEntries();
+    if (entries == nullptr || entries->entries.empty()) return {};
+    const auto *es = fs->getExecutionState();
+
+    // --- Tier 0: did an entry run at all, or the default action? ---
+    //
+    // exists() BEFORE get(): a sink not applied on this path leaves the hit var unstamped, and
+    // ExecutionState::get does not return nullptr for a missing var -- it BUGs and aborts the whole
+    // run, discarding every test already found.
+    const auto &hitVar = TableStepper::getTableHitVar(sink);
+    if (!es->exists(hitVar)) return {};
+    const auto *hitExpr = es->get(hitVar);
+    if (hitExpr == nullptr || Taint::hasTaint(hitExpr)) return {};
+    const auto *hitVal = fs->getFinalModel().evaluate(hitExpr, true);
+    const auto *hitBool = hitVal != nullptr ? hitVal->to<IR::BoolLiteral>() : nullptr;
+    if (hitBool == nullptr) return {};
+    if (!hitBool->value) {
+        // A MISS. Report the default action's own key rather than a sentinel, so an entry naming the
+        // same action as `const default_action` reads as the same outcome instead of a spurious
+        // difference. constEntryOutcomesDiverge rejects a MISS either way; this keeps the reported
+        // string honest for triage.
+        const auto *defAct = sink->getDefaultAction();
+        const auto *defMce = defAct != nullptr ? defAct->to<IR::MethodCallExpression>() : nullptr;
+        return {/*readable=*/true, /*matchedEntry=*/false, constEntryOutcomeKey(defMce, resolve)};
+    }
+
+    // --- Tier 1: the action stamp. ---
+    //
+    // TableStepper writes <table>.*action as a plain StringLiteral on the const-entry branch, using
+    // the same spelling constEntryOutcomeKey renders, so this costs no model evaluation.
+    const auto &actionVar = TableStepper::getTableActionVar(sink);
+    if (!es->exists(actionVar)) return {};
+    const auto *actExpr = es->get(actionVar);
+    const auto *stamp = actExpr != nullptr ? actExpr->to<IR::StringLiteral>() : nullptr;
+    // Not a literal: the tainted-key branch, which synthesises an action rather than selecting one.
+    if (stamp == nullptr) return {};
+
+    std::vector<const IR::Entry *> named;
+    cstring namedKey = ""_cs;
+    bool namedAgree = true;
+    for (const auto *entry : entries->entries) {
+        const auto *act = entry->getAction();
+        const auto *mce = act != nullptr ? act->to<IR::MethodCallExpression>() : nullptr;
+        if (mce == nullptr) return {};  // unanalyzable entry list
+        if (mce->method->toString() != stamp->value) continue;
+        const auto key = constEntryOutcomeKey(mce, resolve);
+        if (named.empty()) {
+            namedKey = key;
+        } else if (key != namedKey) {
+            namedAgree = false;
+        }
+        named.push_back(entry);
+    }
+    if (named.empty()) return {};  // the stamped action names no const entry
+    // Every entry naming this action renders the same outcome, so which one ran does not matter.
+    if (namedAgree) return {/*readable=*/true, /*matchedEntry=*/true, namedKey};
+
+    // --- Tier 2: same action, different action data. ---
+    //
+    // Only here does the concrete key matter, and only among the entries that named the stamped
+    // action. Walk the entry list in declaration order, first match wins, mirroring the order the
+    // stepper forked its branches in.
+    const auto optWidths = constEntryKeyWidths(sink);
+    if (!optWidths.has_value()) return {};
+    const auto point = concreteSinkKey(fs, sink, *optWidths);
+    if (!point.has_value()) return {};
+    for (const auto *entry : named) {
+        const auto cube = constEntryCubeOf(entry, *optWidths);
+        if (!cube.has_value()) return {};
+        if (!cubeContains(*cube, *point)) continue;
+        const auto *mce = entry->getAction()->to<IR::MethodCallExpression>();
+        return {/*readable=*/true, /*matchedEntry=*/true, constEntryOutcomeKey(mce, resolve)};
+    }
+    // The hit bit says an entry ran, but no entry naming the stamped action contains the key we
+    // read. Something disagrees; report no claim rather than guess.
+    return {};
+}
+
+}  // namespace
+
 /// True when @p table's `const entries` exhaustively cover its key space, i.e. every reachable key
 /// combination is named by an entry, so the table can NEVER miss.
 ///
@@ -2373,56 +2575,21 @@ static bool constEntriesCoverKeySpace(const IR::P4Table *table) {
     // enumerating the space, so a wide key must bail rather than loop forever -- and a space that
     // large cannot be covered by an entry list anyway.
     constexpr size_t kMaxKeySpace = 1u << 16u;
-    std::vector<int> widths;
+    const auto optWidths = constEntryKeyWidths(table);
+    if (!optWidths.has_value()) return false;
+    const auto &widths = *optWidths;
     size_t keySpace = 1;
-    for (const auto *ke : key->keyElements) {
-        if (ke->matchType == nullptr || ke->matchType->path == nullptr) return false;
-        const cstring matchKind = ke->matchType->path->name.name;
-        // exact and ternary are enumerable as cubes. lpm/range/optional are not handled here and
-        // must fall through to the existing behaviour.
-        if (matchKind != P4Constants::MATCH_KIND_EXACT &&
-            matchKind != P4Constants::MATCH_KIND_TERNARY)
-            return false;
-        const auto *bits = ke->expression->type->to<IR::Type_Bits>();
-        if (bits == nullptr || bits->width_bits() <= 0 || bits->width_bits() >= 32) return false;
-        const size_t domain = static_cast<size_t>(1) << bits->width_bits();
+    for (const int width : widths) {
+        const size_t domain = static_cast<size_t>(1) << width;
         if (domain > kMaxKeySpace / keySpace) return false;  // too large to enumerate
-        widths.push_back(bits->width_bits());
         keySpace *= domain;
     }
-    if (widths.empty()) return false;
 
-    // Each const entry is a cube: (value, mask) per key, where mask 0 means "don't care". A ternary
-    // entry writes `v &&& m` (IR::Mask) or `_` (IR::DefaultExpression); an exact one is a bare
-    // constant, i.e. an all-ones mask.
-    struct Cube {
-        std::vector<big_int> value;
-        std::vector<big_int> mask;
-    };
-    std::vector<Cube> cubes;
+    std::vector<EntryCube> cubes;
     for (const auto *entry : entries->entries) {
-        if (entry->keys == nullptr || entry->keys->components.size() != widths.size()) return false;
-        Cube cube;
-        for (size_t i = 0; i < widths.size(); ++i) {
-            const IR::Expression *k = entry->keys->components.at(i);
-            const big_int allOnes = (big_int(1) << widths[i]) - 1;
-            if (const auto *c = k->to<IR::Constant>()) {
-                cube.value.push_back(c->value & allOnes);
-                cube.mask.push_back(allOnes);
-            } else if (k->is<IR::DefaultExpression>()) {
-                cube.value.push_back(0);
-                cube.mask.push_back(0);  // don't care
-            } else if (const auto *m = k->to<IR::Mask>()) {
-                const auto *mv = m->left->to<IR::Constant>();
-                const auto *mm = m->right->to<IR::Constant>();
-                if (mv == nullptr || mm == nullptr) return false;
-                cube.value.push_back(mv->value & allOnes);
-                cube.mask.push_back(mm->value & allOnes);
-            } else {
-                return false;  // range/other -> not decided here
-            }
-        }
-        cubes.push_back(std::move(cube));
+        auto cube = constEntryCubeOf(entry, widths);
+        if (!cube.has_value()) return false;
+        cubes.push_back(std::move(*cube));
     }
 
     // Enumerate the key space and require every point to be matched by some cube. Direct rather than
@@ -2437,20 +2604,9 @@ static bool constEntriesCoverKeySpace(const IR::P4Table *table) {
             rest /= domain;
         }
         std::reverse(coords.begin(), coords.end());
-        bool matched = false;
-        for (const auto &cube : cubes) {
-            bool all = true;
-            for (size_t i = 0; i < widths.size(); ++i) {
-                if ((coords[i] & cube.mask[i]) != (cube.value[i] & cube.mask[i])) {
-                    all = false;
-                    break;
-                }
-            }
-            if (all) {
-                matched = true;
-                break;
-            }
-        }
+        const bool matched = std::any_of(cubes.begin(), cubes.end(), [&coords](const auto &cube) {
+            return cubeContains(cube, coords);
+        });
         if (!matched) return false;
     }
     return true;
@@ -2834,7 +2990,7 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
     return phase3States.empty() ? nullptr : phase3States[0];
 }
 
-int StateDependencyTracker::legitPhase3Sink(
+const FinalState *StateDependencyTracker::runLegitPhase3(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr) {
     // Carry Phase 1's OWN register writes (no attacker Phase-2 write) into the replay.
@@ -2846,7 +3002,23 @@ int StateDependencyTracker::legitPhase3Sink(
     const auto *legit = runSymbolicPhase3(chain, initState, fs1, inputPort, inputPortSymExpr,
                                           p1OwnCarry, /*keepWriteCoverage=*/false);
     pinSinkEntryForLegit = false;
+    return legit;
+}
+
+int StateDependencyTracker::legitPhase3Sink(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr) {
+    const auto *legit = runLegitPhase3(chain, initState, fs1, inputPort, inputPortSymExpr);
     return legit == nullptr ? -1 : evalSinkFlip(legit);
+}
+
+ConstEntryOutcome StateDependencyTracker::legitPhase3ConstEntry(
+    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
+    const ActionResolver &resolve) {
+    const auto *legit = runLegitPhase3(chain, initState, fs1, inputPort, inputPortSymExpr);
+    if (legit == nullptr) return {};  // no legit terminal -> no claim
+    return readConstEntrySelection(legit, currentSinkTable_, resolve);
 }
 
 const FinalState *StateDependencyTracker::reDeriveConcretePhase(
@@ -3144,7 +3316,11 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
 size_t StateDependencyTracker::runTamperingChain(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const std::vector<const FinalState *> &phase1Bucket, const TamperingCallback &callBack,
-    size_t maxPerChain, bool missToHit) {
+    size_t maxPerChain, TamperPass pass) {
+    // Recovered immediately so every pre-existing use below reads exactly as it did when this was a
+    // bool parameter; `adiv` guards the additive const-entry pass and nothing else.
+    const bool missToHit = pass == TamperPass::MissToHit;
+    const bool adiv = pass == TamperPass::ConstEntryActionDiverge;
     currentChain = &chain;
 
     // Resolve the chain's sink: either a table (H2S2K) or an if-condition (H2S2C). Exactly one is
@@ -3162,6 +3338,15 @@ size_t StateDependencyTracker::runTamperingChain(
     recordSinkStub(currentSinkTable_, chain.sinkTableControlPlaneName,
                    &programInfo.getP4Program(), /*isSink=*/true);
 
+    // Scope gate for the additive pass, deliberately ABOVE the condition-sink delegation so it
+    // disposes of condition chains too (they have no sink table, hence no const entries). Only a
+    // table the stepper evaluates through its `const entries` qualifies: there the key -> (action,
+    // args) map is program text, so a difference between two entries is a property of the program.
+    // On an open table p4symbex synthesises the entries itself and both sides of the comparison
+    // would be tool-chosen -- which is precisely how the earlier, unrestricted version of this idea
+    // degenerated into "can I invent two control planes that differ".
+    if (adiv && !tableHasConstEntries(currentSinkTable_)) return 0;
+
     // H2S2C: condition sinks use a dedicated flow (symbolic Phase-3 flip confirmation for both
     // directions). Delegate before the table-specific logic below.
     if (currentSinkCondition != nullptr) {
@@ -3169,15 +3354,31 @@ size_t StateDependencyTracker::runTamperingChain(
     }
     if (missToHit && currentSinkTable_ == nullptr) return 0;
 
+    // Cheap static pre-filter for the additive pass: if every const entry has the same observable
+    // effect, the map is a no-op selector and no key movement inside it can change anything.
+    //
+    // This is a SCREEN, never the emission criterion. constEntryActionsDiverge compares summarized
+    // action bodies and reports "diverges" for anything it cannot summarize, which is the right bias
+    // for a filter that must not delete candidates -- and exactly the wrong bias for deciding a case,
+    // since it makes an outcome differ from itself. What decides emission is entry identity, below.
+    if (adiv && !constEntryActionsDiverge(currentSinkTable_,
+                                          actionResolverFor(&programInfo.getP4Program()))) {
+        printInfo("[Tampering adiv] chain id=%1% (%2%): sink '%3%' has const entries, but they are "
+                  "observably identical -- the const map is a no-op selector, so no key movement "
+                  "within it can change anything. Skipping.",
+                  chain.id, currentChainName, chain.sinkTableControlPlaneName);
+        return 0;
+    }
+
     // A sink whose const entries cover the whole key space cannot MISS, so the HIT->MISS direction
     // is asking for a state the program cannot reach. Emitting it produces a test that always fails
     // to reproduce (linkguardian's era_correction h2m class). The MISS->HIT direction is dropped for
     // the same reason: its Phase-1 filter keeps only sink-MISS baselines, of which there are none.
     //
     // What is NOT suppressed is a change of ACTION within the const map -- that is a real observable
-    // difference, and it is what the Step-4 divergence matrix is for; this only removes the
-    // HIT/MISS framing that does not apply to such a table.
-    if (constEntriesCoverKeySpace(currentSinkTable_)) {
+    // difference, and it is exactly what the ConstEntryActionDiverge pass looks for, so that pass
+    // runs on past this guard. This only removes the HIT/MISS framing, which does not apply here.
+    if (!adiv && constEntriesCoverKeySpace(currentSinkTable_)) {
         // Two quite different situations, worth telling apart in the log: either the const map is a
         // no-op selector (every entry has the same observable effect, so no key movement inside it
         // can matter and the chain is dead), or its entries really do differ and only the HIT/MISS
@@ -3210,7 +3411,34 @@ size_t StateDependencyTracker::runTamperingChain(
 
     // Direction filter: the shared collector applied no sink/disposition filter (it served both
     // directions and kept drops), so apply them here.
-    if (missToHit) {
+    const auto resolveAction = actionResolverFor(&programInfo.getP4Program());
+    if (adiv) {
+        // Keep terminals that MATCHED a const entry. Strictly stronger than the HIT→MISS filter
+        // below (matching an entry implies the hit var is true), so every precondition the emission
+        // block already assumes about fs1 still holds. Direction-free: there is no direction to
+        // choose when both replays reach the sink.
+        const bool distinct = SymbexOptions::get().distinctIOPorts;
+        phase1States.erase(
+            std::remove_if(
+                phase1States.begin(), phase1States.end(),
+                [this, distinct, &resolveAction](const FinalState *fs) {
+                    const auto outcome =
+                        readConstEntrySelection(fs, currentSinkTable_, resolveAction);
+                    if (!outcome.readable || !outcome.matchedEntry) return true;
+                    bool dropped = false;
+                    int outPort = -1;
+                    evalDisposition(fs, dropped, outPort);
+                    if (!dropped && distinct) {
+                        const auto *ipExpr =
+                            fs->getExecutionState()->get(programInfo.getTargetInputPortVar());
+                        const auto inPort =
+                            IR::getIntFromLiteral(fs->getFinalModel().evaluate(ipExpr, true));
+                        if (inPort == outPort) return true;
+                    }
+                    return false;
+                }),
+            phase1States.end());
+    } else if (missToHit) {
         // Keep only reached-and-MISS terminals (the flippable baselines).
         phase1States.erase(
             std::remove_if(phase1States.begin(), phase1States.end(),
@@ -3243,16 +3471,29 @@ size_t StateDependencyTracker::runTamperingChain(
             phase1States.end());
     }
     if (phase1States.empty()) {
-        if (!missToHit)
+        if (!missToHit && !adiv)
             warning("[Tampering] Phase 1 found no terminal state for chain id=%1%.", chain.id);
         return 0;
     }
     if (missToHit)
         printInfo("[Tampering MISS→HIT] chain id=%1% (%2%): %3% Phase-1 MISS terminal(s)", chain.id,
                   chain.soName, phase1States.size());
+    if (adiv)
+        printInfo("[Tampering adiv] chain id=%1% (%2%): %3% Phase-1 terminal(s) matched a const "
+                  "entry at sink '%4%'",
+                  chain.id, chain.soName, phase1States.size(), chain.sinkTableControlPlaneName);
 
     // Build deduplicated PhaseConditions (port pair + table key values) for Phase 1.
     std::vector<PhaseConditions> phase1Conditions;
+    // Parallel to phase1Conditions and used only by the additive pass. buildPhaseCondition derives
+    // its table-key map from the EVALUATED tableconfigs, and evalTableConstEntries creates no
+    // TableConfig at all, so for a const-entry sink a PhaseCondition says nothing about which entry
+    // was selected. Without this, two Phase-1 terminals that matched different entries collapse into
+    // one bucket whose representative then drives Phase-2 setup and every cross-phase check while
+    // claiming an outcome its bucket-mates never produced. Adding it can only SPLIT buckets, so it
+    // cannot lose candidates; for the other two passes it stays "" and the pair degenerates to the
+    // std::find this replaces.
+    std::vector<cstring> phase1EntryKeys;
     std::map<size_t, size_t> phase1StateToCondition;
     const IR::Expression *inputPortSymExpr = nullptr;
     for (size_t i = 0; i < phase1States.size(); ++i) {
@@ -3269,16 +3510,21 @@ size_t StateDependencyTracker::runTamperingChain(
                           "Phase 1 identical input/output ports %1%", cond.inputPort);
             }
         }
-        auto it = std::find(phase1Conditions.begin(), phase1Conditions.end(), cond);
-        size_t idx;
-        if (it == phase1Conditions.end()) {
-            idx = phase1Conditions.size();
+        const cstring entryKey =
+            adiv ? readConstEntrySelection(fs1, currentSinkTable_, resolveAction).key : ""_cs;
+        size_t idx = phase1Conditions.size();
+        for (size_t c = 0; c < phase1Conditions.size(); ++c) {
+            if (phase1Conditions[c] == cond && phase1EntryKeys[c] == entryKey) {
+                idx = c;
+                break;
+            }
+        }
+        if (idx == phase1Conditions.size()) {
             phase1Conditions.push_back(cond);
+            phase1EntryKeys.push_back(entryKey);
             if (!missToHit)
                 printInfo("[Tampering] Phase 1 chose input_port=%1% output_port=%2%", cond.inputPort,
                           cond.outputPort);
-        } else {
-            idx = static_cast<size_t>(std::distance(phase1Conditions.begin(), it));
         }
         phase1StateToCondition[i] = idx;
     }
@@ -3524,6 +3770,28 @@ size_t StateDependencyTracker::runTamperingChain(
         size_t subTestId = 0;
         std::vector<size_t> cursor(phase1States.size(), 0);
         std::map<size_t, int> legitSinkByP1;  // memoized attack-attribution per Phase-1 state
+        // The additive pass's own memo, kept separate so the legacy int memo above is untouched.
+        std::map<size_t, ConstEntryOutcome> legitEntryByP1;
+        auto legitEntryFor = [&](size_t i, const FinalState *fs1, int inputPort) {
+            auto it = legitEntryByP1.find(i);
+            if (it != legitEntryByP1.end()) return it->second;
+            const auto outcome = legitPhase3ConstEntry(chain, initState, fs1, inputPort,
+                                                       inputPortSymExpr, resolveAction);
+            // Logged once per Phase-1 state, because an unreadable legit outcome silently disables
+            // the whole pass: the goal cannot claim a difference against something it could not
+            // read, so the chain reports "no accumulation up to cap" and looks like a search
+            // failure rather than a missing baseline.
+            if (!outcome.readable)
+                printInfo("[Tampering adiv] chain id=%1%: legit Phase-3 outcome for Phase-1 state "
+                          "%2% is UNREADABLE (no legit terminal, tainted key, or a stamp naming no "
+                          "const entry); this state can make no divergence claim.",
+                          chain.id, i);
+            else
+                printInfo("[Tampering adiv] chain id=%1%: legit Phase-3 for Phase-1 state %2% "
+                          "selects '%3%'.",
+                          chain.id, i, outcome.key);
+            return legitEntryByP1[i] = outcome;
+        };
         bool chainCapHit = false;
         while (!chainCapHit) {
             bool emittedThisRound = false;
@@ -3538,13 +3806,16 @@ size_t StateDependencyTracker::runTamperingChain(
                 // the Phase-2 write is redundant, so drain this bucket. This is the legit-vs-attack
                 // differential the single-run sinkActionsDiverge gate cannot see. (legitSink == -1 =
                 // no legit terminal → cannot rule out → fall through and emit.)
+                // The additive pass does its own attribution inside the goal (legit vs attack entry
+                // identity), so the HIT/MISS-phrased gate below does not apply to it.
                 auto lsIt = legitSinkByP1.find(i);
                 int legitSink =
-                    (lsIt != legitSinkByP1.end())
-                        ? lsIt->second
-                        : (legitSinkByP1[i] =
-                               legitPhase3Sink(chain, initState, fs1, cond1.inputPort,
-                                               inputPortSymExpr));
+                    adiv ? 1
+                         : ((lsIt != legitSinkByP1.end())
+                                ? lsIt->second
+                                : (legitSinkByP1[i] =
+                                       legitPhase3Sink(chain, initState, fs1, cond1.inputPort,
+                                                       inputPortSymExpr)));
                 if (legitSink == 0) {
                     printInfo("[Tampering] HIT→MISS chain id=%1%: victim's own Phase-1 write already "
                               "MISSes sink '%2%' on replay (redundant with attacker); skipping.",
@@ -3557,7 +3828,15 @@ size_t StateDependencyTracker::runTamperingChain(
                 // action (Phase 1) and its default (MISS) action write different output state. If
                 // they are provably identical the flip changes nothing — drain this Phase-1 bucket
                 // and skip. (Sound-toward-emitting; the differential oracle is the final judge.)
-                if (!sinkActionsDiverge(fs1, currentSinkTable_, chain.sinkTableControlPlaneName)) {
+                //
+                // Skipped for the additive pass, and the guard must stay rather than be deleted:
+                // sinkActionsDiverge compares the HIT action against the DEFAULT action, a question
+                // that does not apply when both replays match an entry. Worse, on a const table with
+                // entries {A, B} and `const default_action = A`, a Phase-1 terminal that selected A
+                // would make it report "does not diverge" and drain the bucket — destroying exactly
+                // the A → B divergence this pass exists to find.
+                if (!adiv &&
+                    !sinkActionsDiverge(fs1, currentSinkTable_, chain.sinkTableControlPlaneName)) {
                     printInfo("[Tampering] HIT→MISS chain id=%1%: sink '%2%' HIT/default actions do "
                               "not diverge; flip is unobservable, skipping.",
                               chain.id, chain.sinkTableControlPlaneName);
@@ -3626,7 +3905,19 @@ size_t StateDependencyTracker::runTamperingChain(
                 // writing a flipping value). Emitting it would produce an un-replayable test.
                 const auto drivenIt = drivenFs3.find(fs2);
                 const bool isDriven = drivenIt != drivenFs3.end();
-                if (!soFeasible || isDriven) {
+                // The additive pass always takes the accumulated branch: its criterion reads the
+                // ATTACK Phase-3 terminal, and the single-send branch below never computes one.
+                //
+                // This is also its current limitation. Accumulation replays the SAME Phase-2 packet,
+                // which moves the register only when replaying changes it -- a counter, or a
+                // read-modify-write RegisterAction. Against a plain `write()` of an attacker-chosen
+                // value the replay is idempotent, so the goal only ever sees the value the Phase-2
+                // solver picked; if that value already agrees with the legit read, the candidate is
+                // rejected even though emission would have forced the packet to write
+                // --state-tamper-value. The fix is to steer the written VALUE toward one selecting a
+                // different const entry (statically known from the entry list) instead of
+                // accumulating -- driveRegisterPhase2's pre-set-and-revalidate pattern.
+                if (!soFeasible || isDriven || adiv) {
                     // A single write does not flip the sink (its value equals the Phase-1 HIT key).
                     // For a counter/accumulator register the value is not attacker-chosen; replaying
                     // the same Phase-2 packet drives the register away from the HIT key until the sink
@@ -3644,6 +3935,38 @@ size_t StateDependencyTracker::runTamperingChain(
                         if (fs1 != drivenFs1[fs2]) continue;
                         fs3 = drivenIt->second;
                         repeat = drivenRepeat[fs2];
+                    } else if (adiv) {
+                        // Entry identity, not a hit bit: emit iff the legit and the attack Phase 3
+                        // both matched a const entry AND the entries differ. Both sides come from
+                        // the program's own entry list, so this is reflexive and needs no
+                        // conservative "unknown ⇒ differs" bias — an unreadable outcome is simply
+                        // not a claim, and the replay oracle remains the judge of observability.
+                        const auto legitEntry = legitEntryFor(i, fs1, cond1.inputPort);
+                        // Report the FIRST attack outcome only. Without it a candidate that fails
+                        // is indistinguishable from one the search never reached, and the three
+                        // explanations — the attacker's write landed on another cell, the outcome
+                        // was unreadable, or it genuinely matches the legit one — need different
+                        // fixes. Throttled because the goal runs once per replayed packet.
+                        bool loggedAttack = false;
+                        fs3 = accumulatePhase2Flip(
+                            chain, initState, fs1, cond1.inputPort, fs2, ipAcc, inputPortSymExpr,
+                            [this, legitEntry, &resolveAction, &loggedAttack,
+                             &chain](const FinalState *cand) {
+                                const auto attack =
+                                    readConstEntrySelection(cand, currentSinkTable_, resolveAction);
+                                if (!loggedAttack) {
+                                    loggedAttack = true;
+                                    printInfo("[Tampering adiv] chain id=%1%: legit selects '%2%', "
+                                              "first attack Phase-3 selects %3%.",
+                                              chain.id, legitEntry.key,
+                                              !attack.readable ? "UNREADABLE"_cs
+                                              : attack.matchedEntry
+                                                  ? attack.key
+                                                  : "the default action (a MISS)"_cs);
+                                }
+                                return constEntryOutcomesDiverge(legitEntry, attack);
+                            },
+                            repeat);
                     } else {
                         fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2,
                                                    ipAcc, inputPortSymExpr, hitGoal(false), repeat);
@@ -3738,6 +4061,22 @@ size_t StateDependencyTracker::runTamperingChain(
                     tsAcc.chainId = chain.id;
                     tsAcc.subTestId = ++subTestId;
                     tsAcc.phase2RepeatCount = repeat;  // HIT→MISS emits hit_phase=1 (missToHit=false)
+                    if (adiv) {
+                        // An action divergence reaches the sink in BOTH replays, so it has no
+                        // hit/miss phase pair to emit; the emitters key that off the kind. What it
+                        // CAN name is the two entries, which is what these two strings carry.
+                        const auto legitEntry = legitEntryFor(i, fs1, cond1.inputPort);
+                        const auto attackEntry =
+                            readConstEntrySelection(fs3, currentSinkTable_, resolveAction);
+                        tsAcc.kind = TamperKind::ActionDiverge;
+                        tsAcc.caseLabel = "ACTION_DIVERGE"_cs;
+                        tsAcc.sinkOutcomeLegit = legitEntry.key;
+                        tsAcc.sinkOutcomeAttack = attackEntry.key;
+                        printInfo("[Tampering adiv] chain id=%1% sub=%2%: sink '%3%' selects "
+                                  "'%4%' in the legit replay and '%5%' under the attacker's write.",
+                                  chain.id, tsAcc.subTestId, chain.sinkTableControlPlaneName,
+                                  legitEntry.key, attackEntry.key);
+                    }
                     if (repeat > 1)
                         printInfo("[Tampering HIT→MISS] chain id=%1% sub=%2%: accumulation needs %3% "
                                   "Phase-2 packet(s) to flip the sink.",
