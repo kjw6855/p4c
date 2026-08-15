@@ -16,6 +16,8 @@
 #include "lib/log.h"
 #include "nlohmann/json.hpp"
 
+#include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
+
 namespace P4::P4Tools::Symbex::Bmv2 {
 
 PTF::PTF(const TestBackendConfiguration &testBackendConfiguration)
@@ -314,7 +316,7 @@ void PTF::writeTestToFile(const TestSpec *testSpec, cstring selectedBranches, si
 std::string PTF::getTamperingTestCaseTemplate() {
     static std::string TEST_CASE(
         R"""(
-class TamperingTest{{test_id}}(AbstractTest):
+class TamperingTest{{test_id}}_{{kind_tag}}(AbstractTest):
     '''
     Date generated: {{timestamp}}
     Current node coverage: {{coverage}}
@@ -430,6 +432,11 @@ void PTF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selec
     }
 
     dataJson["test_id"] = testId;
+    // PTF appends every test to ONE .py file, so the class name has to carry the tamper kind too:
+    // the kinds reuse the same (chainId, subTestId) numbering, and two classes of the same name in
+    // one module are not an error — the later definition silently wins at import, losing a whole
+    // kind's tests. Kept out of test_id so h2m class names do not renumber.
+    dataJson["kind_tag"] = tamperKindTag(testSpec->kind).c_str();
     dataJson["trace"] = getTrace(testSpec->spec1);
 
     // Build a merged control-plane JSON that includes table entries from both Phase 1

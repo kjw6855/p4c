@@ -16,6 +16,7 @@
 #include "backends/state_dependency/dependency_graph.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/lib/final_state.h"
+#include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
 
 namespace P4::P4Tools::Symbex {
@@ -84,12 +85,21 @@ struct TamperingFinalState {
     /// by --max-phase2-packets). The serializer expands this into k marked input_packet blocks.
     size_t phase2RepeatCount = 1;
 
-    // ---- Tamper direction (sink-flip observable) ---------------------------------------------
-    /// Tamper direction. false = HIT→MISS (Phase-1 sink HIT, Phase-3 MISS); true = MISS→HIT
-    /// (Phase-1 sink MISS, Phase-3 HIT). Selects how hit_phase/miss_phase are emitted. Phase 3 is a
-    /// dynamic deviation check for both directions — the end-to-end validator compares the Phase-3
-    /// output to the Phase-1 reference, so p4symbex emits no predicted Phase-3 disposition.
-    bool missToHit = false;
+    // ---- Tamper kind (what the attacker changed at the sink) ---------------------------------
+    /// What this case claims the attacker changed at the sink; see TamperKind. Only the two HIT/MISS
+    /// kinds select hit_phase/miss_phase — the others cannot be expressed as one bit. Phase 3 is a
+    /// dynamic deviation check for every kind: the end-to-end validator compares the Phase-3 output
+    /// to the Phase-1 reference, so p4symbex emits no predicted Phase-3 disposition.
+    ///
+    /// This replaces the former `bool missToHit`, one enumerator per former truth value, so every
+    /// existing call site maps across mechanically and the emitted `h2m`/`m2h` path tags are
+    /// unchanged. Condition sinks deliberately still report HitToMiss/MissToHit rather than the
+    /// Cond* kinds: switching them would rename their output directories, which is an output change
+    /// that belongs in its own commit, not in this refactor.
+    ///
+    /// Declared where `missToHit` was, i.e. past the positional prefix this struct is
+    /// aggregate-initialised with — assign it by name, like the fields around it.
+    TamperKind kind = TamperKind::HitToMiss;
     /// Human-readable case label, e.g. "MISS_TO_HIT/FWD_TO_DROP" (set for MISS→HIT, from the
     /// flip-confirmation run). Emitted as informational metadata; empty for HIT→MISS.
     cstring caseLabel = ""_cs;
@@ -112,10 +122,17 @@ struct TamperingFinalState {
     /// accumulatePhase2Flip finds its packet count empirically and has no flip value to report, so
     /// its cases stay exact (unchanged behaviour).
     ///
-    /// Declared LAST on purpose: this struct is aggregate-initialised positionally at several call
-    /// sites, so a field inserted mid-struct would silently capture the next positional argument.
-    /// Assign it by name after construction.
+    /// Declared after the positional prefix on purpose: this struct is aggregate-initialised
+    /// positionally at several call sites, so a field inserted mid-struct would silently capture the
+    /// next positional argument. Assign this and everything below it by name after construction.
     std::map<cstring, big_int> attackerRegisterMinValues;
+
+    /// What the sink did in the legit Phase 3 and what it did in the attack Phase 3 — an action
+    /// stamp plus its concrete arguments. Report-only, and the only account a case that reaches the
+    /// sink in BOTH runs can give of itself, since such a case has no hit_phase/miss_phase to name.
+    /// Empty for the HIT/MISS kinds, which describe themselves through that pair instead.
+    cstring sinkOutcomeLegit = ""_cs;
+    cstring sinkOutcomeAttack = ""_cs;
 };
 
 /// Callback type for the three-phase tampering scenario.

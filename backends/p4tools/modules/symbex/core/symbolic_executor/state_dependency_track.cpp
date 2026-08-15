@@ -4035,7 +4035,7 @@ size_t StateDependencyTracker::runTamperingChain(
             ts.chainId = chain.id;
             ts.subTestId = ++emitted;
             ts.phase2RepeatCount = repeat;
-            ts.missToHit = true;
+            ts.kind = TamperKind::MissToHit;
             ts.caseLabel = cstring("MISS_TO_HIT/" + disp);
             if (repeat > 1)
                 printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: accumulation needs %3% Phase-2 "
@@ -4370,7 +4370,9 @@ size_t StateDependencyTracker::runConditionChain(
             ts.chainId = chain.id;
             ts.subTestId = ++emitted;
             ts.phase2RepeatCount = repeat;
-            ts.missToHit = missToHit;
+            // A condition sink keeps the HIT/MISS kinds so its emitted path tag stays h2m/m2h;
+            // see TamperingFinalState::kind. The Cond* kinds exist but are not selected here.
+            ts.kind = missToHit ? TamperKind::MissToHit : TamperKind::HitToMiss;
             ts.caseLabel = cstring(missToHit ? "COND_FALSE_TO_TRUE" : "COND_TRUE_TO_FALSE");
             if (repeat > 1)
                 printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: accumulation needs %3% Phase-2 "

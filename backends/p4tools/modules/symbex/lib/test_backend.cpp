@@ -790,7 +790,7 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     TamperingTestSpec tamperingSpec(res1->testSpec, res2->testSpec,
                                     state.readPathHasExit, state.attackerRegisterValues,
                                     state.attackerRegisterSinkTables);
-    tamperingSpec.missToHit = state.missToHit;
+    tamperingSpec.kind = state.kind;
     // The case label rides the emitted "Tamper case:" metadata line on every target, so tag a
     // report-only index there: such a test names the cell the attacker packet hashes to in the
     // model, but the solver was never obliged to keep it, and triage must not read it as a pinned
@@ -809,6 +809,8 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     tamperingSpec.multicastGroupId = state.multicastGroupId;
     tamperingSpec.phase2RepeatCount = state.phase2RepeatCount;
     tamperingSpec.attackerRegisterMinValues = state.attackerRegisterMinValues;
+    tamperingSpec.sinkOutcomeLegit = state.sinkOutcomeLegit;
+    tamperingSpec.sinkOutcomeAttack = state.sinkOutcomeAttack;
     // Phase 3 is a dynamic deviation check for both directions: the test script replays Phase 1's
     // packet and the end-to-end validator compares the Phase-3 output to the Phase-1 reference
     // (detecting drop/port/byte divergence — including non-drop table misses). p4symbex therefore

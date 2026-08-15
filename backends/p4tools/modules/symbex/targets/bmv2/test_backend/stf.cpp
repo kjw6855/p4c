@@ -22,6 +22,7 @@
 #include "nlohmann/json.hpp"
 
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
+#include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/targets/bmv2/test_spec.h"
 
 namespace P4::P4Tools::Symbex::Bmv2 {
@@ -371,7 +372,12 @@ void STF::emitTamperingTestcase(const TamperingTestSpec *testSpec, cstring selec
     auto optBasePath = getTestBackendConfiguration().fileBasePath;
     BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
     auto incrementedbasePath = optBasePath.value();
-    incrementedbasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId));
+    // Include the tamper kind, as BfRt and Protobuf already do. The kinds are generated in separate
+    // passes but reuse the same (chainId, subTestId) numbering, so without a kind tag the second
+    // pass silently OVERWRITES the first pass's files.
+    const std::string dir = tamperKindTag(testSpec->kind).string();
+    incrementedbasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId) +
+                               "_" + dir);
     incrementedbasePath.replace_extension(".stf");
     auto stfFileStream = std::ofstream(incrementedbasePath);
     inja::render_to(stfFileStream, testCase, dataJson);

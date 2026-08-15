@@ -22,6 +22,7 @@
 #include "nlohmann/json.hpp"
 
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
+#include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
 #include "backends/p4tools/modules/symbex/options.h"
 #include "backends/p4tools/modules/symbex/targets/bmv2/constants.h"
@@ -479,8 +480,14 @@ affected_register {
 ## endif
 ## if existsIn(reg, "sink_table")
   sink_table: "{{reg.sink_table}}"
+## if existsIn(reg, "hit_phase")
   hit_phase: {{reg.hit_phase}}
   miss_phase: {{reg.miss_phase}}
+## endif
+## endif
+## if existsIn(reg, "sink_outcome_legit")
+  sink_outcome_legit: "{{reg.sink_outcome_legit}}"
+  sink_outcome_attack: "{{reg.sink_outcome_attack}}"
 ## endif
 }
 ## endfor
@@ -704,10 +711,23 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
             }
             if (!sinkTableList.isNullOrEmpty()) {
                 j["sink_table"] = sinkTableList.c_str();
-                // HIT→MISS: sink HITs in Phase 1, MISSes after tamper in Phase 3.
-                // MISS→HIT: sink MISSes in Phase 1, HITs after tamper in Phase 3.
-                j["hit_phase"] = testSpec->missToHit ? 3 : 1;
-                j["miss_phase"] = testSpec->missToHit ? 1 : 3;
+                // Only the two HIT/MISS kinds have a hit/miss phase to name. An action divergence
+                // reaches the sink in BOTH runs, so any pair of phase numbers here would be a
+                // fiction — a fiction the harness would then lint against the installed keys.
+                if (testSpec->kind == TamperKind::HitToMiss ||
+                    testSpec->kind == TamperKind::MissToHit) {
+                    // HIT→MISS: sink HITs in Phase 1, MISSes after tamper in Phase 3.
+                    // MISS→HIT: sink MISSes in Phase 1, HITs after tamper in Phase 3.
+                    j["hit_phase"] = testSpec->isMissToHit() ? 3 : 1;
+                    j["miss_phase"] = testSpec->isMissToHit() ? 1 : 3;
+                }
+            }
+            // Report-only outcome pair, outside the sink_table block so a condition sink (which has
+            // no sink table) carries it too. The harness's txtpb readers look fields up by name, so
+            // a key they do not know is ignored rather than mis-parsed.
+            if (!testSpec->sinkOutcomeLegit.isNullOrEmpty()) {
+                j["sink_outcome_legit"] = testSpec->sinkOutcomeLegit.c_str();
+                j["sink_outcome_attack"] = testSpec->sinkOutcomeAttack.c_str();
             }
             affectedRegsJson.push_back(j);
         }
@@ -737,11 +757,11 @@ void Protobuf::writeTestToFile(const TamperingTestSpec *testSpec, cstring select
     auto optBasePath = getTestBackendConfiguration().fileBasePath;
     BUG_CHECK(optBasePath.has_value(), "Base path is not set.");
     auto incrementedbasePath = optBasePath.value();
-    // Include the tamper direction: HIT→MISS and MISS→HIT are generated in separate passes but
-    // reuse the same (chainId, subTestId) numbering, so without a direction tag the second pass
-    // silently overwrites the first pass's files (losing the HIT→MISS tests, whose sink entry lives
-    // in Phase 1 and is therefore replayable).
-    const std::string dir = testSpec->missToHit ? "m2h" : "h2m";
+    // Include the tamper kind: the kinds are generated in separate passes but reuse the same
+    // (chainId, subTestId) numbering, so without a kind tag the second pass silently overwrites the
+    // first pass's files (losing the HIT→MISS tests, whose sink entry lives in Phase 1 and is
+    // therefore replayable).
+    const std::string dir = tamperKindTag(testSpec->kind).string();
     incrementedbasePath.concat("_" + std::to_string(chainId + 1) + "_" + std::to_string(subTestId) +
                                "_" + dir);
     incrementedbasePath.replace_extension(".txtpb");

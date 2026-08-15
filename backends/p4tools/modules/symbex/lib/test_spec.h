@@ -11,6 +11,7 @@
 #include "ir/ir.h"
 #include "lib/cstring.h"
 
+#include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
 
 namespace P4::P4Tools::Symbex {
@@ -385,11 +386,15 @@ class TamperingTestSpec {
     /// Empty (or register absent) for non-Key-sink chains.
     std::map<cstring, cstring> attackerRegisterSinkTables;
 
-    /// Tamper direction. false = HIT→MISS (Phase-1 sink HIT → Phase-3 MISS): emit hit_phase=1,
-    /// miss_phase=3. true = MISS→HIT (Phase-1 sink MISS → Phase-3 HIT): emit hit_phase=3,
-    /// miss_phase=1. Phase 3 is a dynamic deviation check for both directions (the validator
-    /// compares the Phase-3 output to the Phase-1 reference).
-    bool missToHit = false;
+    /// What the attacker changed at the sink; see TamperKind. HitToMiss emits hit_phase=1 /
+    /// miss_phase=3 and MissToHit emits hit_phase=3 / miss_phase=1; every other kind emits neither,
+    /// because a single hit/miss pair cannot describe it. Phase 3 stays a dynamic deviation check
+    /// for all kinds (the validator compares the Phase-3 output to the Phase-1 reference).
+    TamperKind kind = TamperKind::HitToMiss;
+
+    /// The MISS→HIT test of the two legacy kinds, so a call site that genuinely needs the direction
+    /// bit (which of hit_phase/miss_phase is Phase 1) does not have to spell out the enumerator.
+    [[nodiscard]] bool isMissToHit() const { return kind == TamperKind::MissToHit; }
 
     /// Human-readable case label (e.g. "MISS_TO_HIT/DROP_TO_FWD"), emitted as metadata. Empty for
     /// HIT→MISS.
@@ -408,6 +413,13 @@ class TamperingTestSpec {
     /// one exact value it cannot observe (the flood stops on reaching its target, and packet loss
     /// moves where that lands). Absent => exact matching, as before.
     std::map<cstring, big_int> attackerRegisterMinValues;
+
+    /// What the sink did in the legit Phase 3 and in the attack Phase 3 — an action stamp plus its
+    /// concrete arguments. Report-only, and the only account a case that reaches the sink in BOTH
+    /// runs can give of itself, since such a case has no hit_phase/miss_phase to name. Empty for the
+    /// HIT/MISS kinds, which describe themselves through that pair instead.
+    cstring sinkOutcomeLegit = ""_cs;
+    cstring sinkOutcomeAttack = ""_cs;
 
     TamperingTestSpec(const TestSpec *s1, const TestSpec *s2, bool hasExit,
                       std::map<cstring, const TestObject *> attackerRegVals = {},
