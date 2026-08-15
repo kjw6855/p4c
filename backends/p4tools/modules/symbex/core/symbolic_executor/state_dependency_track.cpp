@@ -1490,6 +1490,18 @@ int StateDependencyTracker::evalSinkFlip(const FinalState *fs) const {
     return -1;
 }
 
+StateDependencyTracker::Phase3Goal StateDependencyTracker::hitGoal(bool want) const {
+    // Deliberately expressed over evalSinkFlip itself rather than re-deriving the bit: the goal
+    // must be bit-identical to the `evalSinkFlip(fs) == p3Target` test it replaces, and -1 (unknown
+    // state) must satisfy NEITHER direction — it equals neither 0 nor 1. It also has to stay a plain
+    // model lookup: the drivers evaluate it once per replayed packet, up to --max-phase2-packets
+    // times per candidate, so nothing here may touch tableconfigs or summarize an action body.
+    const int target = want ? 1 : 0;
+    return [this, target](const FinalState *fs) {
+        return fs != nullptr && evalSinkFlip(fs) == target;
+    };
+}
+
 void StateDependencyTracker::evalDisposition(const FinalState *fs, bool &dropped,
                                              int &outPort) const {
     const auto *es = fs->getExecutionState();
@@ -2904,7 +2916,7 @@ const FinalState *StateDependencyTracker::reDeriveConcretePhase(
 const FinalState *StateDependencyTracker::accumulatePhase2Flip(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort1, const FinalState *fs2, int inputPort2,
-    const IR::Expression *inputPortSymExpr, int p3Target, size_t &outRepeat) {
+    const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, size_t &outRepeat) {
     // Fold a terminal's register writes into a carry snapshot keyed by register name. Requires the
     // SO register to be present (else the tamper can't propagate).
     auto carryAll = [&](const FinalState *fs,
@@ -2932,7 +2944,7 @@ const FinalState *StateDependencyTracker::accumulatePhase2Flip(
     const FinalState *fs3 =
         runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, carried);
 
-    while ((fs3 == nullptr || evalSinkFlip(fs3) != p3Target) && k < cap) {
+    while ((fs3 == nullptr || !goal(fs3)) && k < cap) {
         // Replay the SAME Phase-2 packet (fs2's pinned input) from the current carried state to
         // apply one more increment; runSymbolicPhase3 pins the input + pre-sets the carried regs.
         const FinalState *fs2Next =
@@ -2949,7 +2961,7 @@ const FinalState *StateDependencyTracker::accumulatePhase2Flip(
         fs3 = runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, carried);
     }
 
-    if (fs3 != nullptr && evalSinkFlip(fs3) == p3Target) {
+    if (fs3 != nullptr && goal(fs3)) {
         outRepeat = k;
         return fs3;
     }
@@ -2967,7 +2979,7 @@ bool StateDependencyTracker::terminalWroteSO(const ExecutionState &es) const {
 const FinalState *StateDependencyTracker::driveRegisterPhase2(
     const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
-    const IR::Expression *inputPortSymExpr, int p3Target, const FinalState *&outFs2,
+    const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, const FinalState *&outFs2,
     size_t &outRepeat, big_int &outFlipValue) {
     // Generous cap on the computed packet count: large enough for real counter thresholds
     // (ACC-Turbo ~10001), small enough to reject pathological extrapolations.
@@ -3059,7 +3071,7 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
     //     Deliberately NOT filtered to clauses whose table feeds this chain's sink: the connection
     //     is a dataflow one (threshold -> est -> sign bit -> sink key) that the dependency graph does
     //     not record, and the sink table is a different table from the one carrying the threshold. A
-    //     wrong candidate is harmless -- it simply fails the allCovered/evalSinkFlip validation below
+    //     wrong candidate is harmless -- it simply fails the allCovered/goal validation below
     //     -- whereas a too-narrow filter silently drops the only workable candidate.
     if (const auto *ann = cpAnnotation(); ann != nullptr) {
         for (const auto &c : ann->assumeClauses()) {
@@ -3113,7 +3125,7 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
         if (!coverVal) continue;
         const FinalState *fs3 =
             runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, afterCover);
-        if (fs3 == nullptr || evalSinkFlip(fs3) != p3Target) continue;
+        if (fs3 == nullptr || !goal(fs3)) continue;
 
         outFs2 = fs2real;
         outRepeat = static_cast<size_t>(k);
@@ -3432,7 +3444,7 @@ size_t StateDependencyTracker::runTamperingChain(
             big_int flipValue = 0;
             const FinalState *fs3Drive = driveRegisterPhase2(
                 chain, initState, driveTemplate, repPhase1State, cond1.inputPort, inputPortSymExpr,
-                /*p3Target=*/missToHit ? 1 : 0, fs2real, kDrive, flipValue);
+                hitGoal(missToHit), fs2real, kDrive, flipValue);
             // Adopt the accumulation result when the write path was unreachable in one packet, or
             // when it genuinely needs k>1 (the single-packet terminals cannot flip this threshold).
             if (fs3Drive != nullptr && (singleWriteEmpty || kDrive > 1)) {
@@ -3634,7 +3646,7 @@ size_t StateDependencyTracker::runTamperingChain(
                         repeat = drivenRepeat[fs2];
                     } else {
                         fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2,
-                                                   ipAcc, inputPortSymExpr, /*p3Target=*/0, repeat);
+                                                   ipAcc, inputPortSymExpr, hitGoal(false), repeat);
                     }
                     if (fs3 == nullptr) {
                         printInfo("[Tampering] Phase 2 packet for chain id=%1%: constant register write "
@@ -3914,7 +3926,7 @@ size_t StateDependencyTracker::runTamperingChain(
                 repeat = drivenRepeat[fs2];
             } else {
                 fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
-                                           inputPortSymExpr, /*p3Target=*/1, repeat);
+                                           inputPortSymExpr, hitGoal(true), repeat);
             }
             if (fs3 == nullptr) continue;  // no packet count up to the cap flips the sink MISS→HIT
             // Sink action-divergence gate (replaces the old Phase1-vs-Phase3 disposition compare):
@@ -4216,7 +4228,8 @@ size_t StateDependencyTracker::runConditionChain(
             big_int flipValue = 0;
             const FinalState *fs3Drive =
                 driveRegisterPhase2(chain, initState, driveTemplate, repPhase1State, cond1.inputPort,
-                                    inputPortSymExpr, p3Target, fs2real, kDrive, flipValue);
+                                    inputPortSymExpr, hitGoal(p3Target == 1), fs2real, kDrive,
+                                    flipValue);
             // Adopt the accumulation result when the write path was unreachable in one packet, or when
             // it genuinely needs k>1 (the single-packet terminals cannot flip this threshold).
             if (fs3Drive != nullptr && (singleWriteEmpty || kDrive > 1)) {
@@ -4290,7 +4303,7 @@ size_t StateDependencyTracker::runConditionChain(
                 repeat = drivenRepeat[fs2];
             } else {
                 fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
-                                           inputPortSymExpr, p3Target, repeat);
+                                           inputPortSymExpr, hitGoal(p3Target == 1), repeat);
             }
             if (fs3 == nullptr) continue;  // no packet count up to the cap flips the condition
 

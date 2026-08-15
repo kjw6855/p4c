@@ -385,17 +385,27 @@ class StateDependencyTracker : public SymbolicExecutor {
     void pinIndexInputsToPhase1(ExecutionState &init, const FinalState *fs1,
                                 const std::set<const IR::SymbolicVariable *> &symVars);
 
+    /// What the Phase-2/Phase-3 search is looking for, evaluated on a Phase-3 terminal. Replaces the
+    /// `int p3Target` the drivers used to compare against: "the sink is HIT" is only one possible
+    /// goal, and a goal phrased over the whole Phase-3 outcome rather than one bit cannot be written
+    /// as an integer. The drivers call this once per replayed packet, so it must stay cheap.
+    using Phase3Goal = std::function<bool(const FinalState *)>;
+
+    /// The legacy goal: exactly `evalSinkFlip(fs) == (want ? 1 : 0)`, unknown (-1) satisfying
+    /// neither. Every existing caller passes this, so the drivers keep their current behaviour.
+    [[nodiscard]] Phase3Goal hitGoal(bool want) const;
+
     /// Accumulation driver: starting from @p fs2 (a reachable Phase-2 write packet), replay the SAME
-    /// packet — carrying the register state forward each time — and re-run symbolic Phase 3 until the
-    /// sink/condition flips to @p p3Target (evalSinkFlip). Returns the flipped Phase-3 terminal and
-    /// sets @p outRepeat to the number of Phase-2 packet sends (k); returns nullptr if no count up to
-    /// --max-phase2-packets flips it (or a fixpoint is reached: the carried SO value stops changing).
-    /// k=1 reproduces today's single-packet behavior. Reuses runSymbolicPhase3 as the pin+carry+run
-    /// engine for both the packet replay and the Phase-3 flip check.
+    /// packet — carrying the register state forward each time — and re-run symbolic Phase 3 until
+    /// @p goal accepts the Phase-3 terminal. Returns the accepted Phase-3 terminal and sets
+    /// @p outRepeat to the number of Phase-2 packet sends (k); returns nullptr if no count up to
+    /// --max-phase2-packets satisfies it (or a fixpoint is reached: the carried SO value stops
+    /// changing). k=1 reproduces today's single-packet behavior. Reuses runSymbolicPhase3 as the
+    /// pin+carry+run engine for both the packet replay and the Phase-3 check.
     const FinalState *accumulatePhase2Flip(
         const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs1, int inputPort1, const FinalState *fs2, int inputPort2,
-        const IR::Expression *inputPortSymExpr, int p3Target, size_t &outRepeat);
+        const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, size_t &outRepeat);
 
     /// Analytical drive-register path (Family 1: the action runs but a register-VALUE gate on the
     /// write path is unreached in one packet, so the single-packet allCovered DFS finds nothing).
@@ -403,14 +413,14 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// criterion), extracts (init, delta) and the threshold (op, C) from the missed gated
     /// IfStatement, computes how many sends k drive the register past the gate, pre-sets the carried
     /// SO to that value and RE-RUNS the real allCovered DFS (keepWriteCoverage) to validate that the
-    /// full write path is now covered, then runs Phase 3 for the flip+diverge check. On success
-    /// returns the flipped Phase-3 terminal, sets @p outFs2 to the validated covering Phase-2 write
-    /// terminal and @p outRepeat to k; returns nullptr (sound skip) on any failure/fallback.
+    /// full write path is now covered, then runs Phase 3 and checks @p goal. On success returns the
+    /// accepted Phase-3 terminal, sets @p outFs2 to the validated covering Phase-2 write terminal and
+    /// @p outRepeat to k; returns nullptr (sound skip) on any failure/fallback.
     /// @p phase2Init is a fresh clone already carrying Phase-1 registers + port/key constraints.
     const FinalState *driveRegisterPhase2(
         const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
-        const IR::Expression *inputPortSymExpr, int p3Target, const FinalState *&outFs2,
+        const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, const FinalState *&outFs2,
         size_t &outRepeat, big_int &outFlipValue);
 
     /// True when @p es's final register state recorded a write to the current chain's SO register.
