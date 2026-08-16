@@ -79,6 +79,15 @@ message BfRtEntity {
     // 1 = Phase 1 install, 2 = Phase 2 install. 0/unset means "install once
     // before sending the single packet" (used by non-tampering tests).
     uint32 phase = 6;
+    // True when this is the table's DEFAULT entry (the action the controller
+    // installs for a keyless table) rather than a match entry. The driver must
+    // then call BF-RT's default_entry_set, which takes data only, instead of
+    // entry_add -- and `key` is empty.
+    //
+    // An explicit flag rather than inferring it from an empty `key`: a keyless
+    // MATCH table also legitimately has zero key fields, so "no key" alone
+    // cannot distinguish the two and would make the driver pick the wrong call.
+    bool is_default_entry = 7;
 }
 
 // Register write that the attacker performs in Phase 2 of a tampering test.

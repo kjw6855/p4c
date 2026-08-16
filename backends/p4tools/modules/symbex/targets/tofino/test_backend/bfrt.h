@@ -98,6 +98,15 @@ class BfRt : public TestFramework {
     static inja::json getControlPlaneForTable(const TableMatchMap &matches,
                                               const std::vector<ActionArg> &args);
 
+    /// The overridden default action of @p tblConfig, or a null json when the table has none.
+    ///
+    /// Such a config carries ZERO TableRules -- the action lives in the "overriden_default_action"
+    /// table property -- so it is invisible to the rule-driven entities loop and would otherwise be
+    /// dropped, leaving the replay to run p4c's compiled-in default instead of the one the model
+    /// assumed. The arguments go through getControlPlaneForTable with an EMPTY match map so a
+    /// default entry and a keyed entry can never disagree on how a value is rendered.
+    static inja::json getDefaultOverride(const TableConfig *tblConfig);
+
     /// Helper for @getVerify: produce hex-escaped ignore mask spans for the egress mask.
     static std::vector<std::pair<size_t, size_t>> getIgnoreMasks(const IR::Constant *mask);
 };

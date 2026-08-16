@@ -428,6 +428,19 @@ void Bmv2V1ModelTableStepper::evalTargetTable(
             setTableDefaultEntries(tableActionList);
             return;
         }
+        // A keyless table offering exactly ONE action is reachable only as the controller-installed
+        // default: p4c emits default_action=NoAction, so the action is otherwise dead code and every
+        // state it writes is unreachable. Modeling it as installed is the faithful reading of a
+        // deployed device, and it is what tofino already does unconditionally here. Restricted to
+        // the single-action case on purpose -- with several actions there is no way to tell which
+        // one the controller picked without an annotation, which the branch above already handles.
+        //
+        // This must be a MODELING decision, not an emission one: if symbex ran NoAction while the
+        // emitted test installed the real action, the replay would contradict the model.
+        if (!properties.defaultIsImmutable && tableActionList.size() == 1) {
+            setTableDefaultEntries(tableActionList);
+            return;
+        }
         if (!properties.defaultIsImmutable) {
             warning(
                 "Table %1%: Overriding default actions not supported for test back end %2%. "

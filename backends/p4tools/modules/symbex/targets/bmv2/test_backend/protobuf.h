@@ -101,6 +101,18 @@ class Protobuf : public Bmv2TestFramework {
     [[nodiscard]] inja::json getControlPlaneForTable(cstring tableName, cstring actionName,
                                                      const TableMatchMap &matches,
                                                      const std::vector<ActionArg> &args) const;
+
+    /// The overridden default action of @p tblConfig rendered for this back end, or a null json when
+    /// the table has none.
+    ///
+    /// Deliberately not TestFramework::checkForDefaultActionOverride: that renders for the STF/PTF
+    /// flavours, which name actions and parameters and need no numeric ids, whereas a P4Runtime
+    /// entity needs `action_id` / `param_id` and the separator hex format. Routing the arguments
+    /// through getControlPlaneForTable with an EMPTY match map reuses the exact renderer the keyed
+    /// entries use, so a default entry and a normal entry can never disagree on how a value is
+    /// spelled.
+    [[nodiscard]] inja::json getDefaultOverride(cstring tableName,
+                                                const TableConfig *tblConfig) const;
 };
 
 }  // namespace P4::P4Tools::Symbex::Bmv2

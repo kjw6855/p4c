@@ -130,6 +130,19 @@ inja::json BfRt::getControlPlaneForTable(const TableMatchMap &matches,
     return rulesJson;
 }
 
+inja::json BfRt::getDefaultOverride(const TableConfig *tblConfig) {
+    const auto *overrideObj = tblConfig->getProperty("overriden_default_action"_cs, false);
+    if (overrideObj == nullptr) return {};
+    const auto *actionCall = overrideObj->checkedTo<ActionCall>();
+    if (actionCall->getAction() == nullptr) return {};
+
+    inja::json j;
+    j["action_name"] = actionCall->getActionName().c_str();
+    // Empty match map: a default entry matches nothing by definition.
+    j["rules"] = getControlPlaneForTable({}, *actionCall->getArgs());
+    return j;
+}
+
 inja::json BfRt::getControlPlane(const TestSpec *testSpec) {
     inja::json controlPlaneJson = inja::json::object();
 
@@ -152,6 +165,8 @@ inja::json BfRt::getControlPlane(const TestSpec *testSpec) {
             ruleJson["rules"] = getControlPlaneForTable(*rule.getMatches(), *actionArgs);
             tblJson["rules"].push_back(ruleJson);
         }
+        if (auto defaultOverride = getDefaultOverride(tblConfig); !defaultOverride.empty())
+            tblJson["default_override"] = std::move(defaultOverride);
         controlPlaneJson["tables"].push_back(tblJson);
     }
 
@@ -297,6 +312,20 @@ entities {
 ## endfor
 }
 ## endfor
+## if existsIn(table, "default_override")
+# Table {{table.table_name}} (default action)
+entities {
+  table_name: "{{table.table_name}}"
+  action_name: "{{table.default_override.action_name}}"
+  is_default_entry: true
+## for act_param in table.default_override.rules.act_args
+  data {
+    field_name: "{{act_param.param}}"
+    value: "{{act_param.value}}"
+  }
+## endfor
+}
+## endif
 ## endfor
 ## endif
 ## if existsIn(control_plane, "registers")
@@ -511,6 +540,23 @@ entities {
 ## endfor
 }
 ## endfor
+## if existsIn(table, "default_overrides")
+## for ovr in table.default_overrides
+# Table {{table.table_name}} (Phase {{ovr.phase}}, default action)
+entities {
+  table_name: "{{table.table_name}}"
+  action_name: "{{ovr.action_name}}"
+  phase: {{ovr.phase}}
+  is_default_entry: true
+## for act_param in ovr.rules.act_args
+  data {
+    field_name: "{{act_param.param}}"
+    value: "{{act_param.value}}"
+  }
+## endfor
+}
+## endfor
+## endif
 ## endfor
 ## endif
 )""");
@@ -539,6 +585,10 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
         std::map<cstring,
                  std::pair<const TableConfig *, std::vector<std::pair<int, const TableRule *>>>>
             mergedByTable;
+        // Kept separate from the rule map because a default-override config has ZERO rules; merging
+        // the two would mean synthesizing a match-less TableRule, which neither this template nor
+        // the replay driver could tell apart from a genuinely keyless match entry.
+        std::map<cstring, std::vector<std::pair<int, const TableConfig *>>> defaultsByTable;
         auto collectRules = [&](const TestSpec *spec, int phaseId) {
             for (const auto &[name, obj] : spec->getTestObjectCategory("tables"_cs)) {
                 const auto *cfg = obj->checkedTo<TableConfig>();
@@ -547,6 +597,8 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
                 for (const auto &rule : *cfg->getRules()) {
                     entry.second.push_back({phaseId, &rule});
                 }
+                if (cfg->getProperty("overriden_default_action"_cs, false) != nullptr)
+                    defaultsByTable[name].push_back({phaseId, cfg});
             }
         };
         collectRules(testSpec->spec1, 1);
@@ -568,6 +620,18 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
                                                             *actionCall->getArgs());
                     rule["priority"] = tblRule->getPriority();
                     tblJson["rules"].push_back(rule);
+                }
+                // Emitted per phase like the keyed rules. The cross-phase control-plane check
+                // already forces both phases onto ONE agreed default action, so these duplicate
+                // rather than conflict and the driver's dedup collapses them.
+                if (auto defIt = defaultsByTable.find(tableName); defIt != defaultsByTable.end()) {
+                    tblJson["default_overrides"] = inja::json::array();
+                    for (const auto &[phaseId, cfg] : defIt->second) {
+                        auto ovr = getDefaultOverride(cfg);
+                        if (ovr.empty()) continue;
+                        ovr["phase"] = phaseId;
+                        tblJson["default_overrides"].push_back(std::move(ovr));
+                    }
                 }
                 controlPlaneJson["tables"].push_back(tblJson);
             }

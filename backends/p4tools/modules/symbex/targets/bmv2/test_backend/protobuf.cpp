@@ -80,8 +80,12 @@ inja::json Protobuf::getControlPlane(const TestSpec *testSpec) const {
         checkForTableActionProfile<Bmv2V1ModelActionProfile, Bmv2V1ModelActionSelector>(
             tblJson, apAsMap, tblConfig);
 
-        // Check whether the default action is overridden for this table.
-        checkForDefaultActionOverride(tblJson, tblConfig);
+        // Check whether the default action is overridden for this table. Such a config carries ZERO
+        // TableRules -- the action lives in a table property -- so without this it would be
+        // invisible to the rule-driven entities loop in the template and the emitted test would
+        // replay against p4c's compiled-in default instead of the one the model assumed.
+        if (auto defaultOverride = getDefaultOverride(tableName, tblConfig); !defaultOverride.empty())
+            tblJson["default_override"] = std::move(defaultOverride);
 
         controlPlaneJson["tables"].push_back(tblJson);
     }
@@ -168,6 +172,25 @@ inja::json Protobuf::getControlPlaneForTable(cstring tableName, cstring actionNa
     }
 
     return rulesJson;
+}
+
+inja::json Protobuf::getDefaultOverride(cstring tableName, const TableConfig *tblConfig) const {
+    const auto *overrideObj = tblConfig->getProperty("overriden_default_action"_cs, false);
+    if (overrideObj == nullptr) return {};
+    const auto *actionCall = overrideObj->checkedTo<ActionCall>();
+    const auto *actionDecl = actionCall->getAction();
+    if (actionDecl == nullptr) return {};
+    const cstring actionName = actionDecl->controlPlaneName();
+
+    inja::json j;
+    j["action_name"] = actionCall->getActionName().c_str();
+    auto actionId = p4InfoMaps.lookUpP4RuntimeId(actionName);
+    BUG_CHECK(actionId, "Id not present for action %1%. Can not generate test.", actionDecl);
+    j["action_id"] = actionId.value();
+    // Empty match map: a default entry matches nothing by definition. This still yields the
+    // `act_args` array with the P4Runtime parameter ids the entity needs.
+    j["rules"] = getControlPlaneForTable(tableName, actionName, {}, *actionCall->getArgs());
+    return j;
 }
 
 inja::json Protobuf::getSend(const TestSpec *testSpec) const {
@@ -330,6 +353,30 @@ entities {
   }
 }
 ## endfor
+## if existsIn(table, "default_override")
+# Table {{table.table_name}} (default action)
+entities {
+  table_entry {
+    table_id: {{table.id}}
+    table_name: "{{table.table_name}}"
+    is_default_action: true
+    action {
+      action {
+        action_id: {{table.default_override.action_id}}
+        action_name: "{{table.default_override.action_name}}"
+## for act_param in table.default_override.rules.act_args
+        # Param {{act_param.param}}
+        params {
+          param_id: {{act_param.id}}
+          param_name: "{{act_param.param}}"
+          value: "{{act_param.value}}"
+        }
+## endfor
+      }
+    }
+  }
+}
+## endif
 ## endfor
 ## endif
 )""");
@@ -594,6 +641,31 @@ entities {
   }
 }
 ## endfor
+## if existsIn(table, "default_overrides")
+## for ovr in table.default_overrides
+# Table {{table.table_name}} (Phase {{ovr.phase}}, default action)
+entities {
+  table_entry {
+    table_id: {{table.id}}
+    table_name: "{{table.table_name}}"
+    is_default_action: true
+    action {
+      action {
+        action_id: {{ovr.action_id}}
+        action_name: "{{ovr.action_name}}"
+## for act_param in ovr.rules.act_args
+        params {
+          param_id: {{act_param.id}}
+          param_name: "{{act_param.param}}"
+          value: "{{act_param.value}}"
+        }
+## endfor
+      }
+    }
+  }
+}
+## endfor
+## endif
 ## endfor
 ## endif
 )""");
@@ -624,6 +696,11 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
         // tableName → ordered vector of (TableConfig*, TableRule*) pairs to preserve rule order
         std::map<cstring, std::pair<const TableConfig *, std::vector<std::pair<int, const TableRule *>>>>
             mergedByTable;
+        // tableName → ordered (phase, TableConfig*) for configs whose DEFAULT ACTION was overridden.
+        // Kept separate from the rule map because such a config has zero rules; merging them would
+        // mean synthesizing a match-less TableRule, which is indistinguishable from a genuinely
+        // keyless match entry both here and to the replay driver.
+        std::map<cstring, std::vector<std::pair<int, const TableConfig *>>> defaultsByTable;
         auto collectRules = [&](const TestSpec *spec, int phaseId) {
             for (const auto &[name, obj] : spec->getTestObjectCategory("tables"_cs)) {
                 const auto *cfg = obj->checkedTo<TableConfig>();
@@ -632,6 +709,8 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
                 for (const auto &rule : *cfg->getRules()) {
                     entry.second.push_back({phaseId, &rule});
                 }
+                if (cfg->getProperty("overriden_default_action"_cs, false) != nullptr)
+                    defaultsByTable[name].push_back({phaseId, cfg});
             }
         };
         collectRules(testSpec->spec1, 1);
@@ -665,6 +744,19 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
                                                             *actionCall->getArgs());
                     rule["priority"] = tblRule->getPriority();
                     tblJson["rules"].push_back(rule);
+                }
+                // Emitted per phase, like the keyed rules above. The cross-phase control-plane check
+                // already forces both phases onto ONE agreed default action, so these duplicate
+                // rather than conflict, install dedup collapses them, and carrying both keeps the
+                // harness lint's cross-phase action-data comparison alive for this table.
+                if (auto defIt = defaultsByTable.find(tableName); defIt != defaultsByTable.end()) {
+                    tblJson["default_overrides"] = inja::json::array();
+                    for (const auto &[phaseId, cfg] : defIt->second) {
+                        auto ovr = getDefaultOverride(tableName, cfg);
+                        if (ovr.empty()) continue;
+                        ovr["phase"] = phaseId;
+                        tblJson["default_overrides"].push_back(std::move(ovr));
+                    }
                 }
                 controlPlaneJson["tables"].push_back(tblJson);
             }
