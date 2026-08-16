@@ -458,12 +458,16 @@ static bool crossPhaseCpAgrees(
     return true;
 }
 
-/// The tampering serializers merge table RULES only, so a default-action override — pinned across
-/// the phases by the two helpers above — still never reaches the emitted `entities`. Emitting it
-/// needs a proto/harness change that is deliberately deferred, so report the gap once per emitted
-/// test: a silent omission reads as "this table did not matter", which is the opposite of true.
-static void reportUnserializedDefaultActions(const PhaseConditions &cond, size_t chainId,
-                                             size_t subTestId) {
+/// Report the default-action overrides an emitted test carries, once per test.
+///
+/// These used to be dropped: the serializers merged table RULES only, and a default-action override
+/// is a TableConfig with none, so the emitted test replayed against p4c's compiled-in default. They
+/// are now serialized as a default entry (is_default_action / is_default_entry) and installed by the
+/// harness, so this is triage output rather than a gap report -- naming the control-plane state a
+/// case depends on is still worth doing, because a wrong default action is otherwise invisible in
+/// the emitted file.
+static void reportDefaultActionOverrides(const PhaseConditions &cond, size_t chainId,
+                                         size_t subTestId) {
     if (cond.tableDefaultActionMap.empty()) return;
     std::stringstream list;
     bool isFirst = true;
@@ -482,8 +486,8 @@ static void reportUnserializedDefaultActions(const PhaseConditions &cond, size_t
         }
         list << ")";
     }
-    printInfo("[Tampering] chain id=%1% sub=%2%: default-action override(s) NOT serialized into the "
-              "test case (the emitters merge table rules only) — install out of band: %3%",
+    printInfo("[Tampering] chain id=%1% sub=%2%: default-action override(s) emitted as default "
+              "entries: %3%",
               chainId, subTestId, list.str());
 }
 
@@ -4085,7 +4089,7 @@ size_t StateDependencyTracker::runTamperingChain(
                         tsAcc.usesMulticast = true;
                         tsAcc.multicastGroupId = mgid;
                     }
-                    reportUnserializedDefaultActions(cond1, chain.id, tsAcc.subTestId);
+                    reportDefaultActionOverrides(cond1, chain.id, tsAcc.subTestId);
                     // Same guard as runConditionChain: the concolic re-solve in the test backend
                     // can hit an expression the Z3 backend cannot translate (a TaintExpression, or
                     // a SizedVarbit whose actual and declared widths disagree). One un-emittable
@@ -4208,7 +4212,7 @@ size_t StateDependencyTracker::runTamperingChain(
                     ts.usesMulticast = true;
                     ts.multicastGroupId = mgid;
                 }
-                reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
+                reportDefaultActionOverrides(cond1, chain.id, ts.subTestId);
                 // See the accumulated branch above: an un-emittable candidate is skipped, not fatal.
                 try {
                     callBack(ts);
@@ -4405,7 +4409,7 @@ size_t StateDependencyTracker::runTamperingChain(
             std::string p3d = d3Drop ? std::string("drop") : ("port=" + std::to_string(d3Port));
             printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: sink MISS→HIT, %3% (P1 %4%, P3 %5%)",
                       chain.id, ts.subTestId, ts.caseLabel, p1d, p3d);
-            reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
+            reportDefaultActionOverrides(cond1, chain.id, ts.subTestId);
             // See runTamperingChain's HIT→MISS branch: an un-emittable candidate is skipped.
             try {
                 callBack(ts);
@@ -4739,7 +4743,7 @@ size_t StateDependencyTracker::runConditionChain(
             }
             printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: condition %3% (%4%→%5%)", chain.id,
                       ts.subTestId, ts.caseLabel, p1Val, p3Target);
-            reportUnserializedDefaultActions(cond1, chain.id, ts.subTestId);
+            reportDefaultActionOverrides(cond1, chain.id, ts.subTestId);
             // The concolic re-solve in the test backend can still hit a TaintExpression the Z3
             // backend cannot translate; don't let one un-emittable candidate abort the whole run.
             try {
