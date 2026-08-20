@@ -20,6 +20,8 @@ limitations under the License.
 #include <iomanip>
 #endif
 
+#include <utility>
+
 #include "exceptions.h"
 
 namespace P4 {
@@ -210,13 +212,13 @@ hash_vector_base::hash_vector_base(const hash_vector_base &a)
     memcpy(hash.s1, a.hash.s1, hashsize * info->hashelsize);
 }
 
-hash_vector_base::hash_vector_base(hash_vector_base &&a)
+hash_vector_base::hash_vector_base(hash_vector_base &&a) noexcept
     : info(a.info),
       hashsize(a.hashsize),
       collisions(a.collisions),
       log_hashsize(a.log_hashsize),
       inuse(a.inuse),
-      erased(a.erased) {
+      erased(std::move(a.erased)) {
     hash.s1 = a.hash.s1;
     a.hash.s1 = nullptr;
 }

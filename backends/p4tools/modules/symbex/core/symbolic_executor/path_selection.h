@@ -13,6 +13,25 @@ enum class PathSelectionPolicy {
     StateDependencyTamperingCond,
 };
 
+/// The --path-selection spelling of @p policy. Inverse of the PATH_SELECTION_OPTIONS map in
+/// options.cpp, kept next to the enum so adding a policy without a name is a compile error under
+/// -Wswitch rather than a silent "unknown" in the [Symbex Summary] line.
+inline const char *toString(PathSelectionPolicy policy) {
+    switch (policy) {
+        case PathSelectionPolicy::DepthFirst:
+            return "DEPTH_FIRST";
+        case PathSelectionPolicy::RandomBacktrack:
+            return "RANDOM_BACKTRACK";
+        case PathSelectionPolicy::GreedyStmtCoverage:
+            return "GREEDY_STATEMENT_SEARCH";
+        case PathSelectionPolicy::StateDependencyTampering:
+            return "STATE_DEP_TAMPERING";
+        case PathSelectionPolicy::StateDependencyTamperingCond:
+            return "STATE_DEP_TAMPERING_COND";
+    }
+    return "UNKNOWN";
+}
+
 /// Which tampering search phases use one global (shared) DFS steered at the union of all chains'
 /// target nodes, with per-chain assignment deferred until terminals are bucketed. Cumulative: PHASE2
 /// is only meaningful on top of PHASE1, so the enum makes "Phase 2 only" unexpressible.

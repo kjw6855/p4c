@@ -166,6 +166,12 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// pre-midend IR). Used by the nightly cache builder.
     std::optional<std::string> dumpStateDepCachePath;
 
+    /// Opt-in: --dump-state-dep-cache-full was used instead of --dump-state-dep-cache, so the dump
+    /// runs EVERY chain category (SD_ALL) rather than only the two the cache can store. The file
+    /// written is identical either way -- this exists to A/B the narrowed default against the old
+    /// behaviour, and to surface the action-parameter passes under --print-performance-report.
+    bool dumpStateDepCacheFull = false;
+
     /// Attacker-chosen register value for the tampering scenario (--state-tamper-value).
     /// If set, Phase 2 writes this exact value to the register instead of a random one.
     /// Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).
@@ -206,6 +212,14 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// that separates how many cases steering rescues from how many were already on the right cell.
     /// Set via --max-index-steer-retries.
     int64_t maxIndexSteerRetries = 2;
+
+    /// Wall-clock budget for the whole run, in seconds. When non-zero, the search polls a
+    /// cooperative deadline at its loop heads and stops early, emitting whatever tests it has
+    /// already produced plus the [Symbex Summary] line and (with --print-performance-report) the
+    /// Timers block, then exits successfully. 0 means no deadline, which is the default and leaves
+    /// behaviour bit-for-bit unchanged. Independent of any external timeout the caller imposes.
+    /// Set via --timeout.
+    int64_t timeoutSeconds = 0;
 
     /// When true, a table whose default action Phase 1 overrode is pinned to that same action and
     /// action data in Phases 2 and 3. Without it the phases are independent Z3 queries that share

@@ -242,7 +242,7 @@ class bitvec {
             data = a.data;
         }
     }
-    bitvec(bitvec &&a) : size(a.size), data(a.data) { a.size = 1; }
+    bitvec(bitvec &&a) noexcept : size(a.size), data(a.data) { a.size = 1; }
     bitvec &operator=(const bitvec &a) {
         if (this == &a) return *this;
         if (size > 1) delete[] ptr;

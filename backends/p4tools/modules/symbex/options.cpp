@@ -15,6 +15,7 @@
 #include "backends/p4tools/common/options.h"
 #include "lib/error.h"
 
+#include "backends/p4tools/modules/symbex/lib/deadline.h"
 #include "backends/p4tools/modules/symbex/lib/logging.h"
 #include "backends/p4tools/modules/symbex/toolname.h"
 
@@ -502,6 +503,30 @@ SymbexOptions::SymbexOptions()
         "Print timing report summary at the end of the program.");
 
     registerOption(
+        "--timeout", "timeoutSeconds",
+        [this](const char *arg) {
+            try {
+                timeoutSeconds = std::stoll(arg);
+                if (timeoutSeconds < 0) {
+                    throw std::invalid_argument("Invalid input.");
+                }
+            } catch (std::invalid_argument &) {
+                error("Invalid value %1% for --timeout. Expected non-negative integer.", arg);
+                return false;
+            }
+            // Armed HERE rather than in mainImpl so the budget covers the frontend and midend as
+            // well as the search. A run can spend its whole budget in the frontend; arming later
+            // would leave that case looking identical to one that never started.
+            Deadline::arm(static_cast<uint64_t>(timeoutSeconds));
+            return true;
+        },
+        "Stop the search after this many seconds of wall time, emit whatever tests have been "
+        "generated, print the [Symbex Summary] line and (with --print-performance-report) the "
+        "timing report, and exit successfully. Cooperative: the deadline is polled at points where "
+        "abandoning work is safe, so partial results survive instead of being killed from outside. "
+        "0 (default) means no deadline. Independent of any external timeout.");
+
+    registerOption(
         "--dcg", "DCG",
         [this](const char *) {
             dcg = true;
@@ -613,14 +638,36 @@ SymbexOptions::SymbexOptions()
     registerOption(
         "--dump-state-dep-cache", "file",
         [this](const char *arg) {
+            if (dumpStateDepCachePath.has_value()) {
+                error("--dump-state-dep-cache cannot be combined with --dump-state-dep-cache-full");
+                return false;
+            }
             dumpStateDepCachePath = std::string(arg);
             return true;
         },
         "Run the state-dependency analysis on this program's post-midend IR, write the resulting "
-        "SOChains to this JSON cache, and exit before symbolic execution. Unlike a "
-        "p4c_state_dependency --cache-chains cache, this is built from the same lowered IR that "
-        "--state-dep-cache re-resolves against, so it always re-resolves. Respects --whole-pipeline "
-        "and --parser-deps for the analysis mode.");
+        "SOChains to this JSON cache, and exit before symbolic execution. Computes only the chain "
+        "categories the cache can store (h2s2k + h2s2c); use --dump-state-dep-cache-full for the "
+        "rest. Unlike a p4c_state_dependency --cache-chains cache, this is built from the same "
+        "lowered IR that --state-dep-cache re-resolves against, so it always re-resolves. Respects "
+        "--whole-pipeline and --parser-deps for the analysis mode.");
+
+    registerOption(
+        "--dump-state-dep-cache-full", "file",
+        [this](const char *arg) {
+            if (dumpStateDepCachePath.has_value()) {
+                error("--dump-state-dep-cache-full cannot be combined with --dump-state-dep-cache");
+                return false;
+            }
+            dumpStateDepCachePath = std::string(arg);
+            dumpStateDepCacheFull = true;
+            return true;
+        },
+        "As --dump-state-dep-cache, but run EVERY chain category "
+        "(a2s2v/a2s2k/a2s2c/h2s2k/h2s2h/h2s2c) instead of only the two the cache stores. The cache "
+        "file written is IDENTICAL; the extra categories are computed and discarded. Use it to A/B "
+        "against the narrowed default, or to profile the action-parameter passes with "
+        "--print-performance-report. Slower, sometimes by hours.");
 
     registerOption(
         "--chain-impact-order", nullptr,

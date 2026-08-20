@@ -29,6 +29,7 @@
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
 #include "backends/p4tools/modules/symbex/lib/concolic.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
+#include "backends/p4tools/modules/symbex/lib/deadline.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/lib/logging.h"
@@ -910,14 +911,29 @@ void recordSinkStub(const IR::P4Table *table, cstring cpName, const IR::P4Progra
 ActionResolver actionResolverFor(const IR::P4Program *program);
 }  // namespace
 
+void StateDependencyTracker::emitSummary() const {
+    // One line, key=value, no spaces inside a value, so a reader is
+    // dict(t.split("=", 1) for t in line.split()[2:]) with no per-field regex. Emitted through
+    // printInfo, which is on unless --disable-info-logging.
+    printInfo(
+        "[Symbex Summary] policy=%1% chains=%2%/%3% pruned=%4% tests=%5% status=%6% elapsed=%7%s",
+        toString(SymbexOptions::get().pathSelectionPolicy), chainsCompleted, allChains.size(),
+        chainsPruned, testsEmitted, Deadline::wasHit() ? "timeout" : "complete",
+        Deadline::elapsedSeconds());
+}
+
 void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
     auto chains = collectChains();
     if (chains.empty()) {
         warning("State-dependency analysis produced no chains for the selected policy.");
+        // Still summarised: a run with no chains and a run that died before reaching them are very
+        // different outcomes, and only this line tells them apart downstream.
+        emitSummary();
         return;
     }
     auto &initState = ExecutionState::create(&programInfo.getP4Program());
     runTamperingScenario(callBack, initState);
+    emitSummary();
 }
 
 // RAII helper — saves/restores SymbexOptions fields around a phase run.
@@ -990,7 +1006,10 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
     // blocks only (the mutually-exclusive branch siblings); built once, like the table map.
     buildRegisterActionBodyNodes();
 
-    auto chains = collectChains();
+    auto chains = [this] {
+        Util::ScopedTimer timer("collect_chains");
+        return collectChains();
+    }();
 
     // Flatten all chains for the shared Phase-1 pass.
     allChains.clear();
@@ -1003,19 +1022,26 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
     // --shared-traversal=NONE selects the per-chain baseline instead (collected inside the loop).
     const bool sharedPhase1Pass =
         SymbexOptions::get().sharedTraversal != SharedTraversalMode::None;
-    if (sharedPhase1Pass) collectPhase1Terminals(initState);
+    if (sharedPhase1Pass) {
+        Util::ScopedTimer timer("phase1_shared");
+        collectPhase1Terminals(initState);
+    }
 
     // --shared-traversal=PHASE1_PHASE2: a global write-path prefilter prunes chains whose write is
     // unreachable BEFORE the expensive per-chain Phase-2/3 loop (empty write bucket => prune).
     std::set<size_t> prunedChains;
-    if (SymbexOptions::get().sharedTraversal == SharedTraversalMode::Phase1Phase2)
+    if (SymbexOptions::get().sharedTraversal == SharedTraversalMode::Phase1Phase2) {
+        Util::ScopedTimer timer("phase2_prefilter");
         prunedChains = collectPhase2Terminals(initState);
+    }
+    chainsPruned = prunedChains.size();
 
     // --chain-impact-order: rank chains whose sink reaches an enforcement primitive (class A) ahead
     // of metadata-only sinks. ORDERING ONLY — a truncated run then spends its budget on the chains
     // whose findings matter, instead of whichever ids happened to come first.
     std::set<size_t> classAChains;
     if (SymbexOptions::get().chainImpactOrder) {
+        Util::ScopedTimer timer("chain_rank");
         std::unordered_map<cstring, const IR::P4Action *> actionByName;
         ActionCollector ac(actionByName);
         programInfo.getP4Program().apply(ac);
@@ -1029,44 +1055,65 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
     // Per-chain cap on emitted sub-tests, reusing the existing --max-tests option. Applied per chain
     // (not globally) so every SOChain produces its own tests. 0 means "unlimited".
     const size_t maxPerChain = static_cast<size_t>(SymbexOptions::get().maxTests);
-    size_t chainsCompleted = 0;
-    for (const auto &[chainName, chainList] : chains) {
-        // Stable partition keeps chain-id order WITHIN each class, so the only difference from the
-        // default schedule is that class-A chains come first (and none when the option is off).
-        std::vector<const P4StateDependency::DependencyGraphs::SOChain *> ordered(chainList.begin(),
-                                                                                 chainList.end());
-        if (SymbexOptions::get().chainImpactOrder)
-            std::stable_partition(ordered.begin(), ordered.end(),
-                                  [&classAChains](const auto *c) { return classAChains.count(c->id) > 0; });
-        for (const auto *chain : ordered) {
-            if (prunedChains.count(chain->id)) {  // write path unreachable -> Phase-2 prefilter pruned
-                printInfo("============ Chain (%1%) id=%2% %3% [Phase-2 prefilter: PRUNED] ============",
+    {
+        Util::ScopedTimer chainLoopTimer("chain_loop");
+        for (const auto &[chainName, chainList] : chains) {
+            // The deadline cut an inner iteration short; stop handing out new chains too.
+            if (Deadline::wasHit()) break;
+            // Stable partition keeps chain-id order WITHIN each class, so the only difference
+            // from the default schedule is that class-A chains come first (and none when the
+            // option is off).
+            std::vector<const P4StateDependency::DependencyGraphs::SOChain *> ordered(
+                chainList.begin(), chainList.end());
+            if (SymbexOptions::get().chainImpactOrder)
+                std::stable_partition(ordered.begin(), ordered.end(),
+                                      [&classAChains](const auto *c) { return classAChains.count(c->id) > 0; });
+            for (const auto *chain : ordered) {
+                // Coarsest of the two poll sites, and the clean one: the txtpb already on
+                // disk all correspond to whole completed chains, and chainsCompleted is exact.
+                // `break` rather than `return` so control still falls through to writeCpStubs()
+                // and, back in runTampering, to emitSummary().
+                if (Deadline::wasHit() || Deadline::checkAndLatch()) break;
+                if (prunedChains.count(chain->id)) {  // write path unreachable -> Phase-2 prefilter pruned
+                    printInfo("============ Chain (%1%) id=%2% %3% [Phase-2 prefilter: PRUNED] ============",
+                              chainName, chain->id, chain->soName);
+                    ++chainsCompleted;
+                    continue;
+                }
+                currentChain = chain;
+                currentChainName = chainName;
+                printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
                           chainName, chain->id, chain->soName);
+                // Held by value in the NONE case; a reference would dangle past the if/else.
+                std::vector<const FinalState *> perChainBucket;
+                if (!sharedPhase1Pass) perChainBucket = collectPhase1TerminalsPerChain(*chain, initState);
+                const auto &bucket = sharedPhase1Pass ? phase1Buckets[chain->id] : perChainBucket;
+                currentChain = chain;  // collectPhase1TerminalsPerChain clears it
+                currentChainName = chainName;
+                // withTimer accumulates by name across every invocation, so each pass ends up
+                // with one total and an invocation count -- the per-pass breakdown we actually
+                // want. The return value (sub-tests emitted) was previously discarded; the
+                // [Symbex Summary] line needs it.
+                Util::withTimer("tamper_h2m", [&] {
+                    testsEmitted += runTamperingChain(*chain, initState, bucket, callBack,
+                                                      maxPerChain, TamperPass::HitToMiss);
+                });
+                Util::withTimer("tamper_m2h", [&] {
+                    testsEmitted += runTamperingChain(*chain, initState, bucket, callBack,
+                                                      maxPerChain, TamperPass::MissToHit);
+                });
+                // Gated HERE rather than by an early return inside the pass, so that "the option
+                // is off ⇒ generation is byte-identical" holds by the shape of the call graph.
+                if (SymbexOptions::get().constEntryActionDivergence)
+                    Util::withTimer("tamper_adiv", [&] {
+                        testsEmitted +=
+                            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain,
+                                              TamperPass::ConstEntryActionDiverge);
+                    });
                 ++chainsCompleted;
-                continue;
             }
-            currentChain = chain;
-            currentChainName = chainName;
-            printInfo("============ Chain (%1%) id=%2% %3% [Tampering 3-phase] ============",
-                      chainName, chain->id, chain->soName);
-            // Held by value in the NONE case; a reference would dangle past the if/else.
-            std::vector<const FinalState *> perChainBucket;
-            if (!sharedPhase1Pass) perChainBucket = collectPhase1TerminalsPerChain(*chain, initState);
-            const auto &bucket = sharedPhase1Pass ? phase1Buckets[chain->id] : perChainBucket;
-            currentChain = chain;  // collectPhase1TerminalsPerChain clears it
-            currentChainName = chainName;
-            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain,
-                              TamperPass::HitToMiss);
-            runTamperingChain(*chain, initState, bucket, callBack, maxPerChain,
-                              TamperPass::MissToHit);
-            // Gated HERE rather than by an early return inside the pass, so that "the option is off
-            // ⇒ generation is byte-identical" holds by the shape of the call graph.
-            if (SymbexOptions::get().constEntryActionDivergence)
-                runTamperingChain(*chain, initState, bucket, callBack, maxPerChain,
-                                  TamperPass::ConstEntryActionDiverge);
-            ++chainsCompleted;
         }
-    }
+    }  // chain_loop
     // Any table with an action PARAMETER is annotatable, sink or not -- SketchLib's threshold lives
     // in tbl_get_threshold, which is upstream of the sink and would otherwise never be reported even
     // though it is the table that actually needed an assume clause.
@@ -1086,9 +1133,10 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
         }
     }
 
-    // Headline progress metric: on a run that is cut short by a timeout this is the only record of how
-    // far the per-chain Phase-2/3 loop actually got. Emitted in every mode so baselines are comparable.
-    printInfo("[Tampering] Chains completed: %1%/%2%", chainsCompleted, allChains.size());
+    // Progress is reported by the [Symbex Summary] line that runTampering emits on every exit path
+    // -- including the deadline path, which this function reaches by breaking out of the chain loop
+    // rather than returning. The old "[Tampering] Chains completed" line lived here, after the loop,
+    // and so was precisely the thing a timeout destroyed; the summary is a strict superset of it.
     writeCpStubs();
 }
 
@@ -1459,10 +1507,21 @@ std::vector<const FinalState *> StateDependencyTracker::collectPhase1TerminalsPe
 int StateDependencyTracker::evalSinkHit(const FinalState *fs) const {
     if (currentSinkTable_ == nullptr) return -1;
     const auto &hitVar = TableStepper::getTableHitVar(currentSinkTable_);
-    const auto *hitExpr = fs->getExecutionState()->get(hitVar);
-    // -1: the sink table was never applied on this path (e.g. the packet dropped earlier). Such a
-    // terminal cannot flip MISS→HIT under tampering, so the Phase-1 filter discards it (keeps only
-    // reached-and-MISS terminals). 0 = reached and MISSed, 1 = reached and HIT.
+    const auto *es = fs->getExecutionState();
+    // -1: the sink table was never applied on this path (e.g. the packet dropped earlier, or the
+    // apply() sits behind a condition the path did not take). Such a terminal cannot flip
+    // MISS→HIT under tampering, so the Phase-1 filter discards it (keeps only reached-and-MISS
+    // terminals). 0 = reached and MISSed, 1 = reached and HIT.
+    //
+    // exists() BEFORE get(): ExecutionState::get does NOT return nullptr for a missing var -- it
+    // BUGs ("Unable to find var ... in the symbolic environment") and aborts the whole run,
+    // discarding every test already found. The `hitExpr == nullptr` check below cannot catch that,
+    // so the unapplied-sink case has to be answered here. Same reasoning as evalCondition and
+    // constEntryOutcome, which already guard this way. FANcY's Egress table
+    // set_fancy_pre_type_to_update is applied under a condition, so its HIT->MISS pass hit exactly
+    // this: every generated test was thrown away 8.7 minutes in.
+    if (!es->exists(hitVar)) return -1;
+    const auto *hitExpr = es->get(hitVar);
     if (hitExpr == nullptr) return -1;
     const auto *hitVal = fs->getFinalModel().evaluate(hitExpr, true);
     const auto *hitBool = hitVal->to<IR::BoolLiteral>();
@@ -4908,7 +4967,12 @@ std::optional<ExecutionStateReference> StateDependencyTracker::pickSuccessor(
         for (const auto *n : currentRequiredNodes)
             if (!n->is<IR::Key>() && visited.count(n) == 0U) return false;
         const auto &sinkHitVar = TableStepper::getTableHitVar(currentSinkTable_);
-        const auto *hv = b.nextState.get().get(sinkHitVar);
+        // exists() BEFORE get(), as in evalSinkHit: "every other step leaves it unset" is precisely
+        // the case where get() BUGs instead of returning nullptr, so the nullptr test below cannot
+        // be the guard. An unset hit var means "not the sink HIT branch" -> no steering preference.
+        const auto &ns = b.nextState.get();
+        if (!ns.exists(sinkHitVar)) return false;
+        const auto *hv = ns.get(sinkHitVar);
         return hv != nullptr && hv->template is<IR::BoolLiteral>() &&
                hv->template to<IR::BoolLiteral>()->value;
     };
@@ -4950,7 +5014,19 @@ std::optional<ExecutionStateReference> StateDependencyTracker::pickSuccessor(
 
 void StateDependencyTracker::runImpl(const Callback &callBack,
                                      ExecutionStateReference executionState) {
+    // The one poll site that bounds EVERY traversal: this is the single DFS driver behind the
+    // shared Phase-1 pass, the shared Phase-2 write-path prefilter, and each per-chain Phase-1/2/3
+    // run. Without it a program that never finishes the shared Phase-1 -- the case that leaves a
+    // six-hour log with not one [Tampering] line -- would never reach the chain-loop poll at all.
+    // Returning here is the function's ordinary exit; it backtracks nothing and throws nothing,
+    // because unwinding out of the executor would abandon the emitted-test bookkeeping.
+    // Checked once every 1024 iterations: steady_clock::now() on the hottest loop in the tool is
+    // not free, and at ~1024 steps the overshoot is far inside the harness's 300s external grace.
+    uint64_t pollTick = 0;
     while (true) {
+        if ((++pollTick & 0x3FF) == 0 && Deadline::checkAndLatch()) {
+            return;
+        }
         try {
             if (executionState.get().isTerminal()) {
                 if (sharedPhase1) {

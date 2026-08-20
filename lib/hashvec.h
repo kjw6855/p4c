@@ -64,7 +64,7 @@ class hash_vector_base {
     bitvec erased; /* elements that have been erased */
     hash_vector_base(bool ismap, bool ismulti, size_t capacity);
     hash_vector_base(const hash_vector_base &);
-    hash_vector_base(hash_vector_base &&);
+    hash_vector_base(hash_vector_base &&) noexcept;
     hash_vector_base &operator=(const hash_vector_base &);
     hash_vector_base &operator=(hash_vector_base &&);
     virtual ~hash_vector_base() { freehash(); }

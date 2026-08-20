@@ -24,6 +24,7 @@
 #include "lib/gc.h"
 #include "lib/cstring.h"
 #include "lib/error.h"
+#include "lib/timer.h"
 
 #include "backends/p4tools/modules/symbex/core/compiler_result.h"
 #include "backends/p4tools/modules/symbex/core/program_info.h"
@@ -105,20 +106,30 @@ const P4StateDependency::StateDependencyResult *buildOrLoadStateDep(const Symbex
     return ::P4::errorCount() > 0 ? nullptr : result;
 }
 
-/// --dump-state-dep-cache: run the in-process state-dependency analysis on @p program (the same
-/// post-midend IR that a later --state-dep-cache load re-resolves against) and serialize both the
-/// Key and Cond SOChains. A self-check re-resolves the just-written cache against @p program so a
-/// subsequent load cannot hit "position not found in program IR". Returns an exit code; the caller
-/// exits before symbolic execution.
+/// --dump-state-dep-cache[-full]: run the in-process state-dependency analysis on @p program (the
+/// same post-midend IR that a later --state-dep-cache load re-resolves against) and serialize both
+/// the Key and Cond SOChains. A self-check re-resolves the just-written cache against @p program so
+/// a subsequent load cannot hit "position not found in program IR". Returns an exit code; the
+/// caller exits before symbolic execution.
+///
+/// The two flags differ ONLY in how much analysis runs; the file written is identical. See the
+/// SD_CACHEABLE comment in analysis.h for why the default is the narrower set.
 int dumpStateDepCache(const SymbexOptions &opts, const IR::P4Program *program) {
     const bool isv1 = opts.langVersion == CompilerOptions::FrontendVersion::P4_14;
     cstring lang = isv1 ? cstring("p4-14") : cstring("p4-16");
     cstring srcHash =
         P4StateDependency::computeSourceHash(opts.file.string(), cstring(opts.arch), lang);
-    // SD_ALL so one cache serves both the key (STATE_DEP_TAMPERING) and cond (…_COND) policies.
+    // serializeChainCache writes exactly two chain fields, "key" and "cond", so SD_CACHEABLE is
+    // all the default needs -- and it already serves both the key (STATE_DEP_TAMPERING) and cond
+    // (…_COND) policies. SD_ALL additionally runs the A2S2V/A2S2K/A2S2C and HEADER passes whose
+    // results the cache format cannot represent and therefore discards; the A2S2V pass is where
+    // redplane's cache build spent 6h without producing a file. --dump-state-dep-cache-full
+    // restores SD_ALL for A/B comparison. graphsDir is empty here, so analysis.cpp's
+    // "graphsDir set => compute everything" override does not silently widen this back out.
+    const unsigned sdCats =
+        opts.dumpStateDepCacheFull ? P4StateDependency::SD_ALL : P4StateDependency::SD_CACHEABLE;
     auto result = P4StateDependency::runStateDependencyAnalysis(
-        program, cstring(opts.arch), isv1, {}, P4StateDependency::SD_ALL, opts.wholePipeline,
-        opts.parserDeps);
+        program, cstring(opts.arch), isv1, {}, sdCats, opts.wholePipeline, opts.parserDeps);
     if (::P4::errorCount() > 0) return EXIT_FAILURE;
     P4StateDependency::serializeChainCache(result, *opts.dumpStateDepCachePath, srcHash,
                                            cstring(opts.arch));
@@ -127,11 +138,14 @@ int dumpStateDepCache(const SymbexOptions &opts, const IR::P4Program *program) {
     P4StateDependency::loadChainCache(*opts.dumpStateDepCachePath, program, srcHash,
                                       cstring(opts.arch));
     if (::P4::errorCount() > 0) {
-        error("--dump-state-dep-cache: self-check failed; the written cache did not re-resolve "
-              "against the program it was built from");
+        error("%1%: self-check failed; the written cache did not re-resolve against the program it "
+              "was built from",
+              opts.dumpStateDepCacheFull ? "--dump-state-dep-cache-full" : "--dump-state-dep-cache");
         return EXIT_FAILURE;
     }
-    std::cout << "Wrote state-dependency cache to " << *opts.dumpStateDepCachePath << "\n";
+    std::cout << "Wrote state-dependency cache ("
+              << (opts.dumpStateDepCacheFull ? "full" : "key+cond") << ") to "
+              << *opts.dumpStateDepCachePath << "\n";
     return EXIT_SUCCESS;
 }
 
@@ -436,12 +450,24 @@ int Symbex::mainImpl(const CompilerResult &compilerResult) {
 
     if (symbexOptions.stateDep || symbexOptions.stateDepCachePath.has_value()) {
         const auto *program = &compilerResult.getProgram();
+        // Name the timer after whichever path is taken, so deserializing a cache and re-resolving
+        // it against the post-midend IR never shares a bucket with the in-process IFDS analysis.
+        // The nightly sweep passes --state-dep-cache for every program, and the cost of that
+        // re-resolve has never been measured.
+        const char *sdTimerName = symbexOptions.stateDepCachePath.has_value()
+                                      ? "state_dep_cache_load"
+                                      : "state_dep_analysis";
+        Util::ScopedTimer sdTimer(sdTimerName);
         const auto *stateDep = buildOrLoadStateDep(symbexOptions, program);
         if (stateDep == nullptr) return 1;
         symbexCompilerResult->setStateDep(stateDep);
     }
 
-    const auto *programInfo = SymbexTarget::produceProgramInfo(*symbexCompilerResult);
+    const ProgramInfo *programInfo = nullptr;
+    {
+        Util::ScopedTimer programInfoTimer("program_info");
+        programInfo = SymbexTarget::produceProgramInfo(*symbexCompilerResult);
+    }
     if (programInfo == nullptr || errorCount() > 0) {
         error("Symbex encountered errors during preprocessing.");
         return EXIT_FAILURE;
@@ -486,6 +512,7 @@ int Symbex::mainImpl(const CompilerResult &compilerResult) {
         return EXIT_SUCCESS;
     }
 
+    Util::ScopedTimer generateTimer("generate");
     return generateAndWriteAbstractTests(symbexOptions, *programInfo);
 }
 

@@ -100,6 +100,12 @@ enum SDCategories : unsigned {
     SD_A2S2K = 16u,   // action parameter -> stateful object -> table match key
     SD_A2S2C = 32u,   // action parameter -> stateful object -> condition
     SD_ALL = SD_A2S2V | SD_KEY | SD_HEADER | SD_COND | SD_A2S2K | SD_A2S2C,
+    /// Exactly the categories the SOChain cache format can carry: chain_cache.cpp serializes
+    /// dataWriteKeyChains as "key" and dataWriteCondChains as "cond", and nothing else. A cache
+    /// builder that computes more than this is doing work it will discard -- which is what
+    /// p4symbex --dump-state-dep-cache used to do, spending hours in the A2S2V pass for a file
+    /// that cannot represent its output.
+    SD_CACHEABLE = SD_KEY | SD_COND,
 };
 
 /// Run the full state-dependency analysis (A2S2V and H2S2V) on a compiled P4 program.

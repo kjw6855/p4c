@@ -303,6 +303,22 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// and fires callBack.
     void runTamperingScenario(const TamperingCallback &callBack, const ExecutionState &initState);
 
+    // ---- [Symbex Summary] accounting ----------------------------------------------------------
+    // Set by runTamperingScenario, read by emitSummary. They are members rather than locals because
+    // runTampering must be able to emit the summary on EVERY exit path, including the early returns
+    // that never enter (or never finish) the per-chain loop -- that is the whole point of the line.
+    /// Chains whose Phase-2/3 processing finished, counting prefilter-pruned chains as done.
+    size_t chainsCompleted = 0;
+    /// Chains the shared Phase-2 write-path prefilter proved unreachable.
+    size_t chainsPruned = 0;
+    /// Sub-tests emitted so far, accumulated from runTamperingChain's return value.
+    size_t testsEmitted = 0;
+
+    /// Emits the one-line machine-readable [Symbex Summary] record. Called on every exit path of
+    /// runTampering, so a run cut short by --timeout reports exactly how far it got. Replaces the
+    /// old "[Tampering] Chains completed: n/m" line, of which it is a strict superset.
+    void emitSummary() const;
+
     /// Which question one pass over a chain asks. The first two are the long-standing directions and
     /// are unchanged; the third is an ADDITIVE opt-in pass (--const-entry-action-divergence) that
     /// applies only to a sink table with `const entries`.

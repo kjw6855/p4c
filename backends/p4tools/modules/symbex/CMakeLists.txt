@@ -77,6 +77,7 @@ set(
   lib/concolic.cpp
   lib/visit_concolic.cpp
   lib/continuation.cpp
+  lib/deadline.cpp
   lib/execution_state.cpp
   lib/final_state.cpp
   lib/final_visit_state.cpp

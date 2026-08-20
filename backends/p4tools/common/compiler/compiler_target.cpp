@@ -10,6 +10,7 @@
 #include "frontends/common/parser_options.h"
 #include "frontends/p4/frontend.h"
 #include "lib/error.h"
+#include "lib/timer.h"
 #include "midend/midEndLast.h"
 
 namespace P4::P4Tools {
@@ -57,6 +58,7 @@ CompilerResultOrError CompilerTarget::runCompilerImpl(const CompilerOptions &opt
 }
 
 const IR::P4Program *CompilerTarget::runParser(const ParserOptions &options) {
+    Util::ScopedTimer timer("compile_parse");
     const auto *program = parseP4File(options);
     if (errorCount() > 0) {
         return nullptr;
@@ -66,6 +68,7 @@ const IR::P4Program *CompilerTarget::runParser(const ParserOptions &options) {
 
 const IR::P4Program *CompilerTarget::runFrontend(const CompilerOptions &options,
                                                  const IR::P4Program *program) const {
+    Util::ScopedTimer timer("compile_frontend");
     P4COptionPragmaParser optionsPragmaParser(false);
     program->apply(ApplyOptionsPragmas(optionsPragmaParser));
 
@@ -93,6 +96,7 @@ MidEnd CompilerTarget::mkMidEnd(const CompilerOptions &options) const {
 
 const IR::P4Program *CompilerTarget::runMidEnd(const CompilerOptions &options,
                                                const IR::P4Program *program) const {
+    Util::ScopedTimer timer("compile_midend");
     auto midEnd = mkMidEnd(options);
     midEnd.addPasses({
         new P4::MidEndLast(),
