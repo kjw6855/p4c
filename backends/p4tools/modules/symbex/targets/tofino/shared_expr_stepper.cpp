@@ -699,6 +699,87 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
         stepper.result->emplace_back(nextState);
     };
 
+const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::MethodImpl
+    SharedTofinoExprStepper::REGISTER_ACTION_PREDICATE = [](const ExternInfo &externInfo,
+                                                            SharedTofinoExprStepper &stepper) {
+        // The stateful ALU runs its comparisons before the state ALUs write back and exposes the
+        // results as a one-hot value: index = sum(cmp_i << i), output = 1 << index. Tofino has two
+        // comparators (cmplo, cmphi) and a 4-bit output; Tofino2 has four (cmp0..cmp3) and a
+        // 16-bit one. The reference is the model itself, tofino-model mau-stateful-alu.cpp, which
+        // builds `cmp |= 1 << alu` and returns `1 << cmp` with alu 0 = Lo and alu 1 = Hi; bf-asm
+        // constants.h agrees (CMPLO = 0xaaaa selects indices 1 and 3, CMPHI = 0xcccc selects 2
+        // and 3). The method reads no register state, so the instance behind the receiver -- which
+        // is `this` at every known call site -- does not matter here.
+        const auto *specType =
+            externInfo.externObjectRef.type->checkedTo<IR::Type_SpecializedCanonical>();
+        // U is the last type argument of both RegisterAction<T, I, U> and
+        // DirectRegisterAction<T, U>.
+        const auto *returnType =
+            stepper.state.resolveType(specType->arguments->at(specType->arguments->size() - 1));
+
+        const auto &arch = SymbexTarget::get().spec.archName;
+        size_t numCmps = 0;
+        if (arch == "tna") {
+            numCmps = 2;
+        } else if (arch == "t2na") {
+            numCmps = 4;
+        } else {
+            BUG("Unexpected architecture %1%", arch);
+        }
+
+        auto &nextState = stepper.state.clone();
+
+        // Every comparison is @optional, but an unsupplied one does NOT read as false: an
+        // unconfigured comparator keeps opcode `equ` with its sources disabled, so the hardware
+        // evaluates 0 == 0 and the unit reads TRUE. Rather than invent either polarity, hand back
+        // taint whenever the program does not supply the full set.
+        bool isTainted = externInfo.externArguments.size() < numCmps;
+        std::vector<const IR::Expression *> cmps;
+        cmps.reserve(numCmps);
+        for (size_t idx = 0; !isTainted && idx < numCmps; ++idx) {
+            const auto *cmp = externInfo.externArguments.at(idx)->expression;
+            isTainted = Taint::hasTaint(cmp);
+            cmps.push_back(cmp);
+        }
+        if (isTainted) {
+            nextState.replaceTopBody(
+                Continuation::Return(ToolsVariables::getTaintExpression(returnType)));
+            stepper.result->emplace_back(nextState);
+            return;
+        }
+        if (!returnType->is<IR::Type_Bits>()) {
+            SYMBEX_UNIMPLEMENTED("Predicate return of type %1% not supported", returnType);
+        }
+
+        // Emit the one-hot as a Concat of bit<1> lanes, highest index first. An IR::Mux would be
+        // stepped as a branch and fork 2^numCmps states per call, whereas a Concat of comparisons
+        // is a symbolic value the solver reasons about directly. A bool may only be cast to
+        // bit<1>, so any widening to a larger U happens once, afterwards.
+        const auto *bitOne = IR::Type_Bits::get(1);
+        const IR::Expression *predicate = nullptr;
+        for (size_t combination = 1U << numCmps; combination-- > 0;) {
+            const IR::Expression *lane = nullptr;
+            for (size_t idx = 0; idx < numCmps; ++idx) {
+                const IR::Expression *term = cmps.at(idx);
+                if (((combination >> idx) & 1U) == 0) {
+                    term = new IR::LNot(term);
+                }
+                lane = lane == nullptr ? term : new IR::LAnd(lane, term);
+            }
+            const auto *laneBit = new IR::Cast(bitOne, lane);
+            predicate = predicate == nullptr
+                            ? static_cast<const IR::Expression *>(laneBit)
+                            : static_cast<const IR::Expression *>(new IR::Concat(predicate,
+                                                                                 laneBit));
+        }
+        if (returnType->width_bits() != static_cast<int>(1U << numCmps)) {
+            predicate = new IR::Cast(returnType, predicate);
+        }
+
+        nextState.replaceTopBody(Continuation::Return(predicate));
+        stepper.result->emplace_back(nextState);
+    };
+
 // Provides implementations of Tofino externs.
 const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
     SharedTofinoExprStepper::SHARED_TOFINO_EXTERN_METHOD_IMPLS({
@@ -823,6 +904,34 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
          * difference is the amount of expected type arguments.
          * ====================================================================================== */
         {"DirectRegisterAction.execute"_cs, {}, DIRECT_REGISTER_ACTION_EXECUTE},
+        /* ======================================================================================
+         *  (Direct)RegisterAction.predicate
+         *  One entry per arity: find() rejects on argument count first and then BUG_CHECKs if more
+         *  than one impl matches, so the tna (cmplo, cmphi) and t2na (cmp0..cmp3) spellings cannot
+         *  both be registered at the same arity. Positional arguments match any parameter name, so
+         *  only a *named* t2na call at arity 1 or 2 misses -- and that lands on the ordinary
+         *  unimplemented-extern path rather than a crash.
+         * ====================================================================================== */
+        {"RegisterAction.predicate"_cs, {}, REGISTER_ACTION_PREDICATE},
+        {"RegisterAction.predicate"_cs, {"cmplo"_cs}, REGISTER_ACTION_PREDICATE},
+        {"RegisterAction.predicate"_cs, {"cmplo"_cs, "cmphi"_cs}, REGISTER_ACTION_PREDICATE},
+        {"RegisterAction.predicate"_cs,
+         {"cmp0"_cs, "cmp1"_cs, "cmp2"_cs},
+         REGISTER_ACTION_PREDICATE},
+        {"RegisterAction.predicate"_cs,
+         {"cmp0"_cs, "cmp1"_cs, "cmp2"_cs, "cmp3"_cs},
+         REGISTER_ACTION_PREDICATE},
+        {"DirectRegisterAction.predicate"_cs, {}, REGISTER_ACTION_PREDICATE},
+        {"DirectRegisterAction.predicate"_cs, {"cmplo"_cs}, REGISTER_ACTION_PREDICATE},
+        {"DirectRegisterAction.predicate"_cs,
+         {"cmplo"_cs, "cmphi"_cs},
+         REGISTER_ACTION_PREDICATE},
+        {"DirectRegisterAction.predicate"_cs,
+         {"cmp0"_cs, "cmp1"_cs, "cmp2"_cs},
+         REGISTER_ACTION_PREDICATE},
+        {"DirectRegisterAction.predicate"_cs,
+         {"cmp0"_cs, "cmp1"_cs, "cmp2"_cs, "cmp3"_cs},
+         REGISTER_ACTION_PREDICATE},
         /* ======================================================================================
          *  Register.read / Register.write
          *  Direct (non-RegisterAction) register accessors. `T read(in I index)` and

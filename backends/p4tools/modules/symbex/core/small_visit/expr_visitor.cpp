@@ -198,8 +198,18 @@ bool ExprVisitor::preorder(const IR::MethodCallExpression *call) {
             // Handle extern calls. They may also be of Type_SpecializedCanonical.
             if (method->expr->type->is<IR::Type_Extern>() ||
                 method->expr->type->is<IR::Type_SpecializedCanonical>()) {
-                evalExternMethodCall({*call, *method->expr->checkedTo<IR::PathExpression>(),
-                                      method->member, *call->arguments});
+                // Inside an abstract method body (e.g. a RegisterAction's apply), `this` denotes
+                // the enclosing extern instance. Type inference stamps the IR::This node with that
+                // instance's type, which is all ExternMethodImpls::find dispatches on, so a typed
+                // stand-in receiver is enough. The `*` prefix keeps the synthesized name out of the
+                // unimplemented-extern diagnostic, matching the "*method" convention above.
+                const auto *receiver = method->expr->to<IR::PathExpression>();
+                if (receiver == nullptr && method->expr->is<IR::This>()) {
+                    receiver = new IR::PathExpression(method->expr->type, new IR::Path("*this"));
+                }
+                BUG_CHECK(receiver != nullptr, "Unsupported extern receiver %1% in %2%",
+                          method->expr, call);
+                evalExternMethodCall({*call, *receiver, method->member, *call->arguments});
                 return false;
             }
 

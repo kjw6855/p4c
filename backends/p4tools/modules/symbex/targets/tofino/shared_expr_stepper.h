@@ -81,6 +81,13 @@ class SharedTofinoExprStepper : public ExprStepper {
      * ====================================================================================== */
     static const ExternMethodImpls<SharedTofinoExprStepper>::MethodImpl
         DIRECT_REGISTER_ACTION_EXECUTE;
+    /* ======================================================================================
+     *  (Direct)RegisterAction.predicate
+     *  The stateful ALU's one-hot predicate output. Shared by both externs: the method is a pure
+     *  function of its comparison arguments and touches no register state, so the instance behind
+     *  the receiver is irrelevant.
+     * ====================================================================================== */
+    static const ExternMethodImpls<SharedTofinoExprStepper>::MethodImpl REGISTER_ACTION_PREDICATE;
 
     // Provides implementations of Tofino externs.
     static const ExternMethodImpls<SharedTofinoExprStepper> SHARED_TOFINO_EXTERN_METHOD_IMPLS;
