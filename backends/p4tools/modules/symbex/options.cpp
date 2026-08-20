@@ -794,7 +794,19 @@ SymbexOptions::SymbexOptions()
         "from the P4 program, so a difference between two entries is a property of the program "
         "rather than of a control plane p4symbex invented; on an open table both sides of the "
         "comparison would be tool-chosen. Purely additive -- the HIT->MISS and MISS->HIT passes "
-        "are unchanged, and with this off generation is byte-identical.");
+        "are unchanged, and with this off generation is byte-identical. ON BY DEFAULT; this flag "
+        "is retained so an explicit --const-entry-action-divergence stays valid.");
+
+    registerOption(
+        "--no-const-entry-action-divergence", nullptr,
+        [this](const char *) {
+            constEntryActionDivergence = false;
+            return true;
+        },
+        "Do not run the additive const-entry action-divergence pass. Use this to reproduce the "
+        "pre-default generation (which is byte-identical with the pass off), or to A/B how much of "
+        "a program's yield the pass accounts for, or to drop its cost on a program whose budget is "
+        "tight -- it is a third pass over every chain, on top of HIT->MISS and MISS->HIT.");
 }
 
 bool SymbexOptions::validateOptions() const {

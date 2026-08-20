@@ -256,7 +256,16 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// that shape work needs the written VALUE steered toward a value selecting a different const
     /// entry (they are statically known) rather than accumulated -- the driveRegisterPhase2
     /// "pre-set the carried SO and re-validate the write path" pattern.
-    bool constEntryActionDivergence = false;
+    ///
+    /// ON BY DEFAULT. It was opt-in when introduced, which in practice meant never enabled: the
+    /// harness has no way to pass the flag (tampering.py forwards no such option, and the
+    /// program-list `extra_args` tail reaches p4c as well as p4symbex, so a p4symbex-only flag
+    /// there breaks compilation), and the one corpus run that exercised it had to wrap the binary
+    /// in a shell shim. The pass costs one IR predicate on a sink without const entries
+    /// (runTamperingChain's tableHasConstEntries guard), and it is additive by construction, so
+    /// the default is the only delivery mechanism that reaches the nightly sweep. Disable with
+    /// --no-const-entry-action-divergence.
+    bool constEntryActionDivergence = true;
 
  protected:
     bool validateOptions() const override;
