@@ -1572,11 +1572,12 @@ StateDependencyTracker::Phase3Goal StateDependencyTracker::hitGoal(bool want) co
     };
 }
 
-void StateDependencyTracker::evalDisposition(const FinalState *fs, bool &dropped,
-                                             int &outPort) const {
+void StateDependencyTracker::evalDisposition(const FinalState *fs, bool &dropped, int &outPort,
+                                             bool *resubmitted) const {
     const auto *es = fs->getExecutionState();
     // Mirrors runPhase's drop predicate: no output bytes or the drop property ⇒ dropped.
     dropped = es->getPacketBufferSize() <= 0 || es->getProperty<bool>("drop"_cs);
+    if (resubmitted != nullptr) *resubmitted = es->getProperty<bool>("resubmit"_cs);
     outPort = -1;
     if (dropped) return;
     const auto *opExpr = es->get(programInfo.getTargetOutputPortVar());
@@ -3133,12 +3134,17 @@ const FinalState *StateDependencyTracker::reDeriveConcretePhase(
     // Pick the terminal matching @p fs's disposition (drop / output port); fall back to @p fs.
     bool d0Drop = false;
     int d0Port = -1;
-    evalDisposition(fs, d0Drop, d0Port);
+    bool d0Resub = false;
+    evalDisposition(fs, d0Drop, d0Port, &d0Resub);
     for (const auto *st : states) {
         bool dDrop = false;
         int dPort = -1;
-        evalDisposition(st, dDrop, dPort);
-        if (dDrop == d0Drop && dPort == d0Port) return st;
+        bool dResub = false;
+        evalDisposition(st, dDrop, dPort, &dResub);
+        // Match the resubmit flag too: a resubmit terminal and a genuine drop terminal both report
+        // dropped=true, and picking one for the other would describe a different path than the one
+        // this candidate was reasoned about on.
+        if (dDrop == d0Drop && dPort == d0Port && dResub == d0Resub) return st;
     }
     return fs;  // no consistent terminal matched the original disposition — strictly additive fallback
 }
@@ -3490,7 +3496,11 @@ size_t StateDependencyTracker::runTamperingChain(
                     if (!outcome.readable || !outcome.matchedEntry) return true;
                     bool dropped = false;
                     int outPort = -1;
-                    evalDisposition(fs, dropped, outPort);
+                    bool resubmitted = false;
+                    evalDisposition(fs, dropped, outPort, &resubmitted);
+                    // A resubmit terminal's real fate is decided by a second pass we do not model,
+                    // so it cannot serve as the reference the differential is taken against.
+                    if (resubmitted) return true;
                     if (!dropped && distinct) {
                         const auto *ipExpr =
                             fs->getExecutionState()->get(programInfo.getTargetInputPortVar());
@@ -3521,7 +3531,10 @@ size_t StateDependencyTracker::runTamperingChain(
                                if (hasSink && evalSinkHit(fs) != 1) return true;  // sink missed
                                bool dropped = false;
                                int outPort = -1;
-                               evalDisposition(fs, dropped, outPort);
+                               bool resubmitted = false;
+                               evalDisposition(fs, dropped, outPort, &resubmitted);
+                               // See above: a resubmit terminal is not a usable Phase-1 baseline.
+                               if (resubmitted) return true;
                                if (!dropped && distinct) {
                                    const auto *ipExpr = fs->getExecutionState()->get(
                                        programInfo.getTargetInputPortVar());
@@ -4296,7 +4309,8 @@ size_t StateDependencyTracker::runTamperingChain(
         const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
         bool d1Drop = false;
         int d1Port = -1;
-        evalDisposition(fs1, d1Drop, d1Port);
+        bool d1Resub = false;
+        evalDisposition(fs1, d1Drop, d1Port, &d1Resub);
 
         // Attack-attribution: if the victim's OWN Phase-1 write already drives the sink to HIT when
         // Phase 1 is replayed (a self-set RegisterAction), the MISS→HIT flip is self-induced, not
@@ -4340,11 +4354,17 @@ size_t StateDependencyTracker::runTamperingChain(
             // Disposition of fs1 (MISS) vs fs3 (HIT) — informational only, for the case label.
             bool d3Drop = false;
             int d3Port = -1;
-            evalDisposition(fs3, d3Drop, d3Port);
+            bool d3Resub = false;
+            evalDisposition(fs3, d3Drop, d3Port, &d3Resub);
 
-            // Compute the informational case label (MISS→HIT × disposition).
+            // Compute the informational case label (MISS→HIT × disposition). A resubmit terminal
+            // reports dropped, but calling it a drop would be a false claim: label it for what it
+            // is rather than folding it into DROP_TO_FWD / FWD_TO_DROP.
             std::string disp;
-            if (d1Drop && !d3Drop) {
+            if (d1Resub || d3Resub) {
+                disp = d1Resub && d3Resub ? "RESUBMIT_TO_RESUBMIT"
+                                          : (d1Resub ? "RESUBMIT_TO_FWD" : "FWD_TO_RESUBMIT");
+            } else if (d1Drop && !d3Drop) {
                 disp = "DROP_TO_FWD";
             } else if (!d1Drop && d3Drop) {
                 disp = "FWD_TO_DROP";

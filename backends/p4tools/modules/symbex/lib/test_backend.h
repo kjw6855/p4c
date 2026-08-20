@@ -98,6 +98,12 @@ class TestBackEnd {
         /// observes the actual egress. Distinct from packetIsDropped (UninitializedTaintExpression /
         /// egress_spec==DROP_PORT), which is a real drop.
         bool outputPortIsUnknown = false;
+
+        /// True when this pass ended in Resubmit.emit. The pass produces no egress packet, so
+        /// packetIsDropped is also set — but the packet is NOT destroyed: it re-enters ingress and
+        /// its final fate is decided by a second pass symbex does not model. Kept distinct so
+        /// disposition-sensitive logic does not report a drop that never happened.
+        bool packetIsResubmitted = false;
     };
 
     /// Reserved output-port value meaning "symbex could not determine the egress port" (tainted,
@@ -110,6 +116,8 @@ class TestBackEnd {
         const TestSpec *testSpec;
         /// Whether the packet was dropped during this phase.
         bool packetIsDropped;
+        /// Whether this phase ended in Resubmit.emit (see TestInfo::packetIsResubmitted).
+        bool packetIsResubmitted = false;
         /// True when this phase's register index was reported but not enforced: asserting the real
         /// hash value contradicted the path (a program branching on hash bits has already committed
         /// to an arbitrary cell), so the emitted index describes the model rather than constraining

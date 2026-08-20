@@ -68,6 +68,12 @@ class SharedTofinoExprStepper : public ExprStepper {
     // configured by the control plane the mirrored packets are discarded and hence not seen
     // by the STF/PTF test.
     static const ExternMethodImpls<SharedTofinoExprStepper>::MethodImpl MIRROR_EMIT;
+    /* ======================================================================================
+     *  Resubmit.emit
+     *  Returns the packet to the ingress buffer for a second ingress pass. Terminal for THIS pass,
+     *  and shared by both arities: the second pass is not modelled.
+     * ====================================================================================== */
+    static const ExternMethodImpls<SharedTofinoExprStepper>::MethodImpl RESUBMIT_EMIT;
 
     /* ======================================================================================
      *  RegisterAction.execute

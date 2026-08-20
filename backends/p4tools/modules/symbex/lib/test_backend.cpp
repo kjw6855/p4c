@@ -476,11 +476,15 @@ TestBackEnd::TestInfo TestBackEnd::produceTestInfo(
     // drops (UninitializedTaintExpression, drop_ctl, egress_spec==DROP_PORT) have
     // outputPortIsUnknown=false and are unaffected.
     bool dropped = executionState->getProperty<bool>("drop"_cs) && !outputPortIsUnknown;
+    // Resubmit is a disposition of its own: no egress packet this pass (hence dropped), but the
+    // packet re-enters ingress rather than being destroyed.
+    bool resubmitted = executionState->getProperty<bool>("resubmit"_cs);
 
     return {inputPacket->checkedTo<IR::Constant>(),  inputPortInt,
             outputPacket->checkedTo<IR::Constant>(), outputPortInt,
             evalMask->checkedTo<IR::Constant>(),     *programTraces,
-            dropped,                                 outputPortIsUnknown};
+            dropped,                                 outputPortIsUnknown,
+            resubmitted};
 }
 
 bool TestBackEnd::printTestInfo(const ExecutionState * /*executionState*/, const TestInfo &testInfo,
@@ -743,7 +747,8 @@ std::optional<TestBackEnd::PhaseResult> TestBackEnd::processPhase(
     auto testInfo = produceTestInfo(executionState, effectiveModel, outputPacketExpr,
                                     outputPortExpr, programTraces);
     const auto *testSpec = createTestSpec(executionState, effectiveModel, testInfo);
-    return PhaseResult{testSpec, testInfo.packetIsDropped, indexReportedNotEnforced};
+    return PhaseResult{testSpec, testInfo.packetIsDropped, testInfo.packetIsResubmitted,
+                       indexReportedNotEnforced};
 }
 
 bool TestBackEnd::runTampering(const TamperingFinalState &state) {
@@ -791,6 +796,8 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
                                     state.readPathHasExit, state.attackerRegisterValues,
                                     state.attackerRegisterSinkTables);
     tamperingSpec.kind = state.kind;
+    tamperingSpec.phase1Resubmitted = res1->packetIsResubmitted;
+    tamperingSpec.phase2Resubmitted = res2->packetIsResubmitted;
     // The case label rides the emitted "Tamper case:" metadata line on every target, so tag a
     // report-only index there: such a test names the cell the attacker packet hashes to in the
     // model, but the solver was never obliged to keep it, and triage must not read it as a pinned

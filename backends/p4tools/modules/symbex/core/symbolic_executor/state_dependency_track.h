@@ -504,7 +504,11 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// Evaluates @p fs's packet disposition from its final model: sets @p dropped (packet not
     /// emitted: drop property, empty buffer, or tainted egress port) and, when not dropped,
     /// @p outPort to the concrete egress port (else -1).
-    void evalDisposition(const FinalState *fs, bool &dropped, int &outPort) const;
+    /// @param resubmitted when non-null, receives whether the pass ended in Resubmit.emit.
+    /// Such a terminal reports dropped=true (no egress packet this pass) but is NOT a drop:
+    /// the packet re-enters ingress and its fate is decided by a pass we do not model.
+    void evalDisposition(const FinalState *fs, bool &dropped, int &outPort,
+                         bool *resubmitted = nullptr) const;
 
     /// Sink action-divergence gate (replaces the cross-phase Phase1↔Phase3 output comparison).
     /// Returns true unless the sink table's HIT action (the action of @p fs's matched entry) and its

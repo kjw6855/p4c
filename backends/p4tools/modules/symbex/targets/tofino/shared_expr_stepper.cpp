@@ -459,6 +459,34 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
         };
 
 /* ======================================================================================
+ *  Resubmit.emit
+ *  Hands the packet back to its original ingress buffer to be enqueued for a second ingress
+ *  pass. Terminal for THIS pass: no egress packet is produced, so "drop" is set -- that is what
+ *  every existing consumer of the property actually needs, and it keeps getEgressPacket() at
+ *  nullopt.
+ *
+ *  "resubmit" is set alongside it because a resubmitted packet is NOT destroyed: its fate is
+ *  decided by a second pass we do not model. Folding the two together is irrecoverable, and the
+ *  generation-side predicates care -- pickConsistentTerminal matches terminals on the drop flag,
+ *  and the emitted case label is computed from it, so a resubmit terminal would otherwise be
+ *  reported as a drop that never happened.
+ *
+ *  Note this cannot follow Mirror.emit's no-op: Mirror makes a COPY and leaves the original
+ *  packet's fate untouched, whereas Resubmit changes the fate of the original packet.
+ * ====================================================================================== */
+const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::MethodImpl
+    SharedTofinoExprStepper::RESUBMIT_EMIT =
+        [](const ExternInfo & /*externInfo*/, SharedTofinoExprStepper &stepper) {
+            auto &nextState = stepper.state.clone();
+            nextState.add(*new TraceEvents::Generic(
+                "Packet resubmitted to ingress; the second pass is not modelled."_cs));
+            nextState.setProperty("drop"_cs, true);
+            nextState.setProperty("resubmit"_cs, true);
+            nextState.replaceTopBody(Continuation::Exception::Drop);
+            stepper.result->emplace_back(nextState);
+        };
+
+/* ======================================================================================
  *  RegisterAction.execute
  *  See also: https://wiki.ith.intel.com/display/BXDCOMPILER/Stateful+ALU
  * ====================================================================================== */
@@ -1479,6 +1507,14 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
          * ====================================================================================== */
         {"Mirror.emit"_cs, {"session_id"_cs}, MIRROR_EMIT},
         {"Mirror.emit"_cs, {"session_id"_cs, "hdr"_cs}, MIRROR_EMIT},
+        /* ======================================================================================
+         *  Resubmit.emit
+         *  tofino1_base.p4 and tofino2_base.p4 declare identical signatures -- `void emit()` and
+         *  `void emit<T>(in T hdr)` -- and find() keys on the extern TYPE name, so these two
+         *  entries serve both architectures and any instance spelling (resubmit.emit, r.emit).
+         * ====================================================================================== */
+        {"Resubmit.emit"_cs, {}, RESUBMIT_EMIT},
+        {"Resubmit.emit"_cs, {"hdr"_cs}, RESUBMIT_EMIT},
         /* ======================================================================================
          *  sizeInBytes
          *  Return the width of the input in bytes.

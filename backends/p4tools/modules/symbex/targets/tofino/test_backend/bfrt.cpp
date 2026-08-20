@@ -435,6 +435,9 @@ traces: '[P2] {{trace_item}}'
 input_packet {
   packet: "{{phase1_send.pkt}}"
   port: {{phase1_send.ig_port}}
+## if phase1_resubmitted
+  resubmitted: true
+## endif
 }
 ## if phase1_verify
 expected_output_packet {
@@ -455,6 +458,9 @@ input_packet {
 ## if pkt.repeat > 1
   repeat_count: {{pkt.repeat}}
 ## endif
+## if phase2_resubmitted
+  resubmitted: true
+## endif
 }
 ## endfor
 
@@ -463,6 +469,9 @@ input_packet {
 input_packet {
   packet: "{{phase3_send.pkt}}"
   port: {{phase3_send.ig_port}}
+## if phase1_resubmitted
+  resubmitted: true
+## endif
 }
 
 ## for reg in affected_registers
@@ -644,6 +653,8 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     coverageStr << std::setprecision(2) << currentCoverage;
     dataJson["coverage"] = coverageStr.str();
 
+    dataJson["phase1_resubmitted"] = testSpec->phase1Resubmitted;
+    dataJson["phase2_resubmitted"] = testSpec->phase2Resubmitted;
     dataJson["phase1_send"] = getSend(testSpec->spec1);
     dataJson["phase1_verify"] = getVerify(testSpec->spec1);
     dataJson["phase2_send"] = getSend(testSpec->spec2);

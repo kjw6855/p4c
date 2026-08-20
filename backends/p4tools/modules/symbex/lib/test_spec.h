@@ -396,6 +396,12 @@ class TamperingTestSpec {
     /// bit (which of hit_phase/miss_phase is Phase 1) does not have to spell out the enumerator.
     [[nodiscard]] bool isMissToHit() const { return kind == TamperKind::MissToHit; }
 
+    /// True when the corresponding phase ended in Resubmit.emit. The pass emits no egress packet,
+    /// but the packet re-enters ingress and its final fate is decided by a second pass symbex does
+    /// not model, so the harness must not read a missing capture as a drop.
+    bool phase1Resubmitted = false;
+    bool phase2Resubmitted = false;
+
     /// Human-readable case label (e.g. "MISS_TO_HIT/DROP_TO_FWD"), emitted as metadata. Empty for
     /// HIT→MISS.
     cstring caseLabel = ""_cs;

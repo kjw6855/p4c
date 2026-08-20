@@ -29,6 +29,10 @@ message InputPacketAtPort {
     // that must be incremented thousands of times to cross a threshold) so the file carries one block
     // with repeat_count=k instead of k literal blocks. The harness sends the packet repeat_count times.
     uint32 repeat_count = 4;
+    // True when p4symbex modelled this phase as ending in Resubmit.emit: the ingress pass produced
+    // no egress packet, but on hardware the packet re-enters ingress and its final fate is NOT
+    // modelled. The harness must not read a missing capture as a drop for such a phase.
+    bool resubmitted = 5;
 }
 
 // Expected packet observed on a switch port (with optional don't-care mask).

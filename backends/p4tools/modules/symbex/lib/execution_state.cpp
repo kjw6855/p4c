@@ -75,6 +75,7 @@ ExecutionState::ExecutionState(const IR::P4Program *program)
     setProperty("inUndefinedState"_cs, false);
     // Drop is initialized to false, too.
     setProperty("drop"_cs, false);
+    setProperty("resubmit"_cs, false);
     // If a user-pattern is provided, initialize the reachability engine state.
     if (!SymbexOptions::get().pattern.empty()) {
         reachabilityEngineState = ReachabilityEngineState::getInitial();
@@ -91,6 +92,7 @@ ExecutionState::ExecutionState(Continuation::Body body)
     setProperty("inUndefinedState"_cs, false);
     // Drop is initialized to false, too.
     setProperty("drop"_cs, false);
+    setProperty("resubmit"_cs, false);
     // If a user-pattern is provided, initialize the reachability engine state.
     if (!SymbexOptions::get().pattern.empty()) {
         reachabilityEngineState = ReachabilityEngineState::getInitial();
@@ -108,6 +110,7 @@ ExecutionState::ExecutionState(const IR::P4Program *program, Continuation::Body 
     setProperty("inUndefinedState"_cs, false);
     // Drop is initialized to false, too.
     setProperty("drop"_cs, false);
+    setProperty("resubmit"_cs, false);
 }
 
 ExecutionState &ExecutionState::create(const IR::P4Program *program) {
