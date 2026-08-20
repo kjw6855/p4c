@@ -4269,28 +4269,98 @@ size_t StateDependencyTracker::runTamperingChain(
                 // HIT->MISS has no symbolic Phase 3, so Phase 1's own HIT configuration is the
                 // one the controller would have to have installed.
                 if (violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
-                // The Phase-2 gate compared against the bucket's representative Phase-1 state; this
-                // emission pairs fs2 with an arbitrary state of the same bucket, and two packets
-                // can share ports and table keys yet hash to different cells. Re-check that pair.
-                if (!phasesShareIndexCell(fs1, fs2, chain.soName, programInfo)) {
+                // A shared-traversal terminal carries an ARBITRARY hash-branch fork that contradicts
+                // the real CRC, so TestBackEnd::processPhase re-solves it unsat and drops the case at
+                // emission (the 0-emit wall). Re-deriving with concrete packet bytes makes the hash
+                // fork-free and the re-solve SAT — but ONLY for a program-fixed write, i.e. when there
+                // is no packet override. A packet-injectable write's attacker value is injected into
+                // the still-SYMBOLIC Phase-2 packet by the backend post-solve (phase2ModelOverrides via
+                // Model::set); re-deriving would freeze the packet to constants AND, where the tampered
+                // field also steers forwarding (SwitchV2P's cache key IS the written value), send that
+                // frozen packet down a different path so processPhase re-solves unsat — losing a case
+                // that emits today. So re-derive only when there is no override to preserve.
+                const FinalState *emitFs1 = fs1;
+                const FinalState *emitFs2 = fs2;
+                std::map<cstring, const TestObject *> emitRegValues = attackerRegValues;
+                std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>>
+                    emitOverrides = phase2ModelOverrides;
+                std::vector<const IR::Expression *> emitConstraints = p1ExtraConstraints;
+                bool reDerived = false;
+                if (phase2ModelOverrides.empty()) {
+                    const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
+                                                             inputPortSymExpr, /*isPhase1=*/true, {});
+                    std::map<cstring, const TestObject *> p1Carry;
+                    for (const auto &[regName, regObj] :
+                         fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
+                        p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
+                    const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2,
+                                                             inputPortSymExpr, /*isPhase1=*/false,
+                                                             p1Carry);
+                    // reDeriveConcretePhase returns its input on failure: fs2c==fs2 means no concrete
+                    // terminal matched fs2's disposition, so fall back to the raw pair (today's
+                    // emission — strictly additive).
+                    if (fs2c != fs2) {
+                        // "Did the ATTACKER write?" is a property of the Phase-2 state itself: a
+                        // terminal can VISIT the write without the register recording anything
+                        // (coverage is control flow, not effect), and the collector accepts on
+                        // coverage — such a re-derived terminal has no attacker action to emit.
+                        const auto *p2SoReg = fs2c->getExecutionState()->getTestObject(
+                            "registervalues"_cs, chain.soName, false);
+                        if (p2SoReg == nullptr || !p2SoReg->wasWritten()) {
+                            printInfo("[Tampering] chain id=%1% (%2%): re-derived Phase-2 terminal "
+                                      "recorded no write to '%3%' — no attacker action to emit; "
+                                      "skipping.",
+                                      chain.id, currentChainName, chain.soName);
+                            continue;
+                        }
+                        reDerived = true;
+                        emitFs1 = fs1c;
+                        emitFs2 = fs2c;
+                        // The frozen field now holds the program's own write value; read it back off
+                        // fs2c (withAttackerValues' program-fixed branch), with the index resolved to
+                        // the real cell the concrete packet addresses.
+                        emitRegValues.clear();
+                        emitRegValues[chain.soName] =
+                            p2SoReg
+                                ->withAttackerValues(
+                                    modelWithResolvedIndices(fs2c, chain.soName, programInfo),
+                                    SymbexOptions::get().stateTamperValue, {})
+                                .testObject;
+                        // p1ExtraConstraints were built against the symbolic fs1; the concrete fs1c
+                        // pins every packet field already, and re-imposing the size-1 key EQ pins on
+                        // the freshly re-solved control plane over-constrains it into UNSAT. The
+                        // accumulated / MISS→HIT branches pass {} for the same reason.
+                        emitConstraints.clear();
+                    }
+                }
+                // The Phase-2 gate compared against the bucket's representative Phase-1 state (and,
+                // on the concrete path, against terminals reDeriveConcretePhase re-ran and it never
+                // saw): two packets can share ports and table keys yet hash to different cells, so
+                // re-check the pair actually being emitted.
+                if (!phasesShareIndexCell(emitFs1, emitFs2, chain.soName, programInfo)) {
                     printInfo("[Tampering] chain id=%1% (%2%): Phase-2 packet writes a cell of "
                               "'%3%' that this Phase-1 packet does not read; skipping.",
                               chain.id, currentChainName, chain.soName);
                     continue;
                 }
-                // Cross-phase control-plane consistency: one installed default action per table,
-                // and one entry per match key, has to serve both emitted phases. Nothing was
-                // propagated unless an annotation fixed it, so a difference here is a real
-                // contradiction, not a pinning artefact.
-                if (!crossPhaseCpAgrees(cond1, {{"Phase 2", fs2}}, chain.id, currentChainName)) {
+                // Cross-phase control-plane consistency: one installed default action per table, and
+                // one entry per match key, has to serve both emitted phases. On the concrete path the
+                // re-derivation re-ran Phase 1 too, so its freshly re-solved config is compared as
+                // well; on the raw path Phase 1 is the unchanged reference (cond1) and only Phase 2
+                // needs comparing.
+                std::vector<std::pair<const char *, const FinalState *>> cpLaterPhases;
+                if (reDerived) cpLaterPhases.push_back({"the re-derived Phase 1", emitFs1});
+                cpLaterPhases.push_back(
+                    {reDerived ? "the re-derived Phase 2" : "Phase 2", emitFs2});
+                if (!crossPhaseCpAgrees(cond1, cpLaterPhases, chain.id, currentChainName)) {
                     continue;
                 }
                 // Phase 3 is a dynamic deviation check: the test script replays Phase 1's packet
                 // after Phase 2 sets the attacker value; the observable is the sink-table HIT(Phase
                 // 1)→MISS(Phase 3) flip (emitted as hit_phase=1 / miss_phase=3).
-                TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, cond1.outputPort, ip2, op2,
-                                       attackerRegValues, phase2ModelOverrides, attackerRegSinkTables,
-                                       p1ExtraConstraints};
+                TamperingFinalState ts{*emitFs1, *emitFs2, false, cond1.inputPort, cond1.outputPort,
+                                       ip2, op2, emitRegValues, emitOverrides, attackerRegSinkTables,
+                                       emitConstraints};
                 ts.chainId = chain.id;
                 ts.subTestId = ++subTestId;
                 // If Phase 1's forward (the validator's reference) came from multicast, emit a
@@ -4757,10 +4827,9 @@ size_t StateDependencyTracker::runConditionChain(
             // Phase 3's read carries the index conditions for the pinned cell; a Phase-2 write
             // terminal does not. The emitted value is therefore post-Phase-3 and is not what the
             // harness reads -- accumulating registers carry AT_LEAST + min_value for that reason.
-            // Same rule as the key path: the harness reads after Phase 2, so a single-send case
-            // must be emitted from the Phase-2 state. This path has no reDeriveConcretePhase, and
-            // fs2 is exactly the state emitted as the Phase-2 packet (see the spec below), so
-            // register and packet stay consistent with each other.
+            // Same rule as the key path: the harness reads after Phase 2, so a single-send case is
+            // emitted from the re-derived Phase-2 state (fs2c below), which is also the state whose
+            // packet bytes are emitted -- register and packet stay consistent with each other.
             // The semantic condition is "did the ATTACKER write?", tested on the Phase-2 state
             // itself, independent of which state supplies the emitted value. A terminal can
             // VISIT the write statement without the register recording anything -- node
@@ -4775,18 +4844,6 @@ size_t StateDependencyTracker::runConditionChain(
                           chain.id, currentChainName, chain.soName);
                 continue;
             }
-            const FinalState *regSrc = (repeat > 1) ? fs3 : fs2;
-            std::map<cstring, const TestObject *> attackerRegValues;
-            const auto *fs3SoReg = regSrc->getExecutionState()->getTestObject(
-                "registervalues"_cs, chain.soName, false);
-            if (fs3SoReg == nullptr) continue;
-            const auto *attackerReg =
-                fs3SoReg
-                    ->withAttackerValues(
-                        modelWithResolvedIndices(regSrc, chain.soName, programInfo),
-                        SymbexOptions::get().stateTamperValue, {})
-                    .testObject;
-            attackerRegValues[chain.soName] = attackerReg;
 
             // Emitted output port for pinning: the concrete value if symbex pinned it, else -1
             // meaning "don't pin / unknown". A tainted egress is NOT a drop — it just means symbex
@@ -4804,21 +4861,57 @@ size_t StateDependencyTracker::runConditionChain(
             // Condition sink: no table, so attackerRegisterSinkTables stays empty.
             labelAttackerPort(chain, ip2);
             if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
-            // The Phase-2 gate compared against the bucket's representative Phase-1 state; this
-            // emission pairs fs2 with an arbitrary state of the same bucket, and two packets can
-            // share ports and table keys yet hash to different cells. Re-check the emitted pair.
-            if (!phasesShareIndexCell(fs1, fs2, chain.soName, programInfo)) {
-                printInfo("[Tampering H2S2C] chain id=%1% (%2%): Phase-2 packet writes a cell of "
-                          "'%3%' that this Phase-1 packet does not read; skipping.",
+            // Re-derive both emitted packets with CONCRETE bytes so their CRC hashes resolve eagerly
+            // (fork-free) and TestBackEnd::processPhase re-solves them SAT — a raw shared-traversal
+            // terminal carries an arbitrary hash-branch fork that contradicts the real CRC and is
+            // dropped unsat at emission (this path had no reDeriveConcretePhase before, the whole of
+            // H2S2C's 0-emit bucket). No packet override: the Phase-2 DFS/accumulation already found a
+            // packet whose OWN write flips the condition, so freezing its bytes preserves the flip.
+            // Phase-2 carries the re-derived Phase-1's registers (same victim) and reuses fs2's bytes.
+            // reDeriveConcretePhase falls back to its input, so fs2c==fs2 emits exactly today's pair
+            // (strictly additive — a case emitted today is never lost).
+            const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
+                                                     inputPortSymExpr, /*isPhase1=*/true, {});
+            std::map<cstring, const TestObject *> p1Carry;
+            for (const auto &[regName, regObj] :
+                 fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
+                p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
+            const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
+                                                     /*isPhase1=*/false, p1Carry);
+            // Single send: source from the re-derived Phase-2 (its packet is the one emitted, so the
+            // value and packet agree). Accumulation (repeat>1) keeps Phase 3 -- the emitted packet is
+            // sent k times and no single state holds base+k, so the value rides AT_LEAST + min_value.
+            const FinalState *regSrc = (repeat > 1) ? fs3 : fs2c;
+            std::map<cstring, const TestObject *> attackerRegValues;
+            const auto *fs3SoReg = regSrc->getExecutionState()->getTestObject(
+                "registervalues"_cs, chain.soName, false);
+            if (fs3SoReg == nullptr) continue;
+            attackerRegValues[chain.soName] =
+                fs3SoReg
+                    ->withAttackerValues(
+                        modelWithResolvedIndices(regSrc, chain.soName, programInfo),
+                        SymbexOptions::get().stateTamperValue, {})
+                    .testObject;
+            // The Phase-2 gate compared against the bucket's representative Phase-1 state, and never
+            // saw the terminals reDeriveConcretePhase re-ran; two packets can share ports and table
+            // keys yet hash to different cells. Re-check the emitted pair.
+            if (!phasesShareIndexCell(fs1c, fs2c, chain.soName, programInfo)) {
+                printInfo("[Tampering H2S2C] chain id=%1% (%2%): re-derived Phase-2 packet writes a "
+                          "cell of '%3%' the re-derived Phase 1 does not read; skipping.",
                           chain.id, currentChainName, chain.soName);
                 continue;
             }
-            // One installed control-plane state has to serve all three phases of the replay.
-            if (!crossPhaseCpAgrees(cond1, {{"Phase 2", fs2}, {"Phase 3", fs3}}, chain.id,
-                                    currentChainName)) {
+            // One installed control-plane state has to serve all three phases of the replay; the
+            // concrete re-derivation re-ran Phase 1 and Phase 2, so both are compared against Phase 1's
+            // reference config alongside Phase 3.
+            if (!crossPhaseCpAgrees(cond1,
+                                    {{"the re-derived Phase 1", fs1c},
+                                     {"the re-derived Phase 2", fs2c},
+                                     {"Phase 3", fs3}},
+                                    chain.id, currentChainName)) {
                 continue;
             }
-            TamperingFinalState ts{*fs1, *fs2, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
+            TamperingFinalState ts{*fs1c, *fs2c, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
                                    attackerRegValues, {}, {}, {}};
             // AT_LEAST bound for an analytically-driven accumulation: the value at which the
             // sink/condition flips. The harness cannot observe an exact value -- it stops driving
