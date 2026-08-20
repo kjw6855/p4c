@@ -9,13 +9,25 @@ Table/action/arg names are the qualified names p4symbex itself emits in the gene
 (`table_name:` fields), not guesses from the P4 source.
 """
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 
-ANN = Path.home() / "Workspace-remote/p4symbex_nightly/annotations"
-BACKUP = Path.home() / "Workspace-remote/p4symbex_nightly/annotations_pre_step2c"
-MIRROR = Path.home() / "Workspace/p4c/backends/state_dependency/annotations"
+# Derived from this file's own location, never from $HOME. This script lives at
+#   <root>/Workspace/p4c/backends/state_dependency/annotations/
+# so parents[4] is the p4c checkout and parents[6] is <root> -- /root/jiwon here,
+# /home/vagrant/jiwon on the Tofino VM. The previous Path.home()-based paths omitted the
+# repo segment entirely ("$HOME/Workspace-remote/..."), so all three resolved to
+# directories that exist on neither machine and the script could not run at all.
+_HERE = Path(__file__).resolve().parent
+_P4C_ROOT = _HERE.parents[2]                 # .../Workspace/p4c
+_ROOT = _P4C_ROOT.parents[1]                 # .../<root>
+_REMOTE = Path(os.environ.get("P4CSD_REMOTE") or (_ROOT / "Workspace-remote"))
+
+ANN = Path(os.environ.get("P4CSD_ANNOTATIONS") or (_REMOTE / "p4symbex_nightly/annotations"))
+BACKUP = _REMOTE / "p4symbex_nightly/annotations_pre_step2c"
+MIRROR = _HERE                               # the in-tree review copy is this directory
 
 THRESHOLD = 30
 
@@ -26,6 +38,24 @@ TARGETS = {
         "SwitchIngress.get_threshold.tbl_get_threshold", "tbl_get_threshold_act", "threshold"),
     "SketchLib_p4_16_univmon_p416_univmon": (
         "SwitchIngress.tcam.tbl_select_level", "tbl_act", "threshold"),
+    # --- added: the remaining SketchLib programs with the same control-plane threshold shape.
+    # Reach differs and is worth knowing before reading a result (counts from the SOChain cache):
+    #   rhhh  3 key / 4 cond chains -> in BOTH policy lists, so this clause can affect both sweeps.
+    #   kary  0 key / 2 cond chains -> h2s2c list only; invisible to an h2s2k run.
+    #   fcm   0 key / 0 cond chains -> in NO policy list, so this clause is inert today. Recorded
+    #         for completeness (it costs nothing and is right if fcm ever gains chains); do not
+    #         count it as yield.
+    # rhhh/univmon route the threshold through select_key/lpm_optimization's tbl_select_level
+    # rather than GET_THRESHOLD, hence the different table+action.
+    "SketchLib_p4_16_rhhh_p416_rhhh": (
+        "SwitchIngress.sram.tbl_select_level", "tbl_act", "threshold"),
+    "SketchLib_p4_16_kary_p416_kary": (
+        "SwitchIngress.get_threshold.tbl_get_threshold", "tbl_get_threshold_act", "threshold"),
+    # fcm carries its OWN copy of GET_THRESHOLD (p416_fcm.p4:70) and instantiates it one level
+    # deeper, inside control FCMSketch, which SwitchIngress instantiates as `fcmsketch`.
+    "SketchLib_p4_16_fcm_p416_fcm": (
+        "SwitchIngress.fcmsketch.get_threshold.tbl_get_threshold",
+        "tbl_get_threshold_act", "threshold"),
 }
 
 REASON = (

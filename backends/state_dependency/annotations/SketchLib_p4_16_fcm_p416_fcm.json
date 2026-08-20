@@ -1,0 +1,60 @@
+{
+  "program": "SketchLib_p4_16_fcm_p416_fcm",
+  "paper": {
+    "title": "SketchLib",
+    "venue": "USENIX NSDI",
+    "year": 2022,
+    "threat_model": null,
+    "pdf": "../annotation_reference/SketchLib_NSDI2022.pdf",
+    "pdf_status": "downloaded"
+  },
+  "threat_model": {
+    "model": "compromised-host (project default): attacker controls a host and may send arbitrary packets, but cannot reconfigure the control plane or compromise the switch",
+    "source": "default-policy",
+    "evidence": "../annotation_reference/SketchLib_NSDI2022.pdf: NO threat-model section \u2014 'threat model' 0 hits, 'adversar*' 0, 'attack' 0 (measured over the full PDF text)",
+    "reason": "The paper states no explicit adversary model, so the project default applies. Findings against these programs are reported under that default, not against a model the authors declared."
+  },
+  "port_roles": {},
+  "registers": {},
+  "assume": [
+    {
+      "table": "SwitchIngress.fcmsketch.get_threshold.tbl_get_threshold",
+      "when": [
+        {
+          "action_data": [
+            "tbl_get_threshold_act",
+            "threshold"
+          ],
+          "op": "eq",
+          "value": 30
+        }
+      ],
+      "then": {
+        "action": "tbl_get_threshold_act"
+      },
+      "source": "controller-assumption",
+      "ref": "SketchLib_p4_16_fcm_p416_fcm: no controller in the SketchLib artifact; threshold assumed",
+      "reason": "SketchLib ships only README.md and compile.sh -- no controller, no entry dump, no threshold value -- so no cp-artifact can be cited. The sketch counter is compared against this control-plane action parameter OUTSIDE the RegisterAction (est = est - threshold, sink keyed on the sign bit), so without pinning it the argument stays free-symbolic and no packet count can be derived. Value 30 is deliberately low: k is replayed as real packets, so a realistic threshold would demand an impractical flood."
+    }
+  ],
+  "auto_facts": {
+    "tables": 7,
+    "keyed_without_default": 1,
+    "const_entries_tables": 5,
+    "note": ""
+  },
+  "todo": [],
+  "tier": "auto-generated",
+  "controller_facts": {
+    "files": [],
+    "tables_installed": 0,
+    "status": "none-available",
+    "reason": "project ships 0 python file(s), 0 of which construct table entries. No (table, action) pairs are statically extractable, so NO control-plane clauses can be asserted for this program. Recorded as a result, not an open task: the correct annotation here is the absence of CP constraints."
+  },
+  "port_authorization": {
+    "enforced": false,
+    "evidence": "p416_fcm.p4 never reads ingress_port",
+    "reason": "No port authorization exists in the data plane. Recorded explicitly rather than as a pseudo-role 'any': binding concrete ports to such a role would make every write 'authorized' and silently disable privilege-escalation detection."
+  },
+  "cp_entries": []
+}
