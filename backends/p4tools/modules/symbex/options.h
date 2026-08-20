@@ -213,6 +213,29 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Set via --max-index-steer-retries.
     int64_t maxIndexSteerRetries = 2;
 
+    /// Per-chain cap on Phase-1 read-baseline terminals collected by the shared traversal. One
+    /// bucket serves BOTH tamper directions (HIT->MISS keeps the sink-HIT terminals, MISS->HIT the
+    /// sink-MISS ones) and the shared pass has no per-chain sink steering, so a bucket that is too
+    /// small starves one direction entirely.
+    ///
+    /// Was derived as max(4 * --max-tests, 12), which tied the width of the SEARCH to the
+    /// per-chain EMISSION cap -- two unrelated quantities. Widening the search then multiplied the
+    /// emitted corpus as a side effect, and the floor of 12 meant --max-tests 1..3 all behaved
+    /// identically. Set via --phase1-bucket-cap; 0 means unlimited (bounded only by the examine
+    /// budget and --timeout).
+    int64_t phase1BucketCap = 256;
+
+    /// Safety bound on terminals EXAMINED by a shared traversal -- both the Phase-1 bucketing pass
+    /// and the Phase-2 write-path prefilter. It exists so a chain that is infeasible in a single
+    /// packet (its bucket never fills) cannot spend the whole run; it is not a target.
+    ///
+    /// 0 means unlimited, which is the default: --timeout already bounds every traversal (runImpl
+    /// polls the deadline every 1024 steps), so the budget's only remaining job was to cut off
+    /// exploration EARLY, which is exactly what starved multi-chain programs -- one infeasible
+    /// chain consumed the shared budget and every later chain got an empty bucket. Set via
+    /// --phase1-examine-budget.
+    int64_t phase1ExamineBudget = 0;
+
     /// Wall-clock budget for the whole run, in seconds. When non-zero, the search polls a
     /// cooperative deadline at its loop heads and stops early, emitting whatever tests it has
     /// already produced plus the [Symbex Summary] line and (with --print-performance-report) the

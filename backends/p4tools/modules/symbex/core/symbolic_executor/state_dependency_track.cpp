@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -37,6 +38,14 @@
 #include "backends/p4tools/modules/symbex/options.h"
 
 namespace P4::P4Tools::Symbex {
+
+// Resolves a "0 means unlimited" budget option to the value the loop should compare against.
+// Kept as one helper so the three shared-traversal call sites cannot drift, and so the sentinel is
+// spelled out once rather than reproduced as a bare SIZE_MAX at each site.
+static size_t budgetOrUnlimited(int64_t opt) {
+    return opt <= 0 ? std::numeric_limits<size_t>::max() : static_cast<size_t>(opt);
+}
+
 
 /// Trailing-component control-plane name comparison. Defined further down (the annotation helpers
 /// own it); forward-declared because the cross-phase default-action helpers below need it first.
@@ -1241,9 +1250,11 @@ void StateDependencyTracker::collectPhase1Terminals(const ExecutionState &initSt
     // sink-MISS); since the shared pass has no per-chain sink steering, collect generously so both
     // subsets have material. The examine budget bounds runaway exploration when a chain's target is
     // single-packet-infeasible (its bucket never fills). Both are tunable.
-    const size_t base = std::max<size_t>(static_cast<size_t>(SymbexOptions::get().maxTests), 1);
-    phase1BucketCap = std::max<size_t>(base * 4, 12);
-    phase1ExamineBudget = std::max<size_t>(phase1BucketCap * allChains.size() * 4, 2000);
+    // Both budgets are now explicit options rather than functions of --max-tests: the width of the
+    // SEARCH and the per-chain EMISSION cap are unrelated quantities, and deriving one from the
+    // other meant widening the search also multiplied the emitted corpus. 0 = unlimited.
+    phase1BucketCap = budgetOrUnlimited(SymbexOptions::get().phase1BucketCap);
+    phase1ExamineBudget = budgetOrUnlimited(SymbexOptions::get().phase1ExamineBudget);
 
     // Multi-target directed search: steer toward / prune via the UNION of all chains' read targets.
     currentRequiredNodes = unionTargets;
@@ -1368,8 +1379,10 @@ std::set<size_t> StateDependencyTracker::collectPhase2Terminals(const ExecutionS
     currentChain = nullptr;
     if (unionTargets.empty()) return {};  // no write nodes to prove reachable -> prune nothing
 
-    const size_t base = std::max<size_t>(static_cast<size_t>(SymbexOptions::get().maxTests), 1);
-    phase2ExamineBudget = std::max<size_t>(allChains.size() * base * 4, 2000);
+    // Same option as the Phase-1 pass: both are shared traversals whose budget exists only to stop
+    // an infeasible chain consuming the run, and having two knobs for one concept invited exactly
+    // the asymmetry this replaces (the old formula gave this pass a 4x smaller per-chain share).
+    phase2ExamineBudget = budgetOrUnlimited(SymbexOptions::get().phase1ExamineBudget);
 
     // Steer toward the UNION of all chains' write nodes.
     currentRequiredNodes = unionTargets;
@@ -1460,9 +1473,11 @@ std::vector<const FinalState *> StateDependencyTracker::collectPhase1TerminalsPe
     phase1Examined = 0;
     phase1Buckets[chain.id].clear();
     chainPhase1Targets[chain.id] = targets;  // chainTargetsCovered (key chains) consults this
-    const size_t base = std::max<size_t>(static_cast<size_t>(SymbexOptions::get().maxTests), 1);
-    phase1BucketCap = std::max<size_t>(base * 4, 12);
-    phase1ExamineBudget = std::max<size_t>(phase1BucketCap * allChains.size() * 4, 2000);
+    phase1BucketCap = budgetOrUnlimited(SymbexOptions::get().phase1BucketCap);
+    // Per-CHAIN pass, so the budget is per chain. The old formula multiplied by allChains.size()
+    // even here, giving one chain the whole corpus's allowance and making --shared-traversal=NONE
+    // incomparable with the shared pass it is meant to be a controlled baseline for.
+    phase1ExamineBudget = budgetOrUnlimited(SymbexOptions::get().phase1ExamineBudget);
 
     // Steer toward THIS chain's targets only (the scope difference from the shared union pass).
     currentRequiredNodes = targets;
@@ -4304,7 +4319,12 @@ size_t StateDependencyTracker::runTamperingChain(
     // ---- Phase 3 (MISS→HIT): symbolically replay Phase 1 with the tampered register ----
     // Require the sink to flip MISS→HIT AND the packet disposition to change.
     size_t emitted = 0;
-    for (size_t i = 0; i < phase1States.size() && emitted < maxPerChain; ++i) {
+    // maxPerChain == 0 means UNLIMITED, matching --max-tests' documented semantics and the
+    // `maxPerChain != 0 &&` guards the HIT->MISS branches already use. Written as a bare
+    // `emitted < maxPerChain`, 0 made this loop emit NOTHING -- so --max-tests 0 silently
+    // disabled the whole MISS->HIT direction and, below, all of H2S2C.
+    for (size_t i = 0; i < phase1States.size() && (maxPerChain == 0 || emitted < maxPerChain);
+         ++i) {
         const auto *fs1 = phase1States[i];
         const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
         bool d1Drop = false;
@@ -4324,7 +4344,7 @@ size_t StateDependencyTracker::runTamperingChain(
         }
 
         for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
-            if (emitted >= maxPerChain) break;
+            if (maxPerChain != 0 && emitted >= maxPerChain) break;
 
             const auto &model2 = fs2->getFinalModel();
             const auto *es2 = fs2->getExecutionState();
@@ -4690,7 +4710,12 @@ size_t StateDependencyTracker::runConditionChain(
     // ---- Phase 3: symbolically replay Phase 1 with the tampered register; confirm the condition
     // flips to p3Target AND the two branches diverge in output. ----
     size_t emitted = 0;
-    for (size_t i = 0; i < phase1States.size() && emitted < maxPerChain; ++i) {
+    // maxPerChain == 0 means UNLIMITED, matching --max-tests' documented semantics and the
+    // `maxPerChain != 0 &&` guards the HIT->MISS branches already use. Written as a bare
+    // `emitted < maxPerChain`, 0 made this loop emit NOTHING -- so --max-tests 0 silently
+    // disabled the whole MISS->HIT direction and, below, all of H2S2C.
+    for (size_t i = 0; i < phase1States.size() && (maxPerChain == 0 || emitted < maxPerChain);
+         ++i) {
         const auto *fs1 = phase1States[i];
         const auto &cond1 = phase1Conditions[phase1StateToCondition[i]];
         // Attack-attribution gate (H2S2C analog of the H2S2K gate in runTamperingChain, sharing the
@@ -4707,7 +4732,7 @@ size_t StateDependencyTracker::runConditionChain(
             continue;
         }
         for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
-            if (emitted >= maxPerChain) break;
+            if (maxPerChain != 0 && emitted >= maxPerChain) break;
             const auto &model2 = fs2->getFinalModel();
             const auto *es2 = fs2->getExecutionState();
             if (!sinkConditionDiverges()) continue;  // then/else write the same output (count-indep.)

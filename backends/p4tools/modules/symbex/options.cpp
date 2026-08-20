@@ -169,6 +169,51 @@ SymbexOptions::SymbexOptions()
         "cell is dropped outright instead of being steered first.");
 
     registerOption(
+        "--phase1-bucket-cap", "phase1BucketCap",
+        [this](const char *arg) {
+            try {
+                phase1BucketCap = std::stoll(arg);
+                if (phase1BucketCap < 0) {
+                    throw std::invalid_argument("Invalid input.");
+                }
+            } catch (std::invalid_argument &) {
+                error("Invalid value %1% for --phase1-bucket-cap. Expected non-negative integer.",
+                      arg);
+                return false;
+            }
+            return true;
+        },
+        "Per-chain cap on the Phase-1 read-baseline terminals the shared traversal collects "
+        "[default: 256]. 0 means unlimited. One bucket serves both tamper directions (HIT->MISS "
+        "keeps its sink-HIT terminals, MISS->HIT its sink-MISS ones) and the shared pass does no "
+        "per-chain sink steering, so a bucket that is too small silently starves one direction. "
+        "This was previously derived from --max-tests, which tied the width of the search to the "
+        "per-chain emission cap; they are now independent.");
+
+    registerOption(
+        "--phase1-examine-budget", "phase1ExamineBudget",
+        [this](const char *arg) {
+            try {
+                phase1ExamineBudget = std::stoll(arg);
+                if (phase1ExamineBudget < 0) {
+                    throw std::invalid_argument("Invalid input.");
+                }
+            } catch (std::invalid_argument &) {
+                error(
+                    "Invalid value %1% for --phase1-examine-budget. Expected non-negative integer.",
+                    arg);
+                return false;
+            }
+            return true;
+        },
+        "Bound on terminals examined by a shared traversal -- the Phase-1 bucketing pass and the "
+        "Phase-2 write-path prefilter alike [default: 0 = unlimited]. It guards against a chain "
+        "that is infeasible in a single packet spending the whole run; it is not a target depth. "
+        "Unlimited is the default because --timeout already bounds every traversal, whereas a "
+        "finite budget is shared across chains: one infeasible chain could exhaust it and leave "
+        "every later chain with an empty bucket.");
+
+    registerOption(
         "--stop-metric", "stopMetric",
         [this](const char *arg) {
             stopMetric = cstring(arg).toUpper();
