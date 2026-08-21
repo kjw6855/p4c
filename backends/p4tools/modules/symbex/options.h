@@ -196,6 +196,11 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// relaxed read, and the relaxed terminal's model then yields the required precondition
     /// (regName, index I, value C). The emitted test never runs in this mode — it is a discovery
     /// oracle, not an execution semantics change.
+    ///
+    /// Set via --relax-carried-register-read. Default OFF: it is a RETRY, applied only where the
+    /// ordinary priming DFS already found nothing, so switching it on cannot change any program
+    /// that currently emits. It was dead code until now -- plumbed through ScopedSymbexOpts and
+    /// consumed in the Tofino stepper, but with no CLI flag and no call site passing it true.
     bool relaxCarriedRegisterRead = false;
 
     /// Safety guardrail bounding the length of a multi-packet Phase-2 sequence (setup packets +

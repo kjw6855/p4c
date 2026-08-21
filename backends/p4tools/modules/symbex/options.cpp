@@ -169,6 +169,22 @@ SymbexOptions::SymbexOptions()
         "cell is dropped outright instead of being steered first.");
 
     registerOption(
+        "--relax-carried-register-read", nullptr,
+        [this](const char *) {
+            relaxCarriedRegisterRead = true;
+            return true;
+        },
+        "Retry the analytical drive-register's PRIMING search with carried register reads relaxed "
+        "to fresh symbolic values, when the ordinary search finds no packet that writes the state "
+        "object. A register holding a carried value C' reads back that constant, so a write gated "
+        "on reg[I]==C with C'!=C is unsatisfiable and the priming DFS returns nothing -- which is "
+        "where driveRegisterPhase2 gives up, before it ever collects a threshold candidate. The "
+        "relaxed terminal's model reveals the precondition value the write actually needs. This is "
+        "a DISCOVERY oracle: the relaxed read never reaches an emitted test, and because the retry "
+        "runs only after the ordinary search came back empty, it cannot alter a program that "
+        "already emits.");
+
+    registerOption(
         "--phase1-bucket-cap", "phase1BucketCap",
         [this](const char *arg) {
             try {

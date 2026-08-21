@@ -969,7 +969,13 @@ struct ScopedSymbexOpts {
                      std::vector<cstring> extraSkippedTables = {},
                      bool setRegTracking = true,
                      bool isPhase1 = false,
-                     bool relaxCarriedRead = false)
+                     // Defaults to whatever --relax-carried-register-read set, NOT to false. The
+                     // parameter used to default to false and was then assigned unconditionally, so
+                     // every one of these guards silently cleared the CLI flag before the code that
+                     // reads it ever ran -- which is the real reason this option looked dead: it was
+                     // reachable from the command line and unreachable in practice. A caller that
+                     // genuinely wants the relaxed read for one scope still passes true explicitly.
+                     std::optional<bool> relaxCarriedRead = std::nullopt)
         : extraSkippedTables_(std::move(extraSkippedTables)) {
         auto &opts = SymbexOptions::get();
         savedOutputPacketOnly             = opts.outputPacketOnly;
@@ -981,7 +987,7 @@ struct ScopedSymbexOpts {
         opts.coverageOptions.coverStatements = true;
         opts.tamperingRegisterTracking    = setRegTracking;
         opts.initRegZeroValue        = isPhase1;
-        opts.relaxCarriedRegisterRead     = relaxCarriedRead;
+        opts.relaxCarriedRegisterRead     = relaxCarriedRead.value_or(savedRelaxCarriedRegisterRead);
         sinkTableName_ = sinkTableName;
         if (!sinkTableName_.isNullOrEmpty()) {
             opts.skippedControlPlaneEntities.insert(sinkTableName_);
@@ -3263,22 +3269,76 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
         buildReachingSet();
         auto &primeInit = phase2Init.clone();
         runPhase(primeInit, primeOut, 1);
+        // No priming packet under ordinary semantics. A register carrying a value C' reads that
+        // constant back, so a write gated on reg[I]==C with C'!=C is simply unsatisfiable and the
+        // DFS has nothing to return -- and this `return nullptr` is where the whole analytical
+        // driver gives up, silently, before collecting a single threshold candidate. Retry with
+        // carried reads relaxed to fresh symbolic values so the model can reveal the precondition
+        // the write needs. Opt-in, and gated on the ordinary search having failed, so it cannot
+        // change a program that already primes. The relaxed terminal is used only to measure
+        // (base, delta) and is never emitted -- see options.h on relaxCarriedRegisterRead.
+        if (primeOut.empty() && SymbexOptions::get().relaxCarriedRegisterRead) {
+            auto &opts = SymbexOptions::get();
+            const bool savedRelax = opts.relaxCarriedRegisterRead;
+            opts.relaxCarriedRegisterRead = true;
+            auto &relaxedInit = phase2Init.clone();
+            runPhase(relaxedInit, primeOut, 1);
+            opts.relaxCarriedRegisterRead = savedRelax;
+            printInfo("[Tampering] chain id=%1% (%2%): priming found nothing under ordinary "
+                      "semantics; relaxed-carried-read retry returned %3% terminal(s).",
+                      chain.id, currentChainName, primeOut.size());
+        }
         phase2AcceptWroteSO_ = false;
     }
-    if (primeOut.empty()) return nullptr;
+    if (primeOut.empty()) {
+        // Unconditional: with the retry off this was the last silent exit in the driver, and a
+        // silent exit here is indistinguishable from "the driver was never called" -- which is
+        // exactly what made this blocker take three rebuilds to locate.
+        printInfo("[Tampering] chain id=%1% (%2%): drive-register found no priming packet that "
+                  "writes '%3%' in a single send%4%.",
+                  chain.id, currentChainName, chain.soName,
+                  SymbexOptions::get().relaxCarriedRegisterRead
+                      ? " (relaxed-carried-read retry also found none)"_cs
+                      : " (--relax-carried-register-read may recover one)"_cs);
+        return nullptr;
+    }
     const FinalState *prime = primeOut[0];
     const int ipPrime = getPortPair(prime).first;
 
     // 2. Measure (base, delta): SO value after one priming write, then after a second replay.
+    //
+    // The three bail-outs below used to be silent `return nullptr`s, which made the driver
+    // indistinguishable from "the driver was never called" in a log -- and that is precisely what
+    // hid rhhh's real blocker: it primes fine and dies HERE, not at the priming step everyone
+    // assumes. Each one now says which measurement failed, because they need different fixes: a
+    // non-scalar carried value is a modelling gap in the register test object, while a replay that
+    // reaches no terminal is a path-feasibility problem.
     std::map<cstring, const TestObject *> s1;
     auto v1opt = carrySO(prime, s1);
-    if (!v1opt) return nullptr;
+    if (!v1opt) {
+        printInfo("[Tampering] chain id=%1% (%2%): drive-register bailed -- the priming terminal's "
+                  "carried '%3%' is absent or not a scalar, so there is no base value to measure "
+                  "from (a struct-typed or index-mapped register lands here).",
+                  chain.id, currentChainName, chain.soName);
+        return nullptr;
+    }
     const FinalState *prime2 =
         runSymbolicPhase3(chain, initState, prime, ipPrime, inputPortSymExpr, s1);
-    if (prime2 == nullptr) return nullptr;
+    if (prime2 == nullptr) {
+        printInfo("[Tampering] chain id=%1% (%2%): drive-register bailed -- replaying the priming "
+                  "packet from its own carried state reaches no terminal, so delta cannot be "
+                  "measured.",
+                  chain.id, currentChainName);
+        return nullptr;
+    }
     std::map<cstring, const TestObject *> s2;
     auto v2opt = carrySO(prime2, s2);
-    if (!v2opt) return nullptr;
+    if (!v2opt) {
+        printInfo("[Tampering] chain id=%1% (%2%): drive-register bailed -- the replayed terminal's "
+                  "carried '%3%' is absent or not a scalar, so delta cannot be measured.",
+                  chain.id, currentChainName, chain.soName);
+        return nullptr;
+    }
     const big_int delta = *v2opt - *v1opt;
     if (delta <= 0) {
         // Non-monotone or saturating: no closed-form k exists. CountSketch/UnivMon land here --
@@ -3359,29 +3419,41 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
 
     auto ceilDiv = [](const big_int &a, const big_int &b) { return (a + b - 1) / b; };
 
+    // Why each candidate was rejected, tallied. The loop below ends in a bare `return nullptr`, and
+    // that silence is not harmless: with a priming packet found, a threshold gate present and
+    // candidates collected, a caller sees exactly the same "nothing happened" as a chain where the
+    // driver was never invoked. SketchLib's rhhh sits here -- it primes fine, collects candidates,
+    // and every one fails re-validation -- and locating that took a rebuild with temporary traces
+    // because no line distinguished it.
+    size_t candBelowBase = 0;   // gate already satisfiable at the current value => not this path
+    size_t candBadK = 0;        // k <= 1, or past the analytical cap
+    size_t candNotCovered = 0;  // pre-set the register, re-run allCovered => write path still uncovered
+    size_t candNoCarry = 0;     // covering terminal carries no scalar SO value
+    size_t candGoalUnmet = 0;   // Phase 3 ran but the sink/condition did not flip
+
     // 4. For each candidate read-value, compute the prior-packet count, pre-set the carried SO to the
     //    value the covering packet will read, and RE-RUN the real allCovered DFS to validate.
     for (const auto &vreg : candidates) {
-        if (vreg <= base) continue;                       // gate already satisfiable ⇒ not this path
+        if (vreg <= base) { ++candBelowBase; continue; }  // gate already satisfiable ⇒ not this path
         const big_int kprior = ceilDiv(vreg - base, delta);
         const big_int overrideVal = base + kprior * delta;
         const big_int k = kprior + 1;                     // + the covering packet itself
-        if (k <= 1 || k > kAnalyticalCap) continue;
+        if (k <= 1 || k > kAnalyticalCap) { ++candBadK; continue; }
 
         std::map<cstring, const TestObject *> overrideRegs = s1;
         overrideRegs[chain.soName] = s1[chain.soName]->withCarriedScalarValue(overrideVal);
         const FinalState *fs2real = runSymbolicPhase3(chain, initState, prime, ipPrime,
                                                       inputPortSymExpr, overrideRegs,
                                                       /*keepWriteCoverage=*/true);
-        if (fs2real == nullptr) continue;                 // full write path not covered ⇒ try next
+        if (fs2real == nullptr) { ++candNotCovered; continue; }  // write path still uncovered
 
         // 5. Phase 3 flip+diverge from the covering packet's carried (tampered) register state.
         std::map<cstring, const TestObject *> afterCover;
         auto coverVal = carrySO(fs2real, afterCover);
-        if (!coverVal) continue;
+        if (!coverVal) { ++candNoCarry; continue; }
         const FinalState *fs3 =
             runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, afterCover);
-        if (fs3 == nullptr || !goal(fs3)) continue;
+        if (fs3 == nullptr || !goal(fs3)) { ++candGoalUnmet; continue; }
 
         outFs2 = fs2real;
         outRepeat = static_cast<size_t>(k);
@@ -3394,6 +3466,11 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
                   chain.id, currentChainName, outRepeat, base, delta, overrideVal);
         return fs3;
     }
+    printInfo("[Tampering] chain id=%1% (%2%): drive-register exhausted %3% threshold candidate(s) "
+              "without validating one (base=%4% delta=%5%) -- below-base %6%, bad-k %7%, write path "
+              "still uncovered after pre-setting %8%, no carried scalar %9%, Phase-3 goal unmet %10%.",
+              chain.id, currentChainName, candidates.size(), base, delta, candBelowBase, candBadK,
+              candNotCovered, candNoCarry, candGoalUnmet);
     return nullptr;
 }
 
