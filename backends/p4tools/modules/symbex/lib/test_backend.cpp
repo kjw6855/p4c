@@ -812,6 +812,43 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
     } else {
         tamperingSpec.caseLabel = state.caseLabel;
     }
+    // Constant egress ports anywhere in the program's actions -- see TamperingTestSpec::monitorPorts.
+    {
+        const auto portFields = getProgramInfo().getEgressPortFieldNames();
+        if (!portFields.empty()) {
+            const auto &program = getProgramInfo().getP4Program();
+            // Named compile-time constants first. Real programs rarely write a port literal at the
+            // assignment: SketchLib says `ucast_egress_port = CPU_PORT` against
+            // `const PortId_t CPU_PORT = 192`, and Brain-on-Switch uses `pipe_aux_recir_port`. Those
+            // reach here as a PathExpression, not an IR::Constant, so matching only literals finds
+            // nothing on exactly the programs this exists for.
+            std::map<cstring, big_int> namedConstants;
+            forAllMatching<IR::Declaration_Constant>(
+                &program, [&](const IR::Declaration_Constant *decl) {
+                    if (decl->initializer == nullptr) return;
+                    if (const auto *c = decl->initializer->to<IR::Constant>())
+                        namedConstants.emplace(decl->name.name, c->value);
+                });
+            const auto constantValueOf =
+                [&namedConstants](const IR::Expression *e) -> std::optional<big_int> {
+                if (const auto *c = e->to<IR::Constant>()) return c->value;
+                if (const auto *path = e->to<IR::PathExpression>()) {
+                    auto it = namedConstants.find(path->path->name.name);
+                    if (it != namedConstants.end()) return it->second;
+                }
+                return std::nullopt;
+            };
+            forAllMatching<IR::AssignmentStatement>(
+                &program, [&](const IR::AssignmentStatement *assign) {
+                    const auto *lhs =
+                        assign->left != nullptr ? assign->left->to<IR::Member>() : nullptr;
+                    if (lhs == nullptr || portFields.count(lhs->member.name) == 0) return;
+                    const auto value = constantValueOf(assign->right);
+                    if (!value.has_value() || *value < 0) return;
+                    tamperingSpec.monitorPorts.insert(static_cast<uint64_t>(*value));
+                });
+        }
+    }
     tamperingSpec.usesMulticast = state.usesMulticast;
     tamperingSpec.multicastGroupId = state.multicastGroupId;
     tamperingSpec.phase2RepeatCount = state.phase2RepeatCount;

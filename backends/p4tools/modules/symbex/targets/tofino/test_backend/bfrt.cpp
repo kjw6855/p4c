@@ -506,6 +506,17 @@ multicast_group {
 }
 ## endif
 
+## if exists("monitor_ports")
+# Ports the harness must sniff in addition to the phases' own in/expected ports: the
+# compile-time-constant egress ports this program's actions can assign. Without them a
+# divergence that egresses on an unnamed port is invisible to the oracle and is reported
+# as "no divergence".
+## for p in monitor_ports
+monitor_ports: {{p}}
+## endfor
+## endif
+
+
 ## if existsIn(control_plane, "tables")
 ## for table in control_plane.tables
 ## for rule in table.rules
@@ -744,6 +755,12 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
         mc["mgid"] = testSpec->multicastGroupId;
         mc["replica_port"] = SharedTofinoConstants::MULTICAST_REP_PORT;
         dataJson["multicast_group"] = mc;
+    }
+
+    if (!testSpec->monitorPorts.empty()) {
+        inja::json ports = inja::json::array();
+        for (auto v : testSpec->monitorPorts) ports.push_back(v);
+        dataJson["monitor_ports"] = ports;
     }
 
     return dataJson;

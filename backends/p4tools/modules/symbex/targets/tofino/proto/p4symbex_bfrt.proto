@@ -179,4 +179,18 @@ message TamperingTestCase {
     repeated string metadata = 6;
     // Present only when the forwarding path is multicast.
     repeated MulticastGroup multicast_group = 7;
+
+    // Extra device ports the harness must sniff during replay, beyond the ones the phases
+    // above already name through their in/expected ports.
+    //
+    // The replay oracle reduces each run to (egress port, first frame) over the MONITORED ports
+    // only, so a divergence that egresses anywhere else is invisible and is scored as "no
+    // divergence" -- a false negative, not a benign tamper. The phases name only the ports the
+    // MODEL predicted; a program that hardcodes an egress port in an action the tampered replay
+    // can reach will egress somewhere the txtpb never mentions (ACC-Turbo 140, Brain-on-Switch
+    // 196, SketchLib {0,2}).
+    //
+    // These are the compile-time-constant egress ports found in the program's actions, so the
+    // set is a property of the program rather than of this test case.
+    repeated uint32 monitor_ports = 8;
 }

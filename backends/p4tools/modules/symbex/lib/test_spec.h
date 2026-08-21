@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <vector>
 
 #include "backends/p4tools/common/lib/model.h"
@@ -409,6 +410,13 @@ class TamperingTestSpec {
     /// True if the forwarding path is multicast (modeled as a single representative port). When
     /// set, the emitted test carries a multicast_group block so the p4csd validator installs the
     /// group (mgid → representative port) before replay and removes it afterwards.
+    /// Extra device ports the replay harness must sniff: the compile-time-constant egress ports
+    /// this PROGRAM's actions can assign. Collected from the program, not from this case, because
+    /// the oracle needs every port a Phase-3-reachable action COULD use while the case only knows
+    /// the ports the model predicted -- which is exactly the gap that makes a real divergence
+    /// egressing elsewhere read as "no divergence".
+    std::set<uint64_t> monitorPorts;
+
     bool usesMulticast = false;
     /// The concrete multicast group id to install; valid only when usesMulticast is true.
     int multicastGroupId = -1;
