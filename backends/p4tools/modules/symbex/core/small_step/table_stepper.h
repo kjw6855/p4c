@@ -143,6 +143,19 @@ class TableStepper {
 
     /// This function allows target back ends to implement their own interpretation of table
     /// execution. How a table is evaluated is target-specific.
+    /// Keeps the target's "drop" port sentinel out of a control-plane action parameter that the
+    /// action assigns straight to the egress port. Returns nullptr unless BOTH hold: the target
+    /// declares a sentinel (ProgramInfo::getDropPortValue) and @p actionType's body contains a
+    /// direct `<egress port> = <parameter>` assignment.
+    ///
+    /// The assignment check is what keeps this precise. Constraining every parameter of the port's
+    /// WIDTH would be a guess -- a bit<9> action argument need not be a port -- whereas an action
+    /// that writes the parameter to the egress port is unambiguous, and is exactly the shape that
+    /// makes the solver's free choice of the sentinel emit a test the device drops.
+    const IR::Expression *dropPortActionArgConstraint(const IR::P4Action *actionType,
+                                                      const IR::Parameter *parameter,
+                                                      const IR::Expression *actionArg);
+
     virtual void evalTargetTable(const std::vector<const IR::ActionListElement *> &tableActionList);
 
     void setTableDefaultEntries(const std::vector<const IR::ActionListElement *> &tableActionList);

@@ -428,6 +428,37 @@ const IR::Expression *pinnedDefaultArgPin(const ActionCall *pinned, cstring acti
 
 }  // namespace
 
+const IR::Expression *TableStepper::dropPortActionArgConstraint(
+    const IR::P4Action *actionType, const IR::Parameter *parameter,
+    const IR::Expression *actionArg) {
+    const auto *progInfo = getProgramInfo();
+    if (progInfo == nullptr || actionType == nullptr || parameter == nullptr) return nullptr;
+    const auto dropValue = progInfo->getDropPortValue();
+    if (!dropValue.has_value()) return nullptr;  // target has no drop sentinel
+    const auto portFields = progInfo->getEgressPortFieldNames();
+    if (portFields.empty()) return nullptr;
+
+    // Does this action assign THIS parameter straight to a port selector? Matched on the LHS's
+    // trailing member name: the control names the struct by its own parameter (`ig_intr_tm_md`)
+    // while symbex uses an internal path (`*ig_intr_md_for_tm`), so neither pointer nor full-name
+    // comparison works.
+    bool assignsPortFromParam = false;
+    forAllMatching<IR::AssignmentStatement>(
+        actionType->body, [&](const IR::AssignmentStatement *assign) {
+            if (assignsPortFromParam) return;
+            const auto *lhs = assign->left != nullptr ? assign->left->to<IR::Member>() : nullptr;
+            if (lhs == nullptr || portFields.count(lhs->member.name) == 0) return;
+            const auto *rhs = assign->right->to<IR::PathExpression>();
+            if (rhs != nullptr && rhs->path != nullptr && rhs->path->name.name == parameter->name.name)
+                assignsPortFromParam = true;
+        });
+    if (!assignsPortFromParam) return nullptr;
+
+    const auto *type = actionArg->type != nullptr ? actionArg->type->to<IR::Type_Bits>() : nullptr;
+    if (type == nullptr) return nullptr;
+    return new IR::Neq(actionArg, IR::Constant::get(type, *dropValue));
+}
+
 const IR::Expression *TableStepper::cpActionArgPin(cstring actionName,
                                                    const IR::Parameter *parameter,
                                                    const IR::Expression *actionArg) const {
@@ -542,6 +573,10 @@ void TableStepper::setTableDefaultEntries(
                 cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
             }
             if (const auto *pin =
+                    dropPortActionArgConstraint(actionType, parameter, actionArg)) {
+                cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
+            }
+            if (const auto *pin =
                     pinnedDefaultArgPin(pinnedDefault, actionName, parameter, actionArg)) {
                 cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
             }
@@ -620,6 +655,10 @@ void TableStepper::evalTableControlEntries(
             // Note how we use the control plane name for the parameter here.
             ctrlPlaneArgs.emplace_back(parameter, actionArg);
             if (const auto *pin = cpActionArgPin(actionName, parameter, actionArg)) {
+                cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
+            }
+            if (const auto *pin =
+                    dropPortActionArgConstraint(actionType, parameter, actionArg)) {
                 cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
             }
         }

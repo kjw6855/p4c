@@ -3,10 +3,12 @@
 
 #include <cstddef>
 #include <optional>
+#include <set>
 
 #include "backends/p4tools/common/compiler/reachability.h"
 #include "backends/p4tools/common/lib/arch_spec.h"
 #include "ir/ir.h"
+#include "lib/big_int.h"
 #include "lib/castable.h"
 #include "lib/rtti.h"
 #include "midend/coverage.h"
@@ -78,6 +80,29 @@ class ProgramInfo : public ICastable {
     [[nodiscard]] virtual std::vector<const IR::StateVariable *> getMulticastGroupVars() const {
         return {};
     }
+
+    /// @returns the value that, written to the egress port, means "drop" on this target, or
+    /// nullopt when the target has no such sentinel.
+    ///
+    /// Needed because a control-plane action parameter that the action assigns straight to the
+    /// egress port is free-symbolic, so the solver may pick the sentinel and produce a test whose
+    /// modelled device drops the packet -- leaving the replay nothing to observe a divergence
+    /// against. On Tofino the sentinel is 511; SwitchV2P shows the effect directly, where two
+    /// otherwise identical emitted cases differ only in this argument (0x1FF fails to reproduce,
+    /// 0x000 reproduces).
+    [[nodiscard]] virtual std::optional<big_int> getDropPortValue() const { return std::nullopt; }
+
+    /// @returns the trailing field names that SELECT an egress port on this target, e.g.
+    /// {"ucast_egress_port", "egress_port"} on Tofino. Empty by default.
+    ///
+    /// Deliberately not getTargetOutputPortVar(): that is the EGRESS pipeline's view
+    /// (*eg_intr_md.egress_port), whereas an ingress forwarding action picks the port by writing
+    /// ig_intr_md_for_tm.ucast_egress_port. They are different variables, so matching an action
+    /// body against the output-port var alone silently matches nothing -- which is exactly how the
+    /// first version of the drop-sentinel constraint failed to fire on SwitchV2P's l3_forward.
+    /// Matching is on the trailing member name because the control's own parameter name
+    /// (`ig_intr_tm_md`) differs from symbex's internal path (`*ig_intr_md_for_tm`).
+    [[nodiscard]] virtual std::set<cstring> getEgressPortFieldNames() const { return {}; }
 
     /// @returns an expression that checks whether the packet is to be dropped.
     /// The computation is target specific.

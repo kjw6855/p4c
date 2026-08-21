@@ -87,6 +87,12 @@ class TofinoSharedProgramInfo : public ProgramInfo {
     IR::StateVariable getParserParamVar(const IR::P4Parser *parser, const IR::Type *type,
                                         size_t paramIndex, cstring paramLabel) const;
 
+    /// 511 -- SharedTofinoConstants::DROP_CONSTANT. See ProgramInfo::getDropPortValue.
+    [[nodiscard]] std::optional<big_int> getDropPortValue() const override;
+
+    /// {"ucast_egress_port", "egress_port"} -- the ingress TM selector and the egress view.
+    [[nodiscard]] std::set<cstring> getEgressPortFieldNames() const override;
+
     [[nodiscard]] const IR::Type_Bits *getParserErrorType() const override;
 
     [[nodiscard]] const TofinoCompilerResult &getCompilerResult() const override;

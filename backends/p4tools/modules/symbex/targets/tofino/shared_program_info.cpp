@@ -136,4 +136,12 @@ IR::StateVariable TofinoSharedProgramInfo::getParserParamVar(const IR::P4Parser 
 const TofinoCompilerResult &TofinoSharedProgramInfo::getCompilerResult() const {
     return ProgramInfo::getCompilerResult().as<TofinoCompilerResult>();
 }
+std::optional<big_int> TofinoSharedProgramInfo::getDropPortValue() const {
+    return big_int(SharedTofinoConstants::DROP_CONSTANT);
+}
+
+std::set<cstring> TofinoSharedProgramInfo::getEgressPortFieldNames() const {
+    return {"ucast_egress_port"_cs, "egress_port"_cs};
+}
+
 }  // namespace P4::P4Tools::Symbex::Tofino
