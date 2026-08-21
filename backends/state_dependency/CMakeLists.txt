@@ -38,6 +38,8 @@ set (STATE_DEPENDENCY_LIB_HDRS
   stateful_to_cond.h
   hdr_to_stateful.h
   utils.h
+  post_midend.h
+  p4runtime_translation.h
 )
 
 # Linkable library for external consumers (e.g. p4tools/symbex).
@@ -50,6 +52,14 @@ target_include_directories(p4csd-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(p4c_state_dependency
   state_dependency.cpp
   options.cpp
+  post_midend.cpp
+  p4runtime_translation.cpp
+  # --post-midend reuses p4symbex's midend pass list verbatim instead of copying it, so the two
+  # can never drift. These TUs depend only on core p4c (no Z3, no Target registry, no
+  # CompilerResult), so no p4tools library is linked and ENABLE_P4TOOLS is irrelevant here.
+  ${P4C_SOURCE_DIR}/backends/p4tools/common/compiler/midend.cpp
+  ${P4C_SOURCE_DIR}/backends/p4tools/common/compiler/convert_varbits.cpp
+  ${P4C_SOURCE_DIR}/backends/p4tools/common/compiler/convert_struct_expr.cpp
   ${EXTENSION_P4_14_CONV_SOURCES}
 )
 target_link_libraries(p4c_state_dependency p4csd-lib ${P4C_LIBRARIES} ${P4C_LIB_DEPS})

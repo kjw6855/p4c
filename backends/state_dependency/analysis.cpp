@@ -76,10 +76,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   bool supergraphOnly) {
     Util::ScopedTimer sdTimer("P4SD");
     StateDependencyResult result;
-    // Graph/binary mode (graphsDir set) exports every category, so it must compute them all.
-    // In library mode a caller may request a subset (e.g. symbex Tampering needs only SD_KEY) to
-    // skip the other expensive IFDS passes.
-    if (!graphsDir.empty()) categories = SD_ALL;
+    // @categories is honoured in both modes. Graph/binary mode used to force SD_ALL here on the
+    // grounds that it "exports every category"; that made it impossible for the binary to request
+    // its four-type measurement set (SD_FOUR), and every in-tree binary-mode caller passes an
+    // explicit mask anyway. Callers that still want everything pass SD_ALL and are unaffected.
 
     // Heap-allocate ControlGraphs so it can be returned to the caller in binary mode
     // (needed by GraphVisitor). Library-mode callers should delete it themselves or
@@ -177,7 +177,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     auto *a2s2cGraphs = new DependencyGraphs(numGraphs);
     auto *sdChecker = new ActParamToStateful(refMap, typeMap,
             &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL);
-    if (categories & SD_A2S2V) {
+    // The base ACT->SO pass feeds stateVars/depEdgeMaps for BOTH sink passes below, so it runs
+    // whenever any A2S category is requested -- mirroring the HDR->SO rule further down. Gating it
+    // on SD_A2S2V alone silently produced zero A2S2K/A2S2C chains for an SD_A2S2V-less mask.
+    if (categories & (SD_A2S2V | SD_A2S2K | SD_A2S2C)) {
         Util::ScopedTimer actToSoTimer("ACT->SO");
         program->apply(*sdChecker);
         for (size_t i = 0; i < numGraphs; i++) {
@@ -215,7 +218,7 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     }
     // reg_A2S: distinct SOs written by an action param (collect from the unpruned a2s2v base graph).
     // Also seed D_all with every SO seen on the action side.
-    if (!graphsDir.empty() && (categories & SD_A2S2V)) {
+    if (!graphsDir.empty() && (categories & (SD_A2S2V | SD_A2S2K | SD_A2S2C))) {
         for (size_t i = 0; i < numGraphs; i++) {
             collectWrittenSOs(a2s2vGraphs, i, result.regA2S);
             collectAllSOs(a2s2vGraphs, i, result.allStatefulObjects);
@@ -600,10 +603,14 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     //   4. EvaluatorPass        — capture toplevel with a valid typeMap (needed to evaluate
     //                             constructor arguments in the package hierarchy).
     //
-    // A2S2V note: after RAP, action-parameter declarations are gone, so sgProp->actionParams
-    // is empty and ActParamToStateful returns early with no results.  That is intentional —
-    // A2S2V for post-RAP IR requires updating ActParamToStateful to recognise the local-
-    // variable initialisation pattern that RAP introduces.
+    // A2S2V note: RAP rewrites in/inout/out action parameters into local variables, and
+    // ActParamToStateful does not recognise that pattern, so chains rooted at those
+    // parameters are lost after RAP. Directionless parameters — the control-plane action
+    // data the A2S2* relations actually model — are NOT removed (removeParameters.cpp:122
+    // keeps them unless every parameter of the action can go), so post-RAP IR still yields
+    // A2S2 chains: Cerberus/multi3 measures A2S2K = 16 both with and without the binary's
+    // --post-midend. An earlier version of this comment said sgProp->actionParams is simply
+    // empty after RAP; that holds only for actions whose parameters are all directional.
     // Whole-pipeline and parser-deps modes both unroll parser header-stack loops (acyclic, concrete stack
     // indices) before evaluation. Best-effort and isolated in its own try/catch: ParsersUnroll's symbolic
     // interpreter can throw (e.g. CompilerBug on Type_Newtype) — on any failure keep the original program

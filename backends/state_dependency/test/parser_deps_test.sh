@@ -11,9 +11,9 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 BIN="${P4SD_BIN:-$ROOT/build/p4c_state_dependency}"
 P4="$HERE/parser_deps_v1model.p4"
 
-cond() {  # $1 = extra flags; prints the "(4) DATA writes to cond" total
+cond() {  # $1 = extra flags; prints the H2S2C (header -> SO -> condition) total
     "$BIN" --arch v1model --std p4-16 -I "$ROOT/p4include" --supergraph FULL $1 "$P4" 2>/dev/null \
-        | awk '/--- Total ---/{t=1} t && /DATA writes to cond/{print $NF; exit}'
+        | awk '/--- Total ---/{t=1} t && /^ *H2S2C /{print $NF; exit}'
 }
 
 pc=$(cond ""); pc=${pc:-0}

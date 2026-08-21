@@ -5,6 +5,7 @@
 #include "backends/state_dependency/version.h"
 #include "backends/state_dependency/state_dependency.h"
 #include "backends/state_dependency/options.h"
+#include "backends/state_dependency/post_midend.h"
 
 #include "frontends/common/applyOptionsPragmas.h"
 #include "frontends/common/parseInput.h"
@@ -120,12 +121,28 @@ int main(int argc, char *const argv[]) {
         if (program == nullptr || ::P4::errorCount() > 0) return 1;
     }
 
+    // --post-midend: reproduce the IR level p4symbex analyzes before anything else touches the
+    // program. Everything below -- the evaluator MidEnd, the analysis, the counts, the graphs --
+    // then runs unchanged on the lowered IR.
+    if (options.postMidEnd) {
+        Util::ScopedTimer postMidEndTimer("P4 post-midend");
+        try {
+            program = P4StateDependency::applyPostMidEnd(program, options);
+        } catch (const std::exception &bug) {
+            std::cerr << bug.what() << std::endl;
+            return 1;
+        }
+        if (program == nullptr || ::P4::errorCount() > 0) return 1;
+    }
+
     P4StateDependency::MidEnd midEnd(options);
     midEnd.addDebugHook(hook);
     // Whole-pipeline mode: unroll parser header-stack loops into distinct, uniquely-named states
     // (bounded by the stack size) so the parser CFG is acyclic with concrete stack indices before the
     // analysis walks it. Opt-in; the legacy per-control path is untouched.
-    if (options.wholePipeline || options.parserDeps) {
+    // Skipped under --post-midend: that pass list already runs EliminateSerEnums and ParsersUnroll
+    // (backends/p4tools/common/compiler/midend.cpp:100,151), so this would be redundant work.
+    if ((options.wholePipeline || options.parserDeps) && !options.postMidEnd) {
         Util::ScopedTimer unrollTimer("Parser unroll");
         // ParsersUnroll's symbolic interpreter can throw (e.g. CompilerBug on Type_Newtype) or set
         // errors on some programs. Treat unrolling as best-effort: on any failure keep the original
@@ -183,7 +200,7 @@ int main(int argc, char *const argv[]) {
             try {
                 sdResult = P4StateDependency::runStateDependencyAnalysis(
                         program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
-                        options.graphsDir, P4StateDependency::SD_ALL, options.wholePipeline,
+                        options.graphsDir, P4StateDependency::SD_FOUR, options.wholePipeline,
                         options.parserDeps, options.supergraphOnly);
             } catch (const std::exception &bug) {
                 if (!options.wholePipeline) throw;
@@ -225,56 +242,57 @@ int main(int argc, char *const argv[]) {
     }
 
     // Print per-control-block and total dependency chain counts.
-    if (sdResult.cfgGraphs &&
-            (sdResult.h2s2vGraphs || sdResult.h2s2cGraphs || sdResult.hdChecker)) {
+    //
+    // Four relations, each named by its full source -> stateful object -> sink path. The two
+    // value-sink families that used to be reported here -- H2S2V (H -> SO -> header/port field)
+    // and A2S2V (action param -> SO -> header/port field) -- and the "non-write SO reads" count
+    // are no longer computed (see SD_FOUR) or printed: nothing downstream consumes them
+    // (analysis/funnel.py's CHAIN_CATS is exactly these four).
+    if (sdResult.cfgGraphs != nullptr) {
         const auto &cfgArr = sdResult.cfgGraphs->controlGraphsArray;
         const size_t numGraphs = cfgArr.size();
 
-        // Case 1: H2S2V reads of registers that are NOT written by header data in the dep graph
-        //         (SO vertices with no incoming "write_to" edge → their reachable leaves).
-        // Case 2: DATA-write chains whose sink is a match key (VertexFlags::KEY).
-        // Case 3: DATA-write chains whose sink is a header/port field (non-KEY).
-        // Case 4: Same as case 2/3 but restricted to H2S2C (SO value reaches a condition leaf).
-        size_t noWriteReadTotal = 0;
-        size_t dataWriteToKeyTotal = 0;
-        size_t dataWriteToHdrTotal = 0;
-        size_t dataWriteToCondTotal = 0;
-        // A2S2K / A2S2C chain totals (sink-agnostic to the per-graph continue below).
+        // Column-aligned "<CODE>  <relation>:" labels. read_log.py keys on these exact strings.
+        static const char *const H2S2K_LABEL = "H2S2K  header -> SO -> match key:       ";
+        static const char *const H2S2C_LABEL = "H2S2C  header -> SO -> condition:       ";
+        static const char *const A2S2K_LABEL = "A2S2K  action param -> SO -> match key: ";
+        static const char *const A2S2C_LABEL = "A2S2C  action param -> SO -> condition: ";
+
+        size_t h2s2kTotal = 0;
+        size_t h2s2cTotal = 0;
         size_t a2s2kTotal = 0;
         size_t a2s2cTotal = 0;
-        for (const auto &[gn, chains] : sdResult.dataWriteA2SKeyChains) a2s2kTotal += chains.size();
-        for (const auto &[gn, chains] : sdResult.dataWriteA2SCondChains) a2s2cTotal += chains.size();
 
         std::cout << "\n================ State Dependency Counts ================\n";
         for (size_t i = 0; i < numGraphs; i++) {
             auto graphName = cstring(boost::get_property(*cfgArr[i], boost::graph_name));
-            size_t noWriteRead = sdResult.noWriteReadChains[graphName].size();
-            size_t dataWriteToKey = sdResult.dataWriteKeyChains[graphName].size();
-            size_t dataWriteToHdr = sdResult.dataWriteHeaderChains[graphName].size();
-            size_t dataWriteToCond = sdResult.dataWriteCondChains[graphName].size();
-            size_t dataWrite = dataWriteToKey + dataWriteToHdr + dataWriteToCond;
+            size_t h2s2k = sdResult.dataWriteKeyChains[graphName].size();
+            size_t h2s2c = sdResult.dataWriteCondChains[graphName].size();
+            size_t a2s2k = sdResult.dataWriteA2SKeyChains[graphName].size();
+            size_t a2s2c = sdResult.dataWriteA2SCondChains[graphName].size();
 
-            if (noWriteRead == 0 && dataWrite == 0) continue;
+            h2s2kTotal += h2s2k;
+            h2s2cTotal += h2s2c;
+            a2s2kTotal += a2s2k;
+            a2s2cTotal += a2s2c;
+
+            if (h2s2k == 0 && h2s2c == 0 && a2s2k == 0 && a2s2c == 0) continue;
 
             std::cout << "  [" << graphName << "]\n"
-                      << "    (1) H2S2V non-write SO reads:     " << noWriteRead << "\n"
-                      << "    (2) H->SO DATA writes to key:     " << dataWriteToKey << "\n"
-                      << "    (3) H->SO DATA writes to header:  " << dataWriteToHdr << "\n"
-                      << "    (4) H2S2C DATA writes to cond:    " << dataWriteToCond << "\n";
-            noWriteReadTotal += noWriteRead;
-            dataWriteToKeyTotal += dataWriteToKey;
-            dataWriteToHdrTotal += dataWriteToHdr;
-            dataWriteToCondTotal += dataWriteToCond;
+                      << "    " << H2S2K_LABEL << h2s2k << "\n"
+                      << "    " << H2S2C_LABEL << h2s2c << "\n"
+                      << "    " << A2S2K_LABEL << a2s2k << "\n"
+                      << "    " << A2S2C_LABEL << a2s2c << "\n";
         }
         std::cout << "  --- Total ---\n"
-                  << "    (1) non-write SO reads:     " << noWriteReadTotal << "\n"
-                  << "    (2) DATA writes to key:     " << dataWriteToKeyTotal << "\n"
-                  << "    (3) DATA writes to header:  " << dataWriteToHdrTotal << "\n"
-                  << "    (4) DATA writes to cond:    " << dataWriteToCondTotal << "\n"
-                  << "    (6) A2S2K DATA writes to key:  " << a2s2kTotal << "\n"
-                  << "    (7) A2S2C DATA writes to cond: " << a2s2cTotal << "\n";
-        // Distinct stateful-object (register) name sets — one line per relation, plus ALL (D_all).
-        // read_log parses the space-separated names after each label into a set.
+                  << "    " << H2S2K_LABEL << h2s2kTotal << "\n"
+                  << "    " << H2S2C_LABEL << h2s2cTotal << "\n"
+                  << "    " << A2S2K_LABEL << a2s2kTotal << "\n"
+                  << "    " << A2S2C_LABEL << a2s2cTotal << "\n";
+        // Distinct stateful-object (register) name sets. These are NOT chain types: H2S/A2S are the
+        // first-hop sets and ALL / TYPE:* are the D_all / D_crao / D_rao denominators, from which
+        // read_log.py derives every reg_* and frac_* column. read_log parses the space-separated
+        // names after each label into a set.
         auto printSOSet = [](const char *label, const std::set<cstring> &s) {
             std::cout << "    SOs[" << label << "]:";
             for (const auto &n : s) std::cout << " " << n;
@@ -287,7 +305,7 @@ int main(int argc, char *const argv[]) {
         printSOSet("H2S2K", sdResult.regH2S2K);
         printSOSet("H2S2C", sdResult.regH2S2C);
         printSOSet("ALL", sdResult.allStatefulObjects);
-        // Per-type declared-SO sets → the D_all/D_crao/D_rao denominators (read_log unions them).
+        // Per-type declared-SO sets -> the D_all/D_crao/D_rao denominators (read_log unions them).
         // Always emit the four so the denominator columns are present even at 0.
         std::map<cstring, std::set<cstring>> byType;
         for (const auto &[soName, soType] : sdResult.soTypeByName) byType[soType].insert(soName);

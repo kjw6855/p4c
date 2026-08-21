@@ -229,6 +229,16 @@ P4StateDependencyOptions::P4StateDependencyOptions() {
             "--print-performance-report. Skips all chain passes and DOT drawing, so it emits NO "
             "dependency counts. Off by default.");
     registerOption(
+            "--post-midend", nullptr,
+            [this](const char *) {
+                postMidEnd = true;
+                return true;
+            },
+            "Lower the program with the same midend p4symbex applies (P4Tools::MidEnd default "
+            "passes + target deltas + MidEndLast) before analyzing, so latency and chain positions "
+            "are measured at p4symbex's IR level rather than at the near-post-frontend level this "
+            "binary otherwise uses. All four reported relations stay measurable. Off by default.");
+    registerOption(
             "--showVarEdge", "varEdgeVis",
             [this](const char *arg) {
                 static std::map<cstring, VarEdgeVisibility> const SHOW_VAR_EDGE_OPTIONS = {

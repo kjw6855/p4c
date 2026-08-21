@@ -36,6 +36,17 @@ class P4StateDependencyOptions : public CompilerOptions {
     /// and skip every chain pass plus DOT drawing. Produces no chain counts — do not use it to
     /// generate analysis results.
     bool supergraphOnly = false;
+    /// Opt-in: lower the program with the same midend p4symbex applies (P4Tools::MidEnd default
+    /// passes + the per-target deltas + MidEndLast) before analyzing, so latency and chain
+    /// positions are measured at p4symbex's IR level instead of near-post-frontend. Off by
+    /// default.
+    ///
+    /// All four relations stay measurable here. That midend runs RemoveActionParameters, but RAP
+    /// only rewrites in/inout/out parameters into locals -- directionless ones, i.e. the
+    /// control-plane action data the A2S2* chains are rooted at, are kept
+    /// (frontends/p4/removeParameters.cpp:122). Verified on Cerberus/multi3: A2S2K is 16 both
+    /// with and without this flag.
+    bool postMidEnd = false;
     VarEdgeVisibility varEdgeVis = VarEdgeVisibility::NONE;
 
  private:

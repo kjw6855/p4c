@@ -87,11 +87,16 @@ struct StateDependencyResult {
     ParserDepsRecord parserDepsRecord;
 };
 
-/// Bitmask of chain categories to compute. The four expensive IFDS sink passes are gated on
-/// these, so a caller that needs only one category skips the rest. The base HDR->SO pass always
-/// runs when any H2S2 category (KEY/HEADER/COND) is requested. Symbex's Tampering policy needs
-/// only SD_KEY; AlteringPath needs only SD_COND. SD_ALL preserves the full analysis (graph/binary
-/// mode, where graphsDir is set, always computes everything regardless of this mask).
+/// Bitmask of chain categories to compute. The expensive IFDS sink passes are gated on these, so a
+/// caller that needs only one category skips the rest. Each of the two *base* passes runs whenever
+/// any category derived from it is requested: HDR->SO for SD_KEY/SD_HEADER/SD_COND, ACT->SO for
+/// SD_A2S2V/SD_A2S2K/SD_A2S2C. (The ACT->SO rule used to key on SD_A2S2V alone, which silently
+/// zeroed A2S2K/A2S2C for a caller that asked for those without SD_A2S2V -- they consume the
+/// stateVars/depEdgeMaps that base pass populates.)
+///
+/// Symbex's Tampering policy needs only SD_KEY; AlteringPath needs only SD_COND. The mask is
+/// honoured in BOTH library and graph/binary mode: binary mode used to force SD_ALL, which made it
+/// impossible for the p4c_state_dependency binary to request its four-type measurement set.
 enum SDCategories : unsigned {
     SD_A2S2V = 1u,
     SD_KEY = 2u,
@@ -106,6 +111,10 @@ enum SDCategories : unsigned {
     /// p4symbex --dump-state-dep-cache used to do, spending hours in the A2S2V pass for a file
     /// that cannot represent its output.
     SD_CACHEABLE = SD_KEY | SD_COND,
+    /// The four source->SO->sink relations the p4c_state_dependency binary measures and reports:
+    /// H2S2K (SD_KEY), H2S2C (SD_COND), A2S2K, A2S2C. The two value-sink families -- H2S2V
+    /// (SD_HEADER) and A2S2V -- are deliberately excluded; nothing downstream consumes them.
+    SD_FOUR = SD_KEY | SD_COND | SD_A2S2K | SD_A2S2C,
 };
 
 /// Run the full state-dependency analysis (A2S2V and H2S2V) on a compiled P4 program.
