@@ -99,6 +99,13 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     // program's (unrolled) parsers; the union of their field-path names seeds the per-control IFDS sources.
     std::set<cstring> parserMetaSrc;
     if (parserDeps) {
+        // Reported as "P4SD.ParserDeps". Every other phase in this function is scoped; without
+        // this one the mapping's cost lands in P4SD's unattributed remainder, where it cannot be
+        // recovered by subtraction -- the end-to-end mode delta is dominated by the extra IFDS
+        // work the new sources create, not by the mapping itself. The scope closes before the
+        // SuperGraphs construction below, so this times the mapping alone, not the seeding it
+        // feeds.
+        Util::ScopedTimer parserDepsTimer("ParserDeps");
         forAllMatching<IR::P4Parser>(program, [&](const IR::P4Parser *p) {
             ParserDepsRecord rec = computeParserDeps(p, refMap, typeMap);
             for (auto &[meta, hdrs] : rec.metaToHeaders) {
