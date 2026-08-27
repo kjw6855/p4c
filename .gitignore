@@ -57,3 +57,4 @@ backends/tofino/third_party/
 uv.lock
 
 *.dot
+*.z3-trace
