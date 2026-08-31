@@ -1,5 +1,6 @@
 #include "backends/state_dependency/analysis.h"
 
+#include <iostream>
 #include <set>
 
 #include <boost/graph/graph_traits.hpp>
@@ -142,6 +143,49 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     // chain passes. Hand back the CFGs in binary mode (the caller owns/deletes them); every chain
     // container stays empty, so callers must not read counts from a supergraph-only result.
     if (supergraphOnly) {
+        // Graph sizes are available here even though chains are not: gen_supergraphs above already
+        // built them. Report them now because hdr_to_stateful.cpp prints these counters only after
+        // forward_tabulate_ide(), the phase that OOMs -- so on failure they are unrecoverable.
+        //
+        // Edge counts are slightly low: each pass seeds its own root-to-source IFDS_FT edges before
+        // counting. Node counts are unaffected. "Reachable ESG nodes/edges" are omitted because the
+        // `interesting` flag is set only by tabulation; printing 0 would be a claim we cannot make.
+        for (size_t gi = 0; gi < cgen.controlGraphsArray.size(); gi++) {
+            auto *cg = cgen.controlGraphsArray[gi];
+            if (cg == nullptr) continue;
+            size_t numNodes = 0, numEsgNodes = 0, numEdges = 0, numEsgEdges = 0;
+            for (auto [vit, vend] = boost::vertices(*cg); vit != vend; ++vit) {
+                if (hasFlag((*cg)[*vit].flags, VertexFlags::VARIABLE))
+                    numEsgNodes++;
+                else
+                    numNodes++;
+            }
+            for (auto [eit, eend] = boost::edges(*cg); eit != eend; ++eit) {
+                auto type = (*cg)[*eit].type;
+                if (type == EdgeType::IFDS || type == EdgeType::IFDS_FT)
+                    numEsgEdges++;
+                else if (type != EdgeType::HAS_VAR)
+                    numEdges++;
+            }
+            auto graphName = boost::get_property(*cg, boost::graph_name);
+	    // Measure H2S and A2S only if hasActionParams
+            const bool hasActionParams =
+                gi < sg.graphProps.size() && sg.graphProps[gi] != nullptr &&
+                !sg.graphProps[gi]->actionParams.empty();
+            std::vector<const char *> relations{"Headers -> Stateful Variables"};
+            if (hasActionParams) relations.push_back("Action Parameters -> Stateful Variables");
+            for (const char *relation : relations) {
+                std::cout << "================" << std::endl;
+                std::cout << "[RESULT] " << relation << " in " << graphName << ":" << std::endl;
+                std::cout << "Total nodes: " << numNodes << std::endl;
+                std::cout << "Total edges: " << numEdges << std::endl;
+                std::cout << "Total ESG nodes: " << numEsgNodes << std::endl;
+                std::cout << "Total ESG edges: " << numEsgEdges << std::endl;
+            }
+        }
+        std::cout << "================" << std::endl;
+        std::cout.flush();
+
         if (!graphsDir.empty())
             result.cfgGraphs = cgenRaw;
         else
