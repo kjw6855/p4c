@@ -1,0 +1,5 @@
+P4
+    filter remove_matches ^\s*//.*
+    filter remove_multiline /\/\*/ /\*\//
+    extension p4
+    3rd_gen_scale 1.00
