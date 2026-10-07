@@ -3,10 +3,12 @@
 
 #include <filesystem>
 #include <optional>
-#include "backends/state_dependency/graphs.h"
+#include "backends/ifds/graphs.h"
 #include "frontends/common/options.h"
 
 namespace P4::P4StateDependency {
+
+using namespace ::P4::IFDS;
 
 class P4StateDependencyOptions : public CompilerOptions {
  public:

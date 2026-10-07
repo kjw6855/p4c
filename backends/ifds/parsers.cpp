@@ -15,13 +15,13 @@
  * limitations under the License.
  */
 
-#include "parsers.h"
+#include "backends/ifds/parsers.h"
 
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/toP4/toP4.h"
 #include "lib/nullstream.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 using Graph = ParserGraphs::Graph;
 
@@ -119,4 +119,4 @@ void ParserGraphs::postorder(const IR::SelectExpression *expression) {
         new TransitionEdge(state, reject->to<IR::ParserState>(), "fallthrough"_cs));
 }
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

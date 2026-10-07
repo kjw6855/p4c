@@ -1,6 +1,6 @@
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 using vertex_t = Graphs::vertex_t;
 using edge_t = Graphs::edge_t;
 const IR::Node *Graphs::globalNode = new IR::Constant(0);
@@ -154,4 +154,4 @@ cstring Graphs::dump_var_edge(Graph *g, const VarEdge &ve) {
 }
 
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

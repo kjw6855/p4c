@@ -10,13 +10,13 @@
 #endif
 
 #include "backends/state_dependency/act_param_to_stateful.h"
-#include "backends/state_dependency/controls.h"
+#include "backends/ifds/controls.h"
 #include "backends/state_dependency/dependency_graph.h"
 #include "backends/state_dependency/hdr_to_stateful.h"
-#include "backends/state_dependency/ide_pass.h"
+#include "backends/ifds/ide_pass.h"
 #include "backends/state_dependency/stateful_to_key.h"
-#include "backends/state_dependency/supergraphs.h"
-#include "backends/state_dependency/utils.h"
+#include "backends/ifds/supergraphs.h"
+#include "backends/ifds/utils.h"
 #include "frontends/p4/evaluator/evaluator.h"
 #include "frontends/p4/removeParameters.h"
 #include "frontends/p4/typeChecking/typeChecker.h"

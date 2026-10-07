@@ -1,15 +1,15 @@
 
-#include "controls.h"
+#include "backends/ifds/controls.h"
 
 #include <boost/graph/graphviz.hpp>
 
 #include "frontends/p4/tableApply.h"
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 #include "lib/cstring.h"
 #include "lib/log.h"
 #include "lib/nullstream.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 using Graph = ControlGraphs::Graph;
 const ControlGraphs::procedure_md_t ControlGraphs::emptyProcedure{};
@@ -1363,4 +1363,4 @@ const IR::Expression *ControlGraphs::add_variables(const IR::Expression *e, cons
     return e;
 }
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

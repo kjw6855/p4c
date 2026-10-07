@@ -1,18 +1,17 @@
 #include "hdr_to_stateful.h"
 
 #include <regex>
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 
 namespace P4::P4StateDependency {
 
-void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
+// Seeds: header variables (plus parser-derived metadata and the ingress port) at the CFG root.
+std::vector<TabVertex> FindHdrToStateful::get_seeds(Tabulation *tab) {
     auto sgProp = tab->sgProp;
-    g = tab->g; // XXX: Init for on-the-fly edge creation
+    auto *g = tab->g;
 
-    auto mainProcName = sgProp->procOf[sgProp->rootVar];
     auto rootCFGVit = get_root_vertex(g);      // Find the first node
     std::vector<TabVertex> targetVars;
-    // 1. Find all header variables and create edge from root to them
     for (size_t i = 1; i < sgProp->progVarInfo.get_var_num(); i++) {
         auto varVit = sgProp->progVarInfo[rootCFGVit][i];
         auto tabTv = tab->get_tab_vertex(varVit);
@@ -22,10 +21,19 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
                 sgProp->parserMetaSources.count(varInfo.name) ||
                 (sgProp->ingressPortVar && sgProp->ingressPortVar->equiv(*tabTv.var))) {
             targetVars.push_back(tabTv);
-            // on-the-fly create IFDS_FT edge
-            // These edges will be removed
-            add_edge(sgProp->rootVar, varVit, cstring::empty, EdgeType::IFDS_FT);
         }
+    }
+    return targetVars;
+}
+
+void FindHdrToStateful::add_flow_functions(Tabulation *tab, const std::vector<TabVertex> &seeds,
+                                           FlowOverlay &overlay) {
+    auto sgProp = tab->sgProp;
+    g = tab->g;
+
+    // 1. Create edge from root to every header variable: <0, 0> -> <CFGroot, hdr>
+    for (const auto &seed : seeds) {
+        overlay.add_flow(tab->g, sgProp->rootVar, tab->get_vertex_id(seed), EdgeType::IFDS_FT);
     }
 
     // 2-1. Create map from tableName to its key variable indices
@@ -105,8 +113,7 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
                         BUG_CHECK(keyVit != 0, "Key variable %1%(%2%) is out of bounds for table %3%",
                                     sgProp->progVarInfo.get_var(keyVarIdx, tableName), keyVarIdx, tableName);
                         // Create edge from match key to action defVar
-                        add_edge(keyVit, defVarVit, cstring::empty, EdgeType::IFDS);
-                        tempEdges.push_back({keyVit, defVarVit});
+                        overlay.add_flow(tab->g, keyVit, defVarVit, EdgeType::IFDS);
                     }
                 }
             }
@@ -117,24 +124,13 @@ void FindHdrToStateful::set_edge_func_in_graph(Tabulation *tab) {
             }
         }
     }
-    tab->init_edge_func(targetVars);
 }
 
 void FindHdrToStateful::analyze_control_graph(Tabulation *tab) {
-    g = tab->g; // Init for on-the-fly edge creation
-    auto *sgProp = tab->sgProp;
+    g = tab->g;
     auto graphName = boost::get_property(*g, boost::graph_name);
 
-    BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
-    set_edge_func_in_graph(tab);
-
-    // TODO: propagate match keys to actions
-    tab->init_ide();
-    if (genSupergraphs == GenSGMode::ON_DEMAND)
-        tab->forward_tabulate_on_demand_ide();
-    else
-        tab->forward_tabulate_ide();
-    tab->compute_values_ide();
+    solve(tab, get_seeds(tab));
     //tab->dump_result();
 
     std::cout << "================" << std::endl;
@@ -231,18 +227,8 @@ void FindHdrToStateful::analyze_control_graph(Tabulation *tab) {
         std::cout << sstream.str() << std::endl;
     }
 
-    // Remove <0, 0> -> <rootCFG, var> except <rootCFG, 0>
-    auto rootCFGVit = get_root_vertex(g);
-    for (size_t i = 1; i < sgProp->progVarInfo.get_var_num(); i++) {
-        auto varVit = sgProp->progVarInfo[rootCFGVit][i];
-        auto edgeIt = boost::edge(sgProp->rootVar, varVit, g->root());
-        if (edgeIt.second) boost::remove_edge(edgeIt.first, g->root());
-    }
-    for (auto &e : tempEdges) {
-        auto edgeIt = boost::edge(e.first, e.second, g->root());
-        if (edgeIt.second) boost::remove_edge(edgeIt.first, g->root());
-    }
-    tempEdges.clear();
+    // Remove <0, 0> -> <rootCFG, hdr> and match key -> action defVar edges
+    flowOverlay.restore();
     tab->clear_edge_func();
     std::cout << "================" << std::endl << std::endl;
 }

@@ -1,22 +1,22 @@
 #include "stateful_to_cond.h"
 
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 
 namespace P4::P4StateDependency {
 
-// Call when setting EdgeFunc in graph for visualization.
-void FindStatefulToCond::set_edge_func_in_graph(Tabulation *tab) {
+// Seeds: the state variables found for this graph.
+std::vector<TabVertex> FindStatefulToCond::get_seeds(Tabulation *tab) {
     auto *g = tab->g;
     auto graphName = boost::get_property(*g, boost::graph_name);
 
     if (!stateVars || stateVars->find(graphName) == stateVars->end()) {
         LOG3("Warning: No state variables found for graph '" << graphName << "'");
-        return;
+        return {};
     }
 
     LOG3("Using stateVars for graph '" << graphName << "' with "
          << (*stateVars)[graphName].size() << " variables");
-    tab->init_edge_func((*stateVars)[graphName]);
+    return (*stateVars)[graphName];
 }
 
 void FindStatefulToCond::analyze_control_graph(Tabulation *tab) {
@@ -25,8 +25,6 @@ void FindStatefulToCond::analyze_control_graph(Tabulation *tab) {
     auto graphName = boost::get_property(*g, boost::graph_name);
 
     LOG3("Analyzing control graph '" << graphName << "' for S2C");
-
-    BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
 
     if (!stateVars || stateVars->find(graphName) == stateVars->end()) {
         LOG2("No state variables found for graph '" << graphName << "', skipping S2C");
@@ -41,13 +39,7 @@ void FindStatefulToCond::analyze_control_graph(Tabulation *tab) {
 
     auto prevDepEdgeMap = prevDepEdgeMaps ? (*prevDepEdgeMaps)[graphName] : IDEPass::DepEdgeMap{};
 
-    tab->init_edge_func(curStateVars);
-    tab->init_ide();
-    if (genSupergraphs == GenSGMode::ON_DEMAND)
-        tab->forward_tabulate_on_demand_ide();
-    else
-        tab->forward_tabulate_ide();
-    tab->compute_values_ide();
+    solve(tab, curStateVars);
 
     std::cout << "================" << std::endl;
     std::cout << "[RESULT]";

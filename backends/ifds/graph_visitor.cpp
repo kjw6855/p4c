@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-#include "graph_visitor.h"
+#include "backends/ifds/graph_visitor.h"
 
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 #include "lib/nullstream.h"
 #include "lib/hvec_map.h"
 #include "lib/hvec_set.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 void inject_rank_to_dot(const std::string& filename,
         const hvec_map<Graphs::vertex_t, hvec_set<Graphs::vertex_t>> groups) {
@@ -251,4 +251,4 @@ void GraphVisitor::process(std::vector<Graph *> &controlGraphsArray,
     }
 }
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

@@ -7,11 +7,13 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graphviz.hpp>
 
-#include "graphs.h"
-#include "ide_pass.h"
+#include "backends/ifds/graphs.h"
+#include "backends/ifds/ide_pass.h"
 #include "ir/ir.h"
 
 namespace P4::P4StateDependency {
+
+using namespace ::P4::IFDS;
 
 /// @class DependencyGraphs
 /// @brief A specialized graph class that shows only data flow dependencies.

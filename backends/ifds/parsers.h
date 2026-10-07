@@ -15,17 +15,17 @@
  * limitations under the License.
  */
 
-#ifndef BACKENDS_GRAPHS_PARSERS_H_
-#define BACKENDS_GRAPHS_PARSERS_H_
+#ifndef BACKENDS_IFDS_PARSERS_H_
+#define BACKENDS_IFDS_PARSERS_H_
 
 #include "frontends/common/resolveReferences/referenceMap.h"
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 #include "ir/ir.h"
 #include "lib/cstring.h"
 #include "lib/nullstream.h"
 #include "lib/safe_vector.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 class ParserGraphs : public Graphs, public Inspector {
  protected:
@@ -58,6 +58,6 @@ class ParserGraphs : public Graphs, public Inspector {
     std::optional<cstring> instanceName{};
 };
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS
 
-#endif /* BACKENDS_GRAPHS_PARSERS_H_ */
+#endif /* BACKENDS_IFDS_PARSERS_H_ */

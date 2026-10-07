@@ -1,6 +1,6 @@
-#include "ide_pass.h"
+#include "backends/ifds/ide_pass.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 std::vector<cstring> IDEPass::get_tables_from_action(Tabulation *tab, Graphs::vertex_t action_v) {
     auto *g = tab->g;
@@ -98,6 +98,26 @@ void IDEPass::set_edge_func() {
     }
 }
 
+void IDEPass::set_edge_func_in_graph(Tabulation *tab) {
+    auto seeds = get_seeds(tab);
+    if (seeds.empty()) return;
+    add_flow_functions(tab, seeds, flowOverlay);
+    tab->init_edge_func(seeds, edge_func_provider());
+    flowOverlay.commit();
+}
+
+void IDEPass::solve(Tabulation *tab, const std::vector<TabVertex> &seeds) {
+    BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
+    add_flow_functions(tab, seeds, flowOverlay);
+    tab->init_edge_func(seeds, edge_func_provider());
+    tab->init_ide();
+    if (genSupergraphs == GenSGMode::ON_DEMAND)
+        tab->forward_tabulate_on_demand_ide();
+    else
+        tab->forward_tabulate_ide();
+    tab->compute_values_ide();
+}
+
 void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v, bool isSrcDstMap) {
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
@@ -140,19 +160,27 @@ void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v, bool is
 }
 
 void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v) {
+    auto *sgProp = tab->sgProp;
+    // Skip non-header variables. --parser-deps also seeds parser-derived metadata fields as sources.
+    collect_all_dep_edge_to_hdr(tab, v, [sgProp](const TabVertex &varTv,
+                                                 const Graphs::Vertex &varInfo) {
+        return varInfo.name.startsWith(sgProp->headerVarName) ||
+               sgProp->parserMetaSources.count(varInfo.name) ||
+               (sgProp->egressPortVar && sgProp->egressPortVar->equiv(*varTv.var));
+    });
+}
+
+void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v,
+                                          const FactFilter &isSink) {
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
-    auto vinfo = (*g)[v];
     auto graphName = boost::get_property(*g, boost::graph_name);
 
     for (auto var : sgProp->progVarInfo.get_all_vars()) {
         auto varTv = TabVertex{v, var};
         auto varVit = tab->get_vertex_id(varTv);
         auto varInfo = (*g)[varVit];
-        // Skip non-header variables. --parser-deps also seeds parser-derived metadata fields as sources.
-        if (varInfo.name.startsWith(sgProp->headerVarName) ||
-                sgProp->parserMetaSources.count(varInfo.name) ||
-                (sgProp->egressPortVar && sgProp->egressPortVar->equiv(*var))) {
+        if (isSink(varTv, varInfo)) {
             auto varBitMap = tab->valueMap[varTv];
             for (auto paramTv : tab->get_target_vars(varBitMap)) {
                 foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
@@ -162,4 +190,4 @@ void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v) {
 }
 
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

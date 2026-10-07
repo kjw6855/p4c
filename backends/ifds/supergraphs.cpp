@@ -2,10 +2,10 @@
 #include <queue>
 #include <boost/graph/visitors.hpp>
 
-#include "supergraphs.h"
-#include "graphs.h"
+#include "backends/ifds/supergraphs.h"
+#include "backends/ifds/graphs.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 const IR::PathExpression* get_base(const IR::Expression* e) {
     if (auto m = e->to<IR::Member>()) return get_base(m->expr);
@@ -341,4 +341,4 @@ void SuperGraphs::gen_supergraphs() {
     }
 }
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

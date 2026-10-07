@@ -6,9 +6,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 #include "lib/nullstream.h"
-#include "utils.h"
+#include "backends/ifds/utils.h"
 
 namespace P4::P4StateDependency {
 using vertex_t = DependencyGraphs::vertex_t;

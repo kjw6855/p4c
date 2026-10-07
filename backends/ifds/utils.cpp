@@ -1,9 +1,9 @@
-#include "utils.h"
+#include "backends/ifds/utils.h"
 #include "frontends/p4/methodInstance.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "ir/ir.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 Graphs::vertex_t get_vertex_id(Graphs::Graph *g, SuperGraphProp *sgProp, const TabVertex &tb) {
     if (tb.node == sgProp->rootVar) return tb.node;
@@ -239,4 +239,4 @@ std::vector<TabVertex> collect_state_vars(Graphs::Graph *g, SuperGraphProp *sgPr
                 std::end(stateVarSet));
     return stateVarList;
 }
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

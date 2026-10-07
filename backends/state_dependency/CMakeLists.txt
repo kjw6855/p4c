@@ -4,19 +4,11 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.cmake"
 # Analysis sources: no main(), no options — usable as a library by other tools.
 set (STATE_DEPENDENCY_LIB_SRCS
   analysis.cpp
-  controls.cpp
-  parsers.cpp
-  graphs.cpp
-  graph_visitor.cpp
   dependency_graph.cpp
-  supergraphs.cpp
-  tabulation.cpp
-  ide_pass.cpp
   act_param_to_stateful.cpp
   stateful_to_key.cpp
   stateful_to_cond.cpp
   hdr_to_stateful.cpp
-  utils.cpp
   chain_cache.cpp
   parser_deps.cpp
 )
@@ -24,27 +16,19 @@ set (STATE_DEPENDENCY_LIB_SRCS
 set (STATE_DEPENDENCY_LIB_HDRS
   analysis.h
   state_dependency.h
-  controls.h
-  parsers.h
   options.h
-  graphs.h
-  graph_visitor.h
   dependency_graph.h
-  supergraphs.h
-  tabulation.h
-  ide_pass.h
   act_param_to_stateful.h
   stateful_to_key.h
   stateful_to_cond.h
   hdr_to_stateful.h
-  utils.h
   post_midend.h
   p4runtime_translation.h
 )
 
 # Linkable library for external consumers (e.g. p4tools/symbex).
 add_library(p4csd-lib STATIC ${STATE_DEPENDENCY_LIB_SRCS})
-target_link_libraries(p4csd-lib ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
+target_link_libraries(p4csd-lib PUBLIC p4ifds-lib ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
 add_dependencies(p4csd-lib ir-generated frontend)
 target_include_directories(p4csd-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

@@ -9,7 +9,7 @@
 #include <boost/dynamic_bitset.hpp>
 
 #include "backends/state_dependency/act_param_to_stateful.h"
-#include "backends/state_dependency/controls.h"
+#include "backends/ifds/controls.h"
 #include "backends/state_dependency/dependency_graph.h"
 #include "backends/state_dependency/hdr_to_stateful.h"
 #include "backends/state_dependency/parser_deps.h"
@@ -22,6 +22,8 @@
 #include "lib/cstring.h"
 
 namespace P4::P4StateDependency {
+
+using namespace ::P4::IFDS;
 
 struct StateDependencyResult {
     /// H2S2V: header variable → stateful object → packet field (header/port value sinks).

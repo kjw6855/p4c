@@ -14,7 +14,7 @@
 #include "midend/eliminateSerEnums.h"
 #include "midend/parserUnroll.h"
 
-#include "backends/state_dependency/graphs.h"
+#include "backends/ifds/graphs.h"
 #include "ir/ir.h"
 #include "ir/json_loader.h"
 #include "ir/pass_utils.h"
@@ -28,9 +28,9 @@
 
 #include "analysis.h"
 #include "backends/state_dependency/chain_cache.h"
-#include "graphs.h"
-#include "parsers.h"
-#include "graph_visitor.h"
+#include "backends/ifds/graphs.h"
+#include "backends/ifds/parsers.h"
+#include "backends/ifds/graph_visitor.h"
 
 namespace P4::P4StateDependency {
 

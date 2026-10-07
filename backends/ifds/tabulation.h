@@ -1,13 +1,14 @@
-#ifndef BACKENDS_STATE_DEPENDENCY_TABULATION_H_
-#define BACKENDS_STATE_DEPENDENCY_TABULATION_H_
+#ifndef BACKENDS_IFDS_TABULATION_H_
+#define BACKENDS_IFDS_TABULATION_H_
 
 #include <queue>
 
-#include "graphs.h"
-#include "supergraphs.h"
+#include "backends/ifds/edge_func_provider.h"
+#include "backends/ifds/graphs.h"
+#include "backends/ifds/supergraphs.h"
 #include "ir/ir.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 using Graph = Graphs::Graph;
 
@@ -144,8 +145,10 @@ class Tabulation : public Graphs {
     SuperGraphProp *sgProp;
     TabVertex rootTv;
 
-    // Initialization for supergraph's EdgeFunc
-    bool init_edge_func(const std::vector<TabVertex> &from);
+    // Initialization for supergraph's EdgeFunc: @from are the seed facts (one value bit each);
+    // @provider decides the IDE edge function of every edge (see EdgeFuncProvider).
+    bool init_edge_func(const std::vector<TabVertex> &from,
+                        const EdgeFuncProvider &provider = defaultEdgeFuncProvider());
     std::vector<TabVertex> get_target_vars(const VarBitSet &bitmap);
     std::optional<size_t> get_target_var_id(const TabVertex &tv);
     void clear_edge_func();
@@ -182,6 +185,6 @@ class Tabulation : public Graphs {
     hvec_map<TabVertex, std::vector<TabVertex>, TabVertexHash> endSummary;
 };
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS
 
-#endif /* BACKENDS_STATE_DEPENDENCY_TABULATION_H_ */
+#endif /* BACKENDS_IFDS_TABULATION_H_ */

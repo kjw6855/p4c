@@ -1,9 +1,10 @@
-#include "tabulation.h"
-#include "graphs.h"
+#include "backends/ifds/tabulation.h"
+#include "backends/ifds/graphs.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
-bool Tabulation::init_edge_func(const std::vector<TabVertex> &from) {
+bool Tabulation::init_edge_func(const std::vector<TabVertex> &from,
+                                const EdgeFuncProvider &provider) {
     auto &progVarInfo = sgProp->progVarInfo;
     targetVars = from;
     varBitSetSize = targetVars.size() + 1;  // varBitSetSize >= 1+vars
@@ -15,7 +16,6 @@ bool Tabulation::init_edge_func(const std::vector<TabVertex> &from) {
         auto &tv = targetVars[i];
         targetVarIdMap[tv] = i;
 
-        auto &tvinfo = (*g)[tv.node];
         auto procName = sgProp->procOf[tv.node];
         auto varIdx = progVarInfo.get_var_index(tv.var, procName);
         auto varIt = progVarInfo[tv.node][varIdx];
@@ -27,24 +27,19 @@ bool Tabulation::init_edge_func(const std::vector<TabVertex> &from) {
                     edge.type != EdgeType::IFDS_FT) continue;
 
             auto srcVarIt = boost::source(*ei, *g);
-            auto srcTv = get_tab_vertex(srcVarIt);
+            if (auto fn = provider.seed_edge_func(*this, srcVarIt, tv, i, edge))
+                edge.fn = std::move(*fn);
+        }
+    }
 
-            // <src, 0> -> <act, var>
-            if (hasFlag(tvinfo.flags, VertexFlags::ACTION) &&
-                    progVarInfo[srcTv.node][0] == srcVarIt)
-                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
-            // <src, 0> -> <STATEFUL & SO_DATA, var>
-            else if (hasFlag(tvinfo.flags, VertexFlags::STATEFUL) &&
-                     hasFlag(tvinfo.flags, VertexFlags::SO_DATA) &&
-                     progVarInfo[srcTv.node][0] == srcVarIt)
-                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
-            // <src=exit, non-0> -> <ret, var>
-            else if (hasFlag(tvinfo.flags, VertexFlags::RETURN) &&
-                    progVarInfo[srcTv.node][0] != srcVarIt)
-                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
-            // <0, 0> -> <CFGroot, var>
-            else if (srcVarIt == sgProp->rootVar)
-                edge.setFunc(std::make_unique<VarSetFunc>(varBitSetSize, i));
+    if (provider.wants_all_edges()) {
+        for (auto [ei, ei_end] = boost::edges(*g); ei != ei_end; ++ei) {
+            auto &edge = (*g)[*ei];
+            if (edge.type != EdgeType::IFDS &&
+                    edge.type != EdgeType::IFDS_FT) continue;
+            if (auto fn = provider.edge_func(*this, boost::source(*ei, *g),
+                                             boost::target(*ei, *g), edge))
+                edge.fn = std::move(*fn);
         }
     }
 
@@ -763,4 +758,4 @@ bool Tabulation::sanity_check_ide() {
     return true;
 }
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS

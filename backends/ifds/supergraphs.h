@@ -1,14 +1,14 @@
-#ifndef BACKENDS_STATE_DEPENDENCY_SUPERGRAPHS_H_
-#define BACKENDS_STATE_DEPENDENCY_SUPERGRAPHS_H_
+#ifndef BACKENDS_IFDS_SUPERGRAPHS_H_
+#define BACKENDS_IFDS_SUPERGRAPHS_H_
 
 #include <optional>
 #include <functional>
 #include <set>
 
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 #include "ir/ir.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 // <node, var> form of supergraph
 struct TabVertex {
@@ -200,16 +200,24 @@ class SuperGraphs : public Graphs {
       parserMetaSources(parserMetaSources) {}
 
     void gen_supergraphs();
+    virtual ~SuperGraphs() = default;
 
  private:
     void gen_supergraph(Graph *g_, SuperGraphProp *sgProp);
     void create_var_vertices(const cstring &);
     void create_root_var_vertex();
-    void gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst,
+
+ protected:
+    /// Base IFDS flow function of the ICFG edge src -> dst: adds the exploded-supergraph fact
+    /// edges <src, d> -> <dst, d'> shared by every analysis instance (default: def-use flow, with
+    /// 0 -> egress port on drop and 0 -> DEF at stateful reads). Override to change the base flow
+    /// for a whole run; per-instance flow belongs in IDEPass::add_flow_functions instead.
+    /// @curGlobalDefBits collects the globals defined along the current path (set bit n whenever
+    /// a global var n is (re)defined); @skipGlobals are globals that must not fall through.
+    virtual void gen_ifds_edge(Graphs::vertex_t src, Graphs::vertex_t dst,
             std::optional<std::reference_wrapper<boost::dynamic_bitset<uint64_t>>> curGlobalDefBits,
             const boost::dynamic_bitset<uint64_t> &skipGlobals);
 
- protected:
     P4::ReferenceMap *refMap;
     P4::TypeMap *typeMap;
     std::vector<Graph *> *controlGraphsArray{};
@@ -233,14 +241,14 @@ class SuperGraphs : public Graphs {
 
 };
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS
 
 namespace std {
 template <>
-struct hash<P4::P4StateDependency::TabVertex> {
-    std::size_t operator()(const P4::P4StateDependency::TabVertex &t) const { return t.hash(); }
+struct hash<P4::IFDS::TabVertex> {
+    std::size_t operator()(const P4::IFDS::TabVertex &t) const { return t.hash(); }
 };
 
 }  // namespace std
 
-#endif  /* BACKENDS_STATE_DEPENDENCY_SUPERGRAPHS_H_ */
+#endif  /* BACKENDS_IFDS_SUPERGRAPHS_H_ */

@@ -19,13 +19,13 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/copy.hpp>
 
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 #include "lib/json.h"
 
-#ifndef BACKENDS_STATE_DEPENDENCY_GRAPH_VISITOR_H_
-#define BACKENDS_STATE_DEPENDENCY_GRAPH_VISITOR_H_
+#ifndef BACKENDS_IFDS_GRAPH_VISITOR_H_
+#define BACKENDS_IFDS_GRAPH_VISITOR_H_
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 /// "process" function of class is dependent on previous aplication of visitor
 /// classes Controls and Parsers onto IR, and can only be run after them.
@@ -128,6 +128,6 @@ class GraphVisitor : public Graphs, public Inspector {
     const VarEdgeVisibility varEdgeVis;
 };
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS
 
-#endif /* BACKENDS_STATE_DEPENDENCY_GRAPH_VISITOR_H_ */
+#endif /* BACKENDS_IFDS_GRAPH_VISITOR_H_ */

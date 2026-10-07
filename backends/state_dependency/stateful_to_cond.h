@@ -1,13 +1,15 @@
 #ifndef BACKENDS_STATE_DEPENDENCY_STATEFUL_TO_COND_H_
 #define BACKENDS_STATE_DEPENDENCY_STATEFUL_TO_COND_H_
 
-#include "ide_pass.h"
-#include "graphs.h"
-#include "supergraphs.h"
-#include "tabulation.h"
+#include "backends/ifds/ide_pass.h"
+#include "backends/ifds/graphs.h"
+#include "backends/ifds/supergraphs.h"
+#include "backends/ifds/tabulation.h"
 #include "ir/ir.h"
 
 namespace P4::P4StateDependency {
+
+using namespace ::P4::IFDS;
 
 using Graph = Graphs::Graph;
 
@@ -34,7 +36,7 @@ class FindStatefulToCond : public IDEPass {
     Visitor::profile_t init_apply(const IR::Node *) override;
 
  protected:
-    void set_edge_func_in_graph(Tabulation *tab) override;
+    std::vector<TabVertex> get_seeds(Tabulation *tab) override;
     void analyze_control_graph(Tabulation *tab) override;
 
  protected:

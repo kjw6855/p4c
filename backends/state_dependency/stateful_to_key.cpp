@@ -2,7 +2,7 @@
 
 #include "frontends/p4/methodInstance.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 
 namespace P4::P4StateDependency {
 std::vector<Graphs::vertex_t> get_actions_from_key(Tabulation *tab, Graphs::vertex_t v) {
@@ -24,19 +24,19 @@ std::vector<Graphs::vertex_t> get_actions_from_key(Tabulation *tab, Graphs::vert
     return actions;
 }
 
-// Call when setting EdgeFunc in graph for visualization
-void FindStatefulToKey::set_edge_func_in_graph(Tabulation *tab) {
+// Seeds: the state variables found for this graph.
+std::vector<TabVertex> FindStatefulToKey::get_seeds(Tabulation *tab) {
     auto *g = tab->g;
     auto graphName = boost::get_property(*g, boost::graph_name);
 
     // Check if stateVars exists and contains this graph
     if (!stateVars || stateVars->find(graphName) == stateVars->end()) {
         LOG3("Warning: No state variables found for graph '" << graphName << "'");
-        return;
+        return {};
     }
 
     LOG3("Using stateVars for graph '" << graphName << "' with " << (*stateVars)[graphName].size() << " variables");
-    tab->init_edge_func((*stateVars)[graphName]);
+    return (*stateVars)[graphName];
 }
 
 void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
@@ -45,8 +45,6 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
     auto graphName = boost::get_property(*g, boost::graph_name);
 
     LOG3("Analyzing control graph '" << graphName << "'");
-
-    BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
 
     // Debug: Log available stateVars keys
     if (stateVars) {
@@ -72,13 +70,7 @@ void FindStatefulToKey::analyze_control_graph(Tabulation *tab) {
 
     auto prevDepEdgeMap = prevDepEdgeMaps ? (*prevDepEdgeMaps)[graphName] : IDEPass::DepEdgeMap{};
 
-    tab->init_edge_func(curStateVars);
-    tab->init_ide();
-    if (genSupergraphs == GenSGMode::ON_DEMAND)
-        tab->forward_tabulate_on_demand_ide();
-    else
-        tab->forward_tabulate_ide();
-    tab->compute_values_ide();
+    solve(tab, curStateVars);
     //tab->dump_result();
 
     std::cout << "================" << std::endl;

@@ -1,5 +1,5 @@
-#ifndef BACKENDS_STATE_DEPENDENCY_GRAPHS_H_
-#define BACKENDS_STATE_DEPENDENCY_GRAPHS_H_
+#ifndef BACKENDS_IFDS_GRAPHS_H_
+#define BACKENDS_IFDS_GRAPHS_H_
 
 #include <memory>
 
@@ -21,7 +21,7 @@ class TypeMap;
 
 }  // namespace P4
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
 
 using namespace P4::literals;
 
@@ -851,6 +851,6 @@ class Graphs {
     static const IR::Node *globalNode;
 };
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS
 
-#endif /* BACKENDS_STATE_DEPENDENCY_GRAPHS_H_ */
+#endif /* BACKENDS_IFDS_GRAPHS_H_ */

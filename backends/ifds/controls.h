@@ -2,18 +2,21 @@
  * Copied from backends/graphs/controls.h
  */
 
-#ifndef BACKENDS_STATE_DEPENDENCY_CONTROLS_H_
-#define BACKENDS_STATE_DEPENDENCY_CONTROLS_H_
+#ifndef BACKENDS_IFDS_CONTROLS_H_
+#define BACKENDS_IFDS_CONTROLS_H_
 
 #include <optional>
 
 #include "frontends/p4/methodInstance.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 #include "ir/ir.h"
 #include "lib/hvec_map.h"
 
-namespace P4::P4StateDependency {
+namespace P4::IFDS {
+
+/// True if @type is a struct that (transitively) contains header fields.
+bool isHeaderStruct(const IR::Type *type, const TypeMap *typeMap);
 
 class ControlGraphs : public Graphs,
                       public Inspector,
@@ -126,6 +129,6 @@ class ControlGraphs : public Graphs,
     std::optional<Graphs::vertex_t> cur_v{};
 };
 
-}  // namespace P4::P4StateDependency
+}  // namespace P4::IFDS
 
-#endif /* BACKENDS_STATE_DEPENDENCY_CONTROLS_H_ */
+#endif /* BACKENDS_IFDS_CONTROLS_H_ */

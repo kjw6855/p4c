@@ -1,12 +1,12 @@
 #include "act_param_to_stateful.h"
 
 #include <regex>
-#include "graphs.h"
+#include "backends/ifds/graphs.h"
 
 namespace P4::P4StateDependency {
 
-void FindActParamToStateful::set_edge_func_in_graph(Tabulation *tab) {
-    tab->init_edge_func(tab->sgProp->actionParams);
+std::vector<TabVertex> FindActParamToStateful::get_seeds(Tabulation *tab) {
+    return tab->sgProp->actionParams;
 }
 
 void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
@@ -18,15 +18,7 @@ void FindActParamToStateful::analyze_control_graph(Tabulation *tab) {
         return;
     }
 
-    BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
-    set_edge_func_in_graph(tab);
-
-    tab->init_ide();
-    if (genSupergraphs == GenSGMode::ON_DEMAND)
-        tab->forward_tabulate_on_demand_ide();
-    else
-        tab->forward_tabulate_ide();
-    tab->compute_values_ide();
+    solve(tab, get_seeds(tab));
     //tab->dump_result();
 
     std::cout << "================" << std::endl;

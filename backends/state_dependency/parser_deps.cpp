@@ -8,12 +8,10 @@
 #include <tuple>
 #include <vector>
 
+#include "backends/ifds/controls.h"
 #include "lib/log.h"
 
 namespace P4::P4StateDependency {
-
-// Defined in controls.cpp (same library/namespace): true if @type is a struct containing header fields.
-bool isHeaderStruct(const IR::Type *type, const TypeMap *typeMap);
 
 namespace {
 
