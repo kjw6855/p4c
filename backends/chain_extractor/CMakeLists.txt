@@ -5,10 +5,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.cmake"
 set (CHAIN_EXTRACTOR_LIB_SRCS
   analysis.cpp
   dependency_graph.cpp
-  act_param_to_stateful.cpp
-  stateful_to_key.cpp
-  stateful_to_cond.cpp
-  hdr_to_stateful.cpp
+  chain_pass.cpp
   chain_cache.cpp
   parser_deps.cpp
 )
@@ -18,10 +15,7 @@ set (CHAIN_EXTRACTOR_LIB_HDRS
   chain_extractor.h
   options.h
   dependency_graph.h
-  act_param_to_stateful.h
-  stateful_to_key.h
-  stateful_to_cond.h
-  hdr_to_stateful.h
+  chain_pass.h
   chain_cache.h
   parser_deps.h
   post_midend.h

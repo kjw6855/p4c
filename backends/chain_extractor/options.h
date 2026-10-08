@@ -38,6 +38,10 @@ class P4ChainExtractorOptions : public CompilerOptions {
     /// and skip every chain pass plus DOT drawing. Produces no chain counts — do not use it to
     /// generate analysis results.
     bool supergraphOnly = false;
+    /// Verification mode: solve {Act, SO} and {Hdr} separately, with the implicit match-key ->
+    /// action flow seen by Hdr only, which reproduces p4c_state_dependency's chains exactly. The
+    /// default (one solve, implicit flow for every domain) yields a superset of them.
+    bool legacyFlow = false;
     /// Opt-in: lower the program with the same midend p4symbex applies (P4Tools::MidEnd default
     /// passes + the per-target deltas + MidEndLast) before analyzing, so latency and chain
     /// positions are measured at p4symbex's IR level instead of near-post-frontend. Off by

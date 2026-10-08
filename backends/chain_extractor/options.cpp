@@ -229,6 +229,15 @@ P4ChainExtractorOptions::P4ChainExtractorOptions() {
             "--print-performance-report. Skips all chain passes and DOT drawing, so it emits NO "
             "dependency counts. Off by default.");
     registerOption(
+            "--legacy-flow", nullptr,
+            [this](const char *) {
+                legacyFlow = true;
+                return true;
+            },
+            "Verification only: solve {action params, register reads} and {headers} separately, "
+            "with the implicit match-key -> action flow seen by headers only. Reproduces "
+            "p4c_state_dependency's chains exactly; the default yields a superset. Off by default.");
+    registerOption(
             "--post-midend", nullptr,
             [this](const char *) {
                 postMidEnd = true;

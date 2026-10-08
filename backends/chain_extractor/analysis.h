@@ -8,13 +8,10 @@
 
 #include <boost/dynamic_bitset.hpp>
 
-#include "backends/chain_extractor/act_param_to_stateful.h"
+#include "backends/chain_extractor/chain_pass.h"
 #include "backends/ifds/controls.h"
 #include "backends/chain_extractor/dependency_graph.h"
-#include "backends/chain_extractor/hdr_to_stateful.h"
 #include "backends/chain_extractor/parser_deps.h"
-#include "backends/chain_extractor/stateful_to_cond.h"
-#include "backends/chain_extractor/stateful_to_key.h"
 #include "frontends/common/resolveReferences/referenceMap.h"
 #include "frontends/p4/typeMap.h"
 #include "frontends/p4/evaluator/evaluator.h"
@@ -47,12 +44,9 @@ struct StateDependencyResult {
     /// Caller takes ownership. Used by GraphVisitor for full CFG visualization.
     ControlGraphs *cfgGraphs = nullptr;
 
-    /// IFDS checkers — non-null only when graphsDir is non-empty (binary mode).
+    /// The chain pass — non-null only when graphsDir is non-empty (binary mode).
     /// Caller takes ownership. Used to call set_edge_func() before CFG drawing.
-    ActParamToStateful *sdChecker = nullptr;
-    HdrToStateful *hdChecker = nullptr;
-    StatefulToKey *s2vChecker = nullptr;
-    StatefulToCond *h2s2cChecker = nullptr;
+    FindChains *chains = nullptr;
 
     // Chains without write
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> noWriteReadChains;
@@ -135,6 +129,9 @@ enum SDCategories : unsigned {
 /// @param supergraphOnly Stop after CFG + IFDS supergraph generation and return a result whose
 ///                  chain containers are all empty. Only for latency measurement of that stage
 ///                  (timers "P4CX.CFG" / "P4CX.Supergraph"); never read counts from such a result.
+/// @param legacyFlow Solve {Act, SO} and {Hdr} separately, with the implicit match-key -> action
+///                  flow seen by Hdr only. Reproduces p4c_state_dependency exactly; the default
+///                  (one solve, implicit flow for every domain) yields a superset of its chains.
 StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   P4::ReferenceMap *refMap,
                                                   P4::TypeMap *typeMap,
@@ -144,7 +141,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   unsigned categories = SD_ALL,
                                                   bool wholePipeline = false,
                                                   bool parserDeps = false,
-                                                  bool supergraphOnly = false);
+                                                  bool supergraphOnly = false,
+                                                  bool legacyFlow = false);
 
 /// Convenience overload: builds its own lightweight midend
 /// (TypeChecking → EvaluatorPass → IFDS analysis → RemoveActionParameters → TypeChecking)
@@ -163,7 +161,8 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   unsigned categories = SD_ALL,
                                                   bool wholePipeline = false,
                                                   bool parserDeps = false,
-                                                  bool supergraphOnly = false);
+                                                  bool supergraphOnly = false,
+                                                  bool legacyFlow = false);
 
 }  // namespace P4::P4ChainExtractor
 

@@ -201,7 +201,7 @@ int main(int argc, char *const argv[]) {
                 sdResult = P4ChainExtractor::runStateDependencyAnalysis(
                         program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
                         options.graphsDir, P4ChainExtractor::SD_FOUR, options.wholePipeline,
-                        options.parserDeps, options.supergraphOnly);
+                        options.parserDeps, options.supergraphOnly, options.legacyFlow);
             } catch (const std::exception &bug) {
                 if (!options.wholePipeline) throw;
                 ::P4::warning("whole-pipeline analysis failed (%1%); emitting no chains for this "
@@ -330,21 +330,8 @@ int main(int argc, char *const argv[]) {
     // Drawing is disk output, not graph generation — skipped in the measurement-only mode.
     if (!options.supergraphOnly) {
         Util::ScopedTimer drawTimer("Drawing graphs");
-        if (sdResult.sdChecker &&
-                (options.varEdgeVis == VarEdgeVisibility::ACTION_PARAM ||
-                 options.varEdgeVis == VarEdgeVisibility::ALL)) {
-            sdResult.sdChecker->set_edge_func();
-        }
-        if (sdResult.s2vChecker &&
-                (options.varEdgeVis == VarEdgeVisibility::STATEFUL_OBJECT ||
-                 options.varEdgeVis == VarEdgeVisibility::ALL)) {
-            sdResult.s2vChecker->set_edge_func();
-        }
-        if (sdResult.hdChecker &&
-                (options.varEdgeVis == VarEdgeVisibility::HDR_TO_STATEFUL ||
-                 options.varEdgeVis == VarEdgeVisibility::ALL)) {
-            sdResult.hdChecker->set_edge_func();
-        }
+        if (sdResult.chains && options.varEdgeVis != VarEdgeVisibility::NONE)
+            sdResult.chains->set_edge_func();
         if (sdResult.cfgGraphs) {
             P4ChainExtractor::GraphVisitor gvs(options.graphsDir, options.graphs,
                     options.fullGraph, options.jsonOut, options.file,
@@ -356,9 +343,7 @@ int main(int argc, char *const argv[]) {
     P4ChainExtractor::printPerformanceReport();
 
     delete pgg;
-    delete sdResult.s2vChecker;
-    delete sdResult.sdChecker;
-    delete sdResult.hdChecker;
+    delete sdResult.chains;
     delete sdResult.cfgGraphs;
     delete sdResult.h2s2vGraphs;
     delete sdResult.a2s2vGraphs;
