@@ -2,6 +2,8 @@
  * @author Jiwon Kim
  */
 
+#include <algorithm>
+
 #include "backends/chain_extractor/version.h"
 #include "backends/chain_extractor/chain_extractor.h"
 #include "backends/chain_extractor/options.h"
@@ -58,6 +60,12 @@ MidEnd::MidEnd(CompilerOptions &options) {
         evaluator,
         [this, evaluator]() { toplevel = evaluator->getToplevelBlock(); },
     });
+}
+
+size_t chain_count(const std::map<cstring, std::vector<DependencyGraphs::SOChain>> &chains,
+                   cstring graphName) {
+    auto it = chains.find(graphName);
+    return it == chains.end() ? 0 : it->second.size();
 }
 
 }  // namespace P4::P4ChainExtractor
@@ -200,7 +208,8 @@ int main(int argc, char *const argv[]) {
             try {
                 sdResult = P4ChainExtractor::runStateDependencyAnalysis(
                         program, &midEnd.refMap, &midEnd.typeMap, top, options.arch,
-                        options.graphsDir, P4ChainExtractor::SD_FOUR, options.wholePipeline,
+                        options.graphsDir, P4ChainExtractor::SD_FOUR | P4ChainExtractor::SD_OUTPUT,
+                        options.wholePipeline,
                         options.parserDeps, options.supergraphOnly, options.legacyFlow);
             } catch (const std::exception &bug) {
                 if (!options.wholePipeline) throw;
@@ -243,11 +252,9 @@ int main(int argc, char *const argv[]) {
 
     // Print per-control-block and total dependency chain counts.
     //
-    // Four relations, each named by its full source -> stateful object -> sink path. The two
-    // value-sink families that used to be reported here -- H2S2V (H -> SO -> header/port field)
-    // and A2S2V (action param -> SO -> header/port field) -- and the "non-write SO reads" count
-    // are no longer computed (see SD_FOUR) or printed: nothing downstream consumes them
-    // (analysis/funnel.py's CHAIN_CATS is exactly these four).
+    // The four control-path relations (SD_FOUR) followed by the four output relations
+    // (SD_OUTPUT), each named by its full source -> stateful object -> sink path. The value-sink
+    // families H2S2V and A2S2V are not computed or printed: nothing downstream consumes them.
     if (sdResult.cfgGraphs != nullptr) {
         const auto &cfgArr = sdResult.cfgGraphs->controlGraphsArray;
         const size_t numGraphs = cfgArr.size();
@@ -257,38 +264,47 @@ int main(int argc, char *const argv[]) {
         static const char *const H2S2C_LABEL = "H2S2C  header -> SO -> condition:       ";
         static const char *const A2S2K_LABEL = "A2S2K  action param -> SO -> match key: ";
         static const char *const A2S2C_LABEL = "A2S2C  action param -> SO -> condition: ";
+        // Output relations: the sink decides the packet's output (port, drop, multicast group).
+        static const char *const H2S2O_LABEL = "H2S2O    header -> SO -> output:               ";
+        static const char *const H2S2OUTC_LABEL = "H2S2OutC header -> SO -> output condition:     ";
+        static const char *const A2S2O_LABEL = "A2S2O    action param -> SO -> output:         ";
+        static const char *const A2S2OUTC_LABEL = "A2S2OutC action param -> SO -> output condition: ";
+        static const char *const H2S2OUTK_LABEL = "H2S2OutK header -> SO -> output table key:     ";
+        static const char *const A2S2OUTK_LABEL = "A2S2OutK action param -> SO -> output table key: ";
 
-        size_t h2s2kTotal = 0;
-        size_t h2s2cTotal = 0;
-        size_t a2s2kTotal = 0;
-        size_t a2s2cTotal = 0;
+        const std::vector<std::pair<const char *,
+                const std::map<cstring, std::vector<P4ChainExtractor::DependencyGraphs::SOChain>> *>>
+            categories = {
+                {H2S2K_LABEL, &sdResult.dataWriteKeyChains},
+                {H2S2C_LABEL, &sdResult.dataWriteCondChains},
+                {A2S2K_LABEL, &sdResult.dataWriteA2SKeyChains},
+                {A2S2C_LABEL, &sdResult.dataWriteA2SCondChains},
+                {H2S2O_LABEL, &sdResult.dataWriteOutChains},
+                {H2S2OUTC_LABEL, &sdResult.dataWriteOutCondChains},
+                {A2S2O_LABEL, &sdResult.dataWriteA2SOutChains},
+                {A2S2OUTC_LABEL, &sdResult.dataWriteA2SOutCondChains},
+                {H2S2OUTK_LABEL, &sdResult.dataWriteOutKeyChains},
+                {A2S2OUTK_LABEL, &sdResult.dataWriteA2SOutKeyChains},
+            };
+        std::vector<size_t> totals(categories.size(), 0);
 
         std::cout << "\n================ State Dependency Counts ================\n";
         for (size_t i = 0; i < numGraphs; i++) {
             auto graphName = cstring(boost::get_property(*cfgArr[i], boost::graph_name));
-            size_t h2s2k = sdResult.dataWriteKeyChains[graphName].size();
-            size_t h2s2c = sdResult.dataWriteCondChains[graphName].size();
-            size_t a2s2k = sdResult.dataWriteA2SKeyChains[graphName].size();
-            size_t a2s2c = sdResult.dataWriteA2SCondChains[graphName].size();
-
-            h2s2kTotal += h2s2k;
-            h2s2cTotal += h2s2c;
-            a2s2kTotal += a2s2k;
-            a2s2cTotal += a2s2c;
-
-            if (h2s2k == 0 && h2s2c == 0 && a2s2k == 0 && a2s2c == 0) continue;
-
-            std::cout << "  [" << graphName << "]\n"
-                      << "    " << H2S2K_LABEL << h2s2k << "\n"
-                      << "    " << H2S2C_LABEL << h2s2c << "\n"
-                      << "    " << A2S2K_LABEL << a2s2k << "\n"
-                      << "    " << A2S2C_LABEL << a2s2c << "\n";
+            std::vector<size_t> counts;
+            for (size_t c = 0; c < categories.size(); c++) {
+                counts.push_back(P4ChainExtractor::chain_count(*categories[c].second, graphName));
+                totals[c] += counts.back();
+            }
+            if (std::all_of(counts.begin(), counts.end(), [](size_t n) { return n == 0; }))
+                continue;
+            std::cout << "  [" << graphName << "]\n";
+            for (size_t c = 0; c < categories.size(); c++)
+                std::cout << "    " << categories[c].first << counts[c] << "\n";
         }
-        std::cout << "  --- Total ---\n"
-                  << "    " << H2S2K_LABEL << h2s2kTotal << "\n"
-                  << "    " << H2S2C_LABEL << h2s2cTotal << "\n"
-                  << "    " << A2S2K_LABEL << a2s2kTotal << "\n"
-                  << "    " << A2S2C_LABEL << a2s2cTotal << "\n";
+        std::cout << "  --- Total ---\n";
+        for (size_t c = 0; c < categories.size(); c++)
+            std::cout << "    " << categories[c].first << totals[c] << "\n";
         // Distinct stateful-object (register) name sets. These are NOT chain types: H2S/A2S are the
         // first-hop sets and ALL / TYPE:* are the D_all / D_crao / D_rao denominators, from which
         // read_log.py derives every reg_* and frac_* column. read_log parses the space-separated

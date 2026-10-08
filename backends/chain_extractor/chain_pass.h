@@ -31,6 +31,49 @@ struct GraphChainMaps {
     IDEPass::DepEdgeMap h2s2k;   // key sinks
     IDEPass::DepEdgeMap h2s2v;   // header/port sinks
     IDEPass::DepEdgeMap h2s2c;   // condition sinks
+    /// Register read -> sink that sets the packet's output (port, drop, multicast group):
+    /// O = the output variables themselves (data flow); OutC = conditions guarding an output write.
+    IDEPass::DepEdgeMap a2s2o;
+    IDEPass::DepEdgeMap a2s2outc;
+    IDEPass::DepEdgeMap h2s2o;
+    IDEPass::DepEdgeMap h2s2outc;
+    /// OutK = match keys of tables where some action writes an output.
+    IDEPass::DepEdgeMap a2s2outk;
+    IDEPass::DepEdgeMap h2s2outk;
+};
+
+/// Sink maps filled by one collect pass; null entries are skipped.
+struct SinkMaps {
+    IDEPass::DepEdgeMap *key = nullptr;     // table match keys
+    IDEPass::DepEdgeMap *hdr = nullptr;     // header / egress port at the end of the control
+    IDEPass::DepEdgeMap *keyHdr = nullptr;  // both of the above in one map
+    IDEPass::DepEdgeMap *cond = nullptr;    // if / switch conditions
+    IDEPass::DepEdgeMap *out = nullptr;     // output variables at the end of the control
+    IDEPass::DepEdgeMap *outCond = nullptr; // conditions whose branches write an output
+    IDEPass::DepEdgeMap *outKey = nullptr;  // keys of tables whose actions write an output
+};
+
+/// True if @expr is (a slice of) packet metadata deciding the packet's output: the egress port,
+/// the drop control or the multicast group of v1model or tna.
+bool is_output_lvalue(const IR::Expression *expr, P4::ReferenceMap *refMap);
+
+/// Finds whether code writes an output (is_output_lvalue or mark_to_drop), following action
+/// calls and table applies into the action bodies.
+class OutputWriteFinder : public Inspector {
+ public:
+    OutputWriteFinder(P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
+        : refMap(refMap), typeMap(typeMap) {}
+    bool writes(const IR::Node *node);
+    /// Whether some action of @table (the default action included) writes an output.
+    bool table_writes(const IR::P4Table *table);
+
+    bool preorder(const IR::AssignmentStatement *assign) override;
+    bool preorder(const IR::MethodCallExpression *call) override;
+
+ private:
+    P4::ReferenceMap *refMap;
+    P4::TypeMap *typeMap;
+    bool found = false;
 };
 
 /// Computes every chain relation of a control graph from IDE solves over three domains:
@@ -73,15 +116,19 @@ class FindChains : public IDEPass {
     void add_implicit_table_flow(Tabulation *tab, FlowOverlay &overlay);
     /// Register-read -> sink maps of one family, in the family's seed order.
     void collect_so_sinks(Tabulation *tab, const DomainSet &domains, size_t so,
-                          const std::vector<TabVertex> &familySeeds,
-                          IDEPass::DepEdgeMap *key, IDEPass::DepEdgeMap *hdr,
-                          IDEPass::DepEdgeMap *keyHdr, IDEPass::DepEdgeMap *cond);
+                          const std::vector<TabVertex> &familySeeds, const SinkMaps &sinks);
+    /// Whether the if/switch of a condition vertex writes an output in one of its branches.
+    bool guards_output(const Graphs::Vertex &vinfo);
+    /// Whether a KEY vertex belongs to a table where some action writes an output.
+    bool key_decides_output(Graph *g, Graphs::vertex_t keyVertex);
     void print_counters(Tabulation *tab);
 
     bool needAct;
     bool needHdr;
     bool legacyFlow;
     hvec_map<cstring, GraphChainMaps> graphMaps;
+    hvec_map<const IR::Node *, bool> guardsOutput;
+    hvec_map<const IR::Node *, bool> tableWritesOutput;
 };
 
 }  // namespace P4::P4ChainExtractor

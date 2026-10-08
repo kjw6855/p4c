@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <iostream>
+#include <map>
+#include <set>
 #include <queue>
 
 #include "backends/ifds/utils.h"
+#include "frontends/p4/methodInstance.h"
 #include "lib/timer.h"
 
 namespace P4::P4ChainExtractor {
@@ -75,6 +78,109 @@ bool is_cond_sink(const Graphs::Vertex &vinfo) {
 }
 
 }  // namespace
+
+bool is_output_lvalue(const IR::Expression *expr, P4::ReferenceMap *refMap) {
+    // Output-deciding fields per intrinsic metadata type (v1model and tna)
+    static const std::map<cstring, std::set<cstring>> outputs = {
+        {"standard_metadata_t"_cs, {"egress_spec"_cs, "mcast_grp"_cs}},
+        {"ingress_intrinsic_metadata_for_tm_t"_cs,
+         {"ucast_egress_port"_cs, "mcast_grp_a"_cs, "mcast_grp_b"_cs}},
+        {"ingress_intrinsic_metadata_for_deparser_t"_cs, {"drop_ctl"_cs}},
+        {"egress_intrinsic_metadata_for_deparser_t"_cs, {"drop_ctl"_cs}},
+    };
+    if (const auto *slice = expr->to<IR::Slice>()) expr = slice->e0;
+    const auto *member = expr->to<IR::Member>();
+    if (member == nullptr) return false;
+    const auto *path = member->expr->to<IR::PathExpression>();
+    if (path == nullptr) return false;
+    const auto *decl = refMap->getDeclaration(path->path, false);
+    const auto *param = decl != nullptr ? decl->to<IR::Parameter>() : nullptr;
+    const auto *type = param != nullptr ? param->type->to<IR::Type_Name>() : nullptr;
+    if (type == nullptr) return false;
+    auto it = outputs.find(type->path->name.name);
+    return it != outputs.end() && it->second.count(member->member.name) > 0;
+}
+
+bool OutputWriteFinder::writes(const IR::Node *node) {
+    found = false;
+    node->apply(*this);
+    return found;
+}
+
+bool OutputWriteFinder::table_writes(const IR::P4Table *table) {
+    const auto *actions = table->getActionList();
+    if (actions == nullptr) return false;
+    for (const auto *el : actions->actionList) {
+        const auto *mce = el->expression->to<IR::MethodCallExpression>();
+        if (mce == nullptr) continue;
+        const auto *mi = P4::MethodInstance::resolve(mce, refMap, typeMap);
+        if (const auto *ac = mi->to<P4::ActionCall>())
+            if (writes(ac->action->body)) return true;
+    }
+    return false;
+}
+
+bool OutputWriteFinder::preorder(const IR::AssignmentStatement *assign) {
+    if (is_output_lvalue(assign->left, refMap)) found = true;
+    return !found;
+}
+
+bool OutputWriteFinder::preorder(const IR::MethodCallExpression *call) {
+    if (found) return false;
+    const auto *mi = P4::MethodInstance::resolve(call, refMap, typeMap);
+    if (const auto *ef = mi->to<P4::ExternFunction>()) {
+        if (ef->method->name.name == "mark_to_drop") found = true;
+    } else if (const auto *ac = mi->to<P4::ActionCall>()) {
+        visit(ac->action->body);
+    } else if (const auto *am = mi->to<P4::ApplyMethod>()) {
+        if (const auto *table = am->object->to<IR::P4Table>()) {
+            if (const auto *actions = table->getActionList()) {
+                for (const auto *el : actions->actionList) {
+                    const auto *mce = el->expression->to<IR::MethodCallExpression>();
+                    if (mce == nullptr) continue;
+                    const auto *act = P4::MethodInstance::resolve(mce, refMap, typeMap);
+                    if (const auto *actCall = act->to<P4::ActionCall>())
+                        visit(actCall->action->body);
+                    if (found) break;
+                }
+            }
+        }
+    }
+    return !found;
+}
+
+bool FindChains::guards_output(const Graphs::Vertex &vinfo) {
+    auto it = guardsOutput.find(vinfo.node);
+    if (it != guardsOutput.end()) return it->second;
+    OutputWriteFinder finder(refMap, typeMap);
+    bool writes = false;
+    if (const auto *ifs = vinfo.node->to<IR::IfStatement>()) {
+        writes = finder.writes(ifs->ifTrue) ||
+                 (ifs->ifFalse != nullptr && finder.writes(ifs->ifFalse));
+    } else if (const auto *sw = vinfo.node->to<IR::SwitchStatement>()) {
+        for (const auto *c : sw->cases)
+            if (c->statement != nullptr && finder.writes(c->statement)) {
+                writes = true;
+                break;
+            }
+    }
+    guardsOutput[vinfo.node] = writes;
+    return writes;
+}
+
+bool FindChains::key_decides_output(Graph *g, Graphs::vertex_t keyVertex) {
+    for (auto [ei, ee] = boost::in_edges(keyVertex, *g); ei != ee; ++ei) {
+        auto src = boost::source(*ei, *g);
+        if (!hasFlag((*g)[src].flags, VertexFlags::TABLE)) continue;
+        const auto *table = (*g)[src].node->to<IR::P4Table>();
+        if (table == nullptr) return false;
+        auto it = tableWritesOutput.find(table);
+        if (it != tableWritesOutput.end()) return it->second;
+        OutputWriteFinder finder(refMap, typeMap);
+        return tableWritesOutput[table] = finder.table_writes(table);
+    }
+    return false;
+}
 
 const GraphChainMaps &FindChains::maps(cstring graphName) const {
     static const GraphChainMaps empty;
@@ -221,8 +327,7 @@ std::vector<TabVertex> FindChains::get_seeds(Tabulation *tab) {
 
 void FindChains::collect_so_sinks(Tabulation *tab, const DomainSet &domains, size_t so,
                                   const std::vector<TabVertex> &familySeeds,
-                                  IDEPass::DepEdgeMap *key, IDEPass::DepEdgeMap *hdr,
-                                  IDEPass::DepEdgeMap *keyHdr, IDEPass::DepEdgeMap *cond) {
+                                  const SinkMaps &sinks) {
     if (familySeeds.empty()) return;
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
@@ -251,18 +356,30 @@ void FindChains::collect_so_sinks(Tabulation *tab, const DomainSet &domains, siz
                (sgProp->egressPortVar && sgProp->egressPortVar->equiv(*varTv.var));
     };
 
+    auto outSink = [this](const TabVertex &varTv, const Graphs::Vertex &) {
+        const auto *expr = varTv.var->to<IR::Expression>();
+        return expr != nullptr && is_output_lvalue(expr, refMap);
+    };
+
     for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
         const auto &vinfo = (*g)[*vit];
         if (hasFlag(vinfo.flags, VertexFlags::KEY)) {
-            if (key) collect_dep_edges_impl(tab, *vit, true, targets, into(key));
-            if (keyHdr) collect_dep_edges_impl(tab, *vit, true, targets, into(keyHdr));
+            if (sinks.key) collect_dep_edges_impl(tab, *vit, true, targets, into(sinks.key));
+            if (sinks.keyHdr) collect_dep_edges_impl(tab, *vit, true, targets, into(sinks.keyHdr));
+            if (sinks.outKey && key_decides_output(g, *vit))
+                collect_dep_edges_impl(tab, *vit, true, targets, into(sinks.outKey));
         }
         if (hasFlag(vinfo.flags, VertexFlags::EXIT) && sgProp->procOf[*vit] == mainProcName) {
-            if (hdr) collect_dep_edges_to_impl(tab, *vit, hdrSink, targets, into(hdr));
-            if (keyHdr) collect_dep_edges_to_impl(tab, *vit, hdrSink, targets, into(keyHdr));
+            if (sinks.hdr) collect_dep_edges_to_impl(tab, *vit, hdrSink, targets, into(sinks.hdr));
+            if (sinks.keyHdr)
+                collect_dep_edges_to_impl(tab, *vit, hdrSink, targets, into(sinks.keyHdr));
+            if (sinks.out) collect_dep_edges_to_impl(tab, *vit, outSink, targets, into(sinks.out));
         }
-        if (cond && is_cond_sink(vinfo))
-            collect_dep_edges_impl(tab, *vit, true, targets, into(cond));
+        if (is_cond_sink(vinfo)) {
+            if (sinks.cond) collect_dep_edges_impl(tab, *vit, true, targets, into(sinks.cond));
+            if (sinks.outCond && guards_output(vinfo))
+                collect_dep_edges_impl(tab, *vit, true, targets, into(sinks.outCond));
+        }
     }
 }
 
@@ -353,12 +470,26 @@ void FindChains::analyze_control_graph(Tabulation *tab) {
 
         // Second hop: the family's register reads reaching key / header-port / condition sinks
         if (solved && soIdx) {
-            if (needAct)
-                collect_so_sinks(tab, domains, *soIdx, m.aStateVars, &m.a2s2k, nullptr, &m.a2s2kv,
-                                 &m.a2s2c);
-            if (needHdr)
-                collect_so_sinks(tab, domains, *soIdx, m.hStateVars, &m.h2s2k, &m.h2s2v, nullptr,
-                                 &m.h2s2c);
+            if (needAct) {
+                SinkMaps a;
+                a.key = &m.a2s2k;
+                a.keyHdr = &m.a2s2kv;
+                a.cond = &m.a2s2c;
+                a.out = &m.a2s2o;
+                a.outCond = &m.a2s2outc;
+                a.outKey = &m.a2s2outk;
+                collect_so_sinks(tab, domains, *soIdx, m.aStateVars, a);
+            }
+            if (needHdr) {
+                SinkMaps h;
+                h.key = &m.h2s2k;
+                h.hdr = &m.h2s2v;
+                h.cond = &m.h2s2c;
+                h.out = &m.h2s2o;
+                h.outCond = &m.h2s2outc;
+                h.outKey = &m.h2s2outk;
+                collect_so_sinks(tab, domains, *soIdx, m.hStateVars, h);
+            }
         }
     }
 

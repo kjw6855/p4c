@@ -69,8 +69,13 @@ def load_dot_edges(path):
                     for (a, b, attr), n in edges.items()})
 
 
+# Dependency graphs p4c_state_dependency also writes; p4ccx's own categories have no counterpart.
+P4CSD_DOT_RE = re.compile(r'_(h2s2k|h2s2c|h2s2v|a2s2v)_dep\.dot$')
+
+
 def load_dots(d):
-    return {p.name: load_dot_edges(p) for p in sorted(d.glob('*_dep.dot'))}
+    return {p.name: load_dot_edges(p) for p in sorted(d.glob('*_dep.dot'))
+            if P4CSD_DOT_RE.search(p.name)}
 
 
 def load_stdout(d):

@@ -61,6 +61,15 @@ struct StateDependencyResult {
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteA2SKeyChains;
     // A2S2C: action parameter -> stateful object -> condition
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteA2SCondChains;
+    // Chains whose sink decides the packet's output (egress port, drop, multicast group):
+    // *2S2O end at an output variable (data flow), *2S2OutC at a condition guarding an output write,
+    // *2S2OutK at the match key of a table where some action writes an output.
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteOutChains;       // H2S2O
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteOutCondChains;   // H2S2OutC
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteA2SOutChains;    // A2S2O
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteA2SOutCondChains;// A2S2OutC
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteOutKeyChains;    // H2S2OutK
+    std::map<cstring, std::vector<DependencyGraphs::SOChain>> dataWriteA2SOutKeyChains; // A2S2OutK
 
     // Distinct stateful-object (register) NAME sets, populated only in binary mode
     // (graphsDir set) for the metrics report. First-hop sets (regA2S/regH2S) are the SOs
@@ -100,13 +109,20 @@ enum SDCategories : unsigned {
     SD_COND = 8u,
     SD_A2S2K = 16u,   // action parameter -> stateful object -> table match key
     SD_A2S2C = 32u,   // action parameter -> stateful object -> condition
-    SD_ALL = SD_A2S2V | SD_KEY | SD_HEADER | SD_COND | SD_A2S2K | SD_A2S2C,
+    SD_H2S2O = 64u,       // header -> stateful object -> output variable
+    SD_H2S2OUTC = 128u,   // header -> stateful object -> condition guarding an output write
+    SD_A2S2O = 256u,      // action parameter -> stateful object -> output variable
+    SD_A2S2OUTC = 512u,   // action parameter -> stateful object -> output-guarding condition
+    SD_H2S2OUTK = 1024u,  // header -> stateful object -> key of an output-writing table
+    SD_A2S2OUTK = 2048u,  // action parameter -> stateful object -> key of an output-writing table
+    /// Every relation whose sink decides the packet's output.
+    SD_OUTPUT = SD_H2S2O | SD_H2S2OUTC | SD_A2S2O | SD_A2S2OUTC | SD_H2S2OUTK | SD_A2S2OUTK,
+    SD_ALL = SD_A2S2V | SD_KEY | SD_HEADER | SD_COND | SD_A2S2K | SD_A2S2C | SD_OUTPUT,
     /// Exactly the categories the SOChain cache format can carry: chain_cache.cpp serializes
-    /// dataWriteKeyChains as "key" and dataWriteCondChains as "cond", and nothing else. A cache
-    /// builder that computes more than this is doing work it will discard -- which is what
-    /// p4symbex --dump-state-dep-cache used to do, spending hours in the A2S2V pass for a file
-    /// that cannot represent its output.
-    SD_CACHEABLE = SD_KEY | SD_COND,
+    /// H2S2K/H2S2C as "key"/"cond", A2S2K/A2S2C as "a2s2k"/"a2s2c", and the output relations as
+    /// "h2s2o"/"h2s2outc"/"h2s2outk"/"a2s2o"/"a2s2outc"/"a2s2outk". A cache builder that computes more than this is
+    /// doing work it will discard.
+    SD_CACHEABLE = SD_KEY | SD_COND | SD_A2S2K | SD_A2S2C | SD_OUTPUT,
     /// The four source->SO->sink relations the p4c_chain_extractor binary measures and reports:
     /// H2S2K (SD_KEY), H2S2C (SD_COND), A2S2K, A2S2C. The two value-sink families -- H2S2V
     /// (SD_HEADER) and A2S2V -- are deliberately excluded; nothing downstream consumes them.
@@ -163,6 +179,16 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
                                                   bool parserDeps = false,
                                                   bool supergraphOnly = false,
                                                   bool legacyFlow = false);
+
+/// Chains of one output relation (H2S2O, H2S2OutC, H2S2OutK or their A2S counterparts) into @out:
+/// the first hop (A2S when @fromAct, else H2S) plus the register reads reaching the relation's
+/// sinks (@sinkMap), assembled per graph of @graphs and pruned like A2S2K. @parserDeps (null when
+/// --parser-deps is off) pins the H2S chains; a non-empty @graphsDir exports "<graph>_<name>_dep.dot".
+void assemble_output_chains(const std::vector<Graph *> &graphs, const FindChains &chains,
+                            bool fromAct, IDEPass::DepEdgeMap GraphChainMaps::*sinkMap,
+                            const char *name, const std::filesystem::path &graphsDir,
+                            const ParserDepsRecord *parserDeps,
+                            std::map<cstring, std::vector<DependencyGraphs::SOChain>> &out);
 
 }  // namespace P4::P4ChainExtractor
 

@@ -157,6 +157,14 @@ std::map<cstring, std::vector<DependencyGraphs::SOChain>> resolveCategory(
     return out;
 }
 
+/// The chains of category @name of the cache @root, re-resolved against @idx (see resolveCategory).
+std::map<cstring, std::vector<DependencyGraphs::SOChain>> loadCategory(
+    const JsonObject *root, const char *name, const PositionIndex &idx, const std::string &path,
+    bool &ok) {
+    const auto *obj = field(root, name);
+    return resolveCategory(obj != nullptr ? obj->to<JsonObject>() : nullptr, idx, path, ok);
+}
+
 }  // namespace
 
 cstring computeSourceHash(const std::string &p4File, cstring arch, cstring langVersion) {
@@ -216,11 +224,21 @@ void serializeChainCache(const StateDependencyResult &result, const std::string 
         }
         return o;
     };
-    auto catToJson = [&](const std::map<cstring, std::vector<DependencyGraphs::SOChain>> &cat) {
+    // @withSinkVar: also record the sink variable, for chains ending at a variable rather than at
+    // a table key or condition (the output relations *2S2O).
+    auto catToJson = [&](const std::map<cstring, std::vector<DependencyGraphs::SOChain>> &cat,
+                         bool withSinkVar = false) {
         auto *byCtrl = new Util::JsonObject();
         for (const auto &[ctrl, chains] : cat) {
             auto *arr = new Util::JsonArray();
-            for (const auto &chain : chains) arr->append(chainToJson(chain));
+            for (const auto &chain : chains) {
+                auto *o = chainToJson(chain);
+                if (withSinkVar) {
+                    const auto *var = chain.sinkNode.esgId.second;
+                    o->emplace("sinkVar", var != nullptr ? cstring(var->toString()) : cstring::empty);
+                }
+                arr->append(o);
+            }
             byCtrl->emplace(ctrl, arr);
         }
         return byCtrl;
@@ -232,6 +250,14 @@ void serializeChainCache(const StateDependencyResult &result, const std::string 
     root->emplace("arch", arch);
     root->emplace("key", catToJson(result.dataWriteKeyChains));
     root->emplace("cond", catToJson(result.dataWriteCondChains));
+    root->emplace("a2s2k", catToJson(result.dataWriteA2SKeyChains));
+    root->emplace("a2s2c", catToJson(result.dataWriteA2SCondChains));
+    root->emplace("h2s2o", catToJson(result.dataWriteOutChains, true));
+    root->emplace("h2s2outc", catToJson(result.dataWriteOutCondChains));
+    root->emplace("a2s2o", catToJson(result.dataWriteA2SOutChains, true));
+    root->emplace("a2s2outc", catToJson(result.dataWriteA2SOutCondChains));
+    root->emplace("h2s2outk", catToJson(result.dataWriteOutKeyChains));
+    root->emplace("a2s2outk", catToJson(result.dataWriteA2SOutKeyChains));
 
     std::ofstream out(path);
     if (!out) {
@@ -273,12 +299,16 @@ StateDependencyResult loadChainCache(const std::string &path, const IR::P4Progra
     program->apply(idx);
 
     bool ok = true;
-    const auto *keyObj = field(root, "key");
-    const auto *condObj = field(root, "cond");
-    result.dataWriteKeyChains =
-        resolveCategory(keyObj != nullptr ? keyObj->to<JsonObject>() : nullptr, idx, path, ok);
-    result.dataWriteCondChains =
-        resolveCategory(condObj != nullptr ? condObj->to<JsonObject>() : nullptr, idx, path, ok);
+    result.dataWriteKeyChains = loadCategory(root, "key", idx, path, ok);
+    result.dataWriteCondChains = loadCategory(root, "cond", idx, path, ok);
+    result.dataWriteA2SKeyChains = loadCategory(root, "a2s2k", idx, path, ok);
+    result.dataWriteA2SCondChains = loadCategory(root, "a2s2c", idx, path, ok);
+    result.dataWriteOutChains = loadCategory(root, "h2s2o", idx, path, ok);
+    result.dataWriteOutCondChains = loadCategory(root, "h2s2outc", idx, path, ok);
+    result.dataWriteA2SOutChains = loadCategory(root, "a2s2o", idx, path, ok);
+    result.dataWriteA2SOutCondChains = loadCategory(root, "a2s2outc", idx, path, ok);
+    result.dataWriteOutKeyChains = loadCategory(root, "h2s2outk", idx, path, ok);
+    result.dataWriteA2SOutKeyChains = loadCategory(root, "a2s2outk", idx, path, ok);
     if (!ok) ::P4::error("--state-dep-cache: %1% could not be fully re-resolved", path.c_str());
     return result;
 }

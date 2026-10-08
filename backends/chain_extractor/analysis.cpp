@@ -193,8 +193,10 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     }
 
     const size_t numGraphs = cgen.controlGraphsArray.size();
-    const bool needAct = categories & (SD_A2S2V | SD_A2S2K | SD_A2S2C);
-    const bool needHdr = categories & (SD_KEY | SD_HEADER | SD_COND);
+    const bool needAct = categories & (SD_A2S2V | SD_A2S2K | SD_A2S2C | SD_A2S2O | SD_A2S2OUTC |
+                                       SD_A2S2OUTK);
+    const bool needHdr = categories & (SD_KEY | SD_HEADER | SD_COND | SD_H2S2O | SD_H2S2OUTC |
+                                       SD_H2S2OUTK);
 
     // Metrics helper (binary mode only): collect the distinct names of SO vertices that have an
     // incoming "write_to" edge in dep-graph @index — i.e. the stateful objects written by this
@@ -453,6 +455,29 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         }
     }
 
+    // Output relations (see assemble_output_chains)
+    const auto *outParserDeps =
+        parserDeps && !result.parserDepsRecord.empty() ? &result.parserDepsRecord : nullptr;
+    const auto &graphs = cgen.controlGraphsArray;
+    if (categories & SD_H2S2O)
+        assemble_output_chains(graphs, *chains, false, &GraphChainMaps::h2s2o, "h2s2o", graphsDir,
+                               outParserDeps, result.dataWriteOutChains);
+    if (categories & SD_H2S2OUTC)
+        assemble_output_chains(graphs, *chains, false, &GraphChainMaps::h2s2outc, "h2s2outc",
+                               graphsDir, outParserDeps, result.dataWriteOutCondChains);
+    if (categories & SD_A2S2O)
+        assemble_output_chains(graphs, *chains, true, &GraphChainMaps::a2s2o, "a2s2o", graphsDir,
+                               outParserDeps, result.dataWriteA2SOutChains);
+    if (categories & SD_A2S2OUTC)
+        assemble_output_chains(graphs, *chains, true, &GraphChainMaps::a2s2outc, "a2s2outc",
+                               graphsDir, outParserDeps, result.dataWriteA2SOutCondChains);
+    if (categories & SD_H2S2OUTK)
+        assemble_output_chains(graphs, *chains, false, &GraphChainMaps::h2s2outk, "h2s2outk",
+                               graphsDir, outParserDeps, result.dataWriteOutKeyChains);
+    if (categories & SD_A2S2OUTK)
+        assemble_output_chains(graphs, *chains, true, &GraphChainMaps::a2s2outk, "a2s2outk",
+                               graphsDir, outParserDeps, result.dataWriteA2SOutKeyChains);
+
     // Metrics (binary mode): distinct-SO name sets for the register report. The *2S2[KC] sets are
     // the SOs on a chain to that sink; allStatefulObjects (D_all) is every STATEFUL vertex.
     if (!graphsDir.empty()) {
@@ -633,6 +658,45 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     } catch (const std::exception &bug) {
         ::P4::warning("whole-pipeline analysis failed (%1%); proceeding with no chains", bug.what());
         return {};
+    }
+}
+
+void assemble_output_chains(const std::vector<Graph *> &graphs, const FindChains &chains,
+                            bool fromAct, IDEPass::DepEdgeMap GraphChainMaps::*sinkMap,
+                            const char *name, const std::filesystem::path &graphsDir,
+                            const ParserDepsRecord *parserDeps,
+                            std::map<cstring, std::vector<DependencyGraphs::SOChain>> &out) {
+    const size_t numGraphs = graphs.size();
+    DependencyGraphs dg(numGraphs);
+    for (size_t i = 0; i < numGraphs; i++) {
+        auto *g = graphs[i];
+        const auto &m = chains.maps(g);
+        if (fromAct) {
+            dg.add_dependencies_from_map(i, g, m.a2s);
+            dg.add_dependencies_from_map(i, g, m.aStateVarMap);
+        } else {
+            dg.add_dependencies_from_map(i, g, convert_dep_edges(m.h2s));
+            dg.add_dependencies_from_map(i, g, m.hStateVarMap);
+        }
+        dg.add_dependencies_from_map(i, g, m.*sinkMap, true);
+    }
+    for (size_t i = 0; i < numGraphs; i++) {
+        if (dg.leaves[i].empty()) continue;
+        auto *g = graphs[i];
+        auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+        dg.add_so_constant_edges(i, g);
+        dg.merge_nodes_without_variable(i);
+        dg.prune_nodes_not_reaching_leaves(i);
+        dg.prune_call_nodes_without_return(i, g);
+        out[graphName] = dg.get_data_write_so_chains(i, g);
+        if (parserDeps != nullptr && !fromAct)
+            for (auto &c : out[graphName]) attachParserDeps(c, *parserDeps);
+        if (!graphsDir.empty() && dg.num_vertices(i) > 0) {
+            auto dotPath = graphsDir / (graphName + "_" + name + "_dep.dot");
+            auto rankPairs = dg.add_chain_satellites(i, {}, out[graphName]);
+            dg.export_to_graphviz(i, dotPath);
+            DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
+        }
     }
 }
 
