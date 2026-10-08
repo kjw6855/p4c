@@ -3,6 +3,7 @@
 
 #include <functional>
 
+#include "backends/ifds/domain.h"
 #include "backends/ifds/edge_func_provider.h"
 #include "backends/ifds/flow_overlay.h"
 #include "backends/ifds/graphs.h"
@@ -55,6 +56,11 @@ class IDEPass : public Graphs,
     virtual void set_edge_func_in_graph(Tabulation *tab);
     // Seed, add flow, set edge functions, and run both IDE phases; results land in tab->valueMap
     void solve(Tabulation *tab, const std::vector<TabVertex> &seeds);
+    // Multi-domain solve: lay out @domains' seeds in one value, let every domain add its flow,
+    // and run both IDE phases once. Returns false (nothing solved) when no domain has a seed.
+    // Read one domain's results with DomainSet::targets or the domain-filtered collectors, then
+    // undo the domains' flow with flowOverlay.restore().
+    bool solve(Tabulation *tab, DomainSet &domains);
 
     // Find dependency from src var for every dst vertex
     void collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v, bool isSrcDstMap=true);
@@ -62,10 +68,24 @@ class IDEPass : public Graphs,
     // metadata, and egress port variables)
     void collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v);
     void collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v, const FactFilter &isSink);
+    // Domain-filtered variants of the two collectors above: only seeds of domain @d count, and
+    // the edges go to @out instead of foundDepEdges.
+    void collect_dep_edges(Tabulation *tab, Graphs::vertex_t v, const DomainSet &domains,
+                           size_t d, DepEdgeMap &out, bool isSrcDstMap=true);
+    void collect_dep_edges_to(Tabulation *tab, Graphs::vertex_t v, const FactFilter &isSink,
+                              const DomainSet &domains, size_t d, DepEdgeMap &out);
     std::vector<const IR::Node *> get_var_members(Tabulation *tab, const IR::Node *var);
     std::vector<cstring> get_tables_from_action(Tabulation *tab, Graphs::vertex_t action_v);
     std::optional<Graphs::vertex_t> get_table_key(Tabulation *tab, Graphs::vertex_t table_v);
     cstring dump_found_dependency(Tabulation *tab, const Graphs::VarEdge &ve);
+
+    // Shared bodies of the collectors: @targets turns a value into seeds, @out yields the map.
+    using TargetsFn = std::function<std::vector<TabVertex>(const VarBitSet &)>;
+    using OutFn = std::function<DepEdgeMap &()>;
+    void collect_dep_edges_impl(Tabulation *tab, Graphs::vertex_t v, bool isSrcDstMap,
+                                const TargetsFn &targets, const OutFn &out);
+    void collect_dep_edges_to_impl(Tabulation *tab, Graphs::vertex_t v, const FactFilter &isSink,
+                                   const TargetsFn &targets, const OutFn &out);
 
     inline Graphs::VarEdge convert_to_var_edge(const TabEdge &te) {
         return {{te.first.node, te.first.var},

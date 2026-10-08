@@ -24,6 +24,10 @@ class EdgeFuncProvider {
                                                          const TabVertex &seed, size_t seedIdx,
                                                          const EdgeTypeIface &edge) const = 0;
 
+    /// When true, init_edge_func composes this provider's seed functions onto the edge's current
+    /// function instead of replacing it, so seeds sharing one fact all get their bits.
+    virtual bool accumulates() const { return false; }
+
     /// When true, edge_func() is additionally called for every IFDS/IFDS_FT edge of the graph
     /// (after the seed pass), so an instance can attach functions to non-seed facts too.
     virtual bool wants_all_edges() const { return false; }

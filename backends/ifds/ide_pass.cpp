@@ -118,11 +118,45 @@ void IDEPass::solve(Tabulation *tab, const std::vector<TabVertex> &seeds) {
     tab->compute_values_ide();
 }
 
+bool IDEPass::solve(Tabulation *tab, DomainSet &domains) {
+    BUG_CHECK(tab->sanity_check_ide(), "Invalid ESG for IDE");
+    domains.layout(tab);
+    if (domains.seeds().empty()) return false;
+    for (size_t d = 0; d < domains.size(); d++)
+        domains.domain(d)->add_flow_functions(tab, domains.seeds_of(d), flowOverlay);
+    // Seeds of different domains may share a fact; the composite provider composes their gens
+    // onto the edge's function, so start every fact edge from identity.
+    tab->clear_edge_func();
+    CompositeEdgeFuncProvider composite(domains);
+    tab->init_edge_func(domains.seeds(), composite);
+    tab->init_ide();
+    if (genSupergraphs == GenSGMode::ON_DEMAND)
+        tab->forward_tabulate_on_demand_ide();
+    else
+        tab->forward_tabulate_ide();
+    tab->compute_values_ide();
+    return true;
+}
+
 void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v, bool isSrcDstMap) {
+    auto graphName = boost::get_property(*tab->g, boost::graph_name);
+    collect_dep_edges_impl(tab, v, isSrcDstMap,
+            [tab](const VarBitSet &value) { return tab->get_target_vars(value); },
+            [this, graphName]() -> DepEdgeMap & { return foundDepEdges[graphName]; });
+}
+
+void IDEPass::collect_dep_edges(Tabulation *tab, Graphs::vertex_t v, const DomainSet &domains,
+                                size_t d, DepEdgeMap &out, bool isSrcDstMap) {
+    collect_dep_edges_impl(tab, v, isSrcDstMap,
+            [tab, &domains, d](const VarBitSet &value) { return domains.targets(*tab, value, d); },
+            [&out]() -> DepEdgeMap & { return out; });
+}
+
+void IDEPass::collect_dep_edges_impl(Tabulation *tab, Graphs::vertex_t v, bool isSrcDstMap,
+                                     const TargetsFn &targets, const OutFn &out) {
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
     auto vinfo = (*g)[v];
-    auto graphName = boost::get_property(*g, boost::graph_name);
     auto &vProcName = sgProp->procOf[v];
 
     // TODO: support IR::Operation (e.g., id * 3)
@@ -141,19 +175,19 @@ void IDEPass::collect_all_dep_edges(Tabulation *tab, Graphs::vertex_t v, bool is
             continue;
 
         auto varBitMap = tab->valueMap[TabVertex{v, var}];
-        for (auto paramTv : tab->get_target_vars(varBitMap)) {
+        for (auto paramTv : targets(varBitMap)) {
             // If isSrcDstMap is true, create map from src (paramTv) to dst (v, var).
             if (isSrcDstMap) {
-                foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
+                out()[{paramTv.node, paramTv.var}].push_back({v, var});
             } else {
-                foundDepEdges[graphName][{v, var}].push_back({paramTv.node, paramTv.var});
+                out()[{v, var}].push_back({paramTv.node, paramTv.var});
             }
         }
         // Find if any variable is a member of var
         for (auto mem : get_var_members(tab, var)) {
             auto varBitMap = tab->valueMap[TabVertex{v, mem}];
-            for (auto paramTv : tab->get_target_vars(varBitMap)) {
-                foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, mem});
+            for (auto paramTv : targets(varBitMap)) {
+                out()[{paramTv.node, paramTv.var}].push_back({v, mem});
             }
         }
     }
@@ -172,9 +206,24 @@ void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v) {
 
 void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v,
                                           const FactFilter &isSink) {
+    auto graphName = boost::get_property(*tab->g, boost::graph_name);
+    collect_dep_edges_to_impl(tab, v, isSink,
+            [tab](const VarBitSet &value) { return tab->get_target_vars(value); },
+            [this, graphName]() -> DepEdgeMap & { return foundDepEdges[graphName]; });
+}
+
+void IDEPass::collect_dep_edges_to(Tabulation *tab, Graphs::vertex_t v, const FactFilter &isSink,
+                                   const DomainSet &domains, size_t d, DepEdgeMap &out) {
+    collect_dep_edges_to_impl(tab, v, isSink,
+            [tab, &domains, d](const VarBitSet &value) { return domains.targets(*tab, value, d); },
+            [&out]() -> DepEdgeMap & { return out; });
+}
+
+void IDEPass::collect_dep_edges_to_impl(Tabulation *tab, Graphs::vertex_t v,
+                                        const FactFilter &isSink, const TargetsFn &targets,
+                                        const OutFn &out) {
     auto *g = tab->g;
     auto *sgProp = tab->sgProp;
-    auto graphName = boost::get_property(*g, boost::graph_name);
 
     for (auto var : sgProp->progVarInfo.get_all_vars()) {
         auto varTv = TabVertex{v, var};
@@ -182,12 +231,11 @@ void IDEPass::collect_all_dep_edge_to_hdr(Tabulation *tab, Graphs::vertex_t v,
         auto varInfo = (*g)[varVit];
         if (isSink(varTv, varInfo)) {
             auto varBitMap = tab->valueMap[varTv];
-            for (auto paramTv : tab->get_target_vars(varBitMap)) {
-                foundDepEdges[graphName][{paramTv.node, paramTv.var}].push_back({v, var});
+            for (auto paramTv : targets(varBitMap)) {
+                out()[{paramTv.node, paramTv.var}].push_back({v, var});
             }
         }
     }
 }
-
 
 }  // namespace P4::IFDS

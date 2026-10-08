@@ -11,6 +11,7 @@ set (IFDS_LIB_SRCS
   utils.cpp
   edge_func_provider.cpp
   flow_overlay.cpp
+  domain.cpp
 )
 
 set (IFDS_LIB_HDRS
@@ -24,8 +25,23 @@ set (IFDS_LIB_HDRS
   utils.h
   edge_func_provider.h
   flow_overlay.h
+  domain.h
 )
 
 add_library(p4ifds-lib STATIC ${IFDS_LIB_SRCS})
 target_link_libraries(p4ifds-lib PUBLIC ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
 add_dependencies(p4ifds-lib ir-generated frontend)
+
+if (ENABLE_GTESTS)
+  add_executable(p4ifds-gtest
+    ${P4C_SOURCE_DIR}/test/gtest/helpers.cpp
+    ${P4C_SOURCE_DIR}/test/gtest/gtestp4c.cpp
+    test/domain_test.cpp
+  )
+  target_link_libraries(p4ifds-gtest PRIVATE p4ifds-lib gtest ${P4C_LIBRARIES} ${P4C_LIB_DEPS})
+  add_dependencies(p4ifds-gtest ir-generated frontend)
+  if (ENABLE_TESTING)
+    add_test(NAME p4ifds-gtest COMMAND p4ifds-gtest)
+    set_tests_properties(p4ifds-gtest PROPERTIES LABELS "gtest-ifds")
+  endif()
+endif()

@@ -28,7 +28,7 @@ bool Tabulation::init_edge_func(const std::vector<TabVertex> &from,
 
             auto srcVarIt = boost::source(*ei, *g);
             if (auto fn = provider.seed_edge_func(*this, srcVarIt, tv, i, edge))
-                edge.fn = std::move(*fn);
+                edge.fn = provider.accumulates() ? fn->compose(edge.fn) : std::move(*fn);
         }
     }
 
