@@ -55,9 +55,10 @@ control I(inout headers_t hdr, inout meta_t meta, inout standard_metadata_t sm) 
     }
 
     action set_nh(bit<8> nh) { meta.nh = nh; }
+    action nh_decoy(bit<32> v) { meta.idx = v; }   // never reaches the guard: not selected
     table t_nh {
         key = { meta.k: exact; }
-        actions = { set_nh; NoAction; }
+        actions = { set_nh; nh_decoy; NoAction; }
         default_action = NoAction();
     }
 

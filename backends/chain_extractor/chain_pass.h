@@ -1,6 +1,10 @@
 #ifndef BACKENDS_CHAIN_EXTRACTOR_CHAIN_PASS_H_
 #define BACKENDS_CHAIN_EXTRACTOR_CHAIN_PASS_H_
 
+#include <map>
+#include <set>
+#include <vector>
+
 #include "backends/ifds/domain.h"
 #include "backends/ifds/graphs.h"
 #include "backends/ifds/ide_pass.h"
@@ -40,6 +44,17 @@ struct GraphChainMaps {
     /// OutK = match keys of tables where some action writes an output.
     IDEPass::DepEdgeMap a2s2outk;
     IDEPass::DepEdgeMap h2s2outk;
+
+    /// Hop annotation of the output chains (default flow only), from the ActSel domain:
+    /// sinkSelect: per OutK/OutC sink fact, the actions whose effect reaches it, by table;
+    /// keyReads:   per table, the registers (SOChain::soName) whose reads reach its match key;
+    /// outputActions: per output-writing table, its actions that write an output;
+    /// tableOrder: CFG position of each table, to order the hops.
+    using SinkFact = std::pair<Graphs::vertex_t, const IR::Node *>;
+    std::map<SinkFact, std::map<cstring, std::set<cstring>>> sinkSelect;
+    std::map<cstring, std::set<cstring>> keyReads;
+    std::map<cstring, std::vector<cstring>> outputActions;
+    std::map<cstring, size_t> tableOrder;
 };
 
 /// Sink maps filled by one collect pass; null entries are skipped.
@@ -86,9 +101,10 @@ class FindChains : public IDEPass {
     FindChains(P4::ReferenceMap *refMap, P4::TypeMap *typeMap,
                std::vector<Graph *> *controlGraphsArray,
                std::vector<SuperGraphProp *> *graphProps, GenSGMode genSupergraphs,
-               bool needAct, bool needHdr, bool legacyFlow)
+               bool needAct, bool needHdr, bool legacyFlow, bool needHops = false)
         : IDEPass(refMap, typeMap, controlGraphsArray, graphProps, genSupergraphs),
-          needAct(needAct), needHdr(needHdr), legacyFlow(legacyFlow) {}
+          needAct(needAct), needHdr(needHdr), legacyFlow(legacyFlow),
+          needHops(needHops && !legacyFlow) {}
 
     Visitor::profile_t init_apply(const IR::Node *) override;
 
@@ -106,12 +122,23 @@ class FindChains : public IDEPass {
     class ActDomain;
     class HdrDomain;
     class SODomain;
+    class ActSelDomain;
 
     std::vector<TabVertex> header_seeds(Tabulation *tab);
     std::vector<TabVertex> register_read_seeds(Tabulation *tab);
     /// Append @tv to @seeds unless @seen already holds it.
     static void add_seed(const TabVertex &tv, hvec_set<TabVertex, TabVertexHash> &seen,
                          std::vector<TabVertex> &seeds);
+    /// Every global defined inside an action body (plus the egress port at a drop statement).
+    std::vector<TabVertex> action_def_seeds(Tabulation *tab);
+    /// The tables (control-plane names) calling the action procedure of @seed, and the action,
+    /// computed once per action procedure into @cache.
+    const std::pair<std::vector<cstring>, cstring> &cached_action_of(
+        Tabulation *tab, const hvec_map<cstring, cstring> &tableName,
+        hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> &cache, const TabVertex &seed);
+    /// Fill the hop-annotation maps of @m from a solve that registered the ActSel domain.
+    void collect_hops(Tabulation *tab, const DomainSet &domains, size_t so, size_t actSel,
+                      GraphChainMaps &m);
     /// Implicit flow of a table: its match-key vars -> every global var its actions define.
     void add_implicit_table_flow(Tabulation *tab, FlowOverlay &overlay);
     /// Register-read -> sink maps of one family, in the family's seed order.
@@ -126,6 +153,7 @@ class FindChains : public IDEPass {
     bool needAct;
     bool needHdr;
     bool legacyFlow;
+    bool needHops;
     hvec_map<cstring, GraphChainMaps> graphMaps;
     hvec_map<const IR::Node *, bool> guardsOutput;
     hvec_map<const IR::Node *, bool> tableWritesOutput;

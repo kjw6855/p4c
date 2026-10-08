@@ -7,7 +7,8 @@
 # chain cache must list (a) under h2s2o, (b) under h2s2outc, and (c) under cond but not h2s2outc.
 # The v1model fixture also indexes a register by a table action param, which must give a2s2o; the
 # tna fixture keys output-writing tables (directly and through an intermediate table), which must
-# give h2s2outk, and a decoy table whose actions write no output.
+# give h2s2outk, and a decoy table whose actions write no output. Output chains carry hops: the
+# tables steering the value to the sink and the actions that do so (decoy actions excluded).
 #
 # Override the binary with P4CX_BIN=/path/to/p4c_chain_extractor.
 set -euo pipefail
@@ -45,6 +46,19 @@ checks = [
     ('tna OutK: k1_reg via t_mid keys t_out (drops)', ('Ingress.k1_reg', '') in sos(tna, 'h2s2outk')),
     ('tna decoy table key is a key sink', ('Ingress.kdec_reg', '') in sos(tna, 'key')),
     ('tna decoy table key is not OutK', ('Ingress.kdec_reg', '') not in sos(tna, 'h2s2outk')),
+]
+def hops(cache, cat, so):
+    return [[(h['table'], h['select']) for h in c.get('hops', [])]
+            for g in cache.get(cat, {}).values() for c in g if c['soName'] == so]
+
+checks += [
+    ('tna hops: k1_reg selects t_mid.set_nh then t_out.do_drop',
+     hops(tna, 'h2s2outk', 'Ingress.k1_reg') ==
+     [[('Ingress.t_mid', ['Ingress.set_nh']), ('Ingress.t_out', ['Ingress.do_drop'])]]),
+    ('tna hops: k2_reg selects t_direct.fwd',
+     hops(tna, 'h2s2outk', 'Ingress.k2_reg') == [[('Ingress.t_direct', ['Ingress.fwd'])]]),
+    ('v1 hops: r_nh selects t_nh.set_nh (decoy excluded)',
+     hops(v1, 'h2s2outc', 'I.r_nh') == [[('I.t_nh', ['I.set_nh'])]]),
 ]
 failed = [name for name, ok in checks if not ok]
 for name, ok in checks:

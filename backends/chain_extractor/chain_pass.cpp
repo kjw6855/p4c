@@ -7,6 +7,7 @@
 #include <set>
 #include <queue>
 
+#include "backends/chain_extractor/dependency_graph.h"
 #include "backends/ifds/utils.h"
 #include "frontends/p4/methodInstance.h"
 #include "lib/timer.h"
@@ -44,6 +45,35 @@ class FindChains::SODomain : public IDEDomain {
     explicit SODomain(FindChains &pass) : pass(pass) {}
     cstring name() const override { return "SO"_cs; }
     std::vector<TabVertex> seeds(Tabulation *tab) override { return pass.register_read_seeds(tab); }
+
+ private:
+    FindChains &pass;
+};
+
+namespace {
+
+// Gens the seed's bit on every fact edge into the seed, whatever its source: a definition inside an
+// action marks the value as produced by that action.
+class GenOnEveryInEdge : public EdgeFuncProvider {
+ public:
+    std::optional<EdgeFuncHolder> seed_edge_func(Tabulation &tab, Graphs::vertex_t,
+                                                 const TabVertex &, size_t seedIdx,
+                                                 const EdgeTypeIface &) const override {
+        return EdgeFuncHolder(std::make_unique<VarSetFunc>(tab.varBitSetSize, seedIdx));
+    }
+};
+
+}  // namespace
+
+class FindChains::ActSelDomain : public IDEDomain {
+ public:
+    explicit ActSelDomain(FindChains &pass) : pass(pass) {}
+    cstring name() const override { return "ActSel"_cs; }
+    std::vector<TabVertex> seeds(Tabulation *tab) override { return pass.action_def_seeds(tab); }
+    const EdgeFuncProvider &edge_funcs() const override {
+        static const GenOnEveryInEdge provider;
+        return provider;
+    }
 
  private:
     FindChains &pass;
@@ -237,6 +267,101 @@ void FindChains::add_seed(const TabVertex &tv, hvec_set<TabVertex, TabVertexHash
     if (seen.insert(tv).second) seeds.push_back(tv);
 }
 
+std::vector<TabVertex> FindChains::action_def_seeds(Tabulation *tab) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
+    std::vector<TabVertex> seeds;
+    for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        if (hasFlag(vinfo.flags, VertexFlags::VARIABLE)) continue;
+        auto procName = sgProp->procOf[*vit];
+        auto srcIt = sgProp->srcOf.find(procName);
+        if (srcIt == sgProp->srcOf.end() ||
+                !hasFlag((*g)[srcIt->second].flags, VertexFlags::ACTION))
+            continue;
+        // INPUT action vars are control-plane parameters, not effects of the action
+        if (vinfo.name.startsWith("INPUT: ")) continue;
+        for (const auto *defVar : vinfo.defVars) {
+            auto idx = sgProp->progVarInfo.get_var_index(defVar, procName);
+            if (!sgProp->progVarInfo.is_local(idx)) seeds.push_back(TabVertex{*vit, defVar});
+        }
+        if (hasFlag(vinfo.flags, VertexFlags::DROP) && sgProp->egressPortVar)
+            seeds.push_back(TabVertex{*vit, sgProp->egressPortVar});
+    }
+    return seeds;
+}
+
+const std::pair<std::vector<cstring>, cstring> &FindChains::cached_action_of(
+        Tabulation *tab, const hvec_map<cstring, cstring> &tableName,
+        hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> &cache, const TabVertex &seed) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
+    auto procName = sgProp->procOf[seed.node];
+    auto it = cache.find(procName);
+    if (it != cache.end()) return it->second;
+    auto src = sgProp->srcOf[procName];
+    const auto *action = (*g)[src].node != nullptr ? (*g)[src].node->to<IR::P4Action>() : nullptr;
+    std::pair<std::vector<cstring>, cstring> entry{
+        {}, action != nullptr ? cstring(action->controlPlaneName()) : procName};
+    for (const auto &caller : get_tables_from_action(tab, src)) {
+        auto t = tableName.find(caller);
+        if (t != tableName.end()) entry.first.push_back(t->second);
+    }
+    return cache.emplace(procName, entry).first->second;
+}
+
+void FindChains::collect_hops(Tabulation *tab, const DomainSet &domains, size_t so,
+                              size_t actSel, GraphChainMaps &m) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
+
+    // Tables: control-plane name, CFG order, register reads reaching the key, output actions
+    hvec_map<cstring, cstring> tableName;   // CFG procedure name -> control-plane name
+    for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        if (!hasFlag(vinfo.flags, VertexFlags::TABLE) || !hasFlag(vinfo.flags, VertexFlags::ENTRY))
+            continue;
+        const auto *table = vinfo.node != nullptr ? vinfo.node->to<IR::P4Table>() : nullptr;
+        if (table == nullptr) continue;
+        auto name = table->controlPlaneName();
+        tableName[sgProp->procOf[*vit]] = name;
+        m.tableOrder.emplace(name, m.tableOrder.size());
+        auto key = get_table_key(tab, *vit);
+        if (!key.has_value()) continue;
+        for (const auto *use : (*g)[*key].useVars)
+            for (const auto &seed : domains.targets(*tab, tab->valueMap[TabVertex{*key, use}], so))
+                if (const auto *soNode = (*g)[seed.node].statefulObjectNode)
+                    m.keyReads[name].insert(DependencyGraphs::so_name(soNode));
+        if (!key_decides_output(g, *key)) continue;
+        OutputWriteFinder finder(refMap, typeMap);
+        for (const auto *el : table->getActionList()->actionList) {
+            const auto *mce = el->expression->to<IR::MethodCallExpression>();
+            if (mce == nullptr) continue;
+            const auto *ac = P4::MethodInstance::resolve(mce, refMap, typeMap)->to<P4::ActionCall>();
+            if (ac != nullptr && finder.writes(ac->action->body))
+                m.outputActions[name].push_back(ac->action->controlPlaneName());
+        }
+    }
+
+    // ActSel seed -> (caller tables, action), cached per action procedure
+    hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> actionOf;
+
+    // Output sinks: the actions whose effect reaches each used fact, grouped by table
+    for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        bool outKey = hasFlag(vinfo.flags, VertexFlags::KEY) && key_decides_output(g, *vit);
+        bool outCond = is_cond_sink(vinfo) && guards_output(vinfo);
+        if (!outKey && !outCond) continue;
+        for (const auto *use : vinfo.useVars) {
+            auto &select = m.sinkSelect[{*vit, use}];
+            for (const auto &seed : domains.targets(*tab, tab->valueMap[TabVertex{*vit, use}], actSel)) {
+                const auto &[tables, action] = cached_action_of(tab, tableName, actionOf, seed);
+                for (const auto &t : tables) select[t].insert(action);
+            }
+        }
+    }
+}
+
 void FindChains::add_implicit_table_flow(Tabulation *tab, FlowOverlay &overlay) {
     auto *sgProp = tab->sgProp;
     g = tab->g;
@@ -427,6 +552,7 @@ void FindChains::analyze_control_graph(Tabulation *tab) {
     ActDomain act;
     HdrDomain hdr(*this, legacyFlow);
     SODomain so(*this);
+    ActSelDomain actSel(*this);
 
     // Default: one solve {Act, Hdr, SO}; the implicit table flow carries every domain.
     // Legacy: {Act, SO} without implicit flow, and {Hdr} with it (as p4c_state_dependency).
@@ -435,6 +561,7 @@ void FindChains::analyze_control_graph(Tabulation *tab) {
     if (needAct) domains.add(&act);
     if (needHdr && !legacyFlow) domains.add(&hdr);
     domains.add(&so);
+    if (needHops) domains.add(&actSel);
     Tabulation hdrTab(g, sgProp);
     Tabulation *tabH = legacyFlow ? &hdrTab : tab;
     const DomainSet &domainsH = legacyFlow ? hdrOnly : domains;
@@ -490,6 +617,8 @@ void FindChains::analyze_control_graph(Tabulation *tab) {
                 h.outKey = &m.h2s2outk;
                 collect_so_sinks(tab, domains, *soIdx, m.hStateVars, h);
             }
+            if (auto actSelIdx = domains.index_of("ActSel"_cs))
+                collect_hops(tab, domains, *soIdx, *actSelIdx, m);
         }
     }
 

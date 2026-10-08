@@ -150,6 +150,23 @@ std::map<cstring, std::vector<DependencyGraphs::SOChain>> resolveCategory(
                                                 boolField(pdo, "wp")});
                 }
             }
+            // Output-chain hops (optional; only in the outk/outc categories).
+            const auto *hopsField = field(co, "hops");
+            const auto *hopsArr = hopsField != nullptr ? hopsField->to<JsonVector>() : nullptr;
+            if (hopsArr != nullptr) {
+                for (const auto &hopVal : *hopsArr) {
+                    const auto *ho = hopVal->to<JsonObject>();
+                    if (ho == nullptr) continue;
+                    DependencyGraphs::SOChain::Hop hop{strField(ho, "table"), {}};
+                    const auto *selField = field(ho, "select");
+                    const auto *selArr = selField != nullptr ? selField->to<JsonVector>() : nullptr;
+                    if (selArr != nullptr)
+                        for (const auto &a : *selArr)
+                            if (const auto *str = a->to<JsonString>())
+                                hop.select.push_back(cstring(str->c_str()));
+                    chain.hops.push_back(std::move(hop));
+                }
+            }
             chains.push_back(std::move(chain));
         }
         out[ctrl] = std::move(chains);
@@ -211,6 +228,19 @@ void serializeChainCache(const StateDependencyResult &result, const std::string 
         o->emplace("cond", cstring(posKey(chain.sinkConditionNode)));  // "" when no condition sink
         // --parser-deps: per-chain header pins (optional/additive; absent in baseline/WP caches, so old
         // caches still load with an empty parserDeps).
+        // Output chains: the tables (and their actions) steering the value to the sink.
+        if (!chain.hops.empty()) {
+            auto *hops = new Util::JsonArray();
+            for (const auto &hop : chain.hops) {
+                auto *h = new Util::JsonObject();
+                h->emplace("table", hop.table);
+                auto *select = new Util::JsonArray();
+                for (const auto &a : hop.select) select->append(a);
+                h->emplace("select", select);
+                hops->append(h);
+            }
+            o->emplace("hops", hops);
+        }
         if (!chain.parserDeps.empty()) {
             auto *pd = new Util::JsonArray();
             for (const auto &dep : chain.parserDeps) {

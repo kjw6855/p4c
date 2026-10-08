@@ -84,9 +84,10 @@ control Ingress(inout headers_t hdr, inout ig_metadata_t ig_md,
     };
 
     action set_nh(bit<8> nh) { ig_md.nh = nh; }
+    action mid_decoy(bit<8> u) { ig_md.unused = u; }   // never steers t_out: not selected
     table t_mid {
         key = { ig_md.k1 : exact; }
-        actions = { set_nh; NoAction; }
+        actions = { set_nh; mid_decoy; NoAction; }
         default_action = NoAction;
     }
     action do_drop() { ig_dprsr_md.drop_ctl = 1; }

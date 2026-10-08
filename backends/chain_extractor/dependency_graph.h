@@ -85,6 +85,8 @@ class DependencyGraphs {
     /// @brief Add a vertex representing a stateful object
     /// @param soNode IR node of the stateful object
     /// @return vertex descriptor
+    /// Name of a stateful object as used by SOChain::soName and the SO vertices.
+    static cstring so_name(const IR::Node *soNode);
     vertex_t add_so_vertex(size_t index, const IR::Node *soNode);
 
     /// @brief Add a dependency edge from source to target
@@ -205,6 +207,16 @@ class DependencyGraphs {
             bool writePath = false;
         };
         std::vector<ParserDep> parserDeps;
+
+        /// Output chains (*2S2OutK / *2S2OutC): the tables whose action selection steers the
+        /// register value towards the output, in CFG order, each with the actions that do so. For an
+        /// OutK chain the last hop is the sink table with its output-writing actions. Filled by
+        /// analysis.cpp from the chain pass's action-selection domain; empty in --legacy-flow.
+        struct Hop {
+            cstring table;
+            std::vector<cstring> select;
+        };
+        std::vector<Hop> hops;
 
         /// Default constructor for reconstructing a chain from a serialized cache
         /// (chain_cache.cpp): only the symbex-consumed fields (soName, sinkTableControlPlaneName,

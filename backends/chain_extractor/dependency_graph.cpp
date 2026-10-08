@@ -51,7 +51,7 @@ vertex_t DependencyGraphs::add_vertex(size_t index, EsgId esgId, const cstring &
     return v;
 }
 
-vertex_t DependencyGraphs::add_so_vertex(size_t index, const IR::Node *soNode) {
+cstring DependencyGraphs::so_name(const IR::Node *soNode) {
     std::stringstream ss;
     if (soNode->is<IR::Declaration_Instance>()) {
         // Use controlPlaneName() so the label matches the key used in the test-object store
@@ -60,7 +60,11 @@ vertex_t DependencyGraphs::add_so_vertex(size_t index, const IR::Node *soNode) {
     } else {
         ss << soNode;
     }
-    vertex_t v = add_vertex(index, {globalVertexId, soNode}, cstring(ss), "lightblue"_cs);
+    return cstring(ss);
+}
+
+vertex_t DependencyGraphs::add_so_vertex(size_t index, const IR::Node *soNode) {
+    vertex_t v = add_vertex(index, {globalVertexId, soNode}, so_name(soNode), "lightblue"_cs);
     (*depGraphs[index])[v].isSO = true;
     return v;
 }

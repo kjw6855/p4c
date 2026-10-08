@@ -1,5 +1,6 @@
 #include "backends/chain_extractor/analysis.h"
 
+#include <algorithm>
 #include <iostream>
 #include <set>
 
@@ -229,8 +230,9 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
     auto *a2s2cGraphs = new DependencyGraphs(numGraphs);
     // One chain pass computes every relation (see FindChains); the blocks below only assemble
     // its maps into dependency graphs, in the same order as the former per-relation passes.
+    const bool needHops = categories & (SD_H2S2OUTK | SD_A2S2OUTK | SD_H2S2OUTC | SD_A2S2OUTC);
     auto *chains = new FindChains(refMap, typeMap, &cgen.controlGraphsArray, &sg.graphProps,
-                                  GenSGMode::FULL, needAct, needHdr, legacyFlow);
+                                  GenSGMode::FULL, needAct, needHdr, legacyFlow, needHops);
     program->apply(*chains);
     if (needAct) {
         for (size_t i = 0; i < numGraphs; i++) {
@@ -478,6 +480,14 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         assemble_output_chains(graphs, *chains, true, &GraphChainMaps::a2s2outk, "a2s2outk",
                                graphsDir, outParserDeps, result.dataWriteA2SOutKeyChains);
 
+    // Hop annotation of the OutK / OutC chains (see annotate_hops)
+    if (needHops) {
+        annotate_hops(*chains, result.dataWriteOutKeyChains);
+        annotate_hops(*chains, result.dataWriteA2SOutKeyChains);
+        annotate_hops(*chains, result.dataWriteOutCondChains);
+        annotate_hops(*chains, result.dataWriteA2SOutCondChains);
+    }
+
     // Metrics (binary mode): distinct-SO name sets for the register report. The *2S2[KC] sets are
     // the SOs on a chain to that sink; allStatefulObjects (D_all) is every STATEFUL vertex.
     if (!graphsDir.empty()) {
@@ -696,6 +706,38 @@ void assemble_output_chains(const std::vector<Graph *> &graphs, const FindChains
             auto rankPairs = dg.add_chain_satellites(i, {}, out[graphName]);
             dg.export_to_graphviz(i, dotPath);
             DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
+        }
+    }
+}
+
+void annotate_hops(const FindChains &chains,
+                   std::map<cstring, std::vector<DependencyGraphs::SOChain>> &byGraph) {
+    for (auto &[graphName, graphChains] : byGraph) {
+        const auto &m = chains.maps(graphName);
+        for (auto &chain : graphChains) {
+            std::vector<std::pair<size_t, DependencyGraphs::SOChain::Hop>> hops;
+            auto sel = m.sinkSelect.find(chain.sinkNode.esgId);
+            if (sel != m.sinkSelect.end()) {
+                for (const auto &[table, actions] : sel->second) {
+                    if (table == chain.sinkTableControlPlaneName) continue;
+                    auto keyReads = m.keyReads.find(table);
+                    if (keyReads == m.keyReads.end() || !keyReads->second.count(chain.soName))
+                        continue;
+                    hops.push_back({m.tableOrder.at(table),
+                                    {table, {actions.begin(), actions.end()}}});
+                }
+            }
+            std::sort(hops.begin(), hops.end(),
+                      [](const auto &a, const auto &b) { return a.first < b.first; });
+            chain.hops.clear();
+            for (auto &[_, hop] : hops) chain.hops.push_back(hop);
+            if (!chain.sinkTableControlPlaneName.isNullOrEmpty()) {
+                auto outActions = m.outputActions.find(chain.sinkTableControlPlaneName);
+                chain.hops.push_back({chain.sinkTableControlPlaneName,
+                                      outActions != m.outputActions.end()
+                                          ? outActions->second
+                                          : std::vector<cstring>{}});
+            }
         }
     }
 }

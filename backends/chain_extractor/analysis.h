@@ -190,6 +190,12 @@ void assemble_output_chains(const std::vector<Graph *> &graphs, const FindChains
                             const ParserDepsRecord *parserDeps,
                             std::map<cstring, std::vector<DependencyGraphs::SOChain>> &out);
 
+/// Hop annotation of the OutK / OutC chains of @byGraph: the tables whose action selection steers
+/// a chain's register towards the sink (a read of the register reaches their key, and one of their
+/// actions reaches the sink), in CFG order; an OutK chain ends with its sink table.
+void annotate_hops(const FindChains &chains,
+                   std::map<cstring, std::vector<DependencyGraphs::SOChain>> &byGraph);
+
 }  // namespace P4::P4ChainExtractor
 
 #endif  // BACKENDS_CHAIN_EXTRACTOR_ANALYSIS_H_
