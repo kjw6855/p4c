@@ -51,6 +51,7 @@ CMAKE_DEPENDENT_OPTION (ENABLE_TEST_TOOLS "Build the P4Tools development platfor
 OPTION (ENABLE_P4C_GRAPHS "Build the p4c-graphs backend" ON)
 OPTION (ENABLE_GC "Compile with the Boehm-Demers-Weiser garbage collector." ON)
 OPTION (ENABLE_STATE_DEPENDENCY "Build the p4c_state_dependency backend tool" ON)
+OPTION (ENABLE_CHAIN_EXTRACTOR "Build the p4c_chain_extractor backend tool" ON)
 OPTION (ENABLE_WERROR "Treat warnings as errors" OFF)
 OPTION (ENABLE_SANITIZERS "Enable sanitizers" OFF)
 OPTION (STATIC_BUILD_WITH_DYNAMIC_GLIBC "Build a (mostly) statically linked release binary. \
@@ -515,10 +516,16 @@ endif ()
 if (ENABLE_GTESTS)
   add_subdirectory (test)
 endif ()
-if (ENABLE_STATE_DEPENDENCY AND HAVE_LIBBOOST_GRAPH EQUAL 1)
+if ((ENABLE_STATE_DEPENDENCY OR ENABLE_CHAIN_EXTRACTOR) AND HAVE_LIBBOOST_GRAPH EQUAL 1)
+    # IFDS/IDE solver library shared by the state_dependency and chain_extractor backends.
     add_subdirectory (backends/ifds)
-    add_subdirectory (backends/state_dependency)
-    add_subdirectory (backends/metrics)
+    if (ENABLE_STATE_DEPENDENCY)
+        add_subdirectory (backends/state_dependency)
+        add_subdirectory (backends/metrics)
+    endif ()
+    if (ENABLE_CHAIN_EXTRACTOR)
+        add_subdirectory (backends/chain_extractor)
+    endif ()
 endif ()
 
 ####################################### IR Generation Begin #######################################

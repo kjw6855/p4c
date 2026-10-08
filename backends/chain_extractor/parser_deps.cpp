@@ -1,0 +1,178 @@
+#include "backends/chain_extractor/parser_deps.h"
+
+#include <functional>
+#include <map>
+#include <set>
+#include <sstream>
+#include <string>
+#include <tuple>
+#include <vector>
+
+#include "backends/ifds/controls.h"
+#include "lib/log.h"
+
+namespace P4::P4ChainExtractor {
+
+namespace {
+
+// Field-path string for a node, matching Graphs::get_var_name (so record keys equal control var names).
+cstring nodePath(const IR::Node *n) {
+    std::stringstream ss;
+    ss << n;
+    cstring full(ss.str());
+    if (auto *p = full.findlast(' ')) return cstring(p + 1);
+    return full;
+}
+
+// Collect maximal field references (Member / PathExpression / ArrayIndex) within an expression.
+struct RefCollector : public Inspector {
+    std::vector<const IR::Expression *> refs;
+    bool preorder(const IR::Member *m) override { refs.push_back(m); return false; }
+    bool preorder(const IR::PathExpression *pe) override { refs.push_back(pe); return false; }
+    bool preorder(const IR::ArrayIndex *ai) override { refs.push_back(ai); return false; }
+};
+
+// Collect every `lhs = rhs` across all parser states (flow-insensitive may-analysis).
+struct AssignCollector : public Inspector {
+    std::map<cstring, std::vector<std::pair<cstring, const IR::Node *>>> deps;  // lhsPath -> {(refPath,node)}
+    std::map<cstring, const IR::Node *> lhsNode;
+
+    bool preorder(const IR::BaseAssignmentStatement *as) override {
+        cstring lp = nodePath(as->left);
+        lhsNode[lp] = as->left;
+        RefCollector rc;
+        as->right->apply(rc);
+        auto &v = deps[lp];
+        for (auto *r : rc.refs) v.emplace_back(nodePath(r), r);
+        return false;
+    }
+};
+
+}  // namespace
+
+ParserDepsRecord computeParserDeps(const IR::P4Parser *parser, P4::ReferenceMap * /*refMap*/,
+                                   P4::TypeMap *typeMap) {
+    ParserDepsRecord out;
+
+    // The TRUE packet-header param is the FIRST parameter whose type is a header struct (mirrors the
+    // control-side headerVarName rule, controls.cpp:221). Later params that merely CONTAIN a header-typed
+    // field — e.g. tna `eg_md.key` / `ig_md.reg_idx` (a header instance living inside the metadata struct)
+    // — are metadata, and those header-typed fields are exactly the cross-block carriers we want to seed.
+    // So they must NOT be treated as header source-leaves (which would skip them at the loop below).
+    std::set<std::string> headerNames;
+    for (auto *p : parser->getApplyParameters()->parameters) {
+        auto *t = typeMap->getType(p, true);
+        if (t != nullptr && isHeaderStruct(t, typeMap)) {
+            headerNames.insert(p->name.name.string());
+            break;  // only the packet-header param; metadata structs with header fields stay seedable
+        }
+    }
+    if (headerNames.empty()) return out;  // no header param -> nothing to source
+
+    auto isHeaderPath = [&](cstring path) {
+        std::string s = path.string();
+        for (const auto &h : headerNames)
+            if (s == h || (s.size() > h.size() && s.compare(0, h.size(), h) == 0 && s[h.size()] == '.'))
+                return true;
+        return false;
+    };
+
+    AssignCollector ac;
+    parser->apply(ac);
+
+    // Transitive header-provenance with memoization + cycle guard.
+    std::map<cstring, std::vector<ParserHeaderDep>> memo;
+    std::set<cstring> inProgress;
+    std::function<std::vector<ParserHeaderDep>(cstring)> prov =
+        [&](cstring path) -> std::vector<ParserHeaderDep> {
+        auto mit = memo.find(path);
+        if (mit != memo.end()) return mit->second;
+        if (inProgress.count(path)) return {};
+        inProgress.insert(path);
+        std::vector<ParserHeaderDep> result;
+        std::set<cstring> seen;
+        auto dit = ac.deps.find(path);
+        if (dit != ac.deps.end()) {
+            for (auto &[refPath, refNode] : dit->second) {
+                if (isHeaderPath(refPath)) {
+                    if (seen.insert(refPath).second) result.push_back({refPath, refNode});
+                } else {
+                    for (auto &hd : prov(refPath))
+                        if (seen.insert(hd.headerPath).second) result.push_back(hd);
+                }
+            }
+        }
+        inProgress.erase(path);
+        memo[path] = result;
+        return result;
+    };
+
+    // Seed `path` (and, transitively, any enclosing HEADER-typed sub-expression of `node`) as a
+    // metadata source carrying `hdrs`. The enclosing-header step matters because the midend flattens
+    // a whole-header parser copy (e.g. `eg_md.key = hdr.key`) into per-field copies, so only the
+    // FIELDS get seeded — but programs use the WHOLE header as an index (e.g. `hash(eg_md.key)`).
+    // Seeding the enclosing header lets `hash(whole header)` inherit a seeded field's provenance.
+    // (eg_md.key is a header field inside the metadata struct; eg_md itself is a struct, not seeded.)
+    auto seedPath = [&](cstring path, const IR::Node *node,
+                        const std::vector<ParserHeaderDep> &hdrs) {
+        auto &acc = out.metaToHeaders[path];
+        for (const auto &hd : hdrs) {
+            bool dup = false;
+            for (const auto &x : acc) if (x.headerPath == hd.headerPath) { dup = true; break; }
+            if (!dup) acc.push_back(hd);
+        }
+        if (out.metaNode.find(path) == out.metaNode.end()) out.metaNode[path] = node;
+    };
+
+    for (auto &[lhsPath, refs] : ac.deps) {
+        (void)refs;
+        if (isHeaderPath(lhsPath)) continue;  // only metadata fields become sources
+        auto hdrs = prov(lhsPath);
+        if (hdrs.empty()) continue;
+        seedPath(lhsPath, ac.lhsNode[lhsPath], hdrs);
+        LOG2("[parser-deps] " << lhsPath << " <- " << hdrs.size() << " header(s)");
+
+        // Walk up the lhs Member chain; seed each enclosing header-typed expression.
+        const IR::Expression *e = nullptr;
+        if (const auto *n = ac.lhsNode[lhsPath]) e = n->to<IR::Expression>();
+        while (const auto *m = (e != nullptr ? e->to<IR::Member>() : nullptr)) {
+            const IR::Expression *parent = m->expr;
+            const auto *pt = parent != nullptr ? typeMap->getType(parent, true) : nullptr;
+            if (pt != nullptr && pt->is<IR::Type_Header>()) {
+                cstring pp = nodePath(parent);
+                if (!isHeaderPath(pp)) {  // never reclassify the real packet-header param
+                    seedPath(pp, parent, hdrs);
+                    LOG2("[parser-deps] " << pp << " <- (enclosing header of " << lhsPath << ")");
+                }
+            }
+            e = parent;
+        }
+    }
+    return out;
+}
+
+void attachParserDeps(DependencyGraphs::SOChain &chain, const ParserDepsRecord &rec) {
+    if (rec.metaToHeaders.empty()) return;
+    std::set<std::tuple<cstring, cstring, bool>> seen;
+    auto scan = [&](const auto &nodes, bool writePath) {
+        for (auto &kv : nodes) {
+            const IR::Node *node = kv.second;
+            if (node == nullptr) continue;
+            RefCollector rc;
+            node->apply(rc);
+            for (auto *r : rc.refs) {
+                cstring path = nodePath(r);
+                auto it = rec.metaToHeaders.find(path);
+                if (it == rec.metaToHeaders.end()) continue;
+                for (const auto &hd : it->second) {
+                    if (seen.insert(std::make_tuple(path, hd.headerPath, writePath)).second)
+                        chain.parserDeps.push_back({path, hd.headerPath, writePath});
+                }
+            }
+        }
+    };
+    scan(chain.writeNodes, true);
+    scan(chain.readNodes, false);
+}
+
+}  // namespace P4::P4ChainExtractor

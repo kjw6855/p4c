@@ -1,0 +1,724 @@
+#include "backends/chain_extractor/analysis.h"
+
+#include <iostream>
+#include <set>
+
+#include <boost/graph/graph_traits.hpp>
+
+#ifdef ENABLE_GC
+#include <gc/gc.h>
+#endif
+
+#include "backends/chain_extractor/act_param_to_stateful.h"
+#include "backends/ifds/controls.h"
+#include "backends/chain_extractor/dependency_graph.h"
+#include "backends/chain_extractor/hdr_to_stateful.h"
+#include "backends/ifds/ide_pass.h"
+#include "backends/chain_extractor/stateful_to_key.h"
+#include "backends/ifds/supergraphs.h"
+#include "backends/ifds/utils.h"
+#include "frontends/p4/evaluator/evaluator.h"
+#include "frontends/p4/removeParameters.h"
+#include "frontends/p4/typeChecking/typeChecker.h"
+#include "midend/eliminateSerEnums.h"
+#include "midend/parserUnroll.h"
+#include "ir/pass_manager.h"
+#include "ir/visitor.h"
+#include "lib/hvec_map.h"
+#include "lib/log.h"
+#include "lib/timer.h"
+
+namespace P4::P4ChainExtractor {
+
+namespace {
+/// Whole-program visitor: enumerate declared stateful objects by extern type, keyed by
+/// controlPlaneName() (the same name the dep-graph uses for an SO — see add_so_vertex). This is
+/// the authoritative D_all/D_crao/D_rao denominator, independent of any dependency chain, so it
+/// counts registers a chain never reaches (e.g. RegisterAction registers with a non-header index).
+/// RegisterAction is intentionally skipped: its SO is the backing Register it wraps (a separate
+/// Declaration_Instance we DO collect), so counting the action too would double-count the register.
+class StatefulInstanceCollector : public Inspector {
+    std::map<cstring, cstring> &out;
+ public:
+    explicit StatefulInstanceCollector(std::map<cstring, cstring> &o) : out(o) {}
+    bool preorder(const IR::Declaration_Instance *di) override {
+        const IR::Type *t = di->type;
+        if (const auto *ts = t->to<IR::Type_Specialized>()) t = ts->baseType;  // Register<T,I> etc.
+        cstring tn;
+        if (const auto *tnn = t->to<IR::Type_Name>()) tn = tnn->path->name.name;
+        else if (const auto *te = t->to<IR::Type_Extern>()) tn = te->name.name;
+        cstring type;
+        if (tn == "Register" || tn == "register") type = "Register"_cs;
+        else if (tn == "Counter") type = "Counter"_cs;
+        else if (tn == "Meter") type = "Meter"_cs;
+        if (!type.isNullOrEmpty()) out[di->controlPlaneName()] = type;
+        return true;
+    }
+    bool preorder(const IR::P4Table *tbl) override {
+        const auto *bp = tbl->getBooleanProperty("add_on_miss"_cs);  // PNA add-on-miss = stateful
+        if (bp != nullptr && bp->value) out[tbl->controlPlaneName()] = "AddOnMiss"_cs;
+        return true;
+    }
+};
+}  // namespace
+
+
+using namespace P4::literals;
+
+StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
+                                                  P4::ReferenceMap *refMap,
+                                                  P4::TypeMap *typeMap,
+                                                  const IR::ToplevelBlock *toplevel,
+                                                  cstring arch,
+                                                  std::filesystem::path graphsDir,
+                                                  unsigned categories,
+                                                  bool wholePipeline,
+                                                  bool parserDeps,
+                                                  bool supergraphOnly) {
+    Util::ScopedTimer sdTimer("P4CX");
+    StateDependencyResult result;
+    // @categories is honoured in both modes. Graph/binary mode used to force SD_ALL here on the
+    // grounds that it "exports every category"; that made it impossible for the binary to request
+    // its four-type measurement set (SD_FOUR), and every in-tree binary-mode caller passes an
+    // explicit mask anyway. Callers that still want everything pass SD_ALL and are unaffected.
+
+    // Heap-allocate ControlGraphs so it can be returned to the caller in binary mode
+    // (needed by GraphVisitor). Library-mode callers should delete it themselves or
+    // simply ignore result.cfgGraphs.
+    auto *cgenRaw = new ControlGraphs(refMap, typeMap, graphsDir, arch);
+    ControlGraphs &cgen = *cgenRaw;
+    cgen.genSupergraphs = GenSGMode::FULL;
+    cgen.wholePipeline = wholePipeline;
+    {
+        // CFG construction over the evaluated pipeline — the input to the IFDS supergraphs below.
+        // Reported as "P4CX.CFG" in the performance report.
+        Util::ScopedTimer cfgTimer("CFG");
+        toplevel->getMain()->apply(cgen);
+    }
+
+    // --parser-deps: compute the parser-state dependency record (header-derived metadata fields) over the
+    // program's (unrolled) parsers; the union of their field-path names seeds the per-control IFDS sources.
+    std::set<cstring> parserMetaSrc;
+    if (parserDeps) {
+        // Reported as "P4CX.ParserDeps". Every other phase in this function is scoped; without
+        // this one the mapping's cost lands in P4CX's unattributed remainder, where it cannot be
+        // recovered by subtraction -- the end-to-end mode delta is dominated by the extra IFDS
+        // work the new sources create, not by the mapping itself. The scope closes before the
+        // SuperGraphs construction below, so this times the mapping alone, not the seeding it
+        // feeds.
+        Util::ScopedTimer parserDepsTimer("ParserDeps");
+        forAllMatching<IR::P4Parser>(program, [&](const IR::P4Parser *p) {
+            ParserDepsRecord rec = computeParserDeps(p, refMap, typeMap);
+            for (auto &[meta, hdrs] : rec.metaToHeaders) {
+                auto &dst = result.parserDepsRecord.metaToHeaders[meta];
+                dst.insert(dst.end(), hdrs.begin(), hdrs.end());
+                result.parserDepsRecord.metaNode[meta] = rec.metaNode.at(meta);
+                parserMetaSrc.insert(meta);
+            }
+        });
+    }
+
+    // Build IFDS supergraphs over the CFGs. Reported as "P4CX.Supergraph" in the performance
+    // report; --supergraph-only stops right after this, so the timer is measurable in isolation.
+    SuperGraphs sg(refMap, typeMap,
+            &cgen.controlGraphsArray,
+            &cgen.graphVars,
+            &cgen.graphLocalVars,
+            &cgen.procOfs,
+            &cgen.callMaps,
+            &cgen.procCallerMaps,
+            &cgen.retArgEdges,
+            &cgen.actionMaps,
+            &cgen.headerVarNames,
+            &cgen.ingressPortVars,
+            &cgen.egressPortVars,
+            &cgen.dropVars,
+            parserDeps ? &parserMetaSrc : nullptr);
+    {
+        Util::ScopedTimer sgTimer("Supergraph");
+        sg.gen_supergraphs();
+    }
+
+    // --supergraph-only: measure CFG + supergraph generation without paying for any of the IFDS
+    // chain passes. Hand back the CFGs in binary mode (the caller owns/deletes them); every chain
+    // container stays empty, so callers must not read counts from a supergraph-only result.
+    if (supergraphOnly) {
+        // Graph sizes are available here even though chains are not: gen_supergraphs above already
+        // built them. Report them now because hdr_to_stateful.cpp prints these counters only after
+        // forward_tabulate_ide(), the phase that OOMs -- so on failure they are unrecoverable.
+        //
+        // Edge counts are slightly low: each pass seeds its own root-to-source IFDS_FT edges before
+        // counting. Node counts are unaffected. "Reachable ESG nodes/edges" are omitted because the
+        // `interesting` flag is set only by tabulation; printing 0 would be a claim we cannot make.
+        for (size_t gi = 0; gi < cgen.controlGraphsArray.size(); gi++) {
+            auto *cg = cgen.controlGraphsArray[gi];
+            if (cg == nullptr) continue;
+            size_t numNodes = 0, numEsgNodes = 0, numEdges = 0, numEsgEdges = 0;
+            for (auto [vit, vend] = boost::vertices(*cg); vit != vend; ++vit) {
+                if (hasFlag((*cg)[*vit].flags, VertexFlags::VARIABLE))
+                    numEsgNodes++;
+                else
+                    numNodes++;
+            }
+            for (auto [eit, eend] = boost::edges(*cg); eit != eend; ++eit) {
+                auto type = (*cg)[*eit].type;
+                if (type == EdgeType::IFDS || type == EdgeType::IFDS_FT)
+                    numEsgEdges++;
+                else if (type != EdgeType::HAS_VAR)
+                    numEdges++;
+            }
+            auto graphName = boost::get_property(*cg, boost::graph_name);
+	    // Measure H2S and A2S only if hasActionParams
+            const bool hasActionParams =
+                gi < sg.graphProps.size() && sg.graphProps[gi] != nullptr &&
+                !sg.graphProps[gi]->actionParams.empty();
+            std::vector<const char *> relations{"Headers -> Stateful Variables"};
+            if (hasActionParams) relations.push_back("Action Parameters -> Stateful Variables");
+            for (const char *relation : relations) {
+                std::cout << "================" << std::endl;
+                std::cout << "[RESULT] " << relation << " in " << graphName << ":" << std::endl;
+                std::cout << "Total nodes: " << numNodes << std::endl;
+                std::cout << "Total edges: " << numEdges << std::endl;
+                std::cout << "Total ESG nodes: " << numEsgNodes << std::endl;
+                std::cout << "Total ESG edges: " << numEsgEdges << std::endl;
+            }
+        }
+        std::cout << "================" << std::endl;
+        std::cout.flush();
+
+        if (!graphsDir.empty())
+            result.cfgGraphs = cgenRaw;
+        else
+            delete cgenRaw;
+        return result;
+    }
+
+    const size_t numGraphs = cgen.controlGraphsArray.size();
+    hvec_map<cstring, std::vector<TabVertex>> stateVars;
+    hvec_map<cstring, IDEPass::DepEdgeMap> depEdgeMaps;
+
+    // Metrics helper (binary mode only): collect the distinct names of SO vertices that have an
+    // incoming "write_to" edge in dep-graph @index — i.e. the stateful objects written by this
+    // graph's source (action param / header). Must be called before pruning so non-sink-reaching
+    // writes are still counted.
+    auto collectWrittenSOs = [](DependencyGraphs *dg, size_t i, std::set<cstring> &out) {
+        const auto &g = dg->get_graph(i);
+        for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit) {
+            auto v = *vit;
+            if (!g[v].isSO) continue;
+            for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+                if (g[*ei].label == "write_to"_cs) { out.insert(g[v].name); break; }
+            }
+        }
+    };
+    // Every distinct SO (register) appearing in dep-graph @index, by clean SO name (g[v].name).
+    // Used for the D_all denominator — the CFG statement vertices carry per-access names, so we
+    // enumerate the dep-graph SO vertices instead.
+    auto collectAllSOs = [](DependencyGraphs *dg, size_t i, std::set<cstring> &out) {
+        const auto &g = dg->get_graph(i);
+        for (auto [vit, vend] = boost::vertices(g); vit != vend; ++vit)
+            if (g[*vit].isSO) out.insert(g[*vit].name);
+    };
+
+    /* I. A2S2V: action parameter → stateful object → packet field */
+    auto *a2s2vGraphs = new DependencyGraphs(numGraphs);
+    // A2S2K / A2S2C: action parameter → stateful object → {table match key, condition}. Reuse the
+    // action first-hop (base edges + stateVars/depEdgeMaps) with a KEY_ONLY / cond sink pass.
+    auto *a2s2kGraphs = new DependencyGraphs(numGraphs);
+    auto *a2s2cGraphs = new DependencyGraphs(numGraphs);
+    auto *sdChecker = new ActParamToStateful(refMap, typeMap,
+            &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL);
+    // The base ACT->SO pass feeds stateVars/depEdgeMaps for BOTH sink passes below, so it runs
+    // whenever any A2S category is requested -- mirroring the HDR->SO rule further down. Gating it
+    // on SD_A2S2V alone silently produced zero A2S2K/A2S2C chains for an SD_A2S2V-less mask.
+    if (categories & (SD_A2S2V | SD_A2S2K | SD_A2S2C)) {
+        Util::ScopedTimer actToSoTimer("ACT->SO");
+        program->apply(*sdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            const auto &ptsEdgeMap = sdChecker->getFoundDepEdges(graphName);
+            IDEPass::DepEdgeMap stateVarMap;
+            stateVars[graphName] = collect_state_vars_from_dep_edges_dst(
+                    g, sg.graphProps[i], refMap, typeMap, ptsEdgeMap, stateVarMap, true);
+            a2s2vGraphs->add_dependencies_from_map(i, g, ptsEdgeMap);
+            a2s2vGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            // Same base action→SO edges feed the A2S2K / A2S2C sink passes.
+            a2s2kGraphs->add_dependencies_from_map(i, g, ptsEdgeMap);
+            a2s2kGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            a2s2cGraphs->add_dependencies_from_map(i, g, ptsEdgeMap);
+            a2s2cGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            depEdgeMaps[graphName] = convert_dep_edges(ptsEdgeMap);
+            for (const auto &ve : ptsEdgeMap)
+                for (const auto &dst : ve.second)
+                    LOG2(Graphs::dump_var_edge(g, {ve.first, dst}));
+        }
+    }
+    if (categories & SD_A2S2V) {
+        Util::ScopedTimer actSoToKeyTimer("ACT->SO->KEY/HDR");
+        StatefulToKey a2s2vPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "A2S2V"_cs, KeySinkMode::KEY_AND_HEADER);
+        program->apply(a2s2vPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2vGraphs->add_dependencies_from_map(i, g,
+                    a2s2vPdChecker.getFoundDepEdges(graphName), true);
+        }
+    }
+    // reg_A2S: distinct SOs written by an action param (collect from the unpruned a2s2v base graph).
+    // Also seed D_all with every SO seen on the action side.
+    if (!graphsDir.empty() && (categories & (SD_A2S2V | SD_A2S2K | SD_A2S2C))) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            collectWrittenSOs(a2s2vGraphs, i, result.regA2S);
+            collectAllSOs(a2s2vGraphs, i, result.allStatefulObjects);
+        }
+    }
+    // A2S2K: action param → SO → table match key (KEY sinks only).
+    if (categories & SD_A2S2K) {
+        Util::ScopedTimer actSoToKeyOnlyTimer("ACT->SO->KEY");
+        StatefulToKey a2s2kPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "A2S2V"_cs, KeySinkMode::KEY_ONLY);
+        program->apply(a2s2kPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2kGraphs->add_dependencies_from_map(i, g,
+                    a2s2kPdChecker.getFoundDepEdges(graphName), true);
+        }
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (a2s2kGraphs->leaves[i].empty()) continue;
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2kGraphs->add_so_constant_edges(i, g);
+            a2s2kGraphs->merge_nodes_without_variable(i);
+            a2s2kGraphs->prune_nodes_not_reaching_leaves(i);
+            a2s2kGraphs->prune_call_nodes_without_return(i, g);
+            result.dataWriteA2SKeyChains[graphName] = a2s2kGraphs->get_data_write_so_chains(i, g);
+        }
+    }
+    // A2S2C: action param → SO → condition (new StatefulToCond pass on the action first-hop).
+    if (categories & SD_A2S2C) {
+        Util::ScopedTimer actSoToCondTimer("ACT->SO->COND");
+        StatefulToCond a2s2cPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "A2S2V"_cs);
+        program->apply(a2s2cPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2cGraphs->add_dependencies_from_map(i, g,
+                    a2s2cPdChecker.getFoundDepEdges(graphName), true);
+        }
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (a2s2cGraphs->leaves[i].empty()) continue;
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2cGraphs->add_so_constant_edges(i, g);
+            a2s2cGraphs->merge_nodes_without_variable(i);
+            a2s2cGraphs->prune_nodes_not_reaching_leaves(i);
+            a2s2cGraphs->prune_call_nodes_without_return(i, g);
+            result.dataWriteA2SCondChains[graphName] = a2s2cGraphs->get_data_write_so_chains(i, g);
+        }
+    }
+    if (categories & SD_A2S2V) {
+        Util::ScopedTimer actSoToKeyDrawTimer("ACT->SO->KEY/HDR drawing");
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (a2s2vGraphs->leaves[i].empty()) continue;
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            a2s2vGraphs->add_so_constant_edges(i, g);
+            if (!graphsDir.empty() && a2s2vGraphs->num_vertices(i) > 0)
+                a2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_a2s2v_dep.dot"));
+            a2s2vGraphs->merge_nodes_without_variable(i);
+            if (!graphsDir.empty() && a2s2vGraphs->num_vertices(i) > 0)
+                a2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_a2s2v_dep.dot"));
+            a2s2vGraphs->prune_nodes_not_reaching_leaves(i);
+            a2s2vGraphs->prune_call_nodes_without_return(i, g);
+            if (!graphsDir.empty() && a2s2vGraphs->num_vertices(i) > 0)
+                a2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_a2s2v_dep.dot"));
+        }
+    }
+    result.a2s2vGraphs = a2s2vGraphs;
+
+    stateVars.clear();
+    depEdgeMaps.clear();
+
+    /* II. H2S2(K/V/C) */
+    /* II-1. Base H2S2: header variable → stateful object. Shared by all three sink graphs. */
+    auto *h2s2kGraphs = new DependencyGraphs(numGraphs);
+    auto *h2s2vGraphs = new DependencyGraphs(numGraphs);
+    auto *h2s2cGraphs = new DependencyGraphs(numGraphs);
+    auto *hdChecker = new HdrToStateful(refMap, typeMap,
+            &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL);
+    if (categories & (SD_KEY | SD_HEADER | SD_COND)) {
+        Util::ScopedTimer hdrToStatefulTimer("HDR->SO");
+        program->apply(*hdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            const auto &htsEdgeMap = hdChecker->getFoundDepEdges(graphName);
+            IDEPass::DepEdgeMap stateVarMap;
+            stateVars[graphName] = collect_state_vars_from_dep_edges_src(
+                    g, sg.graphProps[i], refMap, typeMap, htsEdgeMap, stateVarMap, true);
+            depEdgeMaps[graphName] = htsEdgeMap;
+            auto sthEdgeMap = convert_dep_edges(htsEdgeMap);
+            h2s2kGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
+            h2s2kGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            h2s2vGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
+            h2s2vGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            h2s2cGraphs->add_dependencies_from_map(i, g, sthEdgeMap);
+            h2s2cGraphs->add_dependencies_from_map(i, g, stateVarMap);
+            for (const auto &ve : htsEdgeMap)
+                for (const auto &dst : ve.second)
+                    LOG2(Graphs::dump_var_edge(g, {ve.first, dst}));
+        }
+    }
+    /* II-2. H2S2K: state object → table match KEY sinks only. */
+    if (categories & SD_KEY) {
+        Util::ScopedTimer hdrSoToKeyTimer("HDR->SO->KEY");
+        StatefulToKey h2s2kPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "H2S2V"_cs,
+                KeySinkMode::KEY_ONLY);
+        program->apply(h2s2kPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            h2s2kGraphs->add_dependencies_from_map(i, g,
+                    h2s2kPdChecker.getFoundDepEdges(graphName), true);
+        }
+    }
+    /* II-3. H2S2V: state object → header/port value sinks only. */
+    if (categories & SD_HEADER) {
+        Util::ScopedTimer hdrSoToHdrTimer("HDR->SO->HDR");
+        StatefulToKey h2s2vPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "H2S2V"_cs,
+                KeySinkMode::HEADER_ONLY);
+        program->apply(h2s2vPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            h2s2vGraphs->add_dependencies_from_map(i, g,
+                    h2s2vPdChecker.getFoundDepEdges(graphName), true);
+        }
+    }
+    result.h2s2kGraphs = h2s2kGraphs;
+    result.h2s2vGraphs = h2s2vGraphs;
+
+    /* II-2. H2S2C: header variable → stateful object → conditions */
+    if (categories & SD_COND) {
+        Util::ScopedTimer hdrSoToCondTimer("HDR->SO->COND");
+        StatefulToCond h2s2cPdChecker(refMap, typeMap,
+                &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                &stateVars, &depEdgeMaps, "H2S2C"_cs);
+        program->apply(h2s2cPdChecker);
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            h2s2cGraphs->add_dependencies_from_map(i, g,
+                    h2s2cPdChecker.getFoundDepEdges(graphName), true);
+        }
+    }
+    result.h2s2cGraphs = h2s2cGraphs;
+
+    /* IV. S2V: stateful object → key/header (binary-only; only runs when graphsDir is set) */
+    StatefulToKey *s2vChecker = nullptr;
+    if (!graphsDir.empty()) {
+        stateVars.clear();
+        depEdgeMaps.clear();
+        {
+            Util::ScopedTimer soToKeyTimer("SO->KEY/HDR");
+            for (size_t i = 0; i < numGraphs; i++) {
+                auto *g = cgen.controlGraphsArray[i];
+                auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+                stateVars[graphName] = collect_state_vars(g, sg.graphProps[i], refMap, typeMap, true);
+            }
+            s2vChecker = new StatefulToKey(refMap, typeMap,
+                    &cgen.controlGraphsArray, &sg.graphProps, GenSGMode::FULL,
+                    &stateVars, &depEdgeMaps, "S2V"_cs, KeySinkMode::KEY_AND_HEADER);
+            program->apply(*s2vChecker);
+        }
+    }
+
+    // reg_H2S: distinct SOs written by a header (collect from the unpruned h2s2k base graph;
+    // all three h2s2* graphs share the same base HDR→SO write edges). Also seed D_all with every
+    // SO seen on the header side (covers read-only registers not written by an action param).
+    if (!graphsDir.empty() && (categories & (SD_KEY | SD_HEADER | SD_COND))) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            collectWrittenSOs(h2s2kGraphs, i, result.regH2S);
+            collectAllSOs(h2s2kGraphs, i, result.allStatefulObjects);
+        }
+    }
+
+    // Merge and prune dep graphs before chain extraction.
+    // prune_nodes_not_reaching_leaves must run before any category analysis.
+    // Full/merged exports are emitted here when graphsDir is set (before pruning removes nodes).
+    for (size_t i = 0; i < numGraphs; i++) {
+        auto *g = cgen.controlGraphsArray[i];
+        auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+
+        if (!h2s2kGraphs->leaves[i].empty()) {
+            h2s2kGraphs->add_so_constant_edges(i, g);
+            if (!graphsDir.empty() && h2s2kGraphs->num_vertices(i) > 0)
+                h2s2kGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_h2s2k_dep.dot"));
+            h2s2kGraphs->merge_nodes_without_variable(i);
+            if (!graphsDir.empty() && h2s2kGraphs->num_vertices(i) > 0)
+                h2s2kGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_h2s2k_dep.dot"));
+            h2s2kGraphs->prune_nodes_not_reaching_leaves(i);
+            h2s2kGraphs->prune_call_nodes_without_return(i, g);
+        }
+        if (!h2s2vGraphs->leaves[i].empty()) {
+            h2s2vGraphs->add_so_constant_edges(i, g);
+            if (!graphsDir.empty() && h2s2vGraphs->num_vertices(i) > 0)
+                h2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_h2s2v_dep.dot"));
+            h2s2vGraphs->merge_nodes_without_variable(i);
+            if (!graphsDir.empty() && h2s2vGraphs->num_vertices(i) > 0)
+                h2s2vGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_h2s2v_dep.dot"));
+            h2s2vGraphs->prune_nodes_not_reaching_leaves(i);
+            h2s2vGraphs->prune_call_nodes_without_return(i, g);
+        }
+        if (!h2s2cGraphs->leaves[i].empty()) {
+            h2s2cGraphs->add_so_constant_edges(i, g);
+            if (!graphsDir.empty() && h2s2cGraphs->num_vertices(i) > 0)
+                h2s2cGraphs->export_to_graphviz(i, graphsDir / (graphName + "_full_h2s2c_dep.dot"));
+            h2s2cGraphs->merge_nodes_without_variable(i);
+            if (!graphsDir.empty() && h2s2cGraphs->num_vertices(i) > 0)
+                h2s2cGraphs->export_to_graphviz(i, graphsDir / (graphName + "_merged_h2s2c_dep.dot"));
+            h2s2cGraphs->prune_nodes_not_reaching_leaves(i);
+            h2s2cGraphs->prune_call_nodes_without_return(i, g);
+        }
+    }
+
+    for (size_t i = 0; i < numGraphs; i++) {
+        auto *esg = cgen.controlGraphsArray[i];
+        auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+        result.noWriteReadChains[graphName] = {};
+    }
+
+    // Each graph carries exactly one sink type, so its data-write chains belong wholly to
+    // one category — no post-hoc isKey split, and per-graph chain ids stay contiguous.
+    // Category 1 (nowrite SO reads) is sink-independent (shares the base H->SO edges), so it
+    // is read from the key graph.
+    if (h2s2kGraphs) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (h2s2kGraphs->leaves[i].empty()) continue;
+            auto *esg = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            // Evaluate the by-value getter once: calling it twice would make begin()/end()
+            // straddle two different temporaries (garbage range -> vector::_M_range_insert).
+            auto nowriteChains = h2s2kGraphs->get_nowrite_so_vertices(i, esg);
+            result.noWriteReadChains[graphName].insert(result.noWriteReadChains[graphName].end(),
+                nowriteChains.begin(), nowriteChains.end());
+            result.dataWriteKeyChains[graphName] = h2s2kGraphs->get_data_write_so_chains(i, esg);
+        }
+    }
+    if (h2s2vGraphs) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (h2s2vGraphs->leaves[i].empty()) continue;
+            auto *esg = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            // Evaluate the by-value getter once (see h2s2k site above).
+            auto nowriteChains = h2s2vGraphs->get_nowrite_so_vertices(i, esg);
+            result.noWriteReadChains[graphName].insert(result.noWriteReadChains[graphName].end(),
+                nowriteChains.begin(), nowriteChains.end());
+            result.dataWriteHeaderChains[graphName] = h2s2vGraphs->get_data_write_so_chains(i, esg);
+        }
+    }
+    if (h2s2cGraphs) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            if (h2s2cGraphs->leaves[i].empty()) continue;
+            auto *esg = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*esg, boost::graph_name));
+            result.dataWriteCondChains[graphName] = h2s2cGraphs->get_data_write_so_chains(i, esg);
+        }
+    }
+
+    // Metrics (binary mode): distinct-SO name sets for the register report. The *2S2[KC] sets are
+    // the SOs on a chain to that sink; allStatefulObjects (D_all) is every STATEFUL vertex.
+    if (!graphsDir.empty()) {
+        auto addChainSOs = [](const std::map<cstring, std::vector<DependencyGraphs::SOChain>> &m,
+                              std::set<cstring> &out) {
+            for (const auto &[gn, chains] : m)
+                for (const auto &c : chains) out.insert(c.soName);
+        };
+        addChainSOs(result.dataWriteA2SKeyChains, result.regA2S2K);
+        addChainSOs(result.dataWriteA2SCondChains, result.regA2S2C);
+        addChainSOs(result.dataWriteKeyChains, result.regH2S2K);
+        addChainSOs(result.dataWriteCondChains, result.regH2S2C);
+        // allStatefulObjects (dep-graph SO vertices) was seeded at the reg_A2S/reg_H2S points above
+        // and is kept as a cross-check; the authoritative D_all denominator is soTypeByName below.
+        StatefulInstanceCollector soCollector(result.soTypeByName);
+        program->apply(soCollector);
+    }
+    // a2s2k/a2s2c graphs are metrics-only and never returned; their chains are already copied into
+    // result.dataWriteA2S{Key,Cond}Chains, so free them in both modes.
+    delete a2s2kGraphs;
+    delete a2s2cGraphs;
+
+    // --parser-deps: attach per-chain header pins (chain.parserDeps) from the parser-state record, for
+    // chains rooted at parser-derived metadata (used by p4symbex to pin header values per phase).
+    if (parserDeps && !result.parserDepsRecord.empty()) {
+        for (auto &[g, chains] : result.dataWriteKeyChains)
+            for (auto &c : chains) attachParserDeps(c, result.parserDepsRecord);
+        for (auto &[g, chains] : result.dataWriteCondChains)
+            for (auto &c : chains) attachParserDeps(c, result.parserDepsRecord);
+    }
+
+    // Export pruned dep graphs with satellite chain-category nodes (binary mode only).
+    // One file per sink type; each graph is independent so add_chain_satellites mutates
+    // only its own graph (no clone/snapshot needed).
+    if (!graphsDir.empty()) {
+        for (size_t i = 0; i < numGraphs; i++) {
+            auto *g = cgen.controlGraphsArray[i];
+            auto graphName = cstring(boost::get_property(*g, boost::graph_name));
+            if (!h2s2kGraphs->leaves[i].empty() && h2s2kGraphs->num_vertices(i) > 0) {
+                auto dotPath = graphsDir / (graphName + "_h2s2k_dep.dot");
+                // TODO: noWriteReadChains can have both h2s2v and h2s2k
+                auto rankPairs = h2s2kGraphs->add_chain_satellites(i,
+                    result.noWriteReadChains[graphName],
+                    result.dataWriteKeyChains[graphName]);
+                h2s2kGraphs->export_to_graphviz(i, dotPath);
+                DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
+            }
+            if (!h2s2vGraphs->leaves[i].empty() && h2s2vGraphs->num_vertices(i) > 0) {
+                auto dotPath = graphsDir / (graphName + "_h2s2v_dep.dot");
+                // TODO: noWriteReadChains can have both h2s2v and h2s2k
+                auto rankPairs = h2s2vGraphs->add_chain_satellites(i,
+                    result.noWriteReadChains[graphName],
+                    result.dataWriteHeaderChains[graphName]);
+                h2s2vGraphs->export_to_graphviz(i, dotPath);
+                DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
+            }
+            if (!h2s2cGraphs->leaves[i].empty() && h2s2cGraphs->num_vertices(i) > 0) {
+                auto dotPath = graphsDir / (graphName + "_h2s2c_dep.dot");
+                auto rankPairs = h2s2cGraphs->add_chain_satellites(i, {},
+                    result.dataWriteCondChains[graphName]);
+                h2s2cGraphs->export_to_graphviz(i, dotPath);
+                DependencyGraphs::inject_rank_groups(dotPath, rankPairs);
+            }
+        }
+    }
+
+    // In binary mode, return objects the caller needs for CFG visualization.
+    // In library mode, free everything and return the OS the IFDS heap pages so the
+    // caller's working set (e.g. symbex solver) starts with a clean RSS.
+    if (!graphsDir.empty()) {
+        result.cfgGraphs = cgenRaw;
+        result.sdChecker = sdChecker;
+        result.hdChecker = hdChecker;
+        result.s2vChecker = s2vChecker;
+    } else {
+        delete cgenRaw;
+        delete sdChecker;
+        delete hdChecker;
+        // s2vChecker is null in library mode.
+        // Free IFDS dep-graphs; callers only need depChainNodes / depChainNodeIds.
+        delete a2s2vGraphs;  result.a2s2vGraphs = nullptr;
+        delete h2s2kGraphs;  result.h2s2kGraphs = nullptr;
+        delete h2s2vGraphs;  result.h2s2vGraphs = nullptr;
+        delete h2s2cGraphs;  result.h2s2cGraphs = nullptr;
+#ifdef ENABLE_GC
+        // Return freed IFDS pages to the OS before the caller starts allocating.
+        GC_gcollect_and_unmap();
+#endif
+    }
+
+    return result;
+}
+
+StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
+                                                  cstring arch,
+                                                  bool isv1,
+                                                  std::filesystem::path graphsDir,
+                                                  unsigned categories,
+                                                  bool wholePipeline,
+                                                  bool parserDeps,
+                                                  bool supergraphOnly) {
+    Util::ScopedTimer sdPrepTimer("P4CX-prep");
+
+    P4::ReferenceMap refMap;
+    P4::TypeMap typeMap;
+    refMap.setIsV1(isv1);
+    IR::ToplevelBlock *toplevel = nullptr;
+
+    // Prep pipeline:
+    //   1. TypeChecking         — populate refMap/typeMap so RAP's internal FindActionParameters
+    //                             can resolve action invocations correctly.
+    //   2. RemoveActionParameters — aligns clone_ids with any target midend that also runs RAP;
+    //                             calls ClearTypeMap internally, leaving typeMap stale.
+    //   3. TypeChecking         — rebuild typeMap on the post-RAP program before EvaluatorPass.
+    //   4. EvaluatorPass        — capture toplevel with a valid typeMap (needed to evaluate
+    //                             constructor arguments in the package hierarchy).
+    //
+    // A2S2V note: RAP rewrites in/inout/out action parameters into local variables, and
+    // ActParamToStateful does not recognise that pattern, so chains rooted at those
+    // parameters are lost after RAP. Directionless parameters — the control-plane action
+    // data the A2S2* relations actually model — are NOT removed (removeParameters.cpp:122
+    // keeps them unless every parameter of the action can go), so post-RAP IR still yields
+    // A2S2 chains: Cerberus/multi3 measures A2S2K = 16 both with and without the binary's
+    // --post-midend. An earlier version of this comment said sgProp->actionParams is simply
+    // empty after RAP; that holds only for actions whose parameters are all directional.
+    // Whole-pipeline and parser-deps modes both unroll parser header-stack loops (acyclic, concrete stack
+    // indices) before evaluation. Best-effort and isolated in its own try/catch: ParsersUnroll's symbolic
+    // interpreter can throw (e.g. CompilerBug on Type_Newtype) — on any failure keep the original program
+    // (parser-deps then sees the un-unrolled parser; the may-analysis stays sound, just less precise).
+    if (wholePipeline || parserDeps) {
+        try {
+            unsigned errBefore = ::P4::errorCount();
+            // Lower serializable enums to their underlying bit<> type first. ParsersUnroll's symbolic
+            // interpreter (midend/interpreter.cpp) has no Type_SerEnum case and BUGs out on it; the normal
+            // midend runs EliminateSerEnums well before any such interpreter, so mirror that ordering here.
+            // EliminateSerEnums ends with ClearTypeMap, so re-typecheck to repopulate typeMap for unroll.
+            PassManager serEnumPrep;
+            serEnumPrep.addPasses({
+                new P4::TypeChecking(&refMap, &typeMap, true),
+                new P4::EliminateSerEnums(&typeMap),
+                new P4::TypeChecking(&refMap, &typeMap, true),
+            });
+            program = program->apply(serEnumPrep);
+            P4::ParsersUnroll parsersUnroll(true, &refMap, &typeMap);
+            const auto *unrolled = program->apply(parsersUnroll);
+            if (unrolled != nullptr && ::P4::errorCount() == errBefore)
+                program = unrolled;
+            else
+                ::P4::warning("parser unroll failed; proceeding without unrolling");
+        } catch (const std::exception &e) {
+            ::P4::warning("parser unroll threw (%1%); proceeding without unrolling", e.what());
+        }
+    }
+    {
+        auto *evaluator = new P4::EvaluatorPass(&refMap, &typeMap);
+        PassManager prep;
+        prep.setName("P4CX-prep");
+        prep.addPasses({
+            new P4::TypeChecking(&refMap, &typeMap, true),
+            new P4::RemoveActionParameters(&typeMap),
+            new P4::TypeChecking(&refMap, &typeMap, true),
+            evaluator,
+            [&toplevel, evaluator]() { toplevel = evaluator->getToplevelBlock(); },
+        });
+        program = program->apply(prep);
+    }
+    if (program == nullptr || toplevel == nullptr || ::P4::errorCount() > 0)
+        return {};
+
+    // Isolate whole-pipeline analysis failures (assertions in the block-as-procedure / var machinery
+    // on real tna programs): degrade to an empty result instead of aborting p4symbex. Per-control
+    // stays strict so genuine regressions surface.
+    if (!wholePipeline)
+        return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
+                                          categories, wholePipeline, parserDeps, supergraphOnly);
+    try {
+        return runStateDependencyAnalysis(program, &refMap, &typeMap, toplevel, arch, graphsDir,
+                                          categories, wholePipeline, parserDeps, supergraphOnly);
+    } catch (const std::exception &bug) {
+        ::P4::warning("whole-pipeline analysis failed (%1%); proceeding with no chains", bug.what());
+        return {};
+    }
+}
+
+}  // namespace P4::P4ChainExtractor
