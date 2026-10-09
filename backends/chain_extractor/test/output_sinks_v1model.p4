@@ -8,8 +8,8 @@
 //   r_decoy -> if (..) meta.unused = 1          : H2S2C only, not an output relation
 //   r_cfg   -> mcast_grp, indexed by the action param of t_cfg
 //                                               : A2S2O (action param -> SO -> output)
-// Nothing overwrites a guarded output write afterwards: a later write to the same variable
-// currently also drops the chain to the guarding condition (in p4c_state_dependency as well).
+// Nothing overwrites a guarded output write afterwards: the frontend would delete a write that every
+// path overwrites, and the guarding condition with it (see guard_overwrite_test.sh).
 #include <core.p4>
 #include <v1model.p4>
 
