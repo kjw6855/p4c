@@ -141,6 +141,11 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// Lightweight alternative to --whole-pipeline. Cache loads carry the per-chain header pins regardless.
     bool parserDeps = false;
 
+    /// Opt-in: compute, load and dump state-dependency chains with the staged p4csd analysis
+    /// (backends/state_dependency) instead of the default single-solve p4ccx
+    /// (backends/chain_extractor). For A/B comparison and reproducing p4csd-era results.
+    bool stagedIde = false;
+
     /// When set, load pre-computed SOChains from this JSON cache (produced by p4c_state_dependency
     /// --cache-chains) instead of running the IFDS analysis in-process. Hard-errors if the file is
     /// missing or its embedded source hash / arch does not match this program.

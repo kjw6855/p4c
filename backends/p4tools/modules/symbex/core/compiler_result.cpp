@@ -23,7 +23,7 @@ const P4::Coverage::CoverageSet &SymbexCompilerResult::getCoverableNodes() const
     return coverableNodes;
 }
 
-const P4StateDependency::StateDependencyResult *SymbexCompilerResult::getStateDep() const {
+const P4ChainExtractor::StateDependencyResult *SymbexCompilerResult::getStateDep() const {
     return stateDepResult;
 }
 

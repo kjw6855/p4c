@@ -12,8 +12,8 @@
 #include "lib/cstring.h"
 #include "midend/coverage.h"
 
-#include "backends/state_dependency/analysis.h"
-#include "backends/state_dependency/dependency_graph.h"
+#include "backends/chain_extractor/analysis.h"
+#include "backends/chain_extractor/dependency_graph.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/sink_divergence.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/lib/final_state.h"
@@ -151,7 +151,7 @@ using TamperingCallback = std::function<bool(const TamperingFinalState &)>;
 class StateDependencyTracker : public SymbolicExecutor {
  public:
     StateDependencyTracker(AbstractSolver &solver, const ProgramInfo &programInfo,
-                           const P4StateDependency::StateDependencyResult &sdResult,
+                           const P4ChainExtractor::StateDependencyResult &sdResult,
                            StateDependencyPolicy policy);
 
     /// Guided DFS targeting currentRequiredNodes for a single chain.
@@ -165,7 +165,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     [[nodiscard]] StateDependencyPolicy getPolicy() const { return policy; }
 
  private:
-    const P4StateDependency::StateDependencyResult &sdResult;
+    const P4ChainExtractor::StateDependencyResult &sdResult;
     const StateDependencyPolicy policy;
 
     /// Which phase is currently being executed (Tampering policy only).
@@ -190,7 +190,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     void buildReachingSet();
 
     /// The SOChain being explored (set in run(), read in runImpl()).
-    const P4StateDependency::DependencyGraphs::SOChain *currentChain = nullptr;
+    const P4ChainExtractor::DependencyGraphs::SOChain *currentChain = nullptr;
 
     /// The current chain's sink table (the table whose key the SO value feeds), or nullptr for
     /// chains without a Key sink. Set before Phase 1; used by pickSuccessor to prefer the sink
@@ -218,7 +218,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// and pickSuccessor steers/prunes toward the UNION of all chains' read targets.
     bool sharedPhase1 = false;
     /// All SOChains for the current program (flattened from collectChains), used by the shared pass.
-    std::vector<const P4StateDependency::DependencyGraphs::SOChain *> allChains;
+    std::vector<const P4ChainExtractor::DependencyGraphs::SOChain *> allChains;
     /// Per-chain Phase-1 target node set (readNodes, or writeNodes for isUpdate chains), keyed by
     /// chain id. Used to test coverage of a terminal against each chain.
     std::map<size_t, P4::Coverage::CoverageSet> chainPhase1Targets;
@@ -237,7 +237,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// instead of the single shared pass that buckets every chain at once. Every knob other than the
     /// traversal scope matches collectPhase1Terminals, so the two are a controlled comparison.
     std::vector<const FinalState *> collectPhase1TerminalsPerChain(
-        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState);
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState);
     /// Shared-pass terminal handler: bucket @p es into every chain whose Phase-1 targets it covers.
     void handleSharedTerminal(const ExecutionState &es);
     /// True when chain @p chain's Phase-1 target nodes are all covered in @p visited. A target node
@@ -245,12 +245,12 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// executed): its read path crosses mutually-exclusive if-branches that no single path can
     /// jointly cover. Nodes OUTSIDE the RegisterAction (incl. the .execute() call site and the sink
     /// key) stay strictly required, so this only relaxes the in-RegisterAction blocks.
-    bool chainTargetsCovered(const P4StateDependency::DependencyGraphs::SOChain &chain,
+    bool chainTargetsCovered(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                              const P4::Coverage::CoverageSet &visited, bool soRan) const;
     /// True when @p chain's sink if-condition was reached on @p es's path (its branch-stamped
     /// condition var is set). The Phase-1 baseline criterion for H2S2C chains (whose readNodes are
     /// empty for read-modify-write SOs, so node-coverage is unusable).
-    bool conditionReached(const P4StateDependency::DependencyGraphs::SOChain &chain,
+    bool conditionReached(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                           const ExecutionState &es) const;
     /// True when every chain's Phase-1 bucket has reached phase1BucketCap.
     bool allPhase1BucketsFull() const;
@@ -284,13 +284,13 @@ class StateDependencyTracker : public SymbolicExecutor {
     std::vector<Branch> unexploredBranches;
 
     /// Returns a flat list of SOChain pointers selected by the policy, grouped by chain category.
-    std::map<cstring, std::vector<const P4StateDependency::DependencyGraphs::SOChain *>>
+    std::map<cstring, std::vector<const P4ChainExtractor::DependencyGraphs::SOChain *>>
     collectChains() const;
 
     /// Builds the CoverageSet of required IR nodes for one SOChain per the policy.
     /// For Tampering, the set depends on currentPhase.
     P4::Coverage::CoverageSet buildRequiredNodes(
-        const P4StateDependency::DependencyGraphs::SOChain &chain) const;
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain) const;
 
     /// Runs a single-phase DFS from phaseInit (a caller-owned clone with any required path
     /// constraints already pushed), saving each accepted terminal FinalState into out.
@@ -347,7 +347,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// Returns the number of sub-tests emitted for this (chain, pass). @p phase1Bucket is the
     /// chain's share of the shared Phase-1 traversal (collectPhase1Terminals); this function applies
     /// the pass-specific filter to it and runs Phase 2 / Phase 3.
-    size_t runTamperingChain(const P4StateDependency::DependencyGraphs::SOChain &chain,
+    size_t runTamperingChain(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                              const ExecutionState &initState,
                              const std::vector<const FinalState *> &phase1Bucket,
                              const TamperingCallback &callBack, size_t maxPerChain, TamperPass pass);
@@ -365,7 +365,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// re-validate that the full (branch-gated) write path is covered once the register is pre-set
     /// past the gate.
     const FinalState *runSymbolicPhase3(
-        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
         const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage = false);
 
@@ -373,7 +373,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// writes carried and NO attacker Phase-2 write, with Phase 1's sink-table entry pinned (see the
     /// file-local pinSinkEntryForLegit). Returns the legit Phase-3 terminal, or nullptr if the
     /// pinned replay has none. The two readers below differ only in what they read off it.
-    const FinalState *runLegitPhase3(const P4StateDependency::DependencyGraphs::SOChain &chain,
+    const FinalState *runLegitPhase3(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                                      const ExecutionState &initState, const FinalState *fs1,
                                      int inputPort, const IR::Expression *inputPortSymExpr);
 
@@ -383,7 +383,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// self-set RegisterAction) causes the flip and the attacker write is redundant (a false positive
     /// with no hardware divergence). Shared by runTamperingChain (Key sink) and runConditionChain
     /// (condition sink).
-    int legitPhase3Sink(const P4StateDependency::DependencyGraphs::SOChain &chain,
+    int legitPhase3Sink(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                         const ExecutionState &initState, const FinalState *fs1, int inputPort,
                         const IR::Expression *inputPortSymExpr);
 
@@ -392,7 +392,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// against the attack Phase 3's directly, so a legit run that already selects the "tampered"
     /// entry simply fails to differ.
     ConstEntryOutcome legitPhase3ConstEntry(
-        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
         const ActionResolver &resolve);
 
@@ -419,7 +419,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// @p carriedRegs / @p sinkTableName mirror runSymbolicPhase3's Phase-2 setup (empty / "" for the
     /// no-tamper Phase-1 reference).
     const FinalState *reDeriveConcretePhase(
-        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs, int inputPort, const IR::Expression *inputPortSymExpr, bool isPhase1,
         const std::map<cstring, const TestObject *> &carriedRegs);
 
@@ -452,7 +452,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// changing). k=1 reproduces today's single-packet behavior. Reuses runSymbolicPhase3 as the
     /// pin+carry+run engine for both the packet replay and the Phase-3 check.
     const FinalState *accumulatePhase2Flip(
-        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs1, int inputPort1, const FinalState *fs2, int inputPort2,
         const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, size_t &outRepeat);
 
@@ -467,7 +467,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// @p outRepeat to k; returns nullptr (sound skip) on any failure/fallback.
     /// @p phase2Init is a fresh clone already carrying Phase-1 registers + port/key constraints.
     const FinalState *driveRegisterPhase2(
-        const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
         const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, const FinalState *&outFs2,
         size_t &outRepeat, big_int &outFlipValue);
@@ -496,7 +496,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// Runs the H2S2C condition-chain flow for one (chain, direction): filters @p phase1Bucket by the
     /// Phase-1 condition value, reuses the Phase-2 write DFS, then symbolically replays Phase 3 and
     /// emits when the condition flips and the branches diverge. Returns sub-tests emitted.
-    size_t runConditionChain(const P4StateDependency::DependencyGraphs::SOChain &chain,
+    size_t runConditionChain(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                              const ExecutionState &initState,
                              const std::vector<const FinalState *> &phase1Bucket,
                              const TamperingCallback &callBack, size_t maxPerChain, bool missToHit);
@@ -526,7 +526,7 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// Returns true when any read-side vertex in the chain maps to an EXIT/ENTRY ESG node
     /// (i.e. a dep-graph vertex whose corresponding ESG node has a null IR::Node*).
     /// This indicates the read path must reach program exit (packet is not dropped).
-    static bool chainHasExitLeaf(const P4StateDependency::DependencyGraphs::SOChain &chain);
+    static bool chainHasExitLeaf(const P4ChainExtractor::DependencyGraphs::SOChain &chain);
 
     /// Picks the next execution state from candidate successors, preferring branches
     /// whose potentialNodes or already-visited nodes intersect currentRequiredNodes.

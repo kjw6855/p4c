@@ -763,6 +763,16 @@ SymbexOptions::SymbexOptions()
         "--whole-pipeline). No effect when loading a cache; the cache's own build mode decides.");
 
     registerOption(
+        "--staged-ide", nullptr,
+        [this](const char *) {
+            stagedIde = true;
+            return true;
+        },
+        "Use the staged p4csd analysis (p4c_state_dependency) instead of the default single-solve "
+        "p4ccx (p4c_chain_extractor) for --state-dependency, --state-dep-cache and "
+        "--dump-state-dep-cache.");
+
+    registerOption(
         "--state-tamper-value", "value",
         [this](const char *arg) {
             try {

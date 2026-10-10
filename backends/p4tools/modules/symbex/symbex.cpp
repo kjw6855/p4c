@@ -33,6 +33,8 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/random_backtrack.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/selected_branches.h"
+#include "backends/chain_extractor/chain_cache.h"
+#include "backends/state_dependency/analysis.h"
 #include "backends/state_dependency/chain_cache.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/state_dependency_track.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
@@ -79,73 +81,152 @@ GraphMidEnd::GraphMidEnd(ParserOptions &options) {
 
 namespace {
 
+namespace CX = P4::P4ChainExtractor;
+namespace SD = P4::P4StateDependency;
+using CXChain = CX::DependencyGraphs::SOChain;
+using SDChain = SD::DependencyGraphs::SOChain;
+
+/// --staged-ide: carry a p4csd chain into p4ccx's type, which symbex consumes. The two SOChain
+/// layouts match except for p4ccx's output-chain hops, which p4csd never computes (left empty).
+CXChain toChainExtractor(const SDChain &c) {
+    CXChain out;
+    out.soVertex = c.soVertex;
+    out.soName = c.soName;
+    out.soNode = c.soNode;
+    out.sinkNode.name = c.sinkNode.name;
+    out.sinkNode.esgId = {c.sinkNode.esgId.first, c.sinkNode.esgId.second};
+    out.sinkNode.color = c.sinkNode.color;
+    out.sinkNode.shape = c.sinkNode.shape;
+    out.sinkNode.isSO = c.sinkNode.isSO;
+    out.sinkNode.isSatellite = c.sinkNode.isSatellite;
+    out.sinkTableControlPlaneName = c.sinkTableControlPlaneName;
+    out.sinkKeyName = c.sinkKeyName;
+    out.sinkConditionNode = c.sinkConditionNode;
+    out.writeVertices = c.writeVertices;
+    out.readVertices = c.readVertices;
+    out.isUpdate = c.isUpdate;
+    out.id = c.id;
+    out.writeNodes = c.writeNodes;
+    out.writeNodeIds = c.writeNodeIds;
+    out.readNodes = c.readNodes;
+    out.readNodeIds = c.readNodeIds;
+    for (const auto &d : c.parserDeps) out.parserDeps.push_back({d.metaPath, d.hdrPath, d.writePath});
+    return out;
+}
+
+std::map<cstring, std::vector<CXChain>> toChainExtractor(
+    const std::map<cstring, std::vector<SDChain>> &chainMap) {
+    std::map<cstring, std::vector<CXChain>> out;
+    for (const auto &[control, chains] : chainMap) {
+        auto &dst = out[control];
+        for (const auto &c : chains) dst.push_back(toChainExtractor(c));
+    }
+    return out;
+}
+
+/// Every chain category p4csd fills; p4ccx's output categories stay empty.
+CX::StateDependencyResult toChainExtractor(const SD::StateDependencyResult &r) {
+    CX::StateDependencyResult out;
+    out.noWriteReadChains = toChainExtractor(r.noWriteReadChains);
+    out.dataWriteHeaderChains = toChainExtractor(r.dataWriteHeaderChains);
+    out.dataWriteKeyChains = toChainExtractor(r.dataWriteKeyChains);
+    out.dataWriteCondChains = toChainExtractor(r.dataWriteCondChains);
+    out.dataWriteA2SKeyChains = toChainExtractor(r.dataWriteA2SKeyChains);
+    out.dataWriteA2SCondChains = toChainExtractor(r.dataWriteA2SCondChains);
+    return out;
+}
+
+/// The chain categories the active policy consumes (SD_KEY / SD_COND), else every category. The
+/// two libraries share the mask names but not all values, so the caller picks the namespace.
+template <typename Mask>
+unsigned policyCategories(const SymbexOptions &opts, Mask key, Mask cond, Mask all) {
+    if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering) return key;
+    if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond) return cond;
+    return all;
+}
+
 /// Produce the state-dependency result either by loading the pre-computed SOChains from
 /// --state-dep-cache (re-resolved against @p program's IR) or, when no cache is given, by running
 /// the IFDS analysis in-process. Returns nullptr on error (the caller aborts). Only the chain
 /// category the active policy consumes is computed (SD_KEY / SD_COND); the cache holds both.
-const P4StateDependency::StateDependencyResult *buildOrLoadStateDep(const SymbexOptions &opts,
-                                                                    const IR::P4Program *program) {
+/// p4ccx does both by default; --staged-ide uses p4csd and converts its result.
+const CX::StateDependencyResult *buildOrLoadStateDep(const SymbexOptions &opts,
+                                                     const IR::P4Program *program) {
     const bool isv1 = opts.langVersion == CompilerOptions::FrontendVersion::P4_14;
+    cstring lang = isv1 ? cstring("p4-14") : cstring("p4-16");
+    cstring arch(opts.arch);
+    CX::StateDependencyResult result;
     if (opts.stateDepCachePath.has_value()) {
-        cstring lang = isv1 ? cstring("p4-14") : cstring("p4-16");
-        cstring srcHash =
-            P4StateDependency::computeSourceHash(opts.file.string(), cstring(opts.arch), lang);
-        const auto *result = new P4StateDependency::StateDependencyResult(
-            P4StateDependency::loadChainCache(*opts.stateDepCachePath, program, srcHash,
-                                              cstring(opts.arch)));
-        return ::P4::errorCount() > 0 ? nullptr : result;
+        if (opts.stagedIde) {
+            cstring srcHash = SD::computeSourceHash(opts.file.string(), arch, lang);
+            result = toChainExtractor(
+                SD::loadChainCache(*opts.stateDepCachePath, program, srcHash, arch));
+        } else {
+            cstring srcHash = CX::computeSourceHash(opts.file.string(), arch, lang);
+            result = CX::loadChainCache(*opts.stateDepCachePath, program, srcHash, arch);
+        }
+    } else if (opts.stagedIde) {
+        unsigned sdCats = policyCategories(opts, SD::SD_KEY, SD::SD_COND, SD::SD_ALL);
+        result = toChainExtractor(SD::runStateDependencyAnalysis(
+            program, arch, isv1, {}, sdCats, opts.wholePipeline, opts.parserDeps));
+    } else {
+        unsigned sdCats = policyCategories(opts, CX::SD_KEY, CX::SD_COND, CX::SD_ALL);
+        result = CX::runStateDependencyAnalysis(program, arch, isv1, {}, sdCats,
+                                                opts.wholePipeline, opts.parserDeps);
     }
-    unsigned sdCats = P4StateDependency::SD_ALL;
-    if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering)
-        sdCats = P4StateDependency::SD_KEY;
-    else if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond)
-        sdCats = P4StateDependency::SD_COND;
-    const auto *result = new P4StateDependency::StateDependencyResult(
-        P4StateDependency::runStateDependencyAnalysis(program, cstring(opts.arch), isv1, {}, sdCats,
-                                                      opts.wholePipeline, opts.parserDeps));
-    return ::P4::errorCount() > 0 ? nullptr : result;
+    return ::P4::errorCount() > 0 ? nullptr : new CX::StateDependencyResult(std::move(result));
 }
 
 /// --dump-state-dep-cache[-full]: run the in-process state-dependency analysis on @p program (the
-/// same post-midend IR that a later --state-dep-cache load re-resolves against) and serialize both
-/// the Key and Cond SOChains. A self-check re-resolves the just-written cache against @p program so
-/// a subsequent load cannot hit "position not found in program IR". Returns an exit code; the
-/// caller exits before symbolic execution.
+/// same post-midend IR that a later --state-dep-cache load re-resolves against) and serialize its
+/// SOChains. A self-check re-resolves the just-written cache against @p program so a subsequent
+/// load cannot hit "position not found in program IR". Returns an exit code; the caller exits
+/// before symbolic execution.
 ///
 /// The two flags differ ONLY in how much analysis runs; the file written is identical. See the
-/// SD_CACHEABLE comment in analysis.h for why the default is the narrower set.
+/// SD_CACHEABLE comment in each library's analysis.h for why the default is the narrower set.
+///
+/// p4ccx (default) writes a v3 cache with all ten {h,a}2s2{k,c,o,outk,outc} categories, from one
+/// solve. --staged-ide keeps p4csd's v2 cache: "key" and "cond" only. SD_ALL additionally runs the
+/// A2S2V and HEADER passes, whose results no cache format represents; the p4csd A2S2V pass is where
+/// redplane's cache build spent 6h without producing a file. graphsDir is empty here, so
+/// analysis.cpp's "graphsDir set => compute everything" override does not widen this back out.
 int dumpStateDepCache(const SymbexOptions &opts, const IR::P4Program *program) {
     const bool isv1 = opts.langVersion == CompilerOptions::FrontendVersion::P4_14;
     cstring lang = isv1 ? cstring("p4-14") : cstring("p4-16");
-    cstring srcHash =
-        P4StateDependency::computeSourceHash(opts.file.string(), cstring(opts.arch), lang);
-    // serializeChainCache writes exactly two chain fields, "key" and "cond", so SD_CACHEABLE is
-    // all the default needs -- and it already serves both the key (STATE_DEP_TAMPERING) and cond
-    // (…_COND) policies. SD_ALL additionally runs the A2S2V/A2S2K/A2S2C and HEADER passes whose
-    // results the cache format cannot represent and therefore discards; the A2S2V pass is where
-    // redplane's cache build spent 6h without producing a file. --dump-state-dep-cache-full
-    // restores SD_ALL for A/B comparison. graphsDir is empty here, so analysis.cpp's
-    // "graphsDir set => compute everything" override does not silently widen this back out.
-    const unsigned sdCats =
-        opts.dumpStateDepCacheFull ? P4StateDependency::SD_ALL : P4StateDependency::SD_CACHEABLE;
-    auto result = P4StateDependency::runStateDependencyAnalysis(
-        program, cstring(opts.arch), isv1, {}, sdCats, opts.wholePipeline, opts.parserDeps);
-    if (::P4::errorCount() > 0) return EXIT_FAILURE;
-    P4StateDependency::serializeChainCache(result, *opts.dumpStateDepCachePath, srcHash,
-                                           cstring(opts.arch));
-    if (::P4::errorCount() > 0) return EXIT_FAILURE;
-    // Self-check: the cache must fully re-resolve against this exact program.
-    P4StateDependency::loadChainCache(*opts.dumpStateDepCachePath, program, srcHash,
-                                      cstring(opts.arch));
+    cstring arch(opts.arch);
+    const std::string &path = *opts.dumpStateDepCachePath;
+    if (opts.stagedIde) {
+        cstring srcHash = SD::computeSourceHash(opts.file.string(), arch, lang);
+        const unsigned sdCats = opts.dumpStateDepCacheFull ? SD::SD_ALL : SD::SD_CACHEABLE;
+        auto result = SD::runStateDependencyAnalysis(program, arch, isv1, {}, sdCats,
+                                                     opts.wholePipeline, opts.parserDeps);
+        if (::P4::errorCount() > 0) return EXIT_FAILURE;
+        SD::serializeChainCache(result, path, srcHash, arch);
+        if (::P4::errorCount() > 0) return EXIT_FAILURE;
+        // Self-check: the cache must fully re-resolve against this exact program.
+        SD::loadChainCache(path, program, srcHash, arch);
+    } else {
+        cstring srcHash = CX::computeSourceHash(opts.file.string(), arch, lang);
+        const unsigned sdCats = opts.dumpStateDepCacheFull ? CX::SD_ALL : CX::SD_CACHEABLE;
+        auto result = CX::runStateDependencyAnalysis(program, arch, isv1, {}, sdCats,
+                                                     opts.wholePipeline, opts.parserDeps);
+        if (::P4::errorCount() > 0) return EXIT_FAILURE;
+        CX::serializeChainCache(result, path, srcHash, arch);
+        if (::P4::errorCount() > 0) return EXIT_FAILURE;
+        CX::loadChainCache(path, program, srcHash, arch);
+    }
     if (::P4::errorCount() > 0) {
         error("%1%: self-check failed; the written cache did not re-resolve against the program it "
               "was built from",
               opts.dumpStateDepCacheFull ? "--dump-state-dep-cache-full" : "--dump-state-dep-cache");
         return EXIT_FAILURE;
     }
-    std::cout << "Wrote state-dependency cache ("
-              << (opts.dumpStateDepCacheFull ? "full" : "key+cond") << ") to "
-              << *opts.dumpStateDepCachePath << "\n";
+    const char *scope = opts.dumpStateDepCacheFull ? "full"
+                        : opts.stagedIde           ? "key+cond"
+                                                   : "10 categories";
+    std::cout << "Wrote state-dependency cache (" << scope << ", "
+              << (opts.stagedIde ? "p4csd" : "p4ccx") << ") to " << path << "\n";
     return EXIT_SUCCESS;
 }
 

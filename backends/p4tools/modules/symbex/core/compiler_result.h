@@ -3,7 +3,7 @@
 
 #include "backends/p4tools/common/compiler/compiler_result.h"
 #include "backends/p4tools/common/compiler/reachability.h"
-#include "backends/state_dependency/analysis.h"
+#include "backends/chain_extractor/analysis.h"
 #include "midend/coverage.h"
 
 namespace P4::P4Tools::Symbex {
@@ -17,7 +17,7 @@ class SymbexCompilerResult : public CompilerResult {
     /// The call graph of the analyzed P4 program, if flag --dcg is set.
     const NodesCallGraph *callGraph;
 
-    mutable const P4StateDependency::StateDependencyResult *stateDepResult = nullptr;
+    mutable const P4ChainExtractor::StateDependencyResult *stateDepResult = nullptr;
 
  public:
     explicit SymbexCompilerResult(CompilerResult compilerResult,
@@ -26,7 +26,7 @@ class SymbexCompilerResult : public CompilerResult {
 
     /// Inject the state-dependency result after construction.
     /// Called by mainImpl / generateTestsImpl before symbex starts.
-    void setStateDep(const P4StateDependency::StateDependencyResult *sd) const {
+    void setStateDep(const P4ChainExtractor::StateDependencyResult *sd) const {
         stateDepResult = sd;
     }
 
@@ -39,7 +39,7 @@ class SymbexCompilerResult : public CompilerResult {
     [[nodiscard]] const P4::Coverage::CoverageSet &getCoverableNodes() const;
 
     /// @returns the state dependency analysis result, or nullptr if not computed.
-    [[nodiscard]] const P4StateDependency::StateDependencyResult *getStateDep() const;
+    [[nodiscard]] const P4ChainExtractor::StateDependencyResult *getStateDep() const;
 
     DECLARE_TYPEINFO(SymbexCompilerResult, CompilerResult);
 };

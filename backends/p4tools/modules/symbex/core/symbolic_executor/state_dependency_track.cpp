@@ -673,7 +673,7 @@ void scanWithTables(const IR::Node *root,
 /// True when @p chain's sink can reach an enforcement primitive — directly, through the actions of
 /// an applied table, or transitively through a metadata flag the sink branch sets that later gates
 /// one. Sound toward NOT ranking: an unresolvable sink simply is not class A (ordering only).
-bool chainIsClassA(const P4StateDependency::DependencyGraphs::SOChain &chain,
+bool chainIsClassA(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                    const IR::P4Program &program,
                    const std::unordered_map<cstring, const IR::P4Table *> &tables,
                    const std::unordered_map<cstring, const IR::P4Action *> &actions) {
@@ -799,14 +799,14 @@ bool StateDependencyTracker::sinkConditionDiverges() const {
 
 StateDependencyTracker::StateDependencyTracker(
     AbstractSolver &solver, const ProgramInfo &programInfo,
-    const P4StateDependency::StateDependencyResult &sdResult, StateDependencyPolicy policy)
+    const P4ChainExtractor::StateDependencyResult &sdResult, StateDependencyPolicy policy)
     : SymbolicExecutor(solver, programInfo), sdResult(sdResult), policy(policy) {}
 
-std::map<cstring, std::vector<const P4StateDependency::DependencyGraphs::SOChain *>>
+std::map<cstring, std::vector<const P4ChainExtractor::DependencyGraphs::SOChain *>>
 StateDependencyTracker::collectChains() const {
-    std::map<cstring, std::vector<const P4StateDependency::DependencyGraphs::SOChain *>> result;
+    std::map<cstring, std::vector<const P4ChainExtractor::DependencyGraphs::SOChain *>> result;
 
-    auto addChains = [&](const std::map<cstring, std::vector<P4StateDependency::DependencyGraphs::SOChain>> &chainMap,
+    auto addChains = [&](const std::map<cstring, std::vector<P4ChainExtractor::DependencyGraphs::SOChain>> &chainMap,
                         cstring chainName = ""_cs) {
         for (const auto &[graphName, chains] : chainMap)
             for (const auto &chain : chains)
@@ -825,7 +825,7 @@ StateDependencyTracker::collectChains() const {
 }
 
 P4::Coverage::CoverageSet StateDependencyTracker::buildRequiredNodes(
-    const P4StateDependency::DependencyGraphs::SOChain &chain) const {
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain) const {
     P4::Coverage::CoverageSet nodes;
     switch (policy) {
         case StateDependencyPolicy::Tampering:
@@ -1078,7 +1078,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
             // Stable partition keeps chain-id order WITHIN each class, so the only difference
             // from the default schedule is that class-A chains come first (and none when the
             // option is off).
-            std::vector<const P4StateDependency::DependencyGraphs::SOChain *> ordered(
+            std::vector<const P4ChainExtractor::DependencyGraphs::SOChain *> ordered(
                 chainList.begin(), chainList.end());
             if (SymbexOptions::get().chainImpactOrder)
                 std::stable_partition(ordered.begin(), ordered.end(),
@@ -1160,7 +1160,7 @@ void StateDependencyTracker::runTamperingScenario(const TamperingCallback &callB
 // ---------------------------------------------------------------------------
 
 bool StateDependencyTracker::chainTargetsCovered(
-    const P4StateDependency::DependencyGraphs::SOChain &chain,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain,
     const P4::Coverage::CoverageSet &visited, bool soRan) const {
     auto it = chainPhase1Targets.find(chain.id);
     if (it == chainPhase1Targets.end() || it->second.empty()) return false;
@@ -1178,7 +1178,7 @@ bool StateDependencyTracker::chainTargetsCovered(
 }
 
 bool StateDependencyTracker::conditionReached(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &es) const {
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &es) const {
     if (chain.sinkConditionNode == nullptr) return false;
     const auto *ifStmt = chain.sinkConditionNode->to<IR::IfStatement>();
     if (ifStmt == nullptr) return false;
@@ -1200,7 +1200,7 @@ bool StateDependencyTracker::allPhase1BucketsFull() const {
 // (conditionReached / chainTargetsCovered) rather than runPhase's allCovered acceptance — the latter
 // rejects every RMW read terminal (the threshold branch is unreachable in one packet). File-local
 // because both the setter and the sole reader live in this translation unit.
-static const P4StateDependency::DependencyGraphs::SOChain *phase1SingleChain = nullptr;
+static const P4ChainExtractor::DependencyGraphs::SOChain *phase1SingleChain = nullptr;
 
 void StateDependencyTracker::handleSharedTerminal(const ExecutionState &es) {
     ++phase1Examined;
@@ -1456,7 +1456,7 @@ std::set<size_t> StateDependencyTracker::collectPhase2Terminals(const ExecutionS
 }
 
 std::vector<const FinalState *> StateDependencyTracker::collectPhase1TerminalsPerChain(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState) {
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState) {
     // Baseline for --shared-traversal=NONE. Deliberately mirrors collectPhase1Terminals in EVERY
     // respect except the traversal scope (this chain's targets, not the union of all chains') and the
     // bucketing scope (phase1SingleChain restricts handleSharedTerminal to this chain). Crucially it
@@ -2063,7 +2063,7 @@ std::vector<const IR::Expression *> buildHashInputPins(const IR::ConcolicVariabl
 ///
 /// Terminals in @p drivenTerminals are accept-or-drop with no retry: a k-packet accumulation into
 /// the wrong cell is unambiguously unsound, and re-running the DFS would discard the analytical k.
-void gatePhase2ByIndex(const P4StateDependency::DependencyGraphs::SOChain &chain, cstring chainName,
+void gatePhase2ByIndex(const P4ChainExtractor::DependencyGraphs::SOChain &chain, cstring chainName,
                        const ProgramInfo &programInfo, const FinalState *repPhase1State,
                        std::vector<const FinalState *> &phase2Terminals,
                        ExecutionState &steerTemplate,
@@ -2274,7 +2274,7 @@ static const CpAnnotation *cpAnnotation() { return loadedCpAnnotation(); }
 
 /// Emit an authorization verdict for a tampering test whose Phase-2 packet entered on
 /// @p attackerPort. Silent when no annotation is loaded, so default behaviour is unchanged.
-static void labelAttackerPort(const P4StateDependency::DependencyGraphs::SOChain &chain,
+static void labelAttackerPort(const P4ChainExtractor::DependencyGraphs::SOChain &chain,
                               int attackerPort) {
     const auto *ann = cpAnnotation();
     if (ann == nullptr) return;
@@ -2994,7 +2994,7 @@ static bool violatesCpAssumptions(const FinalState *fs) {
 static bool pinSinkEntryForLegit = false;
 
 const FinalState *StateDependencyTracker::runSymbolicPhase3(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
     const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage) {
     if (keepWriteCoverage) {
@@ -3076,7 +3076,7 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
 }
 
 const FinalState *StateDependencyTracker::runLegitPhase3(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr) {
     // Carry Phase 1's OWN register writes (no attacker Phase-2 write) into the replay.
     std::map<cstring, const TestObject *> p1OwnCarry;
@@ -3091,14 +3091,14 @@ const FinalState *StateDependencyTracker::runLegitPhase3(
 }
 
 int StateDependencyTracker::legitPhase3Sink(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr) {
     const auto *legit = runLegitPhase3(chain, initState, fs1, inputPort, inputPortSymExpr);
     return legit == nullptr ? -1 : evalSinkFlip(legit);
 }
 
 ConstEntryOutcome StateDependencyTracker::legitPhase3ConstEntry(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
     const ActionResolver &resolve) {
     const auto *legit = runLegitPhase3(chain, initState, fs1, inputPort, inputPortSymExpr);
@@ -3107,7 +3107,7 @@ ConstEntryOutcome StateDependencyTracker::legitPhase3ConstEntry(
 }
 
 const FinalState *StateDependencyTracker::reDeriveConcretePhase(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs, int inputPort, const IR::Expression *inputPortSymExpr, bool isPhase1,
     const std::map<cstring, const TestObject *> &carriedRegs) {
     // Accept any terminal: the concrete packet makes the path (near-)deterministic and the CRC
@@ -3176,7 +3176,7 @@ const FinalState *StateDependencyTracker::reDeriveConcretePhase(
 // ---------------------------------------------------------------------------
 
 const FinalState *StateDependencyTracker::accumulatePhase2Flip(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort1, const FinalState *fs2, int inputPort2,
     const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, size_t &outRepeat) {
     // Fold a terminal's register writes into a carry snapshot keyed by register name. Requires the
@@ -3239,7 +3239,7 @@ bool StateDependencyTracker::terminalWroteSO(const ExecutionState &es) const {
 }
 
 const FinalState *StateDependencyTracker::driveRegisterPhase2(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     ExecutionState &phase2Init, const FinalState *fs1, int inputPort1,
     const IR::Expression *inputPortSymExpr, const Phase3Goal &goal, const FinalState *&outFs2,
     size_t &outRepeat, big_int &outFlipValue) {
@@ -3475,7 +3475,7 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
 }
 
 size_t StateDependencyTracker::runTamperingChain(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const std::vector<const FinalState *> &phase1Bucket, const TamperingCallback &callBack,
     size_t maxPerChain, TamperPass pass) {
     // Recovered immediately so every pre-existing use below reads exactly as it did when this was a
@@ -4675,7 +4675,7 @@ size_t StateDependencyTracker::runTamperingChain(
 // ---------------------------------------------------------------------------
 
 size_t StateDependencyTracker::runConditionChain(
-    const P4StateDependency::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
+    const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const std::vector<const FinalState *> &phase1Bucket, const TamperingCallback &callBack,
     size_t maxPerChain, bool missToHit) {
     // currentChain / currentSinkCondition were set by the caller. Direction: missToHit=false means

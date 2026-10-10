@@ -130,6 +130,7 @@ set(
   PRIVATE p4tools-common
   PRIVATE p4tools-control-plane
   PRIVATE p4csd-lib
+  PRIVATE p4ccx-lib
   # Make sure the symbex library and anything that links to it see both the Inja includes.
   PUBLIC inja
   PUBLIC gRPC::grpc++
