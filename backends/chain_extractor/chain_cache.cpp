@@ -21,7 +21,10 @@ namespace {
 // v2: cache positions are now captured from POST-midend IR (p4symbex --dump-state-dep-cache) so they
 // re-resolve against p4symbex's lowered program. A v1 cache holds PRE-midend positions that a matching
 // srcHash would not catch, so the bump makes such caches reject cleanly as a version mismatch.
-constexpr int kSchemaVersion = 2;
+// v3: the H2S2K/H2S2C categories are named "h2s2k"/"h2s2c" (v2: "key"/"cond"), so all ten categories
+// read {h,a}2s2{k,c,o,outk,outc}. v2 caches still load (p4csd and old nightly caches are v2).
+constexpr int kSchemaVersion = 3;
+constexpr int kLegacySchemaVersion = 2;
 
 /// Canonical position key for a node: "line:column:file" (line/column first so the file — which may
 /// contain ':' — is the unparsed tail; the key is only ever compared, never split). Printable so the
@@ -278,8 +281,8 @@ void serializeChainCache(const StateDependencyResult &result, const std::string 
     root->emplace("version", kSchemaVersion);
     root->emplace("srcHash", srcHash);
     root->emplace("arch", arch);
-    root->emplace("key", catToJson(result.dataWriteKeyChains));
-    root->emplace("cond", catToJson(result.dataWriteCondChains));
+    root->emplace("h2s2k", catToJson(result.dataWriteKeyChains));
+    root->emplace("h2s2c", catToJson(result.dataWriteCondChains));
     root->emplace("a2s2k", catToJson(result.dataWriteA2SKeyChains));
     root->emplace("a2s2c", catToJson(result.dataWriteA2SCondChains));
     root->emplace("h2s2o", catToJson(result.dataWriteOutChains, true));
@@ -312,7 +315,8 @@ StateDependencyResult loadChainCache(const std::string &path, const IR::P4Progra
         ::P4::error("--state-dep-cache: %1% is not valid JSON", path.c_str());
         return result;
     }
-    if (intField(root, "version") != kSchemaVersion) {
+    const int version = intField(root, "version");
+    if (version != kSchemaVersion && version != kLegacySchemaVersion) {
         ::P4::error("--state-dep-cache: %1% schema version mismatch", path.c_str());
         return result;
     }
@@ -329,8 +333,9 @@ StateDependencyResult loadChainCache(const std::string &path, const IR::P4Progra
     program->apply(idx);
 
     bool ok = true;
-    result.dataWriteKeyChains = loadCategory(root, "key", idx, path, ok);
-    result.dataWriteCondChains = loadCategory(root, "cond", idx, path, ok);
+    const bool legacy = version == kLegacySchemaVersion;
+    result.dataWriteKeyChains = loadCategory(root, legacy ? "key" : "h2s2k", idx, path, ok);
+    result.dataWriteCondChains = loadCategory(root, legacy ? "cond" : "h2s2c", idx, path, ok);
     result.dataWriteA2SKeyChains = loadCategory(root, "a2s2k", idx, path, ok);
     result.dataWriteA2SCondChains = loadCategory(root, "a2s2c", idx, path, ok);
     result.dataWriteOutChains = loadCategory(root, "h2s2o", idx, path, ok);

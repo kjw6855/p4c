@@ -40,8 +40,9 @@ def read_cache(cache_dir: str) -> dict:
             d = json.loads(f.read_text())
         except Exception:
             continue
-        key = sum(len(v) for v in d.get("key", {}).values())
-        cond = sum(len(v) for v in d.get("cond", {}).values())
+        # Schema v3 (p4ccx) names them "h2s2k"/"h2s2c"; v2 (p4csd) "key"/"cond".
+        key = sum(len(v) for v in d.get("h2s2k", d.get("key", {})).values())
+        cond = sum(len(v) for v in d.get("h2s2c", d.get("cond", {})).values())
         out[f.stem] = (key, cond)
     return out
 

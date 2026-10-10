@@ -23,7 +23,7 @@ cache = json.load(open(sys.argv[1]))
 def sos(cat):
     return {c['soName'] for g in cache.get(cat, {}).values() for c in g}
 
-cond, outc = sos('cond'), sos('h2s2outc')
+cond, outc = sos('h2s2c'), sos('h2s2outc')
 checks = [('C kept: ' + so, 'I.' + so in cond)
           for so in ('r_ctrl', 'r_read', 'r_condow', 'r_else', 'r_local', 'r_actow', 'r_outread')]
 checks += [

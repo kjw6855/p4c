@@ -41,8 +41,9 @@ def load_chains(d):
         return {}
     root = json.loads(p.read_text())
     out = {}
-    for cat in ('key', 'cond'):
-        for ctrl, chains in root.get(cat, {}).items():
+    # p4ccx v3 names H2S2K/H2S2C "h2s2k"/"h2s2c"; p4csd and v2 caches use "key"/"cond".
+    for cat, new in (('key', 'h2s2k'), ('cond', 'h2s2c')):
+        for ctrl, chains in root.get(new, root.get(cat, {})).items():
             out[(cat, ctrl)] = Counter(chain_key(c) for c in chains)
     return out
 

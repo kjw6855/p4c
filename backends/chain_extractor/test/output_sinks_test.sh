@@ -34,7 +34,7 @@ checks = [
     ('v1 O: r_port -> egress_spec', ('I.r_port', 'sm.egress_spec') in sos(v1, 'h2s2o')),
     ('v1 OutC: r_drop guards mark_to_drop', ('I.r_drop', '') in sos(v1, 'h2s2outc')),
     ('v1 OutC: r_nh via table t_nh', ('I.r_nh', '') in sos(v1, 'h2s2outc')),
-    ('v1 decoy is a condition sink', ('I.r_decoy', '') in sos(v1, 'cond')),
+    ('v1 decoy is a condition sink', ('I.r_decoy', '') in sos(v1, 'h2s2c')),
     ('v1 decoy is not OutC', ('I.r_decoy', '') not in sos(v1, 'h2s2outc')),
     ('v1 A2S2O: r_cfg (indexed by t_cfg param) -> mcast_grp',
      ('I.r_cfg', 'sm.mcast_grp') in sos(v1, 'a2s2o')),
@@ -44,7 +44,7 @@ checks = [
     ('tna decoy is not OutC', ('Ingress.decoy_reg', '') not in sos(tna, 'h2s2outc')),
     ('tna OutK: k2_reg keys t_direct (sets port)', ('Ingress.k2_reg', '') in sos(tna, 'h2s2outk')),
     ('tna OutK: k1_reg via t_mid keys t_out (drops)', ('Ingress.k1_reg', '') in sos(tna, 'h2s2outk')),
-    ('tna decoy table key is a key sink', ('Ingress.kdec_reg', '') in sos(tna, 'key')),
+    ('tna decoy table key is a key sink', ('Ingress.kdec_reg', '') in sos(tna, 'h2s2k')),
     ('tna decoy table key is not OutK', ('Ingress.kdec_reg', '') not in sos(tna, 'h2s2outk')),
 ]
 def hops(cache, cat, so):

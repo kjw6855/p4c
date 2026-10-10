@@ -19,9 +19,11 @@ import os
 import sys
 
 FAMILIES = {
-    'H': {'K': 'key', 'C': 'cond', 'OutK': 'h2s2outk', 'OutC': 'h2s2outc', 'O': 'h2s2o'},
+    'H': {'K': 'h2s2k', 'C': 'h2s2c', 'OutK': 'h2s2outk', 'OutC': 'h2s2outc', 'O': 'h2s2o'},
     'A': {'K': 'a2s2k', 'C': 'a2s2c', 'OutK': 'a2s2outk', 'OutC': 'a2s2outc', 'O': 'a2s2o'},
 }
+# Schema v2 caches (and p4csd's) name H2S2K/H2S2C "key"/"cond".
+LEGACY = {'h2s2k': 'key', 'h2s2c': 'cond'}
 
 
 def chain_id(control, c):
@@ -38,7 +40,8 @@ def read_id(cid):
 
 def chains(cache, cat):
     """{chain id: chain} for one category."""
-    return {chain_id(ctrl, c): c for ctrl, cs in cache.get(cat, {}).items() for c in cs}
+    cs_by_ctrl = cache.get(cat, cache.get(LEGACY.get(cat), {}))
+    return {chain_id(ctrl, c): c for ctrl, cs in cs_by_ctrl.items() for c in cs}
 
 
 def compare_family(cache, fam):
