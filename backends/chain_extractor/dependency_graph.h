@@ -176,7 +176,8 @@ class DependencyGraphs {
         /// Vertices on the write side: the EXIT node that writes to this SO plus its full
         /// backward-reachable context (including the update action body when isUpdate=true).
         std::unordered_set<vertex_t> writeVertices;
-        /// {soVertex} plus all vertices forward-reachable via pure "read_from" edges.
+        /// {soVertex} plus all vertices forward-reachable via pure "read_from" edges, or via
+        /// "get_or_init" edges for add-on-miss hits (never an update: add_entry only inits).
         /// For single-update chains this is {soVertex} only.
         std::unordered_set<vertex_t> readVertices;
         /// True when the same action instance both reads and writes this SO.

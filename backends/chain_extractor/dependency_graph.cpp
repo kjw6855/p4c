@@ -17,6 +17,15 @@ using edge_t = DependencyGraphs::edge_t;
 // XXX: this value can conflict with __START__ node id
 vertex_t globalVertexId = 0;
 
+namespace {
+// SO -> reader edges. read_from: register reads and RegisterAction calls (a read in the same action
+// as a write is a read-modify-write). get_or_init: add-on-miss hits, which return what add_entry
+// initialized; the data plane never modifies an existing entry, so it is never an update.
+bool is_read_edge(cstring label) {
+    return label == "read_from"_cs || label == "get_or_init"_cs;
+}
+}  // namespace
+
 DependencyGraphs::DependencyGraphs(size_t numGraphs) {
     for (size_t i = 0; i < numGraphs; ++i) {
         depGraphs.emplace_back(std::make_unique<DepGraph>());
@@ -265,10 +274,10 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                        srcInfo.statefulObjectNode != nullptr &&
                        srcInfo.statefulObjectNode->is<IR::P4Table>() &&
                        hasFlag(dstInfo.flags, VertexFlags::ACTION)) {
-                // add_entry data -> hit action param: a later hit of the add-on-miss table reads the
-                // entry back as the hit action's params, so the table (SO) is read_from there.
+                // add_entry data -> hit action param: an add-on-miss apply gets the entry's params on
+                // a hit or inits them with add_entry on a miss, so the table (SO) is get_or_init there.
                 vertex_t soVertex = add_so_vertex(index, srcInfo.statefulObjectNode);
-                add_dependency_edge(index, soVertex, dstVertex, "read_from"_cs);
+                add_dependency_edge(index, soVertex, dstVertex, "get_or_init"_cs);
             } else {
                 cstring edgeLabel = "depends_on"_cs;
                 if (hasFlag(dstInfo.flags, VertexFlags::SO_IDX))
@@ -522,11 +531,11 @@ DependencyGraphs::get_nowrite_so_vertices(size_t index, Graphs::Graph *esg) cons
     }
     if (noWriteSOs.empty()) return chains;
 
-    // Find read_from non-write SO vertices
+    // Find read_from / get_or_init non-write SO vertices
     std::map<vertex_t, std::unordered_set<vertex_t>> readDestinations;
     for (auto so : noWriteSOs) {
         for (auto [ei, ee] = boost::out_edges(so, g); ei != ee; ++ei) {
-            if (g[*ei].label == "read_from"_cs)
+            if (is_read_edge(g[*ei].label))
                 readDestinations[so].insert(boost::target(*ei, g));
         }
     }
@@ -612,11 +621,11 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
     }
     BUG_CHECK(!writeSources.empty(), "Expected at least one write source for data-write SOs");
 
-    // Collect distinct read-destination vertices from writeSO (pure read_from only).
+    // Collect distinct read-destination vertices from writeSO (read_from / get_or_init).
     std::map<vertex_t, std::unordered_set<vertex_t>> readDestinations;
     for (auto [so, _] : writeSources) {
         for (auto [ei, ee] = boost::out_edges(so, g); ei != ee; ++ei) {
-            if (g[*ei].label == "read_from"_cs) {
+            if (is_read_edge(g[*ei].label)) {
                 auto tgt = boost::target(*ei, g);
                 readDestinations[so].insert(tgt);
             }
@@ -692,6 +701,9 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                         updateReadDstToWriteSrc[v] = src;
                         continue;
                     }
+                    // a get_or_init read feeding a write of the same table is not an update:
+                    // add_entry only inits a missing entry, so the read stays a pure read
+                    if (g[*ei].label == "get_or_init"_cs && tgt == so) continue;
 
                     // don't cross call-to-ret edges, but store target callers
                     if (g[*ei].type == DepEdgeType::CALL_TO_RET) {
@@ -766,7 +778,7 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                     auto v = work.front(); work.pop_front();
                     for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
                         auto src = boost::source(*ei, g);
-                        if (g[*ei].label != "read_from"_cs && !g[src].isSO && !readVtx.count(src)) {
+                        if (!is_read_edge(g[*ei].label) && !g[src].isSO && !readVtx.count(src)) {
                             readVtx.insert(src);
                             work.push_back(src);
                         }
@@ -774,13 +786,15 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                 }
 
                 // 2. Forward BFS from readDst: collect the full read side, but skip
-                //    update-read destinations so the update body stays on write side only.
+                //    update-read destinations so the update body stays on write side only, and
+                //    writes back into this SO (e.g. a hit feeding a later add_entry of its table).
                 readVtx.insert(readDst);
                 work.push_back(readDst);
                 while (!work.empty()) {
                     auto v = work.front(); work.pop_front();
                     for (auto [ei, ee] = boost::out_edges(v, g); ei != ee; ++ei) {
                         auto tgt = boost::target(*ei, g);
+                        if (g[*ei].label == "write_to"_cs && tgt == so) continue;
                         if (!readVtx.count(tgt)) { readVtx.insert(tgt); work.push_back(tgt); }
                     }
                 }
