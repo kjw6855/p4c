@@ -92,15 +92,14 @@ bool collect_state_vars_common(Graphs::Graph *g, SuperGraphProp *sgProp,
     }
 
     if (hasFlag(nodeInfo.flags, VertexFlags::SO_DATA)) {
-        if (hasSOFlag(nodeInfo.soFlags, SOFlags::CREATE) &&
+        // add_entry() writes an add-on-miss table; a later hit reads the entry back as the hit
+        // action's parameters. Its first param names the hit action.
+        if (hasSOFlag(nodeInfo.soFlags, SOFlags::UPDATE) &&
                 nodeInfo.node->is<IR::MethodCallStatement>()) {
-            // For add_entry(), check the first param to find the hitAction name
             auto stmt = nodeInfo.node->to<IR::MethodCallStatement>();
             auto instance = P4::MethodInstance::resolve(stmt->methodCall, refMap, typeMap);
-            if (auto *ec = instance->to<P4::ExternCall>()) {
-                // TODO: check if it has to support other methods
-                if (ec->method->name.name != "add_entry") return true;
-
+            auto *ec = instance->to<P4::ExternCall>();
+            if (ec != nullptr && ec->method->name.name == "add_entry") {
                 auto hitActionName = stmt->methodCall->arguments->at(0)
                     ->expression->to<IR::StringLiteral>()->value;
                 auto hitActionVit = sgProp->actionMap.find(hitActionName);

@@ -52,10 +52,8 @@ enum class VertexFlags : unsigned {
 
 enum class SOFlags : unsigned {
     NONE            = 0,
-    CREATE          = 1u << 0,
     READ            = 1u << 1,
-    UPDATE          = 1u << 2,
-    DELETE          = 1u << 3,      // TODO: unsupported
+    UPDATE          = 1u << 2,      // any write: Register.write, RegisterAction, add_entry
 };
 
 enum class EdgeType {
@@ -532,10 +530,8 @@ inline cstring soFlagsToString(SOFlags flags) {
 
     std::vector<cstring> parts;
 
-    if (hasSOFlag(flags, SOFlags::CREATE))  parts.emplace_back("CREATE"_cs);
     if (hasSOFlag(flags, SOFlags::READ))    parts.emplace_back("READ"_cs);
     if (hasSOFlag(flags, SOFlags::UPDATE))  parts.emplace_back("UPDATE"_cs);
-    if (hasSOFlag(flags, SOFlags::DELETE))  parts.emplace_back("DELETE"_cs);
     cstring res;
     for (std::size_t i = 0; i < parts.size(); ++i) {
         if (i) res += "|"_cs;

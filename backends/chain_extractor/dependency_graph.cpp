@@ -284,9 +284,6 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                 if (hasSOFlag(dstInfo.soFlags, SOFlags::UPDATE)) {
                     add_dependency_edge(index, dstVertex, soVertex, "write_to"_cs);
                 }
-                if (hasSOFlag(dstInfo.soFlags, SOFlags::CREATE)) {
-                    add_dependency_edge(index, dstVertex, soVertex, "create"_cs);
-                }
             }
         }
     }

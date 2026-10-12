@@ -87,14 +87,13 @@ bool is_so_sink(const Graphs::Vertex &vinfo) {
         // TODO: differentiate stateful CALL and procedures
         // TODO: apply block could be used only for read
         return !hasFlag(vinfo.flags, VertexFlags::STATEFUL) ||
-               hasSOFlag(vinfo.soFlags, SOFlags::UPDATE) ||   // TODO: CREATE
+               hasSOFlag(vinfo.soFlags, SOFlags::UPDATE) ||
                hasSOFlag(vinfo.soFlags, SOFlags::READ);
     }
     if (hasFlag(vinfo.flags, VertexFlags::SO_DATA)) {
         // Non-stateful SO_DATA vertices are procedure statements
         return !hasFlag(vinfo.flags, VertexFlags::STATEFUL) ||
-               hasSOFlag(vinfo.soFlags, SOFlags::UPDATE) ||
-               hasSOFlag(vinfo.soFlags, SOFlags::CREATE);
+               hasSOFlag(vinfo.soFlags, SOFlags::UPDATE);
     }
     return false;
 }

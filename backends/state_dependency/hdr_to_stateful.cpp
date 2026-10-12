@@ -179,8 +179,6 @@ void FindHdrToStateful::analyze_control_graph(Tabulation *tab) {
                 caseString = "[B3:->D] "_cs;
             } else if (hasSOFlag(vinfo.soFlags, SOFlags::UPDATE)) {
                 caseString = "[B3:->D] "_cs;
-            } else if (hasSOFlag(vinfo.soFlags, SOFlags::CREATE)) {
-                caseString = "[B2:->D] "_cs;
             }
             if (caseString.size() == 0) continue;
 

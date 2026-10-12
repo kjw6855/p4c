@@ -564,7 +564,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                         params.size());
                 // Key goes index
                 visit_stateful(vName, statement, curKeyVars,
-                        SOFlags::CREATE, {params[1]}, nullptr);
+                        SOFlags::UPDATE, {params[1]}, nullptr);
                 return false;
             }
 
@@ -1087,7 +1087,7 @@ void ControlGraphs::visit_stateful(const cstring &name, const IR::Node *node,
 
         cur_v = sv;
         // Whether the data is read (node writes) or written (node reads)
-        if (hasSOFlag(soFlags, SOFlags::UPDATE) || hasSOFlag(soFlags, SOFlags::CREATE)) {
+        if (hasSOFlag(soFlags, SOFlags::UPDATE)) {
             state = READ_ONLY;
             for (auto data : dataVals) {
                 if (auto *mem = data->to<IR::Member>()) {
