@@ -260,6 +260,15 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                 if (hasRead) {
                     add_dependency_edge(index, soVertex, srcVertex, "read_from"_cs);
                 }
+            } else if (hasFlag(srcInfo.flags, VertexFlags::STATEFUL) &&
+                       hasFlag(srcInfo.flags, VertexFlags::SO_DATA) &&
+                       srcInfo.statefulObjectNode != nullptr &&
+                       srcInfo.statefulObjectNode->is<IR::P4Table>() &&
+                       hasFlag(dstInfo.flags, VertexFlags::ACTION)) {
+                // add_entry data -> hit action param: a later hit of the add-on-miss table reads the
+                // entry back as the hit action's params, so the table (SO) is read_from there.
+                vertex_t soVertex = add_so_vertex(index, srcInfo.statefulObjectNode);
+                add_dependency_edge(index, soVertex, dstVertex, "read_from"_cs);
             } else {
                 cstring edgeLabel = "depends_on"_cs;
                 if (hasFlag(dstInfo.flags, VertexFlags::SO_IDX))
