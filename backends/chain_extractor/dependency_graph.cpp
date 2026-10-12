@@ -57,6 +57,9 @@ cstring DependencyGraphs::so_name(const IR::Node *soNode) {
         // Use controlPlaneName() so the label matches the key used in the test-object store
         // (e.g. "ingress.roundRegister" from the @name annotation, not just "roundRegister").
         ss << soNode->to<IR::Declaration_Instance>()->controlPlaneName();
+    } else if (const auto *table = soNode->to<IR::P4Table>()) {
+        // Add-on-miss table written by add_entry()
+        ss << table->controlPlaneName();
     } else {
         ss << soNode;
     }

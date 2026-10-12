@@ -564,7 +564,7 @@ bool ControlGraphs::preorder(const IR::MethodCallStatement *statement) {
                         params.size());
                 // Key goes index
                 visit_stateful(vName, statement, curKeyVars,
-                        SOFlags::UPDATE, {params[1]}, nullptr);
+                        SOFlags::UPDATE, {params[1]}, curAddOnMissTable);
                 return false;
             }
 
@@ -982,6 +982,8 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
 
     Parents new_parents;
 
+    auto *prevAddOnMissTable = curAddOnMissTable;
+    curAddOnMissTable = isStateful ? table : nullptr;
     auto actList = table->getActionList();
     if (actList) {
         auto actions = actList->actionList;
@@ -1027,6 +1029,7 @@ bool ControlGraphs::preorder(const IR::P4Table *table) {
             parents.clear();
         }
     }
+    curAddOnMissTable = prevAddOnMissTable;
 
     parents = new_parents;
     auto exit_v = add_and_connect_vertex("EXIT "_cs + name, VertexFlags::EXIT);

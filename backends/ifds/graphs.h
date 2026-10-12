@@ -838,6 +838,8 @@ class Graphs {
 
     // Used by controls.cpp
     std::vector<const IR::Node *> curKeyVars;
+    // The add-on-miss table whose actions are being visited: the stateful object of add_entry()
+    const IR::P4Table *curAddOnMissTable = nullptr;
     bool storeKeys = false;
     VertexFlags localProcFlags = VertexFlags::NONE;
 
