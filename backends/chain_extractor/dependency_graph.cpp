@@ -254,6 +254,29 @@ void DependencyGraphs::add_body_writes_from_map(size_t index, Graphs::Graph *gra
     }
 }
 
+void DependencyGraphs::add_so_reads_from_map(size_t index, Graphs::Graph *graph,
+                                             const IDEPass::DepEdgeMap &extraReads) {
+    for (const auto &[access, reads] : extraReads) {
+        const auto &ainfo = (*graph)[access.first];
+        vertex_t accessVertex =
+            add_vertex(index, access, vertex_name(graph, access.first, access.second));
+        vertex_t soVertex = add_so_vertex(index, ainfo.statefulObjectNode);
+        for (const auto &[node, var] : reads) {
+            vertex_t readVertex = add_vertex(index, {node, var}, vertex_name(graph, node, var));
+            if (hasFlag(ainfo.flags, VertexFlags::CALL)) {
+                // RegisterAction call: SO -read_from-> CALL -call_to_return-> RETURN value
+                add_dependency_edge(index, accessVertex, readVertex, "call_to_return"_cs,
+                                    DepEdgeType::CALL_TO_RET);
+                add_dependency_edge(index, soVertex, accessVertex, "read_from"_cs);
+            } else {
+                // Extern read: ACCESS -> READ value <-read_from- SO
+                add_dependency_edge(index, accessVertex, readVertex, ""_cs);
+                add_dependency_edge(index, soVertex, readVertex, "read_from"_cs);
+            }
+        }
+    }
+}
+
 void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *graph,
                                                  const IDEPass::DepEdgeMap &depEdges,
                                                  bool hasLeaves) {

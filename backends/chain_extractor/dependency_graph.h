@@ -114,6 +114,12 @@ class DependencyGraphs {
     void add_body_writes_from_map(size_t index, Graphs::Graph *graph,
                                   const IDEPass::DepEdgeMap &bodyWrites);
 
+    /// @brief Add reads that no source reaches through their index (GraphChainMaps::aExtraReads):
+    /// SO -read_from-> the access, and the access -> its read value. No write_to: the access only
+    /// joins chains as a reader.
+    void add_so_reads_from_map(size_t index, Graphs::Graph *graph,
+                               const IDEPass::DepEdgeMap &extraReads);
+
     /// @brief Get the underlying boost graph
     /// @return Reference to the dependency graph
     DepGraph &get_graph(size_t index) { return *depGraphs[index]; }

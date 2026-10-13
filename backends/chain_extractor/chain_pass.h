@@ -10,6 +10,7 @@
 #include "backends/ifds/ide_pass.h"
 #include "backends/ifds/supergraphs.h"
 #include "backends/ifds/tabulation.h"
+#include "backends/ifds/utils.h"
 #include "ir/ir.h"
 
 namespace P4::P4ChainExtractor {
@@ -28,6 +29,10 @@ struct GraphChainMaps {
     /// -> the RETURN values of the body's call sites carrying that param. Only CALL/RETURN carry the
     /// register, so DependencyGraphs::add_body_writes_from_map draws these calls (write_to).
     IDEPass::DepEdgeMap aBodyWrites;
+    /// Reads of the registers an action param writes, at an index no param reaches (a header, a
+    /// hash or a constant): access -> its read value. A control-plane update leaves the written
+    /// state stale for every reader, so these reads start A2S second hops too (read_from only).
+    IDEPass::DepEdgeMap aExtraReads;
     /// Stateful-object sink -> header (dst -> src), and its register-read seeds.
     IDEPass::DepEdgeMap h2s;
     std::vector<TabVertex> hStateVars;
@@ -140,6 +145,17 @@ class FindChains : public IDEPass {
                              GraphChainMaps &m);
     /// Append @vv to the RETURN values @rets of a body write unless present (keeps call-site order).
     static void add_body_write(std::vector<Graphs::VarVertex> &rets, Graphs::VarVertex vv);
+    /// Fill GraphChainMaps::aExtraReads (and their read values in aStateVars) from the A first hop.
+    void collect_extra_reads(Tabulation *tab, GraphChainMaps &m);
+    /// The cell access of the RegisterAction procedure @entry, computed once into @cache.
+    static const CellAccess &cell_access_of(hvec_map<Graphs::vertex_t, CellAccess> &cache,
+                                            Graph *g, SuperGraphProp *sgProp,
+                                            Graphs::vertex_t entry);
+    /// Record the read value {@node, @var} of the register access @access as an extra read of
+    /// @m, unless it is already a state var (@stateVars).
+    static void add_extra_read(Graph *g, hvec_set<TabVertex, TabVertexHash> &stateVars,
+                               GraphChainMaps &m, Graphs::vertex_t access, Graphs::vertex_t node,
+                               const IR::Node *var);
     /// The tables (control-plane names) calling the action procedure of @seed, and the action,
     /// computed once per action procedure into @cache.
     const std::pair<std::vector<cstring>, cstring> &cached_action_of(

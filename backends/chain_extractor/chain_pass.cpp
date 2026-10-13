@@ -339,6 +339,79 @@ void FindChains::add_body_write(std::vector<Graphs::VarVertex> &rets, Graphs::Va
     if (std::find(rets.begin(), rets.end(), vv) == rets.end()) rets.push_back(vv);
 }
 
+void FindChains::collect_extra_reads(Tabulation *tab, GraphChainMaps &m) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
+    hvec_map<Graphs::vertex_t, CellAccess> cellAccess;   // RegisterAction entry -> cell access
+
+    // Registers the A first hop writes: extern writes (index or data), and RegisterAction calls
+    // (index) or bodies (data) whose apply writes the cell
+    std::set<const IR::Node *> written;
+    for (const auto &[_, sinks] : m.a2s) {
+        for (const auto &[v, var] : sinks) {
+            const auto &info = (*g)[v];
+            if (hasFlag(info.flags, VertexFlags::STATEFUL) && info.statefulObjectNode != nullptr &&
+                    hasSOFlag(info.soFlags, SOFlags::UPDATE)) {
+                written.insert(info.statefulObjectNode);
+            } else if (hasFlag(info.flags, VertexFlags::CALL) && info.statefulObjectNode != nullptr) {
+                if (cell_access_of(cellAccess, g, sgProp, sgProp->get_call_map(v).first).writes)
+                    written.insert(info.statefulObjectNode);
+            } else if (hasFlag(info.flags, VertexFlags::SO_DATA)) {
+                auto entryIt = sgProp->srcOf.find(sgProp->procOf[v]);
+                if (entryIt == sgProp->srcOf.end()) continue;
+                const auto *so = (*g)[entryIt->second].statefulObjectNode;
+                if (so != nullptr && cell_access_of(cellAccess, g, sgProp, entryIt->second).writes)
+                    written.insert(so);
+            }
+        }
+    }
+    if (written.empty()) return;
+
+    // Every read of those registers, at any index, that is not already a family read
+    hvec_set<TabVertex, TabVertexHash> stateVars(m.aStateVars.begin(), m.aStateVars.end());
+    for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
+        const auto &info = (*g)[*vit];
+        if (hasFlag(info.flags, VertexFlags::VARIABLE) || info.statefulObjectNode == nullptr ||
+                !written.count(info.statefulObjectNode))
+            continue;
+        if (hasFlag(info.flags, VertexFlags::CALL)) {
+            // RegisterAction call whose apply reads the cell
+            auto [entry, ret] = sgProp->get_call_map(*vit);
+            if (!cell_access_of(cellAccess, g, sgProp, entry).reads) continue;
+            for (const auto *retVar : find_ret_vars(sgProp, ret))
+                add_extra_read(g, stateVars, m, *vit, ret, retVar);
+        } else if (hasFlag(info.flags, VertexFlags::SO_IDX) &&
+                   hasFlag(info.flags, VertexFlags::STATEFUL) &&
+                   hasSOFlag(info.soFlags, SOFlags::READ)) {
+            // Extern read (Register.read): its READ data vertex defines the read value
+            for (auto d : find_next_cfg_node(g, *vit)) {
+                const auto &dinfo = (*g)[d];
+                if (!hasFlag(dinfo.flags, VertexFlags::SO_DATA)) continue;
+                for (const auto *dv : dinfo.defVars) add_extra_read(g, stateVars, m, *vit, d, dv);
+            }
+        }
+    }
+}
+
+const CellAccess &FindChains::cell_access_of(hvec_map<Graphs::vertex_t, CellAccess> &cache,
+                                             Graph *g, SuperGraphProp *sgProp,
+                                             Graphs::vertex_t entry) {
+    auto it = cache.find(entry);
+    if (it == cache.end()) it = cache.emplace(entry, so_proc_cell_access(g, sgProp, entry)).first;
+    return it->second;
+}
+
+void FindChains::add_extra_read(Graph *g, hvec_set<TabVertex, TabVertexHash> &stateVars,
+                                GraphChainMaps &m, Graphs::vertex_t access,
+                                Graphs::vertex_t node, const IR::Node *var) {
+    if (!stateVars.insert(TabVertex{node, var}).second) return;
+    m.aStateVars.push_back(TabVertex{node, var});
+    // Same access vertex as an index-reached one ({access, index var}), when there is one
+    const auto &ainfo = (*g)[access];
+    const IR::Node *idxVar = ainfo.useVars.empty() ? nullptr : ainfo.useVars[0];
+    m.aExtraReads[{access, idxVar}].push_back({node, var});
+}
+
 const std::pair<std::vector<cstring>, cstring> &FindChains::cached_action_of(
         Tabulation *tab, const hvec_map<cstring, cstring> &tableName,
         hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> &cache, const TabVertex &seed) {
@@ -640,7 +713,10 @@ void FindChains::analyze_control_graph(Tabulation *tab) {
         }
         m.aStateVars = collect_state_vars_from_dep_edges_dst(g, sgProp, refMap, typeMap, m.a2s,
                                                              m.aStateVarMap, true);
-        if (solved && needAct && actIdx) collect_body_writes(tab, domains, *actIdx, m);
+        if (solved && needAct && actIdx) {
+            collect_body_writes(tab, domains, *actIdx, m);
+            collect_extra_reads(tab, m);
+        }
         m.hStateVars = collect_state_vars_from_dep_edges_src(g, sgProp, refMap, typeMap, m.h2s,
                                                              m.hStateVarMap, true);
 
