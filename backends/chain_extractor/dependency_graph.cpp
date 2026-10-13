@@ -2,6 +2,7 @@
 
 #include <deque>
 #include <fstream>
+#include <optional>
 #include <stack>
 #include <unordered_map>
 #include <unordered_set>
@@ -104,6 +105,155 @@ edge_t DependencyGraphs::add_dependency_edge(size_t index, vertex_t from, vertex
     return newEdge;
 }
 
+void DependencyGraphs::add_so_call(size_t index, Graphs::Graph *graph, vertex_t srcVertex,
+                                   vertex_t dstVertex) {
+    const auto srcNode = (*depGraphs[index])[srcVertex].esgId.first;
+    const auto dstNode = (*depGraphs[index])[dstVertex].esgId.first;
+    vertex_t soVertex = add_so_vertex(index, (*graph)[srcNode].statefulObjectNode);
+    std::stringstream ss;
+
+    // Draw CFG: collect all nodes from srcVertex to dstVertex.
+    //
+    // Pass 1 — memoised DFS on ESG nodes to find exactly which nodes lie
+    // on some srcNode→dstNode path.  Nodes on diverging branches that never
+    // reach dstNode are excluded.  Back-edges are skipped to handle cycles.
+    std::unordered_set<Graphs::vertex_t> onPathNodes;
+    {
+        std::unordered_set<Graphs::vertex_t> dfsVisited;
+        std::unordered_set<Graphs::vertex_t> dfsStack;
+        std::function<bool(Graphs::vertex_t)> collectPaths =
+            [&](Graphs::vertex_t cur) -> bool {
+            if (cur == dstNode) return true;
+            if (dfsStack.count(cur)) return false;   // back-edge
+            if (dfsVisited.count(cur))               // memoised
+                return onPathNodes.count(cur) > 0;
+            dfsStack.insert(cur);
+            bool reaches = false;
+            for (auto next : find_next_cfg_node(graph, cur, false))
+                if (collectPaths(next)) reaches = true;
+            dfsStack.erase(cur);
+            dfsVisited.insert(cur);
+            if (reaches) onPathNodes.insert(cur);
+            return reaches;
+        };
+        collectPaths(srcNode);
+    }
+
+    // Pass 2 — DFS on dep-graph vertices to create vertices/edges,
+    // restricted to onPathNodes so diverging branches are excluded.
+    std::stack<vertex_t> stk;
+    std::unordered_set<Graphs::vertex_t> visited;   // original ESG
+    stk.push(srcVertex);
+    visited.insert(srcNode);
+    bool hasUpdate = false;
+    bool hasRead = false;
+    const IR::Node *regVar = nullptr;
+    while (!stk.empty()) {
+        auto curVertex = stk.top();
+        stk.pop();
+
+        const auto &vInfo = (*depGraphs[index])[curVertex];
+        auto nextCfgNodes = find_next_cfg_node(graph, vInfo.esgId.first, false);
+        for (auto dEsgit : nextCfgNodes) {
+            if (dEsgit == dstNode) {
+                // Connect to dstVertex
+                if (curVertex != srcVertex) {
+                    add_dependency_edge(index, curVertex, dstVertex, ""_cs);
+                } else {
+                    add_dependency_edge(index, srcVertex, dstVertex,
+                        "call_to_return"_cs, DepEdgeType::CALL_TO_RET);
+                }
+                // Don't push dstNode; only collect nodes leading to it
+                continue;
+            }
+
+            // Skip nodes not on any srcNode→dstNode path
+            if (!onPathNodes.count(dEsgit)) continue;
+
+            const auto dEsgInfo = (*graph)[dEsgit];
+            const auto depMapIt = esgToDepMaps[index].find({dEsgit, nullptr});
+            vertex_t dVertex;
+            if (visited.count(dEsgit) && depMapIt != esgToDepMaps[index].end()) {
+                // Get the vertex for this ESG node
+                dVertex = depMapIt->second;
+            } else {
+                ss.str("");
+                ss.clear();
+                ss << dEsgInfo.name << "(" << dEsgit << ")";
+                // TODO: find variable for better visualization
+                dVertex = add_vertex(index, {dEsgit, nullptr}, cstring(ss));
+
+                // Check if this node updates the stateful object.
+                // defVar may be a member expression (e.g. val.field = x).
+                auto isRegVarOrMember = [&](const IR::Node *var) {
+                    return is_cell_var(var, regVar);
+                };
+                if (std::any_of(dEsgInfo.defVars.begin(), dEsgInfo.defVars.end(),
+                                isRegVarOrMember)) {
+                    hasUpdate = true;
+                }
+                // Reads the stateful object iff a body node uses the register cell var.
+                if (std::any_of(dEsgInfo.useVars.begin(), dEsgInfo.useVars.end(),
+                                isRegVarOrMember)) {
+                    hasRead = true;
+                }
+                stk.push(dVertex);
+                visited.insert(dEsgit);
+            }
+            add_dependency_edge(index, curVertex, dVertex, ""_cs);
+
+            // Set regVar to determine if stateful object is updated or not
+            if (dEsgInfo.name.startsWith("INPUT: "))
+                regVar = dEsgInfo.defVars.empty() ? nullptr : dEsgInfo.defVars[0];
+        }
+    }
+    // If an internal node updates the stateful object,
+    // add a write_to edge from it to the SO vertex.
+    if (hasUpdate) {
+        add_dependency_edge(index, dstVertex, soVertex, "write_to"_cs);
+    }
+    // Add read_from only if the action actually reads the register cell. Write-only
+    // RegisterActions overwrite without reading, so they get write_to only (no spurious
+    // read_from to the CALL).
+    if (hasRead) {
+        add_dependency_edge(index, soVertex, srcVertex, "read_from"_cs);
+    }
+}
+
+cstring DependencyGraphs::vertex_name(const Graphs::Graph *graph, Graphs::vertex_t node,
+                                      const IR::Node *var) {
+    std::stringstream ss;
+    ss << (*graph)[node].name << "(" << node << "):" << var;
+    return cstring(ss);
+}
+
+void DependencyGraphs::add_body_writes_from_map(size_t index, Graphs::Graph *graph,
+                                                const IDEPass::DepEdgeMap &bodyWrites) {
+    for (const auto &[body, rets] : bodyWrites) {
+        vertex_t bodyVertex =
+            add_vertex(index, body, vertex_name(graph, body.first, body.second));
+        for (const auto &[retNode, retVar] : rets) {
+            // The call site of this RETURN
+            std::optional<Graphs::vertex_t> callNode;
+            for (auto [ei, ee] = boost::in_edges(retNode, *graph); ei != ee; ++ei)
+                if ((*graph)[*ei].type == EdgeType::CALL_TO_RETURN) callNode = boost::source(*ei, *graph);
+            if (!callNode.has_value()) continue;
+            // Same CALL vertex as an index-reached call ({CALL, index var}), when there is one
+            const auto &callInfo = (*graph)[*callNode];
+            const IR::Node *callVar = callInfo.useVars.empty() ? nullptr : callInfo.useVars[0];
+            vertex_t callVertex =
+                add_vertex(index, {*callNode, callVar}, vertex_name(graph, *callNode, callVar));
+            vertex_t retVertex =
+                add_vertex(index, {retNode, retVar}, vertex_name(graph, retNode, retVar));
+            add_so_call(index, graph, callVertex, retVertex);
+            // merge_nodes_without_variable() joins the body value with its drawn node; link it
+            // to the RETURN only when the node is off the drawn CALL->RETURN paths
+            if (esgToDepMaps[index].count({body.first, nullptr}) == 0)
+                add_dependency_edge(index, bodyVertex, retVertex, ""_cs);
+        }
+    }
+}
+
 void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *graph,
                                                  const IDEPass::DepEdgeMap &depEdges,
                                                  bool hasLeaves) {
@@ -147,128 +297,7 @@ void DependencyGraphs::add_dependencies_from_map(size_t index, Graphs::Graph *gr
                 // The read_from edge is added AFTER the body walk, gated on hasRead — a write-only
                 // RegisterAction (e.g. `apply(inout val){ val = hdr; }`) overwrites the cell without
                 // reading it, so it must NOT get a spurious read_from.
-                vertex_t soVertex = add_so_vertex(index, srcInfo.statefulObjectNode);
-
-                // Draw CFG: collect all nodes from srcVertex to dstVertex.
-                //
-                // Pass 1 — memoised DFS on ESG nodes to find exactly which nodes lie
-                // on some srcNode→dstNode path.  Nodes on diverging branches that never
-                // reach dstNode are excluded.  Back-edges are skipped to handle cycles.
-                std::unordered_set<Graphs::vertex_t> onPathNodes;
-                {
-                    std::unordered_set<Graphs::vertex_t> dfsVisited;
-                    std::unordered_set<Graphs::vertex_t> dfsStack;
-                    std::function<bool(Graphs::vertex_t)> collectPaths =
-                        [&](Graphs::vertex_t cur) -> bool {
-                        if (cur == dstNode) return true;
-                        if (dfsStack.count(cur)) return false;   // back-edge
-                        if (dfsVisited.count(cur))               // memoised
-                            return onPathNodes.count(cur) > 0;
-                        dfsStack.insert(cur);
-                        bool reaches = false;
-                        for (auto next : find_next_cfg_node(graph, cur, false))
-                            if (collectPaths(next)) reaches = true;
-                        dfsStack.erase(cur);
-                        dfsVisited.insert(cur);
-                        if (reaches) onPathNodes.insert(cur);
-                        return reaches;
-                    };
-                    collectPaths(srcNode);
-                }
-
-                // Pass 2 — DFS on dep-graph vertices to create vertices/edges,
-                // restricted to onPathNodes so diverging branches are excluded.
-                std::stack<vertex_t> stk;
-                std::unordered_set<Graphs::vertex_t> visited;   // original ESG
-                stk.push(srcVertex);
-                visited.insert(srcNode);
-                bool hasUpdate = false;
-                bool hasRead = false;
-                const IR::Node *regVar = nullptr;
-                while (!stk.empty()) {
-                    auto curVertex = stk.top();
-                    stk.pop();
-
-                    const auto &vInfo = (*depGraphs[index])[curVertex];
-                    auto nextCfgNodes = find_next_cfg_node(graph, vInfo.esgId.first, false);
-                    for (auto dEsgit : nextCfgNodes) {
-                        if (dEsgit == dstNode) {
-                            // Connect to dstVertex
-                            if (curVertex != srcVertex) {
-                                add_dependency_edge(index, curVertex, dstVertex, ""_cs);
-                            } else {
-                                add_dependency_edge(index, srcVertex, dstVertex,
-                                    "call_to_return"_cs, DepEdgeType::CALL_TO_RET);
-                            }
-                            // Don't push dstNode; only collect nodes leading to it
-                            continue;
-                        }
-
-                        // Skip nodes not on any srcNode→dstNode path
-                        if (!onPathNodes.count(dEsgit)) continue;
-
-                        const auto dEsgInfo = (*graph)[dEsgit];
-                        const auto depMapIt = esgToDepMaps[index].find({dEsgit, nullptr});
-                        vertex_t dVertex;
-                        if (visited.count(dEsgit) && depMapIt != esgToDepMaps[index].end()) {
-                            // Get the vertex for this ESG node
-                            dVertex = depMapIt->second;
-                        } else {
-                            ss.str("");
-                            ss.clear();
-                            ss << dEsgInfo.name << "(" << dEsgit << ")";
-                            // TODO: find variable for better visualization
-                            dVertex = add_vertex(index, {dEsgit, nullptr}, cstring(ss));
-
-                            // Check if this node updates the stateful object.
-                            // defVar may be a member expression (e.g. val.field = x), so walk
-                            // the IR::Member chain to the root PathExpression and compare names.
-                            auto isRegVarOrMember = [&](const IR::Node *defVar) -> bool {
-                                if (regVar == nullptr) return false;
-                                const IR::Node *cur = defVar;
-                                while (cur != nullptr) {
-                                    if (cur == regVar) return true;
-                                    if (const auto *mem = cur->to<IR::Member>()) {
-                                        cur = mem->expr;
-                                    } else if (const auto *pe = cur->to<IR::PathExpression>()) {
-                                        const auto *decl = regVar->to<IR::IDeclaration>();
-                                        return decl && pe->path->name == decl->getName();
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                return false;
-                            };
-                            if (std::any_of(dEsgInfo.defVars.begin(), dEsgInfo.defVars.end(),
-                                            isRegVarOrMember)) {
-                                hasUpdate = true;
-                            }
-                            // Reads the stateful object iff a body node uses the register cell var.
-                            if (std::any_of(dEsgInfo.useVars.begin(), dEsgInfo.useVars.end(),
-                                            isRegVarOrMember)) {
-                                hasRead = true;
-                            }
-                            stk.push(dVertex);
-                            visited.insert(dEsgit);
-                        }
-                        add_dependency_edge(index, curVertex, dVertex, ""_cs);
-
-                        // Set regVar to determine if stateful object is updated or not
-                        if (dEsgInfo.name.startsWith("INPUT: "))
-                            regVar = dEsgInfo.defVars.empty() ? nullptr : dEsgInfo.defVars[0];
-                    }
-                }
-                // If an internal node updates the stateful object,
-                // add a write_to edge from it to the SO vertex.
-                if (hasUpdate) {
-                    add_dependency_edge(index, dstVertex, soVertex, "write_to"_cs);
-                }
-                // Add read_from only if the action actually reads the register cell. Write-only
-                // RegisterActions overwrite without reading, so they get write_to only (no spurious
-                // read_from to the CALL).
-                if (hasRead) {
-                    add_dependency_edge(index, soVertex, srcVertex, "read_from"_cs);
-                }
+                add_so_call(index, graph, srcVertex, dstVertex);
             } else if (hasFlag(srcInfo.flags, VertexFlags::STATEFUL) &&
                        hasFlag(srcInfo.flags, VertexFlags::SO_DATA) &&
                        srcInfo.statefulObjectNode != nullptr &&

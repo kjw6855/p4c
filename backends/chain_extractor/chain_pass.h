@@ -24,6 +24,10 @@ struct GraphChainMaps {
     IDEPass::DepEdgeMap a2s;
     std::vector<TabVertex> aStateVars;
     IDEPass::DepEdgeMap aStateVarMap;
+    /// RegisterAction body statements an action param reaches through a global (e.g. `v = ig_md.v`)
+    /// -> the RETURN values of the body's call sites carrying that param. Only CALL/RETURN carry the
+    /// register, so DependencyGraphs::add_body_writes_from_map draws these calls (write_to).
+    IDEPass::DepEdgeMap aBodyWrites;
     /// Stateful-object sink -> header (dst -> src), and its register-read seeds.
     IDEPass::DepEdgeMap h2s;
     std::vector<TabVertex> hStateVars;
@@ -131,6 +135,11 @@ class FindChains : public IDEPass {
                          std::vector<TabVertex> &seeds);
     /// Every global defined inside an action body (plus the egress port at a drop statement).
     std::vector<TabVertex> action_def_seeds(Tabulation *tab);
+    /// Fill GraphChainMaps::aBodyWrites from the A first hop (@act: the Act domain index).
+    void collect_body_writes(Tabulation *tab, const DomainSet &domains, size_t act,
+                             GraphChainMaps &m);
+    /// Append @vv to the RETURN values @rets of a body write unless present (keeps call-site order).
+    static void add_body_write(std::vector<Graphs::VarVertex> &rets, Graphs::VarVertex vv);
     /// The tables (control-plane names) calling the action procedure of @seed, and the action,
     /// computed once per action procedure into @cache.
     const std::pair<std::vector<cstring>, cstring> &cached_action_of(

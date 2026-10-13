@@ -290,6 +290,55 @@ std::vector<TabVertex> FindChains::action_def_seeds(Tabulation *tab) {
     return seeds;
 }
 
+void FindChains::collect_body_writes(Tabulation *tab, const DomainSet &domains, size_t act,
+                                     GraphChainMaps &m) {
+    auto *g = tab->g;
+    auto *sgProp = tab->sgProp;
+    hvec_set<TabVertex, TabVertexHash> stateVars(m.aStateVars.begin(), m.aStateVars.end());
+    for (const auto &[seed, sinks] : m.a2s) {
+        for (const auto &sink : sinks) {
+            const auto &[body, var] = sink;
+            const auto &binfo = (*g)[body];
+            // A RegisterAction body statement: SO_DATA in a procedure whose entry carries the register
+            if (!hasFlag(binfo.flags, VertexFlags::SO_DATA) ||
+                    hasFlag(binfo.flags, VertexFlags::STATEFUL))
+                continue;
+            auto entryIt = sgProp->srcOf.find(sgProp->procOf[body]);
+            if (entryIt == sgProp->srcOf.end() ||
+                    (*g)[entryIt->second].statefulObjectNode == nullptr)
+                continue;
+            for (auto call : find_call_sites(sgProp, entryIt->second)) {
+                // Keep the call sites where the seed reaches the global (all of them, optimistically,
+                // when the global has no fact at the CALL)
+                auto value = tab->valueMap.find(TabVertex{call, var});
+                if (value != tab->valueMap.end()) {
+                    auto targets = domains.targets(*tab, value->second, act);
+                    if (std::find(targets.begin(), targets.end(), TabVertex{seed.first, seed.second}) ==
+                            targets.end())
+                        continue;
+                }
+                auto ret = sgProp->get_call_map(call).second;
+                auto &rets = m.aBodyWrites[sink];
+                auto retVars = find_ret_vars(sgProp, ret);
+                if (retVars.empty()) {
+                    add_body_write(rets, {ret, nullptr});
+                    continue;
+                }
+                for (const auto *retVar : retVars) {
+                    add_body_write(rets, {ret, retVar});
+                    // A read-modify-write's result starts a second hop (appended: keeps seed order)
+                    if (stateVars.insert(TabVertex{ret, retVar}).second)
+                        m.aStateVars.push_back(TabVertex{ret, retVar});
+                }
+            }
+        }
+    }
+}
+
+void FindChains::add_body_write(std::vector<Graphs::VarVertex> &rets, Graphs::VarVertex vv) {
+    if (std::find(rets.begin(), rets.end(), vv) == rets.end()) rets.push_back(vv);
+}
+
 const std::pair<std::vector<cstring>, cstring> &FindChains::cached_action_of(
         Tabulation *tab, const hvec_map<cstring, cstring> &tableName,
         hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> &cache, const TabVertex &seed) {
@@ -591,6 +640,7 @@ void FindChains::analyze_control_graph(Tabulation *tab) {
         }
         m.aStateVars = collect_state_vars_from_dep_edges_dst(g, sgProp, refMap, typeMap, m.a2s,
                                                              m.aStateVarMap, true);
+        if (solved && needAct && actIdx) collect_body_writes(tab, domains, *actIdx, m);
         m.hStateVars = collect_state_vars_from_dep_edges_src(g, sgProp, refMap, typeMap, m.h2s,
                                                              m.hStateVarMap, true);
 

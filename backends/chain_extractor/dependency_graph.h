@@ -104,6 +104,16 @@ class DependencyGraphs {
     void add_dependencies_from_map(size_t index, Graphs::Graph *graph,
                                    const IDEPass::DepEdgeMap &depEdges, bool hasLeaves = false);
 
+    /// @brief Draw a stateful procedure call (RegisterAction execute) from its CALL vertex to its
+    /// RETURN vertex: the body nodes on CALL->RETURN paths, write_to when the body writes the
+    /// register cell, and read_from to the CALL when it reads the cell.
+    void add_so_call(size_t index, Graphs::Graph *graph, vertex_t callVertex, vertex_t retVertex);
+
+    /// @brief Link RegisterAction body statements reached through a global (body -> its call
+    /// sites' RETURN values, see GraphChainMaps::aBodyWrites) and draw those calls.
+    void add_body_writes_from_map(size_t index, Graphs::Graph *graph,
+                                  const IDEPass::DepEdgeMap &bodyWrites);
+
     /// @brief Get the underlying boost graph
     /// @return Reference to the dependency graph
     DepGraph &get_graph(size_t index) { return *depGraphs[index]; }
@@ -361,6 +371,9 @@ class DependencyGraphs {
     std::vector<EsgToDepMap> esgToDepMaps;
 
     void prune_and_remap(size_t index, std::unordered_set<vertex_t> &keep);
+    /// Dep-vertex name of the ESG fact {@node, @var}: "<node name>(<node>):<var>".
+    static cstring vertex_name(const Graphs::Graph *graph, Graphs::vertex_t node,
+                               const IR::Node *var);
 
  public:
     std::vector<std::vector<vertex_t>> leaves;  // Per-graph list of leaf vertices (out-degree 0)

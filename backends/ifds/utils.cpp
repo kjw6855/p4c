@@ -1,4 +1,6 @@
 #include "backends/ifds/utils.h"
+#include <algorithm>
+
 #include "frontends/p4/methodInstance.h"
 #include "frontends/common/resolveReferences/resolveReferences.h"
 #include "ir/ir.h"
@@ -237,5 +239,55 @@ std::vector<TabVertex> collect_state_vars(Graphs::Graph *g, SuperGraphProp *sgPr
     std::vector<TabVertex> stateVarList(std::begin(stateVarSet),
                 std::end(stateVarSet));
     return stateVarList;
+}
+
+bool is_cell_var(const IR::Node *var, const IR::Node *cell) {
+    if (cell == nullptr) return false;
+    const IR::Node *cur = var;
+    while (cur != nullptr) {
+        if (cur == cell) return true;
+        if (const auto *mem = cur->to<IR::Member>()) {
+            cur = mem->expr;
+        } else if (const auto *pe = cur->to<IR::PathExpression>()) {
+            const auto *decl = cell->to<IR::IDeclaration>();
+            return decl && pe->path->name == decl->getName();
+        } else {
+            break;
+        }
+    }
+    return false;
+}
+
+const IR::Node *so_proc_cell(Graphs::Graph *g, Graphs::vertex_t entry) {
+    for (auto next : find_next_cfg_node(g, entry, false)) {
+        const auto &info = (*g)[next];
+        if (info.name.startsWith("INPUT: "))
+            return info.defVars.empty() ? nullptr : info.defVars[0];
+    }
+    return nullptr;
+}
+
+CellAccess so_proc_cell_access(Graphs::Graph *g, SuperGraphProp *sgProp, Graphs::vertex_t entry) {
+    CellAccess access;
+    const auto *cell = so_proc_cell(g, entry);
+    if (cell == nullptr) return access;
+    auto procName = sgProp->procOf[entry];
+    for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
+        const auto &info = (*g)[*vit];
+        if (hasFlag(info.flags, VertexFlags::VARIABLE) || info.name.startsWith("INPUT: ")) continue;
+        auto it = sgProp->procOf.find(*vit);
+        if (it == sgProp->procOf.end() || it->second != procName) continue;
+        for (const auto *dv : info.defVars) access.writes |= is_cell_var(dv, cell);
+        for (const auto *uv : info.useVars) access.reads |= is_cell_var(uv, cell);
+    }
+    return access;
+}
+
+std::vector<Graphs::vertex_t> find_call_sites(SuperGraphProp *sgProp, Graphs::vertex_t entry) {
+    std::vector<Graphs::vertex_t> calls;
+    for (const auto &[call, entryRet] : sgProp->callMap)
+        if (entryRet.first == entry) calls.push_back(call);
+    std::sort(calls.begin(), calls.end());   // vertex ids: deterministic
+    return calls;
 }
 }  // namespace P4::IFDS

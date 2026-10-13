@@ -240,11 +240,14 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
             const auto &m = chains->maps(g);
             a2s2vGraphs->add_dependencies_from_map(i, g, m.a2s);
             a2s2vGraphs->add_dependencies_from_map(i, g, m.aStateVarMap);
+            a2s2vGraphs->add_body_writes_from_map(i, g, m.aBodyWrites);
             // Same base action→SO edges feed the A2S2K / A2S2C sink graphs.
             a2s2kGraphs->add_dependencies_from_map(i, g, m.a2s);
             a2s2kGraphs->add_dependencies_from_map(i, g, m.aStateVarMap);
+            a2s2kGraphs->add_body_writes_from_map(i, g, m.aBodyWrites);
             a2s2cGraphs->add_dependencies_from_map(i, g, m.a2s);
             a2s2cGraphs->add_dependencies_from_map(i, g, m.aStateVarMap);
+            a2s2cGraphs->add_body_writes_from_map(i, g, m.aBodyWrites);
             for (const auto &ve : m.a2s)
                 for (const auto &dst : ve.second)
                     LOG2(Graphs::dump_var_edge(g, {ve.first, dst}));
@@ -684,6 +687,7 @@ void assemble_output_chains(const std::vector<Graph *> &graphs, const FindChains
         if (fromAct) {
             dg.add_dependencies_from_map(i, g, m.a2s);
             dg.add_dependencies_from_map(i, g, m.aStateVarMap);
+            dg.add_body_writes_from_map(i, g, m.aBodyWrites);
         } else {
             dg.add_dependencies_from_map(i, g, convert_dep_edges(m.h2s));
             dg.add_dependencies_from_map(i, g, m.hStateVarMap);
