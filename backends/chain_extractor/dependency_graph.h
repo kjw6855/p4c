@@ -235,6 +235,39 @@ class DependencyGraphs {
         };
         std::vector<Hop> hops;
 
+        /// Cross-plane roles of an A2S chain, for control-plane (CP) update checks: the action
+        /// params (tables, action, param) reaching the write's data, the write's index and the
+        /// read's index. Filled by analysis.cpp for the A2S categories; empty for H2S chains.
+        ///  - inconsistency: a CP update of a writeData param leaves the stored value stale for
+        ///    the read (e.g. a per-flow copy of a table decision);
+        ///  - residual: a CP update of an index param makes a read see a cell written under the
+        ///    old index (writeIdx and readIdx; readIdx == writeIdx for read-modify-write chains).
+        /// soKind tells which snapshot holds the state: "register" (register cells) or
+        /// "addOnMiss" (data-plane-added entries of the table soName).
+        struct CPSource {
+            std::vector<cstring> tables;
+            cstring action;
+            cstring param;
+            const IR::Node *at = nullptr;   // the access: write/read statement, or the table
+        };
+        struct CrossPlane {
+            cstring soKind;
+            std::vector<CPSource> writeData, writeIdx, readIdx;
+            bool empty() const { return writeData.empty() && writeIdx.empty() && readIdx.empty(); }
+            bool inconsistency() const { return !writeData.empty(); }
+            bool residual() const { return !writeIdx.empty() && !readIdx.empty(); }
+        };
+        CrossPlane cp;
+        /// Raw cp roles found on the dependency graph (resolved into cp by analysis.cpp): the
+        /// source fact of an idx/data edge into the write or read access, and the access node.
+        enum class CPSlot { WriteData, WriteIdx, ReadIdx };
+        struct CPRole {
+            CPSlot slot;
+            EsgId src;
+            const IR::Node *at;
+        };
+        std::vector<CPRole> cpRoles;
+
         /// Default constructor for reconstructing a chain from a serialized cache
         /// (chain_cache.cpp): only the symbex-consumed fields (soName, sinkTableControlPlaneName,
         /// sinkKeyName, isUpdate, id, writeNodes, readNodes, sinkConditionNode) are set; the graph
@@ -380,6 +413,12 @@ class DependencyGraphs {
     /// Dep-vertex name of the ESG fact {@node, @var}: "<node name>(<node>):<var>".
     static cstring vertex_name(const Graphs::Graph *graph, Graphs::vertex_t node,
                                const IR::Node *var);
+    /// Cross-plane roles of an access endpoint of @g (a write_to source, or a read_from /
+    /// get_or_init destination): the idx / data edges into its access region, i.e. the endpoint
+    /// plus its backward closure over "" and call_to_return edges. A RegisterAction body is shared
+    /// by its call sites, so the region keeps only the endpoint's own CALL.
+    static std::vector<SOChain::CPRole> collect_cp_roles(const DepGraph &g, Graphs::Graph *esg,
+                                                         vertex_t endpoint, bool isRead);
 
  public:
     std::vector<std::vector<vertex_t>> leaves;  // Per-graph list of leaf vertices (out-degree 0)

@@ -641,6 +641,48 @@ DependencyGraphs::get_nowrite_so_vertices(size_t index, Graphs::Graph *esg) cons
     return chains;
 }
 
+std::vector<DependencyGraphs::SOChain::CPRole> DependencyGraphs::collect_cp_roles(
+        const DepGraph &g, Graphs::Graph *esg, vertex_t endpoint, bool isRead) {
+    std::vector<SOChain::CPRole> roles;
+    std::unordered_set<vertex_t> region{endpoint};
+    std::deque<vertex_t> work{endpoint};
+    std::vector<vertex_t> order;
+    const IR::Node *at = nullptr;
+    while (!work.empty()) {
+        auto v = work.front(); work.pop_front();
+        order.push_back(v);
+        const auto &vinfo = (*esg)[g[v].esgId.first];
+        if (at == nullptr && hasFlag(vinfo.flags, VertexFlags::SO_IDX)) at = vinfo.node;
+        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+            auto src = boost::source(*ei, g);
+            if (g[src].isSO || region.count(src)) continue;
+            if (!g[*ei].label.isNullOrEmpty() && g[*ei].type != DepEdgeType::CALL_TO_RET)
+                continue;
+            const auto &sinfo = (*esg)[g[src].esgId.first];
+            if (hasFlag(sinfo.flags, VertexFlags::CALL) && src != endpoint) {
+                auto [e, exists] = boost::edge(src, endpoint, g);
+                if (!exists || g[e].type != DepEdgeType::CALL_TO_RET) continue;
+            }
+            region.insert(src);
+            work.push_back(src);
+        }
+    }
+    if (at == nullptr) at = (*esg)[g[endpoint].esgId.first].node;
+    for (auto v : order) {
+        for (auto [ei, ee] = boost::in_edges(v, g); ei != ee; ++ei) {
+            const auto &label = g[*ei].label;
+            auto src = g[boost::source(*ei, g)].esgId;
+            if (label == "idx"_cs) {
+                roles.push_back({isRead ? SOChain::CPSlot::ReadIdx : SOChain::CPSlot::WriteIdx,
+                                 src, at});
+            } else if (label == "data"_cs && !isRead) {
+                roles.push_back({SOChain::CPSlot::WriteData, src, at});
+            }
+        }
+    }
+    return roles;
+}
+
 std::vector<DependencyGraphs::SOChain>
 DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                                           std::unordered_set<cstring> *soNames) const {
@@ -733,6 +775,8 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
 
     // Get SO chain for each (writeSO, so, readDst) pair
     for (auto [so, sources] : writeSources) {
+        std::map<vertex_t, std::vector<SOChain::CPRole>> writeRoles;
+        for (auto src : sources) writeRoles[src] = collect_cp_roles(g, esg, src, false);
         // 1. Collect paths for each write source through backward BFS.
         std::map<vertex_t, std::unordered_set<vertex_t>> writeVtx;
         std::map<vertex_t, vertex_t> updateReadDstToWriteSrc; // for detecting update SOs with same read/write vertex
@@ -818,6 +862,12 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                                                 std::move(writeVertices),
                                                 std::unordered_set<vertex_t>(), true, chainId++,
                                                 sinkDV));
+                    // The update reads the cell it writes: read index = write index
+                    auto &roles = chains.back().cpRoles;
+                    roles = writeRoles[writeSrc];
+                    for (const auto &r : writeRoles[writeSrc])
+                        if (r.slot == SOChain::CPSlot::WriteIdx)
+                            roles.push_back({SOChain::CPSlot::ReadIdx, r.src, r.at});
                 }
 
             // 2) Otherwise, create a multi-execution path: pure read x write paths
@@ -852,6 +902,7 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                 }
 
                 // 3. Emit one chain per (write call site × read call site) combination.
+                auto readRoles = collect_cp_roles(g, esg, readDst, true);
                 for (auto src : sources) {
                     std::vector<DependencyVertex> sinkDVs = findSinkDVs(readVtx);
                     for (const auto &sinkDV : sinkDVs) {
@@ -862,6 +913,9 @@ DependencyGraphs::get_data_write_so_chains(size_t index, Graphs::Graph *esg,
                                                     std::move(writeVertices),
                                                     std::move(readVertices),
                                                     false, chainId++, sinkDV));
+                        auto &roles = chains.back().cpRoles;
+                        roles = writeRoles[src];
+                        roles.insert(roles.end(), readRoles.begin(), readRoles.end());
                     }
                 }
             }

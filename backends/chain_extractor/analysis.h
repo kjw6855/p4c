@@ -196,6 +196,16 @@ void assemble_output_chains(const std::vector<Graph *> &graphs, const FindChains
 void annotate_hops(const FindChains &chains,
                    std::map<cstring, std::vector<DependencyGraphs::SOChain>> &byGraph);
 
+/// Append the action param @info accessed at @at to @list, unless already listed.
+void add_cp_source(std::vector<DependencyGraphs::SOChain::CPSource> &list,
+                   const GraphChainMaps::CPSourceInfo &info, const IR::Node *at);
+
+/// Cross-plane roles of the A2S chains of @byGraph (SOChain::cp): the action params reaching the
+/// write's data / index and the read's index, named by the chain pass. An add-on-miss table is
+/// read at its match key, so its readIdx is the params reaching that key.
+void annotate_cp(const FindChains &chains,
+                 std::map<cstring, std::vector<DependencyGraphs::SOChain>> &byGraph);
+
 }  // namespace P4::P4ChainExtractor
 
 #endif  // BACKENDS_CHAIN_EXTRACTOR_ANALYSIS_H_

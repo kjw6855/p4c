@@ -86,6 +86,30 @@ int intField(const JsonObject *obj, const char *key) {
     return n != nullptr ? static_cast<int>(*n) : 0;
 }
 
+/// Append the cross-plane sources listed under @key of the "cp" object @cpObj to @dst. An
+/// unresolved access position leaves CPSource::at null.
+void loadCPSources(const JsonObject *cpObj, const char *key, const PositionIndex &idx,
+                   std::vector<DependencyGraphs::SOChain::CPSource> &dst) {
+    const auto *f = field(cpObj, key);
+    const auto *arr = f != nullptr ? f->to<JsonVector>() : nullptr;
+    if (arr == nullptr) return;
+    for (const auto &val : *arr) {
+        const auto *so = val->to<JsonObject>();
+        if (so == nullptr) continue;
+        DependencyGraphs::SOChain::CPSource src;
+        const auto *tf = field(so, "tables");
+        if (const auto *tables = tf != nullptr ? tf->to<JsonVector>() : nullptr)
+            for (const auto &t : *tables)
+                if (const auto *str = t->to<JsonString>())
+                    src.tables.push_back(cstring(str->c_str()));
+        src.action = strField(so, "action");
+        src.param = strField(so, "param");
+        auto at = idx.byPos.find(strField(so, "at").string());
+        if (at != idx.byPos.end()) src.at = at->second;
+        dst.push_back(std::move(src));
+    }
+}
+
 std::map<cstring, std::vector<DependencyGraphs::SOChain>> resolveCategory(
     const JsonObject *catObj, const PositionIndex &idx, const std::string &path, bool &ok) {
     std::map<cstring, std::vector<DependencyGraphs::SOChain>> out;
@@ -153,6 +177,15 @@ std::map<cstring, std::vector<DependencyGraphs::SOChain>> resolveCategory(
                                                 boolField(pdo, "wp")});
                 }
             }
+            // A2S cross-plane roles (optional). Unresolved access positions are left null, like
+            // the parser pins: the roles stay usable by name.
+            if (const auto *cpObj = field(co, "cp") != nullptr ? field(co, "cp")->to<JsonObject>()
+                                                                : nullptr) {
+                chain.cp.soKind = strField(cpObj, "soKind");
+                loadCPSources(cpObj, "writeData", idx, chain.cp.writeData);
+                loadCPSources(cpObj, "writeIdx", idx, chain.cp.writeIdx);
+                loadCPSources(cpObj, "readIdx", idx, chain.cp.readIdx);
+            }
             // Output-chain hops (optional; only in the outk/outc categories).
             const auto *hopsField = field(co, "hops");
             const auto *hopsArr = hopsField != nullptr ? hopsField->to<JsonVector>() : nullptr;
@@ -183,6 +216,22 @@ std::map<cstring, std::vector<DependencyGraphs::SOChain>> loadCategory(
     bool &ok) {
     const auto *obj = field(root, name);
     return resolveCategory(obj != nullptr ? obj->to<JsonObject>() : nullptr, idx, path, ok);
+}
+
+/// JSON list of the cross-plane sources @list: {tables, action, param, at (position key)}.
+Util::JsonArray *cpSourcesToJson(const std::vector<DependencyGraphs::SOChain::CPSource> &list) {
+    auto *arr = new Util::JsonArray();
+    for (const auto &src : list) {
+        auto *so = new Util::JsonObject();
+        auto *tables = new Util::JsonArray();
+        for (const auto &t : src.tables) tables->append(t);
+        so->emplace("tables", tables);
+        so->emplace("action", src.action);
+        so->emplace("param", src.param);
+        so->emplace("at", cstring(posKey(src.at)));
+        arr->append(so);
+    }
+    return arr;
 }
 
 }  // namespace
@@ -243,6 +292,17 @@ void serializeChainCache(const StateDependencyResult &result, const std::string 
                 hops->append(h);
             }
             o->emplace("hops", hops);
+        }
+        // A2S cross-plane roles (optional/additive; absent for H2S chains and older caches).
+        if (!chain.cp.empty()) {
+            auto *cp = new Util::JsonObject();
+            cp->emplace("soKind", chain.cp.soKind);
+            cp->emplace("inconsistency", chain.cp.inconsistency());
+            cp->emplace("residual", chain.cp.residual());
+            cp->emplace("writeData", cpSourcesToJson(chain.cp.writeData));
+            cp->emplace("writeIdx", cpSourcesToJson(chain.cp.writeIdx));
+            cp->emplace("readIdx", cpSourcesToJson(chain.cp.readIdx));
+            o->emplace("cp", cp);
         }
         if (!chain.parserDeps.empty()) {
             auto *pd = new Util::JsonArray();

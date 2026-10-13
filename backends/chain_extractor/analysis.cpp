@@ -494,6 +494,15 @@ StateDependencyResult runStateDependencyAnalysis(const IR::P4Program *program,
         annotate_hops(*chains, result.dataWriteA2SOutCondChains);
     }
 
+    // Cross-plane roles of the A2S chains (see annotate_cp)
+    if (needAct) {
+        annotate_cp(*chains, result.dataWriteA2SKeyChains);
+        annotate_cp(*chains, result.dataWriteA2SCondChains);
+        annotate_cp(*chains, result.dataWriteA2SOutChains);
+        annotate_cp(*chains, result.dataWriteA2SOutCondChains);
+        annotate_cp(*chains, result.dataWriteA2SOutKeyChains);
+    }
+
     // Metrics (binary mode): distinct-SO name sets for the register report. The *2S2[KC] sets are
     // the SOs on a chain to that sink; allStatefulObjects (D_all) is every STATEFUL vertex.
     if (!graphsDir.empty()) {
@@ -745,6 +754,41 @@ void annotate_hops(const FindChains &chains,
                                       outActions != m.outputActions.end()
                                           ? outActions->second
                                           : std::vector<cstring>{}});
+            }
+        }
+    }
+}
+
+void add_cp_source(std::vector<DependencyGraphs::SOChain::CPSource> &list,
+                   const GraphChainMaps::CPSourceInfo &info, const IR::Node *at) {
+    for (const auto &s : list)
+        if (s.action == info.action && s.param == info.param && s.at == at) return;
+    list.push_back({info.tables, info.action, info.param, at});
+}
+
+void annotate_cp(const FindChains &chains,
+                 std::map<cstring, std::vector<DependencyGraphs::SOChain>> &byGraph) {
+    using SOChain = DependencyGraphs::SOChain;
+    for (auto &[graphName, graphChains] : byGraph) {
+        const auto &m = chains.maps(graphName);
+        for (auto &chain : graphChains) {
+            const auto *table = chain.soNode != nullptr ? chain.soNode->to<IR::P4Table>()
+                                                        : nullptr;
+            chain.cp.soKind = table != nullptr ? "addOnMiss"_cs : "register"_cs;
+            for (const auto &role : chain.cpRoles) {
+                auto info = m.cpSources.find(role.src);
+                if (info == m.cpSources.end()) continue;   // not an action param
+                auto &list = role.slot == SOChain::CPSlot::WriteData ? chain.cp.writeData
+                           : role.slot == SOChain::CPSlot::WriteIdx  ? chain.cp.writeIdx
+                                                                     : chain.cp.readIdx;
+                add_cp_source(list, info->second, role.at);
+            }
+            if (table == nullptr) continue;
+            auto keySeeds = m.aomKeySeeds.find(chain.soName);
+            if (keySeeds == m.aomKeySeeds.end()) continue;
+            for (const auto &seed : keySeeds->second) {
+                auto info = m.cpSources.find(seed);
+                if (info != m.cpSources.end()) add_cp_source(chain.cp.readIdx, info->second, table);
             }
         }
     }

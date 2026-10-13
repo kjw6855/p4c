@@ -33,6 +33,17 @@ struct GraphChainMaps {
     /// hash or a constant): access -> its read value. A control-plane update leaves the written
     /// state stale for every reader, so these reads start A2S second hops too (read_from only).
     IDEPass::DepEdgeMap aExtraReads;
+    /// Cross-plane source names (SOChain::cp): each action-param seed -> the tables calling its
+    /// action, the action and the param (control-plane names).
+    struct CPSourceInfo {
+        std::vector<cstring> tables;
+        cstring action;
+        cstring param;
+    };
+    std::map<Graphs::VarVertex, CPSourceInfo> cpSources;
+    /// Add-on-miss tables (control-plane name) -> the action-param seeds reaching their match key,
+    /// i.e. the index of the table's get_or_init read.
+    std::map<cstring, std::vector<Graphs::VarVertex>> aomKeySeeds;
     /// Stateful-object sink -> header (dst -> src), and its register-read seeds.
     IDEPass::DepEdgeMap h2s;
     std::vector<TabVertex> hStateVars;
@@ -156,8 +167,16 @@ class FindChains : public IDEPass {
     static void add_extra_read(Graph *g, hvec_set<TabVertex, TabVertexHash> &stateVars,
                                GraphChainMaps &m, Graphs::vertex_t access, Graphs::vertex_t node,
                                const IR::Node *var);
-    /// The tables (control-plane names) calling the action procedure of @seed, and the action,
-    /// computed once per action procedure into @cache.
+    /// Fill GraphChainMaps::cpSources and aomKeySeeds (@act: the Act domain index).
+    void collect_cp_sources(Tabulation *tab, const DomainSet &domains, size_t act,
+                            GraphChainMaps &m);
+    /// CFG procedure name of each table -> its control-plane name.
+    hvec_map<cstring, cstring> table_names(Tabulation *tab);
+    /// The tables (control-plane names) calling the action procedure of @seed, and the action.
+    std::pair<std::vector<cstring>, cstring> action_of(Tabulation *tab,
+                                                       const hvec_map<cstring, cstring> &tableName,
+                                                       const TabVertex &seed);
+    /// action_of(@seed), computed once per action procedure into @cache.
     const std::pair<std::vector<cstring>, cstring> &cached_action_of(
         Tabulation *tab, const hvec_map<cstring, cstring> &tableName,
         hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> &cache, const TabVertex &seed);

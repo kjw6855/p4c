@@ -7,6 +7,9 @@
 # at a param index. cross_plane_v1model.p4 writes a param as data and reads it at a header / constant
 # index. Each must give an a2s2k chain to its t_use_* table: a control-plane update leaves the written
 # state stale for every reader, whatever its index. H2S keeps requiring a header-reached read index.
+# A2S chains carry cross-plane roles (cp): inconsistency when a param reaches the written data
+# (inc/rad/hdr/const: set_v.v), residual when params reach the write and read indices (res/rmw:
+# set_slot.s). H2S chains carry none.
 #
 # Override the binary with P4CX_BIN=/path/to/p4c_chain_extractor.
 set -euo pipefail
@@ -45,6 +48,37 @@ checks = [
      bool(chains(v1, 'a2s2k', 'const_reg', 't_use_const', 'I'))),
     ('v1model h2s2k: no chain through a constant read index',
      not chains(v1, 'h2s2k', 'const_reg', 't_use_const', 'I')),
+]
+
+def names(lst):
+    return {(s['action'].split('.')[-1], s['param']) for s in lst}
+
+def cp_is(cache, so, sink, ctrl, kind, cfgTable, wd, wi, ri):
+    cs = chains(cache, 'a2s2k', so, sink, ctrl)
+    return bool(cs) and all(
+        c.get('cp', {}).get('soKind') == 'register' and
+        c['cp']['inconsistency'] == (kind == 'inc') and c['cp']['residual'] == (kind == 'res') and
+        names(c['cp']['writeData']) == wd and names(c['cp']['writeIdx']) == wi and
+        names(c['cp']['readIdx']) == ri and
+        all(s['tables'] == [f'{ctrl}.{cfgTable}'] and s['at']
+            for s in c['cp']['writeData'] + c['cp']['writeIdx'])
+        for c in cs)
+
+V, S = {('set_v', 'v')}, {('set_slot', 's')}
+checks += [
+    ('cp inc_reg: inconsistency, writeData set_v.v',
+     cp_is(tna, 'inc_reg', 't_use_inc', 'Ingress', 'inc', 't_cfg', V, set(), set())),
+    ('cp rad_reg: inconsistency through a body write, read at set_slot.s',
+     cp_is(tna, 'rad_reg', 't_use_rad', 'Ingress', 'inc', 't_cfg', V, set(), S)),
+    ('cp res_reg: residual, writeIdx = readIdx = set_slot.s',
+     cp_is(tna, 'res_reg', 't_use_res', 'Ingress', 'res', 't_slot', set(), S, S)),
+    ('cp rmw_reg: residual on the read-modify-write',
+     cp_is(tna, 'rmw_reg', 't_use_rmw', 'Ingress', 'res', 't_slot', set(), S, S)),
+    ('cp v1model hdr_reg / const_reg: inconsistency, writeData set_v.v',
+     cp_is(v1, 'hdr_reg', 't_use_hdr', 'I', 'inc', 't_cfg', V, set(), set()) and
+     cp_is(v1, 'const_reg', 't_use_const', 'I', 'inc', 't_cfg', V, set(), set())),
+    ('cp: H2S chains carry no cross-plane roles',
+     not any('cp' in c for cache in (tna, v1) for g in cache.get('h2s2k', {}).values() for c in g)),
 ]
 failed = [name for name, ok in checks if not ok]
 for name, ok in checks:

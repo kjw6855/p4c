@@ -412,15 +412,24 @@ void FindChains::add_extra_read(Graph *g, hvec_set<TabVertex, TabVertexHash> &st
     m.aExtraReads[{access, idxVar}].push_back({node, var});
 }
 
-const std::pair<std::vector<cstring>, cstring> &FindChains::cached_action_of(
-        Tabulation *tab, const hvec_map<cstring, cstring> &tableName,
-        hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> &cache, const TabVertex &seed) {
+hvec_map<cstring, cstring> FindChains::table_names(Tabulation *tab) {
     auto *g = tab->g;
-    auto *sgProp = tab->sgProp;
-    auto procName = sgProp->procOf[seed.node];
-    auto it = cache.find(procName);
-    if (it != cache.end()) return it->second;
-    auto src = sgProp->srcOf[procName];
+    hvec_map<cstring, cstring> tableName;
+    for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        if (!hasFlag(vinfo.flags, VertexFlags::TABLE) || !hasFlag(vinfo.flags, VertexFlags::ENTRY))
+            continue;
+        const auto *table = vinfo.node != nullptr ? vinfo.node->to<IR::P4Table>() : nullptr;
+        if (table != nullptr) tableName[tab->sgProp->procOf[*vit]] = table->controlPlaneName();
+    }
+    return tableName;
+}
+
+std::pair<std::vector<cstring>, cstring> FindChains::action_of(
+        Tabulation *tab, const hvec_map<cstring, cstring> &tableName, const TabVertex &seed) {
+    auto *g = tab->g;
+    auto procName = tab->sgProp->procOf[seed.node];
+    auto src = tab->sgProp->srcOf[procName];
     const auto *action = (*g)[src].node != nullptr ? (*g)[src].node->to<IR::P4Action>() : nullptr;
     std::pair<std::vector<cstring>, cstring> entry{
         {}, action != nullptr ? cstring(action->controlPlaneName()) : procName};
@@ -428,16 +437,60 @@ const std::pair<std::vector<cstring>, cstring> &FindChains::cached_action_of(
         auto t = tableName.find(caller);
         if (t != tableName.end()) entry.first.push_back(t->second);
     }
-    return cache.emplace(procName, entry).first->second;
+    return entry;
+}
+
+const std::pair<std::vector<cstring>, cstring> &FindChains::cached_action_of(
+        Tabulation *tab, const hvec_map<cstring, cstring> &tableName,
+        hvec_map<cstring, std::pair<std::vector<cstring>, cstring>> &cache, const TabVertex &seed) {
+    auto procName = tab->sgProp->procOf[seed.node];
+    auto it = cache.find(procName);
+    if (it != cache.end()) return it->second;
+    return cache.emplace(procName, action_of(tab, tableName, seed)).first->second;
+}
+
+void FindChains::collect_cp_sources(Tabulation *tab, const DomainSet &domains, size_t act,
+                                    GraphChainMaps &m) {
+    auto *g = tab->g;
+    auto tableName = table_names(tab);
+    for (const auto &seed : tab->sgProp->actionParams) {
+        auto [tables, action] = action_of(tab, tableName, seed);
+        // The control-plane (@name) name: the midend renames action params (e.g. v -> v_1)
+        cstring param;
+        if (const auto *decl = seed.var->to<IR::Declaration>())
+            param = decl->externalName();
+        else
+            param = cstring(seed.var->toString());
+        m.cpSources[{seed.node, seed.var}] = {std::move(tables), action, param};
+    }
+
+    // Add-on-miss tables: the action-param seeds reaching the match key (the get_or_init index)
+    for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
+        const auto &vinfo = (*g)[*vit];
+        if (!hasFlag(vinfo.flags, VertexFlags::TABLE) || !hasFlag(vinfo.flags, VertexFlags::ENTRY) ||
+                !hasFlag(vinfo.flags, VertexFlags::STATEFUL))
+            continue;
+        const auto *table = vinfo.node != nullptr ? vinfo.node->to<IR::P4Table>() : nullptr;
+        auto key = get_table_key(tab, *vit);
+        if (table == nullptr || !key.has_value()) continue;
+        auto &seeds = m.aomKeySeeds[table->controlPlaneName()];
+        for (const auto *use : (*g)[*key].useVars) {
+            auto value = tab->valueMap.find(TabVertex{*key, use});
+            if (value == tab->valueMap.end()) continue;
+            for (const auto &seed : domains.targets(*tab, value->second, act)) {
+                Graphs::VarVertex vv{seed.node, seed.var};
+                if (std::find(seeds.begin(), seeds.end(), vv) == seeds.end()) seeds.push_back(vv);
+            }
+        }
+    }
 }
 
 void FindChains::collect_hops(Tabulation *tab, const DomainSet &domains, size_t so,
                               size_t actSel, GraphChainMaps &m) {
     auto *g = tab->g;
-    auto *sgProp = tab->sgProp;
 
     // Tables: control-plane name, CFG order, register reads reaching the key, output actions
-    hvec_map<cstring, cstring> tableName;   // CFG procedure name -> control-plane name
+    auto tableName = table_names(tab);   // CFG procedure name -> control-plane name
     for (auto [vit, vend] = boost::vertices(*g); vit != vend; ++vit) {
         const auto &vinfo = (*g)[*vit];
         if (!hasFlag(vinfo.flags, VertexFlags::TABLE) || !hasFlag(vinfo.flags, VertexFlags::ENTRY))
@@ -445,7 +498,6 @@ void FindChains::collect_hops(Tabulation *tab, const DomainSet &domains, size_t 
         const auto *table = vinfo.node != nullptr ? vinfo.node->to<IR::P4Table>() : nullptr;
         if (table == nullptr) continue;
         auto name = table->controlPlaneName();
-        tableName[sgProp->procOf[*vit]] = name;
         m.tableOrder.emplace(name, m.tableOrder.size());
         auto key = get_table_key(tab, *vit);
         if (!key.has_value()) continue;
@@ -716,6 +768,7 @@ void FindChains::analyze_control_graph(Tabulation *tab) {
         if (solved && needAct && actIdx) {
             collect_body_writes(tab, domains, *actIdx, m);
             collect_extra_reads(tab, m);
+            collect_cp_sources(tab, domains, *actIdx, m);
         }
         m.hStateVars = collect_state_vars_from_dep_edges_src(g, sgProp, refMap, typeMap, m.h2s,
                                                              m.hStateVarMap, true);
