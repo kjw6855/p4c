@@ -2,10 +2,12 @@
  * --state-dep-sinks O fixture (TNA), used with cp_outvar_tna.txtpb. A register value is written
  * straight into an output variable (H2S2O); the attacker (protocol 17) overwrites the cell.
  *   reg_p -> ucast_egress_port   (ttl 1): the controller set reg_p[5] = 2
- *   reg_m -> mcast_grp_a         (ttl 2): the controller set reg_m[5] = 1; groups 1 and 2 both
- *                                         replicate to ports {1,2}, group 3 to {3}
- * With --state-tamper-value 3 both chains change where the victim's packet goes; with 2 the unicast
- * chain does (port 2 -> 2? no: the value IS 2) -- see cp_outsinks_test.sh.
+ *   reg_m -> mcast_grp_b         (ttl 2): the controller set reg_m[5] = 1; groups 1 and 2 both
+ *                                         replicate to ports {1,2}, group 3 to {3}; the
+ *                                         packet also carries mcast_grp_a = 128, a group the
+ *                                         snapshot never creates, so it adds no replica port
+ * With --state-tamper-value 3 both chains change where the victim's packet goes; with 2 neither
+ * does (port 2 stays 2, group 2 = group 1's ports) -- see cp_outsinks_test.sh.
  */
 #include <core.p4>
 #include <tna.p4>
@@ -66,7 +68,8 @@ control Ingress(inout headers_t hdr, inout ig_metadata_t ig_md,
                 ig_tm_md.ucast_egress_port = (PortId_t)ig_md.p;
             } else if (hdr.ipv4.ttl == 2) {
                 ig_md.m = read_m.execute(idx);
-                ig_tm_md.mcast_grp_a = ig_md.m;
+                ig_tm_md.mcast_grp_a = 16w128;
+                ig_tm_md.mcast_grp_b = ig_md.m;
             }
         }
     }

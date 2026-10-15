@@ -1642,18 +1642,24 @@ std::string StateDependencyTracker::outputSignature(const FinalState *fs) const 
     int port = -1;
     evalDisposition(fs, dropped, port, nullptr);
     if (dropped) return "drop";
-    if (const int mgid = evalMulticastGroup(fs); mgid >= 0) {
+    const auto mgids = evalMulticastGroups(fs);
+    if (mgids.empty()) return "port:" + std::to_string(port);
+    if (const auto *snap = loadedCpSnapshot(); snap != nullptr) {
         // Two groups that replicate to the same ports send the packet to the same place.
-        if (const auto *snap = loadedCpSnapshot(); snap != nullptr) {
-            if (auto ports = snap->multicastPorts(mgid); ports.has_value()) {
-                std::string out = "ports:";
-                for (int p : *ports) out += std::to_string(p) + ",";
-                return out;
+        std::set<int> ports;
+        for (int mgid : mgids) {
+            if (auto groupPorts = snap->multicastPorts(mgid); groupPorts.has_value()) {
+                ports.insert(groupPorts->begin(), groupPorts->end());
             }
         }
-        return "mcast:" + std::to_string(mgid);
+        if (ports.empty()) return "drop";
+        std::string out = "ports:";
+        for (int p : ports) out += std::to_string(p) + ",";
+        return out;
     }
-    return "port:" + std::to_string(port);
+    std::string out = "mcast:";
+    for (size_t i = 0; i < mgids.size(); ++i) out += (i ? "," : "") + std::to_string(mgids[i]);
+    return out;
 }
 
 bool StateDependencyTracker::outputPortGateRejects(const FinalState *fs1, const FinalState *fs3,
@@ -1669,6 +1675,18 @@ bool StateDependencyTracker::outputPortGateRejects(const FinalState *fs1, const 
               "(--diverge-output PORT); skipping.",
               chain.id, chain.soName, before);
     return true;
+}
+
+std::vector<int> StateDependencyTracker::evalMulticastGroups(const FinalState *fs) const {
+    const auto *es = fs->getExecutionState();
+    std::vector<int> out;
+    for (const auto *mcastVar : programInfo.getMulticastGroupVars()) {
+        const auto *mcastExpr = es->get(*mcastVar);
+        if (mcastExpr == nullptr || Taint::hasTaint(mcastExpr)) continue;
+        int mgid = IR::getIntFromLiteral(fs->getFinalModel().evaluate(mcastExpr, true));
+        if (mgid != 0) out.push_back(mgid);
+    }
+    return out;
 }
 
 int StateDependencyTracker::evalMulticastGroup(const FinalState *fs) const {
@@ -5017,12 +5035,17 @@ size_t StateDependencyTracker::runConditionChain(
                 // An output sink takes the register value as is, so what moves the packet is the
                 // attacker's VALUE. Replay Phase 1 over its own state with the attacker's write set
                 // to each candidate in turn: --state-tamper-value first, then -- under a snapshot --
-                // every destination the deployment knows (topology ports, multicast groups), then 0
-                // and 1. The first value that moves the victim's packet is the one emitted.
+                // every destination the deployment knows (topology ports, multicast groups) and the
+                // first key values its rules match on (a register may hold an address that a
+                // forwarding table routes), then 0 and 1. The first value that moves the victim's
+                // packet is the one emitted.
+                constexpr size_t kOutputKeyCandidates = 32;
                 std::vector<std::optional<big_int>> candidates = {
                     SymbexOptions::get().stateTamperValue};
                 if (const auto *snap = loadedCpSnapshot(); snap != nullptr) {
                     for (int target : snap->outputTargets()) candidates.emplace_back(target);
+                    for (const auto &value : snap->ruleKeyValues(kOutputKeyCandidates))
+                        candidates.emplace_back(value);
                 }
                 candidates.emplace_back(0);
                 candidates.emplace_back(1);

@@ -319,6 +319,20 @@ std::set<int> CpSnapshot::outputTargets() const {
     return out;
 }
 
+std::vector<big_int> CpSnapshot::ruleKeyValues(size_t cap) const {
+    std::vector<big_int> out;
+    std::set<big_int> seen;
+    for (const auto &[_, table] : tables_) {
+        for (const auto &rule : table.rules) {
+            for (const auto &[__, key] : rule.keys) {
+                if (out.size() >= cap) return out;
+                if (key.value != 0 && seen.insert(key.value).second) out.push_back(key.value);
+            }
+        }
+    }
+    return out;
+}
+
 std::optional<std::set<int>> CpSnapshot::multicastPorts(int mgid) const {
     auto it = multicastPorts_.find(mgid);
     if (it == multicastPorts_.end()) return std::nullopt;

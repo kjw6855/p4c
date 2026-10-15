@@ -9,7 +9,8 @@
 #   outc.neg    accum_threshold_tna, OUTC, PORT: the program drops before and after the flip, so the
 #               gate rejects it (the same flip IS a finding for plain C runs)
 #   o.move      cp_outvar_tna (+snapshot), O, attacker value 3: the register value IS the egress port
-#               (2 -> 3) or the multicast group (group 1 = ports {1,2} -> group 3 = {3}): odiv cases
+#               (2 -> 3) or the multicast group (group 1 = ports {1,2} -> group 3 = {3}): odiv cases;
+#               mcast_grp_b = 128, which the snapshot's PRE lacks, adds no port to either side
 #   o.same      same with attacker value 2: port 2 stays 2, and group 2 replicates to the same ports
 #               {1,2} as group 1 (resolved through the snapshot's PRE), so value 2 moves nothing; the
 #               other candidates (snapshot ports and groups, 0, 1) do, and no case keeps the

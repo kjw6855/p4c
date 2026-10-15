@@ -92,6 +92,11 @@ class CpSnapshot {
     /// deployment knows, i.e. the values an attacker steering an output variable would write.
     [[nodiscard]] std::set<int> outputTargets() const;
 
+    /// The distinct non-zero key values of the snapshot's rules (exact, optional, LPM and ternary
+    /// values, range low bounds), at most @p cap, in table-name then rule order: the values the
+    /// deployed rules match on, e.g. the addresses a forwarding table routes.
+    [[nodiscard]] std::vector<big_int> ruleKeyValues(size_t cap) const;
+
     /// The parsed message, for emitting the snapshot block into a test file.
     [[nodiscard]] const symbex::CpSnapshot &proto() const { return *proto_; }
 
