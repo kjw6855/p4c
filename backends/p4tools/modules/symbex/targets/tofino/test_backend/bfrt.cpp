@@ -36,6 +36,7 @@
 #include "ir/ir.h"
 #include "lib/log.h"
 
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/lib/test_backend_configuration.h"
@@ -421,6 +422,9 @@ metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=r
 ## if length(tamper_case) > 0
 metadata: "Tamper case: {{tamper_case}}"
 ## endif
+## if length(register_knowledge) > 0
+metadata: "Register knowledge: {{register_knowledge}}"
+## endif
 
 # --- Phase 1 (read) symbex trace ---
 ## for trace_item in trace
@@ -694,6 +698,7 @@ inja::json BfRt::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     // expected output so the test asserts a concrete Phase-1 ≠ Phase-3 deviation.
     dataJson["phase3_send"] = getSend(testSpec->spec1);
     dataJson["tamper_case"] = testSpec->caseLabel.c_str();
+    dataJson["register_knowledge"] = testSpec->registerKnowledge.c_str();
 
     // Emit affected_register entries for each attacker-chosen write in Phase 2.
     inja::json affectedRegsJson = inja::json::array();
@@ -787,6 +792,8 @@ void BfRt::writeTestToFile(const TamperingTestSpec *testSpec, cstring selectedBr
     incrementedBasePath.replace_extension(".txtpb");
     auto fileStream = std::ofstream(incrementedBasePath);
     inja::render_to(fileStream, getTamperingTestCaseTemplate(), dataJson);
+    // --cp-snapshot: the deployed state the harness installs once, before Phase 1.
+    fileStream << cpSnapshotTxtpbBlock(/*bfrt=*/true);
     fileStream.flush();
 }
 

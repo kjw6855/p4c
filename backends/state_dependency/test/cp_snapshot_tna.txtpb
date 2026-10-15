@@ -1,0 +1,76 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# Hand-written --cp-snapshot for cp_snapshot_tna.p4 (BfRt names, as dump_bfrt.py writes them).
+program: "cp_snapshot_tna"
+target: "tofino"
+snapshot_id: "fixture"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+# Keyless cfg: the controller's default opens the stateful path.
+bfrt_entities {
+  table_name: "pipe.Ingress.cfg"
+  action_name: "Ingress.set_mode"
+  data { field_name: "m" value: "\x07" }
+  is_default_entry: true
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.sink_tbl"
+  action_name: "Ingress.fwd"
+  key { field_name: "ig_md.state" exact { value: "\x08\x00" } }
+  data { field_name: "port" value: "\x00\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.sink_tbl"
+  action_name: "Ingress.drop"
+  is_default_entry: true
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.state_reg"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x05" } }
+  data { field_name: "Ingress.state_reg.f1" value: "\x08\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.gate_reg"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x00" } }
+  data { field_name: "Ingress.gate_reg.f1" value: "\x40" }
+}
+# Keyset forms and order. BfRt: the SMALLER priority wins, so the second rule must come first.
+bfrt_entities {
+  table_name: "pipe.Ingress.pri_tbl"
+  action_name: "Ingress.mark"
+  key { field_name: "hdr.ipv4.ttl" ternary { value: "\x40" mask: "\xff" } }
+  key { field_name: "hdr.ipv4.$valid" exact { value: "\x01" } }
+  priority: 10
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.pri_tbl"
+  action_name: "NoAction"
+  key { field_name: "hdr.ipv4.ttl" ternary { value: "\x00" mask: "\x0f" } }
+  key { field_name: "hdr.ipv4.$valid" exact { value: "\x01" } }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.lpm_tbl"
+  action_name: "Ingress.mark"
+  key { field_name: "hdr.ipv4.dst_addr" lpm { value: "\x0a\x00\x00\x00" prefix_len: 8 } }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.rng_tbl"
+  action_name: "Ingress.mark"
+  key { field_name: "hdr.ipv4.total_len" range { low: "\x00\x64" high: "\x00\xc8" } }
+}
+# Replay-only state: carried into the cases, ignored by symbex (no "matches no table" warning).
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x00\x01" } }
+  data { field_name: "$ucast_egress_port" value: "\x00\x03" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x00\x01" } }
+  data { field_name: "$MULTICAST_NODE_ID" value: "\x00\x01" }
+}

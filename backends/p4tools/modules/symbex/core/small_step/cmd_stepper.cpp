@@ -35,6 +35,7 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
 #include "backends/p4tools/modules/symbex/lib/collect_coverable_nodes.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
@@ -316,6 +317,25 @@ bool CmdStepper::preorder(const IR::P4Program * /*program*/) {
             BUG_CHECK(portRangeCond.has_value(), "Port range constraint has no value.");
             cond = new IR::LAnd(cond.value(), portRangeCond.value());
         }
+    }
+
+    // --cp-snapshot topology: the victim (Phases 1 and 3) enters on a HOST port and the attacker
+    // (Phase 2) on an ATTACKER port. The tampering tracker sets the role per phase.
+    const auto role = SymbexOptions::get().cpSnapshotPortRole;
+    if (const auto *snapshot = loadedCpSnapshot();
+        snapshot != nullptr && snapshot->hasTopology() &&
+        role != SymbexOptions::SnapshotPortRole::None) {
+        const auto &inputPortVar = programInfo.getTargetInputPortVar();
+        const auto &ports = role == SymbexOptions::SnapshotPortRole::Host
+                                ? snapshot->hostPorts()
+                                : snapshot->attackerPorts();
+        const IR::Expression *roleCond = IR::BoolLiteral::get(false);
+        for (int port : ports) {
+            roleCond = new IR::LOr(roleCond,
+                                   new IR::Equ(inputPortVar, IR::Constant::get(inputPortVar->type,
+                                                                               port)));
+        }
+        cond = cond == std::nullopt ? roleCond : new IR::LAnd(cond.value(), roleCond);
     }
 
     // If this option is active, mandate that all packets must be larger than a minimum size.

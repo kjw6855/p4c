@@ -48,6 +48,7 @@
 
 #include "backends/p4tools/modules/symbex/core/extern_info.h"
 #include "backends/p4tools/modules/symbex/core/small_step/small_step.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
@@ -555,8 +556,30 @@ const SharedTofinoExprStepper::ExternMethodImpls<SharedTofinoExprStepper>::Metho
 
         if (canConfigure) {
             CHECK_NULL(registerExpr);
-            const auto *registerValue = new TofinoRegisterValue(
-                externInstance->checkedTo<IR::Declaration_Instance>(), registerExpr, index);
+            const auto *decl = externInstance->checkedTo<IR::Declaration_Instance>();
+            auto *registerValue = new TofinoRegisterValue(decl, registerExpr, index);
+            if (registerState != nullptr) {
+                registerValue->setBaseCells(
+                    registerState->checkedTo<TofinoRegisterValue>()->getBaseCells());
+            } else if (index != nullptr) {
+                // --cp-snapshot: the first read sees the deployed cells, in every phase: a cell the
+                // controller set is known state, not a zero (Phase 1) or free (Phase 2) guess.
+                seedRegisterFromSnapshot(*registerValue, nextState, decl->controlPlaneName(),
+                                         index->type, registerParamRef->type);
+                if (!registerValue->getBaseCells().empty()) {
+                    const auto *seeded = registerValue->getBaseValueAtIndex(index);
+                    if (const auto *seededStruct = seeded->to<IR::StructExpression>()) {
+                        std::vector<IR::StateVariable> validFields;
+                        const auto fields = nextState.getFlatFields(registerParamRef, &validFields);
+                        for (size_t idx = 0; idx < fields.size(); ++idx) {
+                            nextState.set(fields.at(idx),
+                                          seededStruct->components.at(idx)->expression);
+                        }
+                    } else {
+                        nextState.set(registerParamRef, seeded);
+                    }
+                }
+            }
             nextState.addTestObject("registervalues"_cs, externInstance->toString(), registerValue);
         }
         std::vector<Continuation::Command> replacements;
@@ -1001,6 +1024,8 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
                                       ToolsVariables::getSymbolicVariable(valueType, regName));
                  }
                  auto *registerValue = new TofinoRegisterValue(decl, init, index);
+                 seedRegisterFromSnapshot(*registerValue, nextState, decl->controlPlaneName(),
+                                          index->type, valueType);
                  nextState.addTestObject("registervalues"_cs, regName, registerValue);
                  readValue = registerValue->getValueAtIndex(index);
              }
@@ -1027,6 +1052,8 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
              } else {
                  registerValue =
                      new TofinoRegisterValue(decl, IR::Constant::get(valueType, 0), index);
+                 seedRegisterFromSnapshot(*registerValue, nextState, decl->controlPlaneName(),
+                                          index->type, valueType);
              }
              registerValue->writeToIndex(index, value);
              nextState.addTestObject("registervalues"_cs, regName, registerValue);
@@ -1061,7 +1088,14 @@ const ExprStepper::ExternMethodImpls<SharedTofinoExprStepper>
              if (testObject != nullptr) {
                  returnVal = testObject->checkedTo<TofinoRegisterParam>()->getInitialValue();
              } else {
-                 returnVal = ToolsVariables::getSymbolicVariable(returnType, externName);
+                 // --cp-snapshot: a run-time parameter the controller set holds that value.
+                 std::vector<const IR::Expression *> pins;
+                 returnVal =
+                     snapshotRegisterParam(externInstance->controlPlaneName(), returnType, pins);
+                 for (const auto *pin : pins) nextState.pushPathConstraint(pin);
+                 if (returnVal == nullptr) {
+                     returnVal = ToolsVariables::getSymbolicVariable(returnType, externName);
+                 }
                  auto *registerParam = new TofinoRegisterParam(
                      externInstance->checkedTo<IR::Declaration_Instance>(), returnVal);
                  nextState.addTestObject("registerparams"_cs, externName, registerParam);

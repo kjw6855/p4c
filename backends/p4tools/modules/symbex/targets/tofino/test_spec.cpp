@@ -96,8 +96,31 @@ std::optional<big_int> IndexMap::getCarriedScalarValue() const {
     return std::nullopt;
 }
 
+const IR::Expression *IndexMap::getBaseValueAtIndex(const IR::Expression *index) const {
+    if (baseCells.empty()) return initialValue;
+    if (const auto *init = initialValue->to<IR::StructExpression>()) {
+        IR::IndexedVector<IR::NamedExpression> fields;
+        for (size_t i = 0; i < init->components.size(); i++) {
+            const auto *field = init->components.at(i);
+            const IR::Expression *value = field->expression;
+            for (const auto &[cellIndex, cellValue] : baseCells) {
+                const auto *cv = cellValue->checkedTo<IR::StructExpression>()->components.at(i);
+                value = new IR::Mux(value->type, new IR::Equ(cellIndex, index), cv->expression,
+                                    value);
+            }
+            fields.push_back(new IR::NamedExpression(field->name, value));
+        }
+        return new IR::StructExpression(init->type, init->structType, fields);
+    }
+    const IR::Expression *value = initialValue;
+    for (const auto &[cellIndex, cellValue] : baseCells) {
+        value = new IR::Mux(value->type, new IR::Equ(cellIndex, index), cellValue, value);
+    }
+    return value;
+}
+
 const IR::Expression *IndexMap::getValueAtIndex(const IR::Expression *index) const {
-    const IR::Expression *baseExpr = initialValue;
+    const IR::Expression *baseExpr = getBaseValueAtIndex(index);
     for (const auto &indexMap : indexConditions) {
         const auto *storedIndex = indexMap.getIndex();
         const auto *storedVal = indexMap.getValue();
@@ -141,7 +164,9 @@ const TofinoRegisterValue *TofinoRegisterValue::evaluate(const Model &model,
         evaluatedValue = model.evaluate(initialValue, doComplete);
     }
     const auto *evaluatedInitialIndex = model.evaluate(initialIndex, doComplete);
-    return new TofinoRegisterValue(decl, evaluatedValue, evaluatedInitialIndex);
+    auto *evaluatedRegister = new TofinoRegisterValue(decl, evaluatedValue, evaluatedInitialIndex);
+    evaluatedRegister->setBaseCells(baseCells);
+    return evaluatedRegister;
 }
 
 const TestObject *TofinoRegisterValue::evaluateForCarry(const Model &model) const {
@@ -153,6 +178,13 @@ const TestObject *TofinoRegisterValue::evaluateForCarry(const Model &model) cons
     // carrying the post-write value a later phase must read.
     const IR::Expression *finalValue = initialValue;
     const auto *evalIndex = model.evaluate(initialIndex, /*doComplete=*/true);
+    // An unwritten cell holds its --cp-snapshot value (base cells are constants).
+    if (const auto *evalConst = evalIndex->to<IR::Constant>()) {
+        for (const auto &[cellIndex, cellValue] : baseCells) {
+            const auto *cellConst = cellIndex->to<IR::Constant>();
+            if (cellConst != nullptr && cellConst->value == evalConst->value) finalValue = cellValue;
+        }
+    }
     for (const auto &cond : indexConditions) {
         const auto *condIndex = model.evaluate(cond.getIndex(), /*doComplete=*/true);
         if (condIndex->equiv(*evalIndex)) {
@@ -165,13 +197,17 @@ const TestObject *TofinoRegisterValue::evaluateForCarry(const Model &model) cons
     } else {
         evaluatedValue = model.evaluate(finalValue, /*doComplete=*/true);
     }
-    return new TofinoRegisterValue(decl, evaluatedValue, evalIndex);
+    auto *carried = new TofinoRegisterValue(decl, evaluatedValue, evalIndex);
+    carried->setBaseCells(baseCells);
+    return carried;
 }
 
 const TestObject *TofinoRegisterValue::withCarriedScalarValue(big_int value) const {
     // initialValue is the post-carry folded constant; replace it with a constant of the same width.
     const auto *valueType = initialValue->type;
-    return new TofinoRegisterValue(decl, IR::Constant::get(valueType, value), initialIndex);
+    auto *carried = new TofinoRegisterValue(decl, IR::Constant::get(valueType, value), initialIndex);
+    carried->setBaseCells(baseCells);
+    return carried;
 }
 
 bool TofinoRegisterValue::hasTaintedIndex() const {
@@ -267,6 +303,7 @@ AttackerControlResult TofinoRegisterValue::withAttackerValues(
     const Model &model, std::optional<big_int> fixedValue,
     const std::vector<big_int> &forbiddenValues) const {
     auto *randReg = new TofinoRegisterValue(decl, getInitialValue(), initialIndex);
+    randReg->setBaseCells(baseCells);
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
     bool feasible = true;
     auto isForbidden = [&](const big_int &v) {

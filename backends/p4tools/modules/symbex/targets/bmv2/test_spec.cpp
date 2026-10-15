@@ -76,8 +76,31 @@ void IndexMap::writeToIndex(const IR::Expression *index, const IR::Expression *v
 
 const IR::Expression *IndexMap::getInitialValue() const { return initialValue; }
 
+const IR::Expression *IndexMap::getBaseValueAtIndex(const IR::Expression *index) const {
+    if (baseCells.empty()) return initialValue;
+    if (const auto *init = initialValue->to<IR::StructExpression>()) {
+        IR::IndexedVector<IR::NamedExpression> fields;
+        for (size_t i = 0; i < init->components.size(); i++) {
+            const auto *field = init->components.at(i);
+            const IR::Expression *value = field->expression;
+            for (const auto &[cellIndex, cellValue] : baseCells) {
+                const auto *cv = cellValue->checkedTo<IR::StructExpression>()->components.at(i);
+                value = new IR::Mux(value->type, new IR::Equ(cellIndex, index), cv->expression,
+                                    value);
+            }
+            fields.push_back(new IR::NamedExpression(field->name, value));
+        }
+        return new IR::StructExpression(init->type, init->structType, fields);
+    }
+    const IR::Expression *value = initialValue;
+    for (const auto &[cellIndex, cellValue] : baseCells) {
+        value = new IR::Mux(value->type, new IR::Equ(cellIndex, index), cellValue, value);
+    }
+    return value;
+}
+
 const IR::Expression *IndexMap::getValueAtIndex(const IR::Expression *index) const {
-    const IR::Expression *baseExpr = initialValue;
+    const IR::Expression *baseExpr = getBaseValueAtIndex(index);
     for (const auto &indexMap : indexConditions) {
         const auto *storedIndex = indexMap.getIndex();
         const auto *storedVal = indexMap.getValue();
@@ -137,6 +160,7 @@ const Bmv2V1ModelRegisterValue *Bmv2V1ModelRegisterValue::evaluate(const Model &
     const auto *evaluatedIndex =
         initialIndex != nullptr ? model.evaluate(initialIndex, doComplete) : nullptr;
     auto *evaluatedRegisterValue = new Bmv2V1ModelRegisterValue(evaluatedValue, evaluatedIndex);
+    evaluatedRegisterValue->setBaseCells(baseCells);
     for (const auto &cond : indexConditions) {
         const auto *evaluatedCond = cond.evaluate(model, doComplete);
         evaluatedRegisterValue->writeToIndex(evaluatedCond->getEvaluatedIndex(),
@@ -154,17 +178,24 @@ const TestObject *Bmv2V1ModelRegisterValue::evaluateForCarry(const Model &model)
     // the tampering case — read back exactly the written value; multi-index registers
     // collapse to the last write, which is sufficient for the gating reads we steer.)
     const IR::Expression *finalValue = getInitialValue();
+    // An unwritten cell holds its --cp-snapshot value (base cells are constants).
+    if (initialIndex != nullptr && !baseCells.empty()) {
+        finalValue = model.evaluate(getBaseValueAtIndex(initialIndex), /*doComplete=*/true);
+    }
     if (!indexConditions.empty()) {
         finalValue = indexConditions.back().getValue();
     }
     const auto *evaluatedValue = model.evaluate(finalValue, /*doComplete=*/true);
-    return new Bmv2V1ModelRegisterValue(evaluatedValue);
+    auto *carried = new Bmv2V1ModelRegisterValue(evaluatedValue);
+    carried->setBaseCells(baseCells);
+    return carried;
 }
 
 AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
     const Model &model, std::optional<big_int> fixedValue,
     const std::vector<big_int> &forbiddenValues) const {
     auto *randReg = new Bmv2V1ModelRegisterValue(getInitialValue());
+    randReg->setBaseCells(baseCells);
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
     bool feasible = true;
     auto isForbidden = [&](const big_int &v) {

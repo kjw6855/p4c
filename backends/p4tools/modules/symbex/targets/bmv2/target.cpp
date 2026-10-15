@@ -14,6 +14,7 @@
 #include "lib/ordered_map.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
@@ -60,6 +61,16 @@ CompilerResultOrError Bmv2V1ModelSymbexTarget::runCompilerImpl(
     program = runMidEnd(options, program);
     if (program == nullptr) {
         return std::nullopt;
+    }
+
+    // --cp-snapshot: the captured control-plane state, as closed-world const entries. bmv2
+    // register entries name their register by P4Runtime id, so bind the P4Info first.
+    if (auto *snapshot = loadedCpSnapshot(); snapshot != nullptr) {
+        snapshot->bindP4Info(*p4runtimeApi.p4Info);
+        program = program->apply(ApplyCpSnapshot(*snapshot));
+        if (errorCount() > 0) {
+            return std::nullopt;
+        }
     }
 
     // Create DCG.

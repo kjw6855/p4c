@@ -157,6 +157,19 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// => behaviour is exactly as before. Hard-errors if the file is missing or unparseable.
     std::optional<std::string> cpAnnotationPath;
 
+    /// --cp-snapshot files: control-plane state captured from a running target (symbex.CpSnapshot
+    /// textproto). The state replaces the symbolic control plane: every non-const table gets the
+    /// snapshot's entries and default action as const properties (closed world), registers start
+    /// from the snapshot cells, and port roles constrain where victim and attacker packets enter.
+    /// A vector so that a snapshot sequence can be accepted later; only one file is allowed today.
+    std::vector<std::string> cpSnapshotPaths;
+
+    /// Port role the input port must have in the phase being executed under --cp-snapshot:
+    /// HOST for the victim (Phases 1 and 3), ATTACKER for the attacker (Phase 2). Set by the
+    /// tampering tracker per phase; unset outside tampering or without a snapshot topology.
+    enum class SnapshotPortRole { None, Host, Attacker };
+    SnapshotPortRole cpSnapshotPortRole = SnapshotPortRole::None;
+
     /// When set, write a per-sink control-plane report to this JSON path during tampering
     /// generation: each chain sink with its action list, const-entry status and key-space coverage,
     /// which actions are observably distinct from the default, and a pre-filled `assume` skeleton

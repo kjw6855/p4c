@@ -12,6 +12,8 @@ set(SYMBEX_DRIVER "${CMAKE_CURRENT_BINARY_DIR}/p4symbex")
 
 get_filename_component(p4symbex_proto_path "./targets/bmv2/proto" ABSOLUTE)
 set(p4symbex_proto "${p4symbex_proto_path}/p4symbex.proto")
+get_filename_component(p4symbex_bfrt_proto_path "./targets/tofino/proto" ABSOLUTE)
+set(p4symbex_bfrt_proto "${p4symbex_bfrt_proto_path}/p4symbex_bfrt.proto")
 set(p4runtime_proto_path "${P4RUNTIME_STD_DIR}")
 set(p4runtime_cp_path "${P4C_SOURCE_DIR}/control-plane")
 
@@ -19,6 +21,8 @@ set(p4symbex_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4symbex.grpc.pb.cc")
 set(p4symbex_grpc_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4symbex.grpc.pb.h")
 set(p4symbex_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4symbex.pb.cc")
 set(p4symbex_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4symbex.pb.h")
+set(p4symbex_bfrt_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/p4symbex_bfrt.pb.cc")
+set(p4symbex_bfrt_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/p4symbex_bfrt.pb.h")
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/p4runtime")
 add_custom_target(link_target ALL
@@ -28,17 +32,24 @@ add_custom_target(link_target ALL
 
 add_custom_command(
       OUTPUT "${p4symbex_proto_srcs}" "${p4symbex_proto_hdrs}" "${p4symbex_grpc_srcs}" "${p4symbex_grpc_hdrs}"
+             "${p4symbex_bfrt_proto_srcs}" "${p4symbex_bfrt_proto_hdrs}"
       COMMAND "${Protobuf_PROTOC_EXECUTABLE}"
       ARGS --grpc_out "${CMAKE_CURRENT_BINARY_DIR}"
         --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
         -I "${p4symbex_proto_path}"
+        -I "${p4symbex_bfrt_proto_path}"
         -I "${P4RUNTIME_STD_DIR}"
         -I "${p4runtime_cp_path}"
         -I "${protobuf_SOURCE_DIR}/src"
         --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
         "${p4symbex_proto}"
+      COMMAND "${Protobuf_PROTOC_EXECUTABLE}"
+      ARGS --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
+        -I "${p4symbex_bfrt_proto_path}"
+        "${p4symbex_bfrt_proto}"
       DEPENDS
         ${p4symbex_proto}
+        ${p4symbex_bfrt_proto}
         ${P4RUNTIME_STD_DIR}/p4/v1/p4runtime.proto
       COMMENT "Generating proto files at ${CMAKE_CURRENT_BINARY_DIR} by using ${Protobuf_PROTOC_EXECUTABLE}, depending ${p4runtime_SOURCE_DIR}, and importing ${p4symbex_proto_path}, ${P4RUNTIME_STD_DIR}, and ${p4runtime_cp_path}")
 
@@ -63,6 +74,7 @@ set(
   core/small_visit/table_visitor.cpp
   core/small_visit/small_visit.cpp
   core/symbolic_executor/cp_annotation.cpp
+  core/symbolic_executor/cp_snapshot.cpp
   core/symbolic_executor/depth_first.cpp
   core/symbolic_executor/selected_branches.cpp
   core/symbolic_executor/sink_divergence.cpp
@@ -96,6 +108,8 @@ set(
   ${p4symbex_proto_hdrs}
   ${p4symbex_grpc_srcs}
   ${p4symbex_grpc_hdrs}
+  ${p4symbex_bfrt_proto_srcs}
+  ${p4symbex_bfrt_proto_hdrs}
 )
 
 # GTest source files for symbex.

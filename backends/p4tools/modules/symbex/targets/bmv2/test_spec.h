@@ -72,6 +72,10 @@ class IndexMap : public TestObject {
     /// Each element is an API name paired with a match rule.
     std::vector<IndexExpression> indexConditions;
 
+    /// --cp-snapshot cells (index, value) the register held before any packet: a read of an
+    /// unwritten cell falls back to these before initialValue. Constant, so carries keep them.
+    std::vector<std::pair<const IR::Expression *, const IR::Expression *>> baseCells;
+
  public:
     explicit IndexMap(const IR::Expression *initialValue);
 
@@ -80,6 +84,19 @@ class IndexMap : public TestObject {
 
     /// @returns the value with which this register has been initialized.
     [[nodiscard]] const IR::Expression *getInitialValue() const;
+
+    /// Seed the --cp-snapshot cells (see baseCells).
+    void setBaseCells(std::vector<std::pair<const IR::Expression *, const IR::Expression *>> cells) {
+        baseCells = std::move(cells);
+    }
+    [[nodiscard]] const std::vector<std::pair<const IR::Expression *, const IR::Expression *>> &
+    getBaseCells() const {
+        return baseCells;
+    }
+
+    /// @returns the value of @p index before any write: the matching snapshot base cell, else the
+    /// initial value. Struct values are selected field by field.
+    [[nodiscard]] const IR::Expression *getBaseValueAtIndex(const IR::Expression *index) const;
 
     /// @returns the current value of this register after writes have been performed according to a
     /// provided index.

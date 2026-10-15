@@ -19,6 +19,7 @@
 #include "backends/p4tools/modules/symbex/lib/final_state.h"
 #include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
+#include "backends/p4tools/modules/symbex/options.h"
 
 namespace P4::P4Tools::Symbex {
 
@@ -134,6 +135,10 @@ struct TamperingFinalState {
     /// Empty for the HIT/MISS kinds, which describe themselves through that pair instead.
     cstring sinkOutcomeLegit = ""_cs;
     cstring sinkOutcomeAttack = ""_cs;
+
+    /// --cp-snapshot: whether the attack needs CP-set values the data-plane attacker cannot read
+    /// (see checkRegisterKnowledge). Set by runTampering just before emission; empty otherwise.
+    cstring registerKnowledge = ""_cs;
 };
 
 /// Callback type for the three-phase tampering scenario.
@@ -170,6 +175,15 @@ class StateDependencyTracker : public SymbolicExecutor {
 
     /// Which phase is currently being executed (Tampering policy only).
     TamperingPhase currentPhase = TamperingPhase::Phase1_Read;
+
+    /// Enter @p phase. Under a --cp-snapshot topology this also selects the port role the input
+    /// port must have: ATTACKER for Phase 2, HOST for the victim's Phases 1 and 3.
+    void setPhase(TamperingPhase phase) {
+        currentPhase = phase;
+        SymbexOptions::get().cpSnapshotPortRole = phase == TamperingPhase::Phase2_Write
+                                                      ? SymbexOptions::SnapshotPortRole::Attacker
+                                                      : SymbexOptions::SnapshotPortRole::Host;
+    }
 
     /// IR nodes that the current chain requires the path to cover.
     P4::Coverage::CoverageSet currentRequiredNodes;

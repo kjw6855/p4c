@@ -407,6 +407,10 @@ class TamperingTestSpec {
     /// HIT→MISS.
     cstring caseLabel = ""_cs;
 
+    /// --cp-snapshot: whether the attack needs CP-set values the attacker cannot read ("none",
+    /// "required: <cells>", "unknown"); empty without a snapshot. See checkRegisterKnowledge.
+    cstring registerKnowledge = ""_cs;
+
     /// True if the forwarding path is multicast (modeled as a single representative port). When
     /// set, the emitted test carries a multicast_group block so the p4csd validator installs the
     /// group (mgid → representative port) before replay and removes it afterwards.

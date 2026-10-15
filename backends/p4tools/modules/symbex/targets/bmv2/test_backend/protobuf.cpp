@@ -21,6 +21,7 @@
 #include "lib/log.h"
 #include "nlohmann/json.hpp"
 
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
@@ -473,6 +474,9 @@ metadata: "Tampering test: phase1=read original, phase2=write tampered, phase3=r
 ## if length(tamper_case) > 0
 metadata: "Tamper case: {{tamper_case}}"
 ## endif
+## if length(register_knowledge) > 0
+metadata: "Register knowledge: {{register_knowledge}}"
+## endif
 
 # --- Phase 1 (read) symbex trace ---
 ## for trace_item in trace
@@ -775,6 +779,7 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     // Phase 3 replays Phase 1's input packet; the validator detects the deviation dynamically.
     dataJson["phase3_send"] = getSend(testSpec->spec1);
     dataJson["tamper_case"] = testSpec->caseLabel.c_str();
+    dataJson["register_knowledge"] = testSpec->registerKnowledge.c_str();
 
     // Emit affected_register entries for each attacker-chosen write in Phase 2.
     inja::json affectedRegsJson = inja::json::array();
@@ -859,6 +864,8 @@ void Protobuf::writeTestToFile(const TamperingTestSpec *testSpec, cstring select
     incrementedbasePath.replace_extension(".txtpb");
     auto protobufFileStream = std::ofstream(incrementedbasePath);
     inja::render_to(protobufFileStream, getTamperingTestCaseTemplate(), dataJson);
+    // --cp-snapshot: the deployed state the harness installs once, before Phase 1.
+    protobufFileStream << cpSnapshotTxtpbBlock(/*bfrt=*/false);
     protobufFileStream.flush();
 }
 

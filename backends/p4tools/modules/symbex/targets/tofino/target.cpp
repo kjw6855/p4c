@@ -33,6 +33,7 @@
 #include "lib/exceptions.h"
 #include "lib/ordered_map.h"
 
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/compiler_result.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/map_direct_externs.h"
@@ -105,6 +106,15 @@ CompilerResultOrError AbstractTofinoSymbexTarget::runCompilerImpl(
     program = runMidEnd(options, program);
     if (program == nullptr) {
         return std::nullopt;
+    }
+
+    // --cp-snapshot: the captured control-plane state, as closed-world const entries. Applied after
+    // the midend so key names are final (RenameKeys spells them as bf-rt.json does).
+    if (const auto *snapshot = loadedCpSnapshot(); snapshot != nullptr) {
+        program = program->apply(ApplyCpSnapshot(*snapshot));
+        if (errorCount() > 0) {
+            return std::nullopt;
+        }
     }
 
     // Create DCG.

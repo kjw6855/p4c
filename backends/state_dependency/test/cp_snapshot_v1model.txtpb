@@ -1,0 +1,43 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# Hand-written --cp-snapshot for cp_snapshot_v1model.p4 (P4Runtime entities, named through the
+# fork's name fields). REGISTER_ID is replaced by the test with the P4Info id of
+# MyIngress.state_reg, since a RegisterEntry carries only the id.
+program: "cp_snapshot_v1model"
+target: "bmv2"
+snapshot_id: "fixture"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.cfg"
+    is_default_action: true
+    action { action { action_name: "MyIngress.set_mode" params { param_name: "m" value: "\x07" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.sink_tbl"
+    match { field_name: "meta.state" exact { value: "\x08\x00" } }
+    action { action { action_name: "MyIngress.fwd" params { param_name: "port" value: "\x00\x02" } } }
+  }
+}
+entities {
+  register_entry {
+    register_id: REGISTER_ID
+    index { index: 5 }
+    data { bitstring: "\x08\x00" }
+  }
+}
+# Optional keys: dstAddr is omitted, so it is a wildcard.
+entities {
+  table_entry {
+    table_name: "MyIngress.opt_tbl"
+    match { field_name: "hdr.ethernet.srcAddr" optional { value: "\x00\x00\x00\x00\x00\x01" } }
+    action { action { action_name: "MyIngress.mark" } }
+    priority: 1
+  }
+}

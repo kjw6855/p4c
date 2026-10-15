@@ -682,6 +682,19 @@ SymbexOptions::SymbexOptions()
         "unannotated behaviour. Hard-errors if the file is missing or unparseable.");
 
     registerOption(
+        "--cp-snapshot", "file",
+        [this](const char *arg) {
+            cpSnapshotPaths.emplace_back(arg);
+            return true;
+        },
+        "Load control-plane state captured from a running target (a symbex.CpSnapshot textproto: "
+        "P4Runtime entities for bmv2, BfRt entities for tofino). Closed world: every non-const "
+        "table runs exactly the snapshot's entries and default action, registers start from the "
+        "snapshot cells, and the snapshot topology decides where victim (HOST) and attacker "
+        "(ATTACKER) packets enter. Requires a STATE_DEP_TAMPERING* path selection and excludes "
+        "--cp-annotation. Only one snapshot is accepted.");
+
+    registerOption(
         "--state-dep-cache", "file",
         [this](const char *arg) {
             stateDepCachePath = std::string(arg);
@@ -887,6 +900,25 @@ bool SymbexOptions::validateOptions() const {
               "tracking enabled with --track-coverage option. Without coverage tracking, the "
               "--assert-min-coverage is meaningless.");
         return false;
+    }
+    if (!cpSnapshotPaths.empty()) {
+        if (cpSnapshotPaths.size() > 1) {
+            error(ErrorType::ERR_INVALID, "--cp-snapshot: multiple snapshots are not supported yet.");
+            return false;
+        }
+        if (cpAnnotationPath.has_value()) {
+            error(ErrorType::ERR_INVALID,
+                  "--cp-snapshot and --cp-annotation are mutually exclusive: the snapshot already "
+                  "decides every table, default action, register cell and port role.");
+            return false;
+        }
+        if (pathSelectionPolicy != PathSelectionPolicy::StateDependencyTampering &&
+            pathSelectionPolicy != PathSelectionPolicy::StateDependencyTamperingCond) {
+            error(ErrorType::ERR_INVALID,
+                  "--cp-snapshot requires --path-selection STATE_DEP_TAMPERING or "
+                  "STATE_DEP_TAMPERING_COND.");
+            return false;
+        }
     }
     return true;
 }

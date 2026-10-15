@@ -1,8 +1,9 @@
 // Schema for the BfRt textproto artifacts emitted by the p4symbex `BFRT`
 // test_backend on the Tofino/TNA target.
 //
-// This .proto is informational — it documents the on-disk format of the
-// .txtpb files produced by `--test-backend BFRT`. The harness in
+// This .proto documents the on-disk format of the .txtpb files produced by
+// `--test-backend BFRT`. It is also compiled: symbex.CpSnapshot (p4symbex.proto)
+// reuses BfRtEntity for the tofino entities of a --cp-snapshot file. The harness in
 // tools/p4csd/tofino/tofino_driver.py parses these files at runtime and
 // translates them into BF-Runtime gRPC calls (table.entry_add(...) etc.)
 // against a live tofino_model.
@@ -193,4 +194,9 @@ message TamperingTestCase {
     // These are the compile-time-constant egress ports found in the program's actions, so the
     // set is a property of the program rather than of this test case.
     repeated uint32 monitor_ports = 8;
+
+    // The --cp-snapshot state (tables, defaults, register tables, $pre.*, $mirror.cfg), copied
+    // from the snapshot file. The harness installs it once, before Phase 1; `entities` then holds
+    // no entry for a snapshot table.
+    repeated BfRtEntity snapshot_entities = 9;
 }

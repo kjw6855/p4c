@@ -25,6 +25,7 @@
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/sink_divergence.h"
 #include "backends/p4tools/modules/symbex/core/small_step/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/core/small_step/table_stepper.h"
@@ -941,7 +942,19 @@ void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
         return;
     }
     auto &initState = ExecutionState::create(&programInfo.getP4Program());
-    runTamperingScenario(callBack, initState);
+    if (loadedCpSnapshot() == nullptr) {
+        runTamperingScenario(callBack, initState);
+    } else {
+        // --cp-snapshot: tag every case with whether the attacker must know CP-set values.
+        auto tagged = [&callBack](const TamperingFinalState &ts) {
+            TamperingFinalState out = ts;
+            out.registerKnowledge = checkRegisterKnowledge(ts.phase1, ts.phase2);
+            printInfo("[Tampering] Register knowledge: chain id=%1% sub=%2% %3%", ts.chainId,
+                      ts.subTestId, out.registerKnowledge);
+            return callBack(out);
+        };
+        runTamperingScenario(tagged, initState);
+    }
     emitSummary();
 }
 
@@ -1238,7 +1251,7 @@ void StateDependencyTracker::collectPhase1Terminals(const ExecutionState &initSt
     phase1Examined = 0;
 
     // Per-chain Phase-1 targets (readNodes, or writeNodes for isUpdate) and their union.
-    currentPhase = TamperingPhase::Phase1_Read;
+    setPhase(TamperingPhase::Phase1_Read);
     P4::Coverage::CoverageSet unionTargets;
     for (const auto *chain : allChains) {
         currentChain = chain;  // buildRequiredNodes consults currentPhase + chain
@@ -1374,7 +1387,7 @@ std::set<size_t> StateDependencyTracker::collectPhase2Terminals(const ExecutionS
     phase2Examined = 0;
 
     // Per-chain Phase-2 write targets (writeNodes) and their union.
-    currentPhase = TamperingPhase::Phase2_Write;
+    setPhase(TamperingPhase::Phase2_Write);
     P4::Coverage::CoverageSet unionTargets;
     for (const auto *chain : allChains) {
         currentChain = chain;  // buildRequiredNodes consults currentPhase + chain
@@ -1465,7 +1478,7 @@ std::vector<const FinalState *> StateDependencyTracker::collectPhase1TerminalsPe
     // branch is unreachable in one packet — so the two modes produce identical terminals for this
     // chain. The HIT->MISS / MISS->HIT direction filters are applied downstream in runTamperingChain /
     // runConditionChain exactly as for the shared bucket, so one pass serves both.
-    currentPhase = TamperingPhase::Phase1_Read;
+    setPhase(TamperingPhase::Phase1_Read);
     currentChain = &chain;
     auto targets = buildRequiredNodes(chain);
     if (chain.sinkConditionNode != nullptr) targets.insert(chain.sinkConditionNode);
@@ -3003,12 +3016,12 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
         // write path is now covered (the carried register was pre-set past the gate). But DISABLE
         // reaching-set pruning — for update chains it would cut the path before a terminal (same
         // reason the condition-replay branch below clears it).
-        currentPhase = TamperingPhase::Phase2_Write;
+        setPhase(TamperingPhase::Phase2_Write);
         currentRequiredNodes = buildRequiredNodes(chain);
         reachingSet_.clear();
         reachingSetValid_ = false;
     } else {
-        currentPhase = TamperingPhase::Phase3_Read;
+        setPhase(TamperingPhase::Phase3_Read);
         // The pinned-input replay is (almost) deterministic, so accept ANY terminal and check the flip
         // externally via evalSinkFlip (evalCondition for a condition sink, evalSinkHit for a table
         // sink). Requiring read/write-node coverage would reject every terminal for a read-modify-write
@@ -3112,7 +3125,7 @@ const FinalState *StateDependencyTracker::reDeriveConcretePhase(
     const std::map<cstring, const TestObject *> &carriedRegs) {
     // Accept any terminal: the concrete packet makes the path (near-)deterministic and the CRC
     // resolves eagerly, so there is no per-cell fork to steer around.
-    currentPhase = TamperingPhase::Phase3_Read;
+    setPhase(TamperingPhase::Phase3_Read);
     currentRequiredNodes.clear();
     reachingSet_.clear();
     reachingSetValid_ = false;
@@ -3264,7 +3277,7 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
     std::vector<const FinalState *> primeOut;
     {
         phase2AcceptWroteSO_ = true;
-        currentPhase = TamperingPhase::Phase2_Write;
+        setPhase(TamperingPhase::Phase2_Write);
         currentRequiredNodes = buildRequiredNodes(chain);
         buildReachingSet();
         auto &primeInit = phase2Init.clone();
@@ -3567,7 +3580,7 @@ size_t StateDependencyTracker::runTamperingChain(
 
     // ---- Phase 1: take this chain's share of the shared read-baseline traversal ----
     // (collectPhase1Terminals already ran one program-wide DFS and bucketed terminals per chain.)
-    currentPhase = TamperingPhase::Phase1_Read;
+    setPhase(TamperingPhase::Phase1_Read);
     std::vector<const FinalState *> phase1States(phase1Bucket.begin(), phase1Bucket.end());
 
     // Direction filter: the shared collector applied no sink/disposition filter (it served both
@@ -3698,7 +3711,7 @@ size_t StateDependencyTracker::runTamperingChain(
     }
 
     // ---- Phase 2: write the tampered value (shared by both directions) ----
-    currentPhase = TamperingPhase::Phase2_Write;
+    setPhase(TamperingPhase::Phase2_Write);
     currentRequiredNodes = buildRequiredNodes(chain);
     if (currentRequiredNodes.empty()) {
         if (!missToHit) warning("[Tampering] Chain id=%1% has no writeNodes; skipping.", chain.id);
@@ -3895,7 +3908,7 @@ size_t StateDependencyTracker::runTamperingChain(
                               // the read path — a retry started from there would accept any
                               // terminal instead of a write-covering one. Restore the Phase-2
                               // context first.
-                              currentPhase = TamperingPhase::Phase2_Write;
+                              setPhase(TamperingPhase::Phase2_Write);
                               currentRequiredNodes = buildRequiredNodes(chain);
                               buildReachingSet();
                               // Same acceptance rule as the bucket's own DFS above: a branching RMW
@@ -4685,7 +4698,7 @@ size_t StateDependencyTracker::runConditionChain(
     const int p3Target = 1 - p1Val;
 
     // ---- Phase 1: take this chain's share of the shared traversal, keep cond == p1Val ----
-    currentPhase = TamperingPhase::Phase1_Read;
+    setPhase(TamperingPhase::Phase1_Read);
     std::vector<const FinalState *> phase1States(phase1Bucket.begin(), phase1Bucket.end());
     phase1States.erase(
         std::remove_if(phase1States.begin(), phase1States.end(),
@@ -4714,7 +4727,7 @@ size_t StateDependencyTracker::runConditionChain(
 
     // ---- Phase 2: write the tampered value (sinkTableControlPlaneName is empty for condition
     // chains, so no sink table is excluded). ----
-    currentPhase = TamperingPhase::Phase2_Write;
+    setPhase(TamperingPhase::Phase2_Write);
     currentRequiredNodes = buildRequiredNodes(chain);
     if (currentRequiredNodes.empty()) {
         if (!missToHit) warning("[Tampering] Chain id=%1% has no writeNodes; skipping.", chain.id);
@@ -4839,7 +4852,7 @@ size_t StateDependencyTracker::runConditionChain(
                                          std::vector<const FinalState *> &out, size_t cap) {
                               // Restore the Phase-2 context first: driveRegisterPhase2's Phase-3
                               // replay leaves the read path selected — see the key path's note.
-                              currentPhase = TamperingPhase::Phase2_Write;
+                              setPhase(TamperingPhase::Phase2_Write);
                               currentRequiredNodes = buildRequiredNodes(chain);
                               buildReachingSet();
                               runPhase(init, out, cap);

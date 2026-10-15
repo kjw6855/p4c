@@ -33,6 +33,7 @@
 #include "backends/p4tools/modules/symbex/core/target.h"
 #include "backends/p4tools/modules/symbex/lib/logging.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
@@ -593,7 +594,11 @@ const Bmv2V1ModelExprStepper::ExternMethodImpls<Bmv2V1ModelExprStepper>
                  // tampering executor can pin its packet-field operands (collectIndexSymVars) and make
                  // an attacker's Phase-2 write collide with this read's bucket. Mirrors TNA, where
                  // RegisterAction.execute seeds TofinoRegisterValue::initialIndex.
-                 registerValue = new Bmv2V1ModelRegisterValue(inputValue, index);
+                 auto *created = new Bmv2V1ModelRegisterValue(inputValue, index);
+                 // --cp-snapshot: unwritten cells hold the deployed values, not zero.
+                 seedRegisterFromSnapshot(*created, nextState, externInstance->controlPlaneName(),
+                                          index->type, readOutput->type);
+                 registerValue = created;
                  nextState.addTestObject("registervalues"_cs, externInstance->controlPlaneName(),
                                          registerValue);
              }
@@ -682,6 +687,9 @@ const Bmv2V1ModelExprStepper::ExternMethodImpls<Bmv2V1ModelExprStepper>
                  const auto &writeValue =
                      stepper.programInfo.createTargetUninitialized(inputValue->type, false);
                  registerValue = new Bmv2V1ModelRegisterValue(writeValue);
+                 seedRegisterFromSnapshot(*registerValue, nextState,
+                                          externInstance->controlPlaneName(), index->type,
+                                          inputValue->type);
                  registerValue->writeToIndex(index, inputValue);
              }
              nextState.addTestObject("registervalues"_cs, externInstance->controlPlaneName(),

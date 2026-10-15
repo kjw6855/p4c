@@ -4,6 +4,7 @@ syntax = "proto3";
 package symbex;
 
 import "p4/v1/p4runtime.proto";
+import "p4symbex_bfrt.proto";
 
 service P4FuzzGuide {
     rpc Hello(HealthCheckRequest) returns (HealthCheckResponse) {}
@@ -145,6 +146,46 @@ message TamperingTestCase {
     repeated string metadata = 6;
     // Present only when the forwarding path is multicast.
     repeated MulticastGroup multicast_group = 7;
+    // The --cp-snapshot state (tables, defaults, registers, PRE, clone sessions), copied from the
+    // snapshot file. The harness installs it once, before Phase 1; `entities` then holds no entry
+    // for a snapshot table.
+    repeated p4.v1.Entity snapshot_entities = 8;
+}
+
+// Role of a switch port in a captured topology. Victim packets (Phases 1 and 3) enter on HOST
+// ports and the attacker's packet (Phase 2) on ATTACKER ports.
+enum PortRole {
+    PORT_ROLE_UNSPECIFIED = 0;
+    PORT_ROLE_HOST = 1;
+    PORT_ROLE_LINK = 2;
+    PORT_ROLE_ATTACKER = 3;
+    PORT_ROLE_CPU = 4;
+    PORT_ROLE_RECIRC = 5;
+}
+
+message SnapshotPort {
+    uint32 port = 1;
+    PortRole role = 2;
+    string name = 3;
+    string mac = 4;
+    string ip = 5;
+}
+
+message Topology {
+    repeated SnapshotPort port = 1;
+}
+
+// Control-plane state captured from a running target (--cp-snapshot). bmv2 uses P4Runtime
+// entities named through the name fields; tofino uses BfRt entities (register tables,
+// $mirror.cfg and $pre.* included). P4 const entries and const default actions are not listed.
+message CpSnapshot {
+    string program = 1;
+    string target = 2;       // "bmv2" | "tofino" ("dpdk" reserved)
+    string snapshot_id = 3;
+    string captured_at = 4;
+    Topology topology = 5;
+    repeated p4.v1.Entity entities = 6;
+    repeated symbex.tofino.BfRtEntity bfrt_entities = 7;
 }
 
 message TestCase {
