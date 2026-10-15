@@ -9,6 +9,9 @@
 # tna fixture keys output-writing tables (directly and through an intermediate table), which must
 # give h2s2outk, and a decoy table whose actions write no output. Output chains carry hops: the
 # tables steering the value to the sink and the actions that do so (decoy actions excluded).
+# output_sinks_pna.p4 sets the output through externs (drop_packet, send_to_port) and reads
+# add-on-miss tables: a condition guarding drop_packet() must give h2s2outc, and the key of a table
+# whose action calls send_to_port() must give h2s2outk, with decoys in cond/key only.
 #
 # Override the binary with P4CX_BIN=/path/to/p4c_chain_extractor.
 set -euo pipefail
@@ -22,14 +25,16 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 "$BIN" --arch tna --std p4-16 -D__TARGET_TOFINO__=1 --target tofino \
     -I "$ROOT/backends/tofino/bf-p4c/p4include" -I "$ROOT/p4include" --supergraph FULL \
     --cache-chains "$tmp/tna.json" "$HERE/output_sinks_tna.p4" >/dev/null 2>&1
+"$BIN" --arch pna --target dpdk -I "$ROOT/p4include" --supergraph FULL \
+    --cache-chains "$tmp/pna.json" "$HERE/output_sinks_pna.p4" >/dev/null 2>&1
 
-python3 -I - "$tmp/v1.json" "$tmp/tna.json" <<'PY'
+python3 -I - "$tmp/v1.json" "$tmp/tna.json" "$tmp/pna.json" <<'PY'
 import json, sys
 
 def sos(cache, cat):
     return {(c['soName'], c.get('sinkVar', '')) for g in cache.get(cat, {}).values() for c in g}
 
-v1, tna = (json.load(open(p)) for p in sys.argv[1:3])
+v1, tna, pna = (json.load(open(p)) for p in sys.argv[1:4])
 checks = [
     ('v1 O: r_port -> egress_spec', ('I.r_port', 'sm.egress_spec') in sos(v1, 'h2s2o')),
     ('v1 OutC: r_drop guards mark_to_drop', ('I.r_drop', '') in sos(v1, 'h2s2outc')),
@@ -46,6 +51,15 @@ checks = [
     ('tna OutK: k1_reg via t_mid keys t_out (drops)', ('Ingress.k1_reg', '') in sos(tna, 'h2s2outk')),
     ('tna decoy table key is a key sink', ('Ingress.kdec_reg', '') in sos(tna, 'h2s2k')),
     ('tna decoy table key is not OutK', ('Ingress.kdec_reg', '') not in sos(tna, 'h2s2outk')),
+    ('pna OutC: flows_d guards drop_packet',
+     ('MainControlImpl.flows_d', '') in sos(pna, 'h2s2outc')),
+    ('pna decoy is a condition sink', ('MainControlImpl.flows_c', '') in sos(pna, 'h2s2c')),
+    ('pna decoy is not OutC', ('MainControlImpl.flows_c', '') not in sos(pna, 'h2s2outc')),
+    ('pna OutK: flows_k keys t_fwd (send_to_port)',
+     ('MainControlImpl.flows_k', '') in sos(pna, 'h2s2outk')),
+    ('pna decoy table key is a key sink', ('MainControlImpl.flows_kd', '') in sos(pna, 'h2s2k')),
+    ('pna decoy table key is not OutK',
+     ('MainControlImpl.flows_kd', '') not in sos(pna, 'h2s2outk')),
 ]
 def hops(cache, cat, so):
     return [[(h['table'], h['select']) for h in c.get('hops', [])]
@@ -57,6 +71,9 @@ checks += [
      [[('Ingress.t_mid', ['Ingress.set_nh']), ('Ingress.t_out', ['Ingress.do_drop'])]]),
     ('tna hops: k2_reg selects t_direct.fwd',
      hops(tna, 'h2s2outk', 'Ingress.k2_reg') == [[('Ingress.t_direct', ['Ingress.fwd'])]]),
+    ('pna hops: flows_k selects t_fwd.fwd',
+     hops(pna, 'h2s2outk', 'MainControlImpl.flows_k') ==
+     [[('MainControlImpl.t_fwd', ['MainControlImpl.fwd'])]]),
     ('v1 hops: r_nh selects t_nh.set_nh (decoy excluded)',
      hops(v1, 'h2s2outc', 'I.r_nh') == [[('I.t_nh', ['I.set_nh'])]]),
 ]

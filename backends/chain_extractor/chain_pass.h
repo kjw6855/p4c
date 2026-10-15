@@ -89,10 +89,14 @@ struct SinkMaps {
 };
 
 /// True if @expr is (a slice of) packet metadata deciding the packet's output: the egress port,
-/// the drop control or the multicast group of v1model or tna.
+/// the drop control or the multicast group of v1model, tna or psa.
 bool is_output_lvalue(const IR::Expression *expr, P4::ReferenceMap *refMap);
 
-/// Finds whether code writes an output (is_output_lvalue or mark_to_drop), following action
+/// True if @name is an extern function deciding the packet's output (v1model mark_to_drop, pna
+/// send_to_port and drop_packet).
+bool is_output_extern(cstring name);
+
+/// Finds whether code writes an output (is_output_lvalue or is_output_extern), following action
 /// calls and table applies into the action bodies.
 class OutputWriteFinder : public Inspector {
  public:

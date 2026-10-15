@@ -109,13 +109,17 @@ bool is_cond_sink(const Graphs::Vertex &vinfo) {
 }  // namespace
 
 bool is_output_lvalue(const IR::Expression *expr, P4::ReferenceMap *refMap) {
-    // Output-deciding fields per intrinsic metadata type (v1model and tna)
+    // Output-deciding fields per intrinsic metadata type (v1model, tna and psa; pna sets the
+    // output through externs, see is_output_extern)
     static const std::map<cstring, std::set<cstring>> outputs = {
         {"standard_metadata_t"_cs, {"egress_spec"_cs, "mcast_grp"_cs}},
         {"ingress_intrinsic_metadata_for_tm_t"_cs,
          {"ucast_egress_port"_cs, "mcast_grp_a"_cs, "mcast_grp_b"_cs}},
         {"ingress_intrinsic_metadata_for_deparser_t"_cs, {"drop_ctl"_cs}},
         {"egress_intrinsic_metadata_for_deparser_t"_cs, {"drop_ctl"_cs}},
+        {"psa_ingress_output_metadata_t"_cs,
+         {"egress_port"_cs, "multicast_group"_cs, "drop"_cs}},
+        {"psa_egress_output_metadata_t"_cs, {"drop"_cs}},
     };
     if (const auto *slice = expr->to<IR::Slice>()) expr = slice->e0;
     const auto *member = expr->to<IR::Member>();
@@ -128,6 +132,13 @@ bool is_output_lvalue(const IR::Expression *expr, P4::ReferenceMap *refMap) {
     if (type == nullptr) return false;
     auto it = outputs.find(type->path->name.name);
     return it != outputs.end() && it->second.count(member->member.name) > 0;
+}
+
+bool is_output_extern(cstring name) {
+    // Output-deciding extern functions (v1model mark_to_drop; pna send_to_port and drop_packet)
+    static const std::set<cstring> externs = {"mark_to_drop"_cs, "send_to_port"_cs,
+                                              "drop_packet"_cs};
+    return externs.count(name) > 0;
 }
 
 bool OutputWriteFinder::writes(const IR::Node *node) {
@@ -158,7 +169,7 @@ bool OutputWriteFinder::preorder(const IR::MethodCallExpression *call) {
     if (found) return false;
     const auto *mi = P4::MethodInstance::resolve(call, refMap, typeMap);
     if (const auto *ef = mi->to<P4::ExternFunction>()) {
-        if (ef->method->name.name == "mark_to_drop") found = true;
+        if (is_output_extern(ef->method->name.name)) found = true;
     } else if (const auto *ac = mi->to<P4::ActionCall>()) {
         visit(ac->action->body);
     } else if (const auto *am = mi->to<P4::ApplyMethod>()) {
