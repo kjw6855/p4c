@@ -2,7 +2,8 @@
 # campaign.sh <outdir> [program ...]
 # Capturable-H2S2 generation: every program that has a --cp-snapshot, for each output-chain category
 # (OUTK, OUTC, O) in which its nightly chain cache has chains, with --diverge-output PORT. One job
-# per (program, category), at most JOBS (10) at a time, 32GB and TIMEOUT (1800s) each.
+# per (program, category), at most JOBS (10) at a time, 32GB and TIMEOUT (1800s) each; CATS (e.g. "O")
+# restricts the categories.
 set -uo pipefail
 OUT="$1"; shift
 R=/root/jiwon/Workspace/p4c
@@ -18,6 +19,7 @@ for P in "${programs[@]}"; do
   cache="$CACHE/$tgt/$arch/$P.chains"
   for cat in h2s2outk:OUTK:STATE_DEP_TAMPERING h2s2outc:OUTC:STATE_DEP_TAMPERING_COND h2s2o:O:STATE_DEP_TAMPERING; do
     IFS=: read -r key sinks pol <<< "$cat"
+    [[ " ${CATS:-OUTK OUTC O} " == *" $sinks "* ]] || continue
     n=$(python3 -I -c "import json,sys; c=json.load(open(sys.argv[1])); print(sum(len(v) for v in c.get(sys.argv[2],{}).values()))" "$cache" "$key")
     [ "$n" -gt 0 ] && echo "$P $tgt $arch $p4 $cache $sinks $pol $n" >> "$jobs_file"
   done
