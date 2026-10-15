@@ -744,6 +744,46 @@ SymbexOptions::SymbexOptions()
         "--print-performance-report. Slower, sometimes by hours.");
 
     registerOption(
+        "--state-dep-sinks", "K|C|O|OUTK|OUTC",
+        [this](const char *arg) {
+            static const std::map<std::string, StateDepSinks> kinds = {
+                {"K", StateDepSinks::K},       {"C", StateDepSinks::C},
+                {"O", StateDepSinks::O},       {"OUTK", StateDepSinks::OutK},
+                {"OUTC", StateDepSinks::OutC},
+            };
+            auto it = kinds.find(arg);
+            if (it == kinds.end()) {
+                error(ErrorType::ERR_INVALID, "--state-dep-sinks: unknown category %1%", arg);
+                return false;
+            }
+            stateDepSinks = it->second;
+            return true;
+        },
+        "The chain category a tampering run consumes: K (h2s2k), C (h2s2c), O (h2s2o: register "
+        "value flows into an output variable), OUTK (h2s2outk: key of a table whose action writes "
+        "an output), OUTC (h2s2outc: condition guarding an output write). K, O and OUTK pair with "
+        "STATE_DEP_TAMPERING; C and OUTC with STATE_DEP_TAMPERING_COND. Default: the policy's own "
+        "(K or C).");
+
+    registerOption(
+        "--diverge-output", "PORT|PORT_AND_BYTES",
+        [this](const char *arg) {
+            if (std::string(arg) == "PORT") {
+                divergeOutput = DivergeOutput::Port;
+            } else if (std::string(arg) == "PORT_AND_BYTES") {
+                divergeOutput = DivergeOutput::PortAndBytes;
+            } else {
+                error(ErrorType::ERR_INVALID, "--diverge-output: expected PORT or PORT_AND_BYTES");
+                return false;
+            }
+            return true;
+        },
+        "What an output-chain (OUTK/OUTC/O) finding must change. PORT (default): where the "
+        "victim's packet goes (drop, unicast egress port, multicast group) differs between Phase 1 "
+        "and the attacked Phase 3. PORT_AND_BYTES: a changed packet on the same port also counts. "
+        "K and C runs are unaffected.");
+
+    registerOption(
         "--chain-impact-order", nullptr,
         [this](const char *) {
             chainImpactOrder = true;
@@ -900,6 +940,30 @@ bool SymbexOptions::validateOptions() const {
               "tracking enabled with --track-coverage option. Without coverage tracking, the "
               "--assert-min-coverage is meaningless.");
         return false;
+    }
+    if (stateDepSinks != StateDepSinks::Default) {
+        const bool keyPolicy = pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering;
+        const bool condPolicy =
+            pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond;
+        const bool keySinks = stateDepSinks == StateDepSinks::K ||
+                              stateDepSinks == StateDepSinks::O ||
+                              stateDepSinks == StateDepSinks::OutK;
+        if ((keySinks && !keyPolicy) || (!keySinks && !condPolicy)) {
+            error(ErrorType::ERR_INVALID,
+                  "--state-dep-sinks: K, O and OUTK need --path-selection STATE_DEP_TAMPERING; C "
+                  "and OUTC need STATE_DEP_TAMPERING_COND.");
+            return false;
+        }
+        if (stagedIde && (stateDepSinks == StateDepSinks::O || stateDepSinks == StateDepSinks::OutK ||
+                          stateDepSinks == StateDepSinks::OutC)) {
+            error(ErrorType::ERR_INVALID,
+                  "--state-dep-sinks O/OUTK/OUTC need p4ccx chains; --staged-ide has none.");
+            return false;
+        }
+        if (stateDepSinks == StateDepSinks::O) {
+            error(ErrorType::ERR_UNSUPPORTED, "--state-dep-sinks O is not supported yet.");
+            return false;
+        }
     }
     if (!cpSnapshotPaths.empty()) {
         if (cpSnapshotPaths.size() > 1) {

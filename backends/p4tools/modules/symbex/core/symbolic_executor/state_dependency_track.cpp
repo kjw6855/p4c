@@ -814,6 +814,20 @@ StateDependencyTracker::collectChains() const {
                 result[chainName].push_back(&chain);
     };
 
+    using Sinks = SymbexOptions::StateDepSinks;
+    switch (SymbexOptions::get().stateDepSinks) {
+        case Sinks::OutK:
+            addChains(sdResult.dataWriteOutKeyChains, "Write OutKey"_cs);
+            return result;
+        case Sinks::OutC:
+            addChains(sdResult.dataWriteOutCondChains, "Write OutCondition"_cs);
+            return result;
+        case Sinks::O:
+            addChains(sdResult.dataWriteOutChains, "Write Output"_cs);
+            return result;
+        default:
+            break;
+    }
     switch (policy) {
         case StateDependencyPolicy::Tampering:
             addChains(sdResult.dataWriteKeyChains, "Write Key"_cs);
@@ -1621,6 +1635,30 @@ void StateDependencyTracker::evalDisposition(const FinalState *fs, bool &dropped
         return;
     }
     outPort = IR::getIntFromLiteral(fs->getFinalModel().evaluate(opExpr, true));
+}
+
+std::string StateDependencyTracker::outputSignature(const FinalState *fs) const {
+    bool dropped = false;
+    int port = -1;
+    evalDisposition(fs, dropped, port, nullptr);
+    if (dropped) return "drop";
+    if (const int mgid = evalMulticastGroup(fs); mgid >= 0) return "mcast:" + std::to_string(mgid);
+    return "port:" + std::to_string(port);
+}
+
+bool StateDependencyTracker::outputPortGateRejects(const FinalState *fs1, const FinalState *fs3,
+                                                   const P4ChainExtractor::DependencyGraphs::SOChain &chain) const {
+    const auto &opts = SymbexOptions::get();
+    if (!opts.outputSinks() || opts.divergeOutput != SymbexOptions::DivergeOutput::Port) {
+        return false;
+    }
+    const auto before = outputSignature(fs1);
+    const auto after = outputSignature(fs3);
+    if (before != after) return false;
+    printInfo("[Tampering] chain id=%1% SO=%2%: the flip leaves the victim's packet at %3% "
+              "(--diverge-output PORT); skipping.",
+              chain.id, chain.soName, before);
+    return true;
 }
 
 int StateDependencyTracker::evalMulticastGroup(const FinalState *fs) const {
@@ -4159,6 +4197,7 @@ size_t StateDependencyTracker::runTamperingChain(
                                   chain.id, chain.soName);
                         continue;
                     }
+                    if (outputPortGateRejects(fs1, fs3, chain)) continue;
                     // Accumulated HIT→MISS flip confirmed on fs3. Emit the real accumulated value from
                     // fs3's SO-register READ: only the Phase-3 read carries index conditions for the
                     // pinned (== Phase-1) cell. A Phase-2 write terminal does not — sourcing from it
@@ -4359,6 +4398,21 @@ size_t StateDependencyTracker::runTamperingChain(
                 // HIT->MISS has no symbolic Phase 3, so Phase 1's own HIT configuration is the
                 // one the controller would have to have installed.
                 if (violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
+                // --diverge-output PORT on an output-chain run needs to know where the attacked
+                // replay sends the victim's packet, so replay Phase 3 here with the attacker's
+                // register values (K runs never reach this).
+                if (SymbexOptions::get().outputSinks() &&
+                    SymbexOptions::get().divergeOutput == SymbexOptions::DivergeOutput::Port) {
+                    const auto *fs3Gate = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
+                                                            inputPortSymExpr, attackerRegValues);
+                    if (fs3Gate == nullptr) {
+                        printInfo("[Tampering] chain id=%1% SO=%2%: attacked Phase 3 replay found no "
+                                  "terminal; cannot confirm a port change, skipping.",
+                                  chain.id, chain.soName);
+                        continue;
+                    }
+                    if (outputPortGateRejects(fs1, fs3Gate, chain)) continue;
+                }
                 // A shared-traversal terminal carries an ARBITRARY hash-branch fork that contradicts
                 // the real CRC, so TestBackEnd::processPhase re-solves it unsat and drops the case at
                 // emission (the 0-emit wall). Re-deriving with concrete packet bytes makes the hash
@@ -4525,6 +4579,7 @@ size_t StateDependencyTracker::runTamperingChain(
                                            inputPortSymExpr, hitGoal(true), repeat);
             }
             if (fs3 == nullptr) continue;  // no packet count up to the cap flips the sink MISS→HIT
+            if (outputPortGateRejects(fs1, fs3, chain)) continue;
             // Sink action-divergence gate (replaces the old Phase1-vs-Phase3 disposition compare):
             // a confirmed MISS→HIT flip is observable only if the sink's HIT action (now taken in
             // Phase 3) differs in effect from its default (MISS) action (taken in Phase 1). The
@@ -4913,6 +4968,7 @@ size_t StateDependencyTracker::runConditionChain(
                                            inputPortSymExpr, hitGoal(p3Target == 1), repeat);
             }
             if (fs3 == nullptr) continue;  // no packet count up to the cap flips the condition
+            if (outputPortGateRejects(fs1, fs3, chain)) continue;
 
             // Phase 3's read carries the index conditions for the pinned cell; a Phase-2 write
             // terminal does not. The emitted value is therefore post-Phase-3 and is not what the

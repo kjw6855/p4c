@@ -140,6 +140,10 @@ CX::StateDependencyResult toChainExtractor(const SD::StateDependencyResult &r) {
 /// two libraries share the mask names but not all values, so the caller picks the namespace.
 template <typename Mask>
 unsigned policyCategories(const SymbexOptions &opts, Mask key, Mask cond, Mask all) {
+    using Sinks = SymbexOptions::StateDepSinks;
+    if (opts.stateDepSinks == Sinks::OutK) return CX::SD_H2S2OUTK;
+    if (opts.stateDepSinks == Sinks::OutC) return CX::SD_H2S2OUTC;
+    if (opts.stateDepSinks == Sinks::O) return CX::SD_H2S2O;
     if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTampering) return key;
     if (opts.pathSelectionPolicy == PathSelectionPolicy::StateDependencyTamperingCond) return cond;
     return all;

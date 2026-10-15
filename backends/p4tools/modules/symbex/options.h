@@ -170,6 +170,26 @@ class SymbexOptions : public AbstractP4cToolOptions {
     enum class SnapshotPortRole { None, Host, Attacker };
     SnapshotPortRole cpSnapshotPortRole = SnapshotPortRole::None;
 
+    /// --state-dep-sinks: the chain category a tampering run consumes. Default keeps each policy's
+    /// own (STATE_DEP_TAMPERING: K = h2s2k, STATE_DEP_TAMPERING_COND: C = h2s2c). OutK (keys of
+    /// output-writing tables) and O (output variables) pair with STATE_DEP_TAMPERING; OutC
+    /// (conditions guarding an output write) with STATE_DEP_TAMPERING_COND.
+    enum class StateDepSinks { Default, K, C, O, OutK, OutC };
+    StateDepSinks stateDepSinks = StateDepSinks::Default;
+
+    /// --diverge-output: what an output-chain (OutK/OutC/O) finding must change. Port (default):
+    /// where the victim's packet goes -- drop, unicast egress port or multicast group -- differs
+    /// between Phase 1 and the attacked Phase 3. PortAndBytes also accepts a change of the packet
+    /// on the same port (the criterion K/C runs use). K/C runs are not affected.
+    enum class DivergeOutput { Port, PortAndBytes };
+    DivergeOutput divergeOutput = DivergeOutput::Port;
+
+    /// True when the run consumes an output-chain category (OutK, OutC or O).
+    [[nodiscard]] bool outputSinks() const {
+        return stateDepSinks == StateDepSinks::O || stateDepSinks == StateDepSinks::OutK ||
+               stateDepSinks == StateDepSinks::OutC;
+    }
+
     /// When set, write a per-sink control-plane report to this JSON path during tampering
     /// generation: each chain sink with its action list, const-entry status and key-space coverage,
     /// which actions are observably distinct from the default, and a pre-filled `assume` skeleton

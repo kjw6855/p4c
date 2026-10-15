@@ -521,6 +521,13 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// @param resubmitted when non-null, receives whether the pass ended in Resubmit.emit.
     /// Such a terminal reports dropped=true (no egress packet this pass) but is NOT a drop:
     /// the packet re-enters ingress and its fate is decided by a pass we do not model.
+    /// Where @p fs sends the packet: "drop", "port:<n>" or "mcast:<mgid>".
+    [[nodiscard]] std::string outputSignature(const FinalState *fs) const;
+    /// --diverge-output PORT on an output-chain run: true (and logged) when the attacked Phase 3
+    /// @p fs3 sends the victim's packet where Phase 1 @p fs1 did, i.e. the flip changes no port.
+    [[nodiscard]] bool outputPortGateRejects(
+        const FinalState *fs1, const FinalState *fs3,
+        const P4ChainExtractor::DependencyGraphs::SOChain &chain) const;
     void evalDisposition(const FinalState *fs, bool &dropped, int &outPort,
                          bool *resubmitted = nullptr) const;
 

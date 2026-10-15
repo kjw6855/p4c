@@ -1,0 +1,33 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# Hand-written --cp-snapshot for cp_outsinks_tna.p4.
+program: "cp_outsinks_tna"
+target: "tofino"
+snapshot_id: "fixture"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.sink_a"
+  action_name: "Ingress.fwd"
+  key { field_name: "ig_md.a" exact { value: "\x08\x00" } }
+  data { field_name: "port" value: "\x00\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.sink_b"
+  action_name: "Ingress.fwd_mark"
+  key { field_name: "ig_md.b" exact { value: "\x08\x00" } }
+  data { field_name: "port" value: "\x00\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.reg_a"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x05" } }
+  data { field_name: "Ingress.reg_a.f1" value: "\x08\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.reg_b"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x05" } }
+  data { field_name: "Ingress.reg_b.f1" value: "\x08\x00" }
+}
