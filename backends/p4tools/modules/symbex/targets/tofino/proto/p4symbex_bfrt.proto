@@ -69,6 +69,11 @@ message BfRtOptionalMatch { bytes value = 1; }
 message BfRtDataField {
     string field_name = 1;
     bytes value = 2;
+    // Array- and string-valued fields of BfRt fixed tables ($pre.node $DEV_PORT, $pre.mgid node
+    // lists, $mirror.cfg session settings), as captured into a --cp-snapshot.
+    repeated uint64 int_arr_val = 3;
+    repeated bool bool_arr_val = 4;
+    string str_val = 5;
 }
 
 // One BfRt table entry (key set + action + action data).
