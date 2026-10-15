@@ -263,6 +263,7 @@ std::optional<CpSnapshot> CpSnapshot::load(const std::string &path) {
         }
     }
     for (const auto &port : msg->topology().port()) {
+        snap.topologyPorts_.insert(int(port.port()));
         if (port.role() == symbex::PORT_ROLE_HOST) snap.hostPorts_.insert(int(port.port()));
         if (port.role() == symbex::PORT_ROLE_ATTACKER) snap.attackerPorts_.insert(int(port.port()));
     }
@@ -310,6 +311,12 @@ const std::map<big_int, std::vector<big_int>> *CpSnapshot::registerCells(cstring
         if (nameMatches(name.string_view(), cpName.string_view())) return &cells;
     }
     return nullptr;
+}
+
+std::set<int> CpSnapshot::outputTargets() const {
+    std::set<int> out = topologyPorts_;
+    for (const auto &[mgid, _] : multicastPorts_) out.insert(mgid);
+    return out;
 }
 
 std::optional<std::set<int>> CpSnapshot::multicastPorts(int mgid) const {

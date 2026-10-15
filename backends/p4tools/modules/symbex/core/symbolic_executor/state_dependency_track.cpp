@@ -5005,6 +5005,8 @@ size_t StateDependencyTracker::runConditionChain(
             // packet (accumulating the register) until the condition flips. repeat = packet count.
             size_t repeat = 1;
             const FinalState *fs3 = nullptr;
+            // Output mode: the attacker value that moved the victim's packet (see below).
+            std::optional<big_int> outputAttackerValue = SymbexOptions::get().stateTamperValue;
             if (auto drivenIt = drivenFs3.find(fs2); drivenIt != drivenFs3.end()) {
                 // Analytical drive-register result: precomputed flip terminal + k, valid only for the
                 // representative Phase-1 state it was derived against.
@@ -5013,29 +5015,46 @@ size_t StateDependencyTracker::runConditionChain(
                 repeat = drivenRepeat[fs2];
             } else if (outputMode) {
                 // An output sink takes the register value as is, so what moves the packet is the
-                // attacker's VALUE: replay Phase 1 over its own state with the attacker's write at
-                // --state-tamper-value (as the key path does), rather than accumulating the solver's
-                // arbitrary Phase-2 value.
-                std::map<cstring, const TestObject *> carried;
+                // attacker's VALUE. Replay Phase 1 over its own state with the attacker's write set
+                // to each candidate in turn: --state-tamper-value first, then -- under a snapshot --
+                // every destination the deployment knows (topology ports, multicast groups), then 0
+                // and 1. The first value that moves the victim's packet is the one emitted.
+                std::vector<std::optional<big_int>> candidates = {
+                    SymbexOptions::get().stateTamperValue};
+                if (const auto *snap = loadedCpSnapshot(); snap != nullptr) {
+                    for (int target : snap->outputTargets()) candidates.emplace_back(target);
+                }
+                candidates.emplace_back(0);
+                candidates.emplace_back(1);
+                const auto *p2Reg = es2->getTestObject("registervalues"_cs, chain.soName, false);
+                std::map<cstring, const TestObject *> p1Carry;
                 for (const auto &[regName, regObj] :
                      fs1->getExecutionState()->getTestObjectCategory("registervalues"_cs))
-                    carried[regName] = regObj->evaluateForCarry(fs1->getFinalModel());
-                if (const auto *p2Reg = es2->getTestObject("registervalues"_cs, chain.soName, false)) {
+                    p1Carry[regName] = regObj->evaluateForCarry(fs1->getFinalModel());
+                std::set<std::string> tried;
+                for (const auto &value : candidates) {
+                    const std::string key = value.has_value() ? value->str() : "default";
+                    if (!tried.insert(key).second || p2Reg == nullptr) continue;
+                    auto carried = p1Carry;
                     carried[chain.soName] =
                         p2Reg
-                            ->withAttackerValues(modelWithResolvedIndices(fs2, chain.soName, programInfo),
-                                                 SymbexOptions::get().stateTamperValue, {})
+                            ->withAttackerValues(
+                                modelWithResolvedIndices(fs2, chain.soName, programInfo), value, {})
                             .testObject;
+                    const auto *cand = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
+                                                         inputPortSymExpr, carried);
+                    if (cand != nullptr && goalFor(fs1)(cand)) {
+                        fs3 = cand;
+                        outputAttackerValue = value;
+                        break;
+                    }
                 }
-                fs3 = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort, inputPortSymExpr,
-                                        carried);
-                if (fs3 != nullptr && !goalFor(fs1)(fs3)) fs3 = nullptr;
             } else {
                 fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
                                            inputPortSymExpr, goalFor(fs1), repeat);
             }
             if (fs3 == nullptr && outputMode) {
-                printInfo("[Tampering H2S2O] chain id=%1%: the attacker's write does not move the "
+                printInfo("[Tampering H2S2O] chain id=%1%: no candidate attacker value moves the "
                           "victim's packet away from %2%.",
                           chain.id, outputSignature(fs1));
             }
@@ -5108,7 +5127,7 @@ size_t StateDependencyTracker::runConditionChain(
                 fs3SoReg
                     ->withAttackerValues(
                         modelWithResolvedIndices(regSrc, chain.soName, programInfo),
-                        SymbexOptions::get().stateTamperValue, {})
+                        outputMode ? outputAttackerValue : SymbexOptions::get().stateTamperValue, {})
                     .testObject;
             // The Phase-2 gate compared against the bucket's representative Phase-1 state, and never
             // saw the terminals reDeriveConcretePhase re-ran; two packets can share ports and table

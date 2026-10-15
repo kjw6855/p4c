@@ -11,7 +11,9 @@
 #   o.move      cp_outvar_tna (+snapshot), O, attacker value 3: the register value IS the egress port
 #               (2 -> 3) or the multicast group (group 1 = ports {1,2} -> group 3 = {3}): odiv cases
 #   o.same      same with attacker value 2: port 2 stays 2, and group 2 replicates to the same ports
-#               {1,2} as group 1 (resolved through the snapshot's PRE) -- neither is a finding
+#               {1,2} as group 1 (resolved through the snapshot's PRE), so value 2 moves nothing; the
+#               other candidates (snapshot ports and groups, 0, 1) do, and no case keeps the
+#               victim's destination
 # plus option errors (category/policy pairing, --staged-ide).
 #
 # Generation-only (no target replay).
@@ -82,11 +84,11 @@ rc=$(TV=2 run_one o.same cp_outvar_tna --path-selection STATE_DEP_TAMPERING --st
      "${OSNAP[@]}")
 o=$(outcomes o.same)
 if [ "$rc" -ne 0 ]; then failed o.same "p4symbex exit $rc"
-elif [[ "$o" == *'"port:2">'* ]] || [[ "$o" == *'"ports:1,2,">'* ]]; then
-    failed o.same "a same-destination change was emitted: [$o]"
-elif [ "$(grep -c 'does not move the victim' "$tmp/o.same.log")" -lt 2 ]; then
-    failed o.same "the two same-destination writes were not reported as rejected"
-else pass o.same "port 2 -> 2 and group 1 -> 2 (same ports) rejected"; fi
+elif [[ "$o" == *'"port:2">"port:2"'* ]] || [[ "$o" == *'"ports:1,2,">"ports:1,2,"'* ]]; then
+    failed o.same "a case keeps the victim's destination: [$o]"
+elif [[ "$o" != *'"port:2">'* ]] || [[ "$o" != *'"ports:1,2,">'* ]]; then
+    failed o.same "no other candidate moved the victim: [$o]"
+else pass o.same "value 2 moves nothing; another candidate moves port 2 and group 1"; fi
 
 expect_error() {   # $1 tag, $2 message, $3... flags
     local tag="$1" msg="$2"; shift 2

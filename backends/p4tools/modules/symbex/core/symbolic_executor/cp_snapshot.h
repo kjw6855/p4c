@@ -88,6 +88,10 @@ class CpSnapshot {
     /// multicast_group_entry); nullopt when the snapshot does not define the group.
     [[nodiscard]] std::optional<std::set<int>> multicastPorts(int mgid) const;
 
+    /// Every port of the topology and every multicast group of the PRE: the destinations the
+    /// deployment knows, i.e. the values an attacker steering an output variable would write.
+    [[nodiscard]] std::set<int> outputTargets() const;
+
     /// The parsed message, for emitting the snapshot block into a test file.
     [[nodiscard]] const symbex::CpSnapshot &proto() const { return *proto_; }
 
@@ -101,6 +105,7 @@ class CpSnapshot {
     std::map<uint32_t, std::map<big_int, std::vector<big_int>>> registersById_;
     std::map<cstring, big_int> registerParams_;
     std::map<int, std::set<int>> multicastPorts_;
+    std::set<int> topologyPorts_;
     std::set<int> hostPorts_;
     std::set<int> attackerPorts_;
     std::shared_ptr<symbex::CpSnapshot> proto_;
