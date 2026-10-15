@@ -58,7 +58,9 @@ class KeyField:
 @dataclass
 class DataField:
     field_name: str
-    value: object  # int (from hex "0x…") or bytearray (from escaped binary)
+    # int (from hex "0x…"), bytearray (from escaped binary), or -- in --cp-snapshot blocks of
+    # BfRt fixed tables ($pre.node, $pre.mgid, $mirror.cfg) -- a list of ints/bools or a string.
+    value: object
 
 
 @dataclass
@@ -134,6 +136,11 @@ class TamperCase:
     affected_registers: List[AffectedRegister]
     path: str
     multicast_groups: List[MulticastGroup] = field(default_factory=list)
+    # --cp-snapshot: the deployed control-plane state, installed once before the phases.
+    snapshot_entities: List[BfRtEntity] = field(default_factory=list)
+    # Output-chain cases: the generator's --diverge-output oracle ("PORT" | "PORT_AND_BYTES");
+    # empty for K/C cases, which keep the port+bytes differential.
+    diverge_output: str = ""
 
     @property
     def tamper_indices(self) -> List[int]:
@@ -270,9 +277,17 @@ def _parse_entity_block(body: str) -> BfRtEntity:
             if kf is not None:
                 ent.keys.append(kf)
         elif hdr == "data":
-            df = DataField(field_name=_str_field(sub, "field_name"),
-                           value=_parse_entity_value(_str_field(sub, "value")))
-            ent.data.append(df)
+            ints = [int(v) for k, v in _KV_NUM_RE.findall(sub) if k == "int_arr_val"]
+            bools = re.findall(r'bool_arr_val\s*:\s*(true|false)', sub)
+            if ints:
+                value = ints
+            elif bools:
+                value = [b == "true" for b in bools]
+            elif re.search(r'\bstr_val\s*:', sub):
+                value = _str_field(sub, "str_val")
+            else:
+                value = _parse_entity_value(_str_field(sub, "value"))
+            ent.data.append(DataField(field_name=_str_field(sub, "field_name"), value=value))
     return ent
 
 
@@ -317,6 +332,11 @@ def _parse_affected_register(body: str) -> AffectedRegister:
     )
 
 
+def _diverge_output(text: str) -> str:
+    m = re.search(r'^metadata:\s*"Diverge output: (\w+)"', text, re.M)
+    return m.group(1) if m else ""
+
+
 # ----------------------- public entry point ----------------------- #
 
 def parse_tampering_txtpb(path: Path) -> TamperCase:
@@ -324,6 +344,7 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
     text = path.read_text()
     phases: List[Phase] = []
     entities: List[BfRtEntity] = []
+    snapshot_entities: List[BfRtEntity] = []
     regs: List[AffectedRegister] = []
     mcast_groups: List[MulticastGroup] = []
     current: Optional[Phase] = None
@@ -345,6 +366,8 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
             current.exp_mask = mask if mask is not None else b"\xFF" * len(pkt)
         elif header == "entities":
             entities.append(_parse_entity_block(body))
+        elif header == "snapshot_entities":
+            snapshot_entities.append(_parse_entity_block(body))
         elif header == "affected_register":
             regs.append(_parse_affected_register(body))
         elif header == "multicast_group":
@@ -358,5 +381,6 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
     while len(phases) < 3:
         phases.append(Phase())
     return TamperCase(phases=phases, entities=entities,
+                      snapshot_entities=snapshot_entities, diverge_output=_diverge_output(text),
                       affected_registers=regs, path=str(path),
                       multicast_groups=mcast_groups)

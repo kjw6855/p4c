@@ -655,6 +655,11 @@ class TamperCase:
     path: str
     affected_registers: List[dict] = field(default_factory=list)
     multicast_groups: List[MulticastGroup] = field(default_factory=list)
+    # --cp-snapshot: the deployed control-plane state (P4Runtime entities named by the fork's
+    # name fields; registers by P4Info id), installed once before the phases.
+    snapshot_entities: List[p4runtime_pb2.Entity] = field(default_factory=list)
+    # Output-chain cases: the generator's --diverge-output oracle ("PORT" | "PORT_AND_BYTES").
+    diverge_output: str = ""
 
 
 _BLOCK_RE = re.compile(r"^(\w+)\s*\{\s*$")
@@ -743,12 +748,18 @@ def _entity_from_block(table_entry_body: str) -> p4runtime_pb2.Entity:
     return ent
 
 
+def _diverge_output(text: str) -> str:
+    m = re.search(r'^metadata:\s*"Diverge output: (\w+)"', text, re.M)
+    return m.group(1) if m else ""
+
+
 def parse_tampering_txtpb(path: Path) -> TamperCase:
     text = path.read_text()
     phases: List[Phase] = []
     entities: List[p4runtime_pb2.Entity] = []
     affected_registers: List[dict] = []
     multicast_groups: List[MulticastGroup] = []
+    snapshot_entities: List[p4runtime_pb2.Entity] = []
     current: Optional[Phase] = None
 
     for header, body in _iter_top_level_blocks(text):
@@ -817,6 +828,10 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
             if mgid_m:
                 multicast_groups.append(
                     MulticastGroup(mgid=int(mgid_m.group(1)), replica_ports=ports))
+        elif header == "snapshot_entities":
+            ent = p4runtime_pb2.Entity()
+            text_format.Parse(body, ent, allow_unknown_field=True)
+            snapshot_entities.append(ent)
         # ignore unknown headers (e.g. metadata/traces at top level are not blocks)
 
     if current is not None:
@@ -827,7 +842,9 @@ def parse_tampering_txtpb(path: Path) -> TamperCase:
         phases.append(Phase(in_packet=b"", in_port=0))
     return TamperCase(phases=phases[:3], entities=entities, path=str(path),
                       affected_registers=affected_registers,
-                      multicast_groups=multicast_groups)
+                      multicast_groups=multicast_groups,
+                      snapshot_entities=snapshot_entities,
+                      diverge_output=_diverge_output(text))
 
 
 # --------------------------------------------------------------------------- #
@@ -1054,6 +1071,51 @@ def install_entities(client: P4RuntimeClient, entities: List[p4runtime_pb2.Entit
                 continue
             log.warn(f"Failed while installing {ent.table_entry}: {ex}")
             raise
+
+
+def install_snapshot(client: P4RuntimeClient, thrift_client, p4info: p4info_pb2.P4Info,
+                     entities: List[p4runtime_pb2.Entity]) -> None:
+    """Install the --cp-snapshot block before the phases. Table entries carry names only, so their
+    ids are filled in from P4Info; registers are written through thrift (bmv2's P4Runtime server
+    does not serve them) by the name P4Info gives their id; multicast groups and clone sessions go
+    through the PRE. Entries that survive the per-run reset (PRE) are modified instead."""
+    tables = {t.preamble.name: t for t in p4info.tables}
+    actions = {a.preamble.name: a for a in p4info.actions}
+    registers = {r.preamble.id: r.preamble.name for r in p4info.registers}
+
+    def write(entity) -> None:
+        try:
+            client.insert(entity)
+        except P4RuntimeWriteException as ex:
+            if "ALREADY_EXISTS" not in str(ex):
+                raise
+            client.update(entity)
+
+    for ent in entities:
+        if ent.HasField("table_entry"):
+            te = p4runtime_pb2.TableEntry()
+            te.CopyFrom(ent.table_entry)
+            t = tables[te.table_name]
+            te.table_id = t.preamble.id
+            fields = {m.name: m.id for m in t.match_fields}
+            for fm in te.match:
+                fm.field_id = fields[fm.field_name]
+            if te.action.HasField("action"):
+                a = actions[te.action.action.action_name]
+                te.action.action.action_id = a.preamble.id
+                params = {p.name: p.id for p in a.params}
+                for p in te.action.action.params:
+                    p.param_id = params[p.param_name]
+            if te.is_default_action:
+                client.update(te)
+            else:
+                write(te)
+        elif ent.HasField("register_entry"):
+            re_ = ent.register_entry
+            value = int.from_bytes(re_.data.bitstring, "big")
+            thrift_client.write_register(registers[re_.register_id], re_.index.index, value)
+        elif ent.HasField("packet_replication_engine_entry"):
+            write(ent)
 
 
 def _build_multicast_entity(mc: "MulticastGroup") -> p4runtime_pb2.Entity:
@@ -1413,10 +1475,21 @@ class PacketTester:
         return last, reg_diag
 
     def compare_runs(self, legit: Optional[Tuple[int, bytes]],
-                     attack: Optional[Tuple[int, bytes]]) -> Tuple[bool, str]:
+                     attack: Optional[Tuple[int, bytes]],
+                     diverge_output: str = "") -> Tuple[bool, str]:
         """Differential oracle: legit = Phase-3 output of (P1 -> P3); attack = (P1 -> P2 -> P3).
         Both share Phase 1, so any difference is the attacker's Phase-2 write. Returns
-        (vulnerable, reason)."""
+        (vulnerable, reason). Output-chain cases generated under --diverge-output PORT claim a
+        change of WHERE the packet goes, so only the port (or drop) is compared for them."""
+        if diverge_output == "PORT":
+            port_legit = None if legit is None else legit[0]
+            port_attack = None if attack is None else attack[0]
+            if port_legit == port_attack:
+                return False, (f"no port divergence (--diverge-output PORT): the replayed Phase-3 "
+                               f"packet leaves on {port_legit if port_legit is not None else 'drop'}"
+                               f" in both runs")
+            return True, (f"VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet "
+                          f"(--diverge-output PORT: legit={port_legit} vs attack={port_attack})")
         if legit == attack:
             return False, ("no divergence: Phase-2 write has no observable effect on the replayed "
                            "Phase-3 output (benign / masked corruption)")
@@ -1576,6 +1649,12 @@ def do_testing(spec: TargetSpec, json_path: Path, p4info_path: Path,
                                             initial_values=_reg_inits)
 
                 def _install_for_run(case):
+                    if case.snapshot_entities:
+                        # The snapshot carries the deployed multicast groups; the per-case group
+                        # block (a representative port) would clash with them.
+                        install_snapshot(client, thrift_client, p4info, case.snapshot_entities)
+                        install_entities(client, case.entities, const_ids)
+                        return
                     install_entities(client, case.entities, const_ids)
                     install_multicast_groups(client, case.multicast_groups)
 
@@ -1606,7 +1685,7 @@ def do_testing(spec: TargetSpec, json_path: Path, p4info_path: Path,
                                                          label=f"{tx.stem}_attack",
                                                          verify_regs_after=1)
                         remove_multicast_groups(client, case.multicast_groups)
-                        ok, reason = tester.compare_runs(legit, attack)
+                        ok, reason = tester.compare_runs(legit, attack, case.diverge_output)
                         if reg_diag:
                             reason = f"{reason} [Phase-2 reg: {reg_diag}]"
                     except P4RuntimeWriteException as ex:

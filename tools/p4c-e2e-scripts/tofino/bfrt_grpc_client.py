@@ -275,6 +275,49 @@ class BfRtClient:
                 continue
             self.clear_table(name)
 
+    # --- --cp-snapshot state ----------------------------------------------------
+    def write_snapshot_entity(self, table_name: str, keys: Iterable[KeyField],
+                              datas: Iterable[DataField], action_name: Optional[str] = None,
+                              is_default: bool = False) -> None:
+        """Install one --cp-snapshot entity: a table entry or default entry, a register cell
+        ($REGISTER_INDEX key), a RegisterParam (keyless, actionless default), or a fixed-table
+        entry ($pre.node, $pre.mgid, $mirror.cfg, $PORT_METADATA) whose data may be int/bool
+        arrays or strings. An entry that already exists -- fixed tables survive the per-run table
+        reset -- is modified instead of added."""
+        assert self.bfrt_info is not None, "call bind_pipeline() first"
+        table = self.bfrt_info.table_get(table_name)
+        tuples = []
+        for d in datas:
+            v = d.value
+            if isinstance(v, list) and v and all(isinstance(x, bool) for x in v):
+                tuples.append(_gc.DataTuple(d.field_name, bool_arr_val=v))
+            elif isinstance(v, list):
+                tuples.append(_gc.DataTuple(d.field_name, int_arr_val=[int(x) for x in v]))
+            elif isinstance(v, str):
+                tuples.append(_gc.DataTuple(d.field_name, str_val=v))
+            elif isinstance(v, bool):
+                tuples.append(_gc.DataTuple(d.field_name, bool_val=v))
+            else:
+                if isinstance(v, (bytes, bytearray)):
+                    v = int.from_bytes(v, "big")
+                if table_name.startswith("$") and d.field_name in (
+                        "$session_enable", "$ucast_egress_port_valid", "$mcast_grp_a_valid"):
+                    tuples.append(_gc.DataTuple(d.field_name, bool_val=bool(v)))
+                else:
+                    tuples.append(_gc.DataTuple(d.field_name, v))
+        if action_name and table_name.startswith("$mirror") and not action_name.startswith("$"):
+            action_name = "$" + action_name
+        data = table.make_data(tuples, action_name) if action_name else table.make_data(tuples)
+        keys = list(keys)
+        if is_default or not keys:
+            table.default_entry_set(self.target, data)
+            return
+        key = table.make_key([self._key_to_tuple(k) for k in keys])
+        try:
+            table.entry_add(self.target, [key], [data])
+        except Exception:  # noqa: BLE001 - exists already (fixed tables, registers): modify
+            table.entry_mod(self.target, [key], [data])
+
     # --- multicast (packet replication engine) ------------------------------
     # p4symbex models a multicast-forwarded packet as a single representative egress port.
     # For the replayed packet to actually egress that port, the control plane must install the

@@ -509,8 +509,12 @@ class PacketTester:
         comparison of two replays (legit vs attack) is the oracle. When `verify_regs_after` is the
         index of the phase that writes the attacker register (Phase 2 = 1), read the register right
         after that phase (before Phase 3 overwrites it) and return a human diagnostic."""
-        self._install_multicast(case)
+        # A --cp-snapshot case carries its multicast groups in the snapshot; the per-case group
+        # block (a single representative port) would clash with them.
+        if not case.snapshot_entities:
+            self._install_multicast(case)
         try:
+            self._install_snapshot(case.snapshot_entities)
             self._install_entities(case.entities)
             last_cap: Dict[int, List[bytes]] = {}
             reg_diag = ""
@@ -536,6 +540,22 @@ class PacketTester:
             return last_cap, reg_diag
         finally:
             self._remove_multicast(case)
+
+    # Fixed tables a snapshot entry may depend on come first ($pre.mgid names $pre.node nodes).
+    _SNAPSHOT_ORDER = ("$pre.node", "$pre.mgid", "$mirror.cfg")
+
+    def _install_snapshot(self, entities: List[BfRtEntity]) -> None:
+        """Install the --cp-snapshot block (deployed control-plane state) before the phases."""
+        def rank(ent: BfRtEntity) -> int:
+            return (self._SNAPSHOT_ORDER.index(ent.table_name)
+                    if ent.table_name in self._SNAPSHOT_ORDER else len(self._SNAPSHOT_ORDER))
+        for ent in sorted(entities, key=rank):
+            try:
+                self.client.write_snapshot_entity(ent.table_name, _to_client_keys(ent),
+                                                  _to_client_data(ent), ent.action_name,
+                                                  ent.is_default_entry)
+            except Exception as ex:  # noqa: BLE001 - report which entity, then fail the case
+                raise RuntimeError(f"cp-snapshot install of {ent.table_name} failed: {ex}") from ex
 
     def _diag_registers(self, affected_registers: List[AffectedRegister]) -> str:
         """Confirm (weakly — scanning all cells) that the attacker value is present in each
@@ -563,12 +583,24 @@ class PacketTester:
         return port, capture[port][0]
 
     def compare_runs(self, legit: Dict[int, List[bytes]],
-                     attack: Dict[int, List[bytes]]) -> Tuple[bool, str]:
+                     attack: Dict[int, List[bytes]], diverge_output: str = "") -> Tuple[bool, str]:
         """Differential oracle. `legit` = Phase-3 output of (Phase 1 -> Phase 3); `attack` =
         Phase-3 output of (Phase 1 -> Phase 2 -> Phase 3). Both share Phase 1, so any difference
         is caused solely by the attacker's Phase-2 write. Returns (vulnerable, reason): True/"OK"
         when the attacker changes the replayed output (a real tamper), False/"FAIL" when it has no
         observable effect (benign/masked corruption)."""
+        if diverge_output == "PORT":
+            # Output-chain cases generated under --diverge-output PORT claim that the attacker
+            # changes WHERE the victim's packet goes: the set of ports it leaves on (empty = drop,
+            # several = multicast replicas). A byte-only change on the same ports is not a finding.
+            p_legit = sorted(p for p, pkts in legit.items() if pkts)
+            p_attack = sorted(p for p, pkts in attack.items() if pkts)
+            if p_legit == p_attack:
+                return False, (f"no port divergence (--diverge-output PORT): the replayed Phase-3 "
+                               f"packet leaves on {p_legit or 'no port (drop)'} in both runs")
+            return True, (f"VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet "
+                          f"(--diverge-output PORT: legit ports={p_legit or 'drop'} vs "
+                          f"attack ports={p_attack or 'drop'})")
         o_legit = self._observed(legit)
         o_attack = self._observed(attack)
         if o_legit == o_attack:

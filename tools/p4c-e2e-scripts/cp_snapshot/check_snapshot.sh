@@ -8,7 +8,7 @@ P="$1"
 SNAP="${2:-/root/jiwon/Workspace-remote/sp27/cp_snapshots/$P.txtpb}"
 R=/root/jiwon/Workspace/p4c
 LIST=/root/jiwon/Workspace-remote/usenix27/program_list_151_no_oom.txt
-CACHE=/root/jiwon/Workspace-remote/p4symbex_nightly/sochain_cache
+CACHE=/root/jiwon/Workspace-remote/sp27/p4symbex_nightly/sochain_cache
 read -r _ p4 tgt arch _ < <(grep -E "^$P " "$LIST" | sed 's#~/#/root/#g')
 [ -n "${p4:-}" ] || { echo "$P: not in $LIST"; exit 2; }
 if [ "$tgt" = tofino ]; then

@@ -657,6 +657,13 @@ def do_testing(spec, build_dir: Path, txtpb_files: List[Path],
                     used_ports.add(_ph.in_port)
                 if _ph.exp_port is not None and _ph.exp_port >= 0:
                     used_ports.add(_ph.exp_port)
+            # --cp-snapshot multicast groups: monitor every replica port, so the port-set oracle
+            # sees all copies.
+            for _ent in _c.snapshot_entities:
+                if _ent.table_name == "$pre.node":
+                    for _d in _ent.data:
+                        if _d.field_name == "$DEV_PORT" and isinstance(_d.value, list):
+                            used_ports.update(int(p) for p in _d.value)
         except Exception:
             pass
     ports_json_path, host_iface_map = prepare_ports_json(used_ports, log_dir)
@@ -777,7 +784,7 @@ def do_testing(spec, build_dir: Path, txtpb_files: List[Path],
                     attack, reg_diag = tester.replay(case, attack_idx, label=f"{tx.stem}_attack",
                                                      verify_regs_after=verify_after)
                     pristine[0] = False
-                    ok, reason = tester.compare_runs(legit, attack)
+                    ok, reason = tester.compare_runs(legit, attack, case.diverge_output)
                     if reg_diag:
                         reason = f"{reason} [Phase-2 reg: {reg_diag}]"
                 except Exception as ex:
