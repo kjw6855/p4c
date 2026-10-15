@@ -96,6 +96,19 @@ std::optional<big_int> IndexMap::getCarriedScalarValue() const {
     return std::nullopt;
 }
 
+std::vector<std::pair<const IR::Expression *, const IR::Expression *>>
+IndexMap::evaluatedBaseCells(const Model &model) const {
+    std::vector<std::pair<const IR::Expression *, const IR::Expression *>> out;
+    for (const auto &[index, value] : baseCells) {
+        if (const auto *st = value->to<IR::StructExpression>()) {
+            out.emplace_back(index, model.evaluateStructExpr(st, /*doComplete=*/true));
+        } else {
+            out.emplace_back(index, model.evaluate(value, /*doComplete=*/true));
+        }
+    }
+    return out;
+}
+
 const IR::Expression *IndexMap::getBaseValueAtIndex(const IR::Expression *index) const {
     if (baseCells.empty()) return initialValue;
     if (const auto *init = initialValue->to<IR::StructExpression>()) {
@@ -165,7 +178,7 @@ const TofinoRegisterValue *TofinoRegisterValue::evaluate(const Model &model,
     }
     const auto *evaluatedInitialIndex = model.evaluate(initialIndex, doComplete);
     auto *evaluatedRegister = new TofinoRegisterValue(decl, evaluatedValue, evaluatedInitialIndex);
-    evaluatedRegister->setBaseCells(baseCells);
+    evaluatedRegister->setBaseCells(evaluatedBaseCells(model));
     return evaluatedRegister;
 }
 
@@ -198,7 +211,7 @@ const TestObject *TofinoRegisterValue::evaluateForCarry(const Model &model) cons
         evaluatedValue = model.evaluate(finalValue, /*doComplete=*/true);
     }
     auto *carried = new TofinoRegisterValue(decl, evaluatedValue, evalIndex);
-    carried->setBaseCells(baseCells);
+    carried->setBaseCells(evaluatedBaseCells(model));
     return carried;
 }
 
@@ -303,7 +316,7 @@ AttackerControlResult TofinoRegisterValue::withAttackerValues(
     const Model &model, std::optional<big_int> fixedValue,
     const std::vector<big_int> &forbiddenValues) const {
     auto *randReg = new TofinoRegisterValue(decl, getInitialValue(), initialIndex);
-    randReg->setBaseCells(baseCells);
+    randReg->setBaseCells(evaluatedBaseCells(model));
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
     bool feasible = true;
     auto isForbidden = [&](const big_int &v) {

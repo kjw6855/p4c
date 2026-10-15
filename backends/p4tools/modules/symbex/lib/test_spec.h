@@ -411,6 +411,11 @@ class TamperingTestSpec {
     /// "required: <cells>", "unknown"); empty without a snapshot. See checkRegisterKnowledge.
     cstring registerKnowledge = ""_cs;
 
+    /// Output-chain runs (--state-dep-sinks OUTK/OUTC/O): the --diverge-output oracle the case was
+    /// generated under ("PORT" or "PORT_AND_BYTES"), so replay judges it by the same criterion.
+    /// Empty for K/C runs.
+    cstring divergeOutput = ""_cs;
+
     /// True if the forwarding path is multicast (modeled as a single representative port). When
     /// set, the emitted test carries a multicast_group block so the p4csd validator installs the
     /// group (mgid → representative port) before replay and removes it afterwards.

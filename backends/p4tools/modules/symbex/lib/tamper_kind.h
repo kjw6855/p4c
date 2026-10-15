@@ -36,6 +36,9 @@ enum class TamperKind : uint8_t {
     CondTrueToFalse,
     /// Condition sink: the else-branch runs in the legit run, the then-branch after the write.
     CondFalseToTrue,
+    /// Output sink (H2S2O): the register value feeds an output variable directly, and the attacked
+    /// replay sends the victim's packet somewhere else (drop, egress port or multicast ports).
+    OutputDiverge,
 };
 
 /// The short tag naming @p kind in emitted file names, PTF class names and report metadata. One
@@ -53,6 +56,8 @@ inline cstring tamperKindTag(TamperKind kind) {
             return "c_t2f"_cs;
         case TamperKind::CondFalseToTrue:
             return "c_f2t"_cs;
+        case TamperKind::OutputDiverge:
+            return "odiv"_cs;
     }
     // Unreachable for a well-formed enumerator; a value out of range would otherwise fall off the
     // end of a non-void function.

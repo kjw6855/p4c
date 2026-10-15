@@ -1,0 +1,54 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# Hand-written --cp-snapshot for cp_outvar_tna.p4.
+program: "cp_outvar_tna"
+target: "tofino"
+snapshot_id: "fixture"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 4 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.reg_p"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x05" } }
+  data { field_name: "Ingress.reg_p.f1" value: "\x00\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.reg_m"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x05" } }
+  data { field_name: "Ingress.reg_m.f1" value: "\x00\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x10" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 1 int_arr_val: 2 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x01" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 16 }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x20" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 1 int_arr_val: 2 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x02" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 32 }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x30" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 3 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x03" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 48 }
+}

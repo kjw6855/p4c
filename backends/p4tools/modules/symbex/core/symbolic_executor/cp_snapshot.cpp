@@ -229,6 +229,39 @@ std::optional<CpSnapshot> CpSnapshot::load(const std::string &path) {
             table.rules.push_back(ruleFromBfRt(e));
         }
     }
+    // Multicast groups -> replica ports, for the output-port oracle.
+    std::map<int, std::set<int>> nodePorts;
+    std::map<int, std::vector<int>> mgidNodes;
+    for (const auto &e : msg->bfrt_entities()) {
+        if (e.table_name() != "$pre.node" && e.table_name() != "$pre.mgid") continue;
+        if (e.key_size() == 0 || !e.key(0).has_exact()) continue;
+        const int id = static_cast<int>(bytesToInt(e.key(0).exact().value()));
+        for (const auto &d : e.data()) {
+            if (e.table_name() == "$pre.node" && d.field_name() == "$DEV_PORT") {
+                for (auto p : d.int_arr_val()) nodePorts[id].insert(static_cast<int>(p));
+            }
+            if (e.table_name() == "$pre.mgid" && d.field_name() == "$MULTICAST_NODE_ID") {
+                for (auto n : d.int_arr_val()) mgidNodes[id].push_back(static_cast<int>(n));
+            }
+        }
+    }
+    for (const auto &[mgid, nodes] : mgidNodes) {
+        for (int n : nodes) {
+            const auto &ports = nodePorts[n];
+            snap.multicastPorts_[mgid].insert(ports.begin(), ports.end());
+        }
+    }
+    for (const auto &entity : msg->entities()) {
+        if (!entity.has_packet_replication_engine_entry()) continue;
+        const auto &pre = entity.packet_replication_engine_entry();
+        if (!pre.has_multicast_group_entry()) continue;
+        const auto &g = pre.multicast_group_entry();
+        auto &ports = snap.multicastPorts_[static_cast<int>(g.multicast_group_id())];
+        for (const auto &r : g.replicas()) {
+            ports.insert(r.has_port() ? static_cast<int>(bytesToInt(r.port()))
+                                      : static_cast<int>(r.egress_port()));
+        }
+    }
     for (const auto &port : msg->topology().port()) {
         if (port.role() == symbex::PORT_ROLE_HOST) snap.hostPorts_.insert(int(port.port()));
         if (port.role() == symbex::PORT_ROLE_ATTACKER) snap.attackerPorts_.insert(int(port.port()));
@@ -277,6 +310,12 @@ const std::map<big_int, std::vector<big_int>> *CpSnapshot::registerCells(cstring
         if (nameMatches(name.string_view(), cpName.string_view())) return &cells;
     }
     return nullptr;
+}
+
+std::optional<std::set<int>> CpSnapshot::multicastPorts(int mgid) const {
+    auto it = multicastPorts_.find(mgid);
+    if (it == multicastPorts_.end()) return std::nullopt;
+    return it->second;
 }
 
 std::optional<big_int> CpSnapshot::registerParam(cstring cpName) const {

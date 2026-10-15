@@ -813,6 +813,12 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
         tamperingSpec.caseLabel = state.caseLabel;
     }
     tamperingSpec.registerKnowledge = state.registerKnowledge;
+    if (SymbexOptions::get().outputSinks()) {
+        tamperingSpec.divergeOutput =
+            SymbexOptions::get().divergeOutput == SymbexOptions::DivergeOutput::Port
+                ? "PORT"_cs
+                : "PORT_AND_BYTES"_cs;
+    }
     // Constant egress ports anywhere in the program's actions -- see TamperingTestSpec::monitorPorts.
     {
         const auto portFields = getProgramInfo().getEgressPortFieldNames();

@@ -84,6 +84,10 @@ class CpSnapshot {
     [[nodiscard]] const std::set<int> &attackerPorts() const { return attackerPorts_; }
     [[nodiscard]] bool hasTopology() const { return !hostPorts_.empty() || !attackerPorts_.empty(); }
 
+    /// Egress ports multicast group @p mgid replicates to (BfRt $pre.mgid/$pre.node or P4Runtime
+    /// multicast_group_entry); nullopt when the snapshot does not define the group.
+    [[nodiscard]] std::optional<std::set<int>> multicastPorts(int mgid) const;
+
     /// The parsed message, for emitting the snapshot block into a test file.
     [[nodiscard]] const symbex::CpSnapshot &proto() const { return *proto_; }
 
@@ -96,6 +100,7 @@ class CpSnapshot {
     /// bmv2 register cells keyed by P4Runtime register id until bindP4Info names them.
     std::map<uint32_t, std::map<big_int, std::vector<big_int>>> registersById_;
     std::map<cstring, big_int> registerParams_;
+    std::map<int, std::set<int>> multicastPorts_;
     std::set<int> hostPorts_;
     std::set<int> attackerPorts_;
     std::shared_ptr<symbex::CpSnapshot> proto_;

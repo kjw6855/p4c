@@ -477,6 +477,9 @@ metadata: "Tamper case: {{tamper_case}}"
 ## if length(register_knowledge) > 0
 metadata: "Register knowledge: {{register_knowledge}}"
 ## endif
+## if length(diverge_output) > 0
+metadata: "Diverge output: {{diverge_output}}"
+## endif
 
 # --- Phase 1 (read) symbex trace ---
 ## for trace_item in trace
@@ -780,6 +783,7 @@ inja::json Protobuf::produceTamperingTestCase(const TamperingTestSpec *testSpec,
     dataJson["phase3_send"] = getSend(testSpec->spec1);
     dataJson["tamper_case"] = testSpec->caseLabel.c_str();
     dataJson["register_knowledge"] = testSpec->registerKnowledge.c_str();
+    dataJson["diverge_output"] = testSpec->divergeOutput.c_str();
 
     // Emit affected_register entries for each attacker-chosen write in Phase 2.
     inja::json affectedRegsJson = inja::json::array();

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Output-chain tampering regression: --state-dep-sinks OUTK/OUTC and the --diverge-output oracle.
+# Output-chain tampering regression: --state-dep-sinks OUTK/OUTC/O and the --diverge-output oracle.
 #
 #   outk.port   cp_outsinks_tna (+snapshot), OUTK, PORT: the sink_a flip (fwd(2) -> drop) is a
 #               finding; the sink_b flip (port 2 + ttl rewrite -> port 2) changes no port and is
@@ -8,7 +8,11 @@
 #   outc.port   cp_outc_tna, OUTC, PORT: the counter flip turns "port 2" into "drop" -- a finding
 #   outc.neg    accum_threshold_tna, OUTC, PORT: the program drops before and after the flip, so the
 #               gate rejects it (the same flip IS a finding for plain C runs)
-# plus option errors (category/policy pairing, O not yet supported, --staged-ide).
+#   o.move      cp_outvar_tna (+snapshot), O, attacker value 3: the register value IS the egress port
+#               (2 -> 3) or the multicast group (group 1 = ports {1,2} -> group 3 = {3}): odiv cases
+#   o.same      same with attacker value 2: port 2 stays 2, and group 2 replicates to the same ports
+#               {1,2} as group 1 (resolved through the snapshot's PRE) -- neither is a finding
+# plus option errors (category/policy pairing, --staged-ide).
 #
 # Generation-only (no target replay).
 set -uo pipefail
@@ -24,7 +28,7 @@ run_one() {   # $1 tag, $2 p4 stem, $3... flags
     mkdir -p "$tmp/$tag"
     (cd "$tmp/$tag" && timeout 900 "$SX" "${TNA[@]}" --packet-size-range 14:9600 \
         --track-coverage STATEMENTS --max-tests 8 --max-port 32 --out-dir "$tmp/$tag" --state-dep \
-        "$@" "$HERE/$stem.p4" --state-tamper-value 0x1 > "$tmp/$tag.log" 2>&1)
+        "$@" "$HERE/$stem.p4" --state-tamper-value "${TV:-0x1}" > "$tmp/$tag.log" 2>&1)
     echo $?
 }
 sinks() { grep -ho 'sink_table: "[^"]*"' "$tmp/$1"/*.txtpb 2>/dev/null | sort -u | sed 's/sink_table: //' | tr '\n' ' '; }
@@ -62,6 +66,28 @@ elif [ "$(ncases outc.neg)" -ne 0 ] || [ "$(gate outc.neg)" -lt 1 ]; then
     failed outc.neg "$(ncases outc.neg) case(s), gate x$(gate outc.neg): a drop->drop flip must be rejected"
 else pass outc.neg "drop -> drop rejected by the gate"; fi
 
+outcomes() { grep -h 'sink_outcome_' "$tmp/$1"/*.txtpb 2>/dev/null | sed 's/.*: //' | paste -d'>' - - | sort -u | tr '\n' ' '; }
+OSNAP=(--cp-snapshot "$HERE/cp_outvar_tna.txtpb")
+rc=$(TV=3 run_one o.move cp_outvar_tna --path-selection STATE_DEP_TAMPERING --state-dep-sinks O \
+     "${OSNAP[@]}")
+o=$(outcomes o.move)
+odiv=$(find "$tmp/o.move" -name '*_odiv.txtpb' | wc -l | tr -d ' ')
+if [ "$rc" -ne 0 ]; then failed o.move "p4symbex exit $rc"
+elif [ "$odiv" -ne "$(ncases o.move)" ] || [ "$odiv" -lt 2 ]; then failed o.move "$odiv odiv of $(ncases o.move) cases"
+elif [[ "$o" != *'"port:2">"port:3"'* ]] || [[ "$o" != *'"ports:1,2,">"ports:3,"'* ]]; then
+    failed o.move "outcomes [$o] lack port 2->3 or ports {1,2}->{3}"
+else pass o.move "odiv cases incl. port 2->3 and ports {1,2}->{3}"; fi
+
+rc=$(TV=2 run_one o.same cp_outvar_tna --path-selection STATE_DEP_TAMPERING --state-dep-sinks O \
+     "${OSNAP[@]}")
+o=$(outcomes o.same)
+if [ "$rc" -ne 0 ]; then failed o.same "p4symbex exit $rc"
+elif [[ "$o" == *'"port:2">'* ]] || [[ "$o" == *'"ports:1,2,">'* ]]; then
+    failed o.same "a same-destination change was emitted: [$o]"
+elif [ "$(grep -c 'does not move the victim' "$tmp/o.same.log")" -lt 2 ]; then
+    failed o.same "the two same-destination writes were not reported as rejected"
+else pass o.same "port 2 -> 2 and group 1 -> 2 (same ports) rejected"; fi
+
 expect_error() {   # $1 tag, $2 message, $3... flags
     local tag="$1" msg="$2"; shift 2
     local rc; rc=$(run_one "$tag" cp_outc_tna "$@")
@@ -72,7 +98,6 @@ expect_error err.outk.cond "need --path-selection STATE_DEP_TAMPERING" \
     --path-selection STATE_DEP_TAMPERING_COND --state-dep-sinks OUTK
 expect_error err.outc.key "need STATE_DEP_TAMPERING_COND" \
     --path-selection STATE_DEP_TAMPERING --state-dep-sinks OUTC
-expect_error err.o "not supported yet" --path-selection STATE_DEP_TAMPERING --state-dep-sinks O
 expect_error err.staged "staged-ide has none" \
     --path-selection STATE_DEP_TAMPERING --state-dep-sinks OUTK --staged-ide
 

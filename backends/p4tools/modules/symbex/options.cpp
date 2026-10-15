@@ -960,10 +960,6 @@ bool SymbexOptions::validateOptions() const {
                   "--state-dep-sinks O/OUTK/OUTC need p4ccx chains; --staged-ide has none.");
             return false;
         }
-        if (stateDepSinks == StateDepSinks::O) {
-            error(ErrorType::ERR_UNSUPPORTED, "--state-dep-sinks O is not supported yet.");
-            return false;
-        }
     }
     if (!cpSnapshotPaths.empty()) {
         if (cpSnapshotPaths.size() > 1) {

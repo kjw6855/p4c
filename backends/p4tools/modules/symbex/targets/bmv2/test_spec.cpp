@@ -76,6 +76,19 @@ void IndexMap::writeToIndex(const IR::Expression *index, const IR::Expression *v
 
 const IR::Expression *IndexMap::getInitialValue() const { return initialValue; }
 
+std::vector<std::pair<const IR::Expression *, const IR::Expression *>>
+IndexMap::evaluatedBaseCells(const Model &model) const {
+    std::vector<std::pair<const IR::Expression *, const IR::Expression *>> out;
+    for (const auto &[index, value] : baseCells) {
+        if (const auto *st = value->to<IR::StructExpression>()) {
+            out.emplace_back(index, model.evaluateStructExpr(st, /*doComplete=*/true));
+        } else {
+            out.emplace_back(index, model.evaluate(value, /*doComplete=*/true));
+        }
+    }
+    return out;
+}
+
 const IR::Expression *IndexMap::getBaseValueAtIndex(const IR::Expression *index) const {
     if (baseCells.empty()) return initialValue;
     if (const auto *init = initialValue->to<IR::StructExpression>()) {
@@ -160,7 +173,7 @@ const Bmv2V1ModelRegisterValue *Bmv2V1ModelRegisterValue::evaluate(const Model &
     const auto *evaluatedIndex =
         initialIndex != nullptr ? model.evaluate(initialIndex, doComplete) : nullptr;
     auto *evaluatedRegisterValue = new Bmv2V1ModelRegisterValue(evaluatedValue, evaluatedIndex);
-    evaluatedRegisterValue->setBaseCells(baseCells);
+    evaluatedRegisterValue->setBaseCells(evaluatedBaseCells(model));
     for (const auto &cond : indexConditions) {
         const auto *evaluatedCond = cond.evaluate(model, doComplete);
         evaluatedRegisterValue->writeToIndex(evaluatedCond->getEvaluatedIndex(),
@@ -187,7 +200,7 @@ const TestObject *Bmv2V1ModelRegisterValue::evaluateForCarry(const Model &model)
     }
     const auto *evaluatedValue = model.evaluate(finalValue, /*doComplete=*/true);
     auto *carried = new Bmv2V1ModelRegisterValue(evaluatedValue);
-    carried->setBaseCells(baseCells);
+    carried->setBaseCells(evaluatedBaseCells(model));
     return carried;
 }
 
@@ -195,7 +208,7 @@ AttackerControlResult Bmv2V1ModelRegisterValue::withAttackerValues(
     const Model &model, std::optional<big_int> fixedValue,
     const std::vector<big_int> &forbiddenValues) const {
     auto *randReg = new Bmv2V1ModelRegisterValue(getInitialValue());
-    randReg->setBaseCells(baseCells);
+    randReg->setBaseCells(evaluatedBaseCells(model));
     std::vector<std::pair<const IR::SymbolicVariable *, const IR::Constant *>> modelOverrides;
     bool feasible = true;
     auto isForbidden = [&](const big_int &v) {

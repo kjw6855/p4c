@@ -1642,7 +1642,17 @@ std::string StateDependencyTracker::outputSignature(const FinalState *fs) const 
     int port = -1;
     evalDisposition(fs, dropped, port, nullptr);
     if (dropped) return "drop";
-    if (const int mgid = evalMulticastGroup(fs); mgid >= 0) return "mcast:" + std::to_string(mgid);
+    if (const int mgid = evalMulticastGroup(fs); mgid >= 0) {
+        // Two groups that replicate to the same ports send the packet to the same place.
+        if (const auto *snap = loadedCpSnapshot(); snap != nullptr) {
+            if (auto ports = snap->multicastPorts(mgid); ports.has_value()) {
+                std::string out = "ports:";
+                for (int p : *ports) out += std::to_string(p) + ",";
+                return out;
+            }
+        }
+        return "mcast:" + std::to_string(mgid);
+    }
     return "port:" + std::to_string(port);
 }
 
@@ -3559,6 +3569,13 @@ size_t StateDependencyTracker::runTamperingChain(
     // degenerated into "can I invent two control planes that differ".
     if (adiv && !tableHasConstEntries(currentSinkTable_)) return 0;
 
+    // H2S2O: the register value feeds an output variable; there is no table or condition to flip,
+    // so the condition flow runs in output mode (one direction: "the output changes").
+    if (SymbexOptions::get().stateDepSinks == SymbexOptions::StateDepSinks::O) {
+        if (pass != TamperPass::HitToMiss) return 0;
+        currentSinkCondition = nullptr;
+        return runConditionChain(chain, initState, phase1Bucket, callBack, maxPerChain, false);
+    }
     // H2S2C: condition sinks use a dedicated flow (symbolic Phase-3 flip confirmation for both
     // directions). Delegate before the table-specific logic below.
     if (currentSinkCondition != nullptr) {
@@ -4748,17 +4765,33 @@ size_t StateDependencyTracker::runConditionChain(
     size_t maxPerChain, bool missToHit) {
     // currentChain / currentSinkCondition were set by the caller. Direction: missToHit=false means
     // TRUE→FALSE (Phase-1 condition true, tampered Phase-3 false); missToHit=true means FALSE→TRUE.
+    //
+    // Output mode (H2S2O, no sink condition): the register value feeds an output variable, and the
+    // flip to confirm is "the attacked replay sends the victim's packet elsewhere" -- its output
+    // signature (drop / port / multicast ports) differs from Phase 1's. One direction only.
     solver.checkSat({});
+    const bool outputMode = currentSinkCondition == nullptr;
     const int p1Val = missToHit ? 0 : 1;
     const int p3Target = 1 - p1Val;
+    // The Phase-3 goal against Phase-1 state @p p1.
+    auto goalFor = [this, outputMode, p3Target](const FinalState *p1) -> Phase3Goal {
+        if (!outputMode) return hitGoal(p3Target == 1);
+        const std::string before = outputSignature(p1);
+        return [this, before](const FinalState *fs) {
+            return fs != nullptr && outputSignature(fs) != before;
+        };
+    };
 
     // ---- Phase 1: take this chain's share of the shared traversal, keep cond == p1Val ----
     setPhase(TamperingPhase::Phase1_Read);
     std::vector<const FinalState *> phase1States(phase1Bucket.begin(), phase1Bucket.end());
-    phase1States.erase(
-        std::remove_if(phase1States.begin(), phase1States.end(),
-                       [this, p1Val](const FinalState *fs) { return evalCondition(fs) != p1Val; }),
-        phase1States.end());
+    if (!outputMode) {
+        phase1States.erase(std::remove_if(phase1States.begin(), phase1States.end(),
+                                          [this, p1Val](const FinalState *fs) {
+                                              return evalCondition(fs) != p1Val;
+                                          }),
+                           phase1States.end());
+    }
     if (phase1States.empty()) return 0;
 
     // Deduped PhaseConditions (ports + table keys). Conditions allow any disposition (drop or
@@ -4885,7 +4918,7 @@ size_t StateDependencyTracker::runConditionChain(
             big_int flipValue = 0;
             const FinalState *fs3Drive =
                 driveRegisterPhase2(chain, initState, driveTemplate, repPhase1State, cond1.inputPort,
-                                    inputPortSymExpr, hitGoal(p3Target == 1), fs2real, kDrive,
+                                    inputPortSymExpr, goalFor(repPhase1State), fs2real, kDrive,
                                     flipValue);
             // Adopt the accumulation result when the write path was unreachable in one packet, or when
             // it genuinely needs k>1 (the single-packet terminals cannot flip this threshold).
@@ -4916,10 +4949,14 @@ size_t StateDependencyTracker::runConditionChain(
         phase2StateNum += phase2StateMap[i].size();
     }
     if (phase2StateNum == 0) {
-        printInfo("[Tampering H2S2C] chain id=%1% (%2%): Phase-2 write not satisfiable in a single "
+        printInfo("[Tampering %1%] chain id=%2% (%3%): Phase-2 write not satisfiable in a single "
                   "packet; skipping (sound).",
-                  chain.id, currentChainName);
+                  outputMode ? "H2S2O" : "H2S2C", chain.id, currentChainName);
         return 0;
+    }
+    if (outputMode) {
+        printInfo("[Tampering H2S2O] chain id=%1%: %2% Phase-1 state(s), %3% Phase-2 write(s)",
+                  chain.id, phase1States.size(), phase2StateNum);
     }
 
     // ---- Phase 3: symbolically replay Phase 1 with the tampered register; confirm the condition
@@ -4940,7 +4977,17 @@ size_t StateDependencyTracker::runConditionChain(
         // it. (legit == -1 = no legit terminal -> cannot rule out -> fall through and emit.) For a
         // condition chain evalSinkFlip dispatches to evalCondition and pinSinkEntryForLegit is inert
         // (no sink table, so runSymbolicPhase3 pins every table to Phase 1 regardless).
-        if (legitPhase3Sink(chain, initState, fs1, cond1.inputPort, inputPortSymExpr) == p3Target) {
+        if (outputMode) {
+            const auto *legit =
+                runLegitPhase3(chain, initState, fs1, cond1.inputPort, inputPortSymExpr);
+            if (legit != nullptr && outputSignature(legit) != outputSignature(fs1)) {
+                printInfo("[Tampering H2S2O] chain id=%1%: the victim's own replay already changes "
+                          "its output (%2% -> %3%); not attacker-caused, skipping.",
+                          chain.id, outputSignature(fs1), outputSignature(legit));
+                continue;
+            }
+        } else if (legitPhase3Sink(chain, initState, fs1, cond1.inputPort, inputPortSymExpr) ==
+                   p3Target) {
             printInfo("[Tampering H2S2C] chain id=%1%: victim's own Phase-1 write already flips the "
                       "condition to the tampered branch on replay (redundant with attacker); skipping.",
                       chain.id);
@@ -4950,7 +4997,8 @@ size_t StateDependencyTracker::runConditionChain(
             if (maxPerChain != 0 && emitted >= maxPerChain) break;
             const auto &model2 = fs2->getFinalModel();
             const auto *es2 = fs2->getExecutionState();
-            if (!sinkConditionDiverges()) continue;  // then/else write the same output (count-indep.)
+            // then/else write the same output (count-indep.); an output sink has no branches.
+            if (!outputMode && !sinkConditionDiverges()) continue;
             int ip2 = IR::getIntFromLiteral(
                 model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
             // Drive the tamper to flip: one send if that suffices, else replay the same Phase-2
@@ -4963,9 +5011,33 @@ size_t StateDependencyTracker::runConditionChain(
                 if (fs1 != drivenFs1[fs2]) continue;
                 fs3 = drivenIt->second;
                 repeat = drivenRepeat[fs2];
+            } else if (outputMode) {
+                // An output sink takes the register value as is, so what moves the packet is the
+                // attacker's VALUE: replay Phase 1 over its own state with the attacker's write at
+                // --state-tamper-value (as the key path does), rather than accumulating the solver's
+                // arbitrary Phase-2 value.
+                std::map<cstring, const TestObject *> carried;
+                for (const auto &[regName, regObj] :
+                     fs1->getExecutionState()->getTestObjectCategory("registervalues"_cs))
+                    carried[regName] = regObj->evaluateForCarry(fs1->getFinalModel());
+                if (const auto *p2Reg = es2->getTestObject("registervalues"_cs, chain.soName, false)) {
+                    carried[chain.soName] =
+                        p2Reg
+                            ->withAttackerValues(modelWithResolvedIndices(fs2, chain.soName, programInfo),
+                                                 SymbexOptions::get().stateTamperValue, {})
+                            .testObject;
+                }
+                fs3 = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort, inputPortSymExpr,
+                                        carried);
+                if (fs3 != nullptr && !goalFor(fs1)(fs3)) fs3 = nullptr;
             } else {
                 fs3 = accumulatePhase2Flip(chain, initState, fs1, cond1.inputPort, fs2, ip2,
-                                           inputPortSymExpr, hitGoal(p3Target == 1), repeat);
+                                           inputPortSymExpr, goalFor(fs1), repeat);
+            }
+            if (fs3 == nullptr && outputMode) {
+                printInfo("[Tampering H2S2O] chain id=%1%: the attacker's write does not move the "
+                          "victim's packet away from %2%.",
+                          chain.id, outputSignature(fs1));
             }
             if (fs3 == nullptr) continue;  // no packet count up to the cap flips the condition
             if (outputPortGateRejects(fs1, fs3, chain)) continue;
@@ -5073,6 +5145,12 @@ size_t StateDependencyTracker::runConditionChain(
             // see TamperingFinalState::kind. The Cond* kinds exist but are not selected here.
             ts.kind = missToHit ? TamperKind::MissToHit : TamperKind::HitToMiss;
             ts.caseLabel = cstring(missToHit ? "COND_FALSE_TO_TRUE" : "COND_TRUE_TO_FALSE");
+            if (outputMode) {
+                ts.kind = TamperKind::OutputDiverge;
+                ts.caseLabel = "OUTPUT_DIVERGE"_cs;
+                ts.sinkOutcomeLegit = cstring(outputSignature(fs1));
+                ts.sinkOutcomeAttack = cstring(outputSignature(fs3));
+            }
             if (repeat > 1)
                 printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: accumulation needs %3% Phase-2 "
                           "packet(s) to flip the condition.",
@@ -5084,8 +5162,13 @@ size_t StateDependencyTracker::runConditionChain(
                 ts.usesMulticast = true;
                 ts.multicastGroupId = mgid1;
             }
-            printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: condition %3% (%4%→%5%)", chain.id,
-                      ts.subTestId, ts.caseLabel, p1Val, p3Target);
+            if (outputMode) {
+                printInfo("[Tampering H2S2O] chain id=%1% sub=%2%: output %3% -> %4%", chain.id,
+                          ts.subTestId, ts.sinkOutcomeLegit, ts.sinkOutcomeAttack);
+            } else {
+                printInfo("[Tampering H2S2C] chain id=%1% sub=%2%: condition %3% (%4%→%5%)",
+                          chain.id, ts.subTestId, ts.caseLabel, p1Val, p3Target);
+            }
             reportDefaultActionOverrides(cond1, chain.id, ts.subTestId);
             // The concolic re-solve in the test backend can still hit a TaintExpression the Z3
             // backend cannot translate; don't let one un-emittable candidate abort the whole run.

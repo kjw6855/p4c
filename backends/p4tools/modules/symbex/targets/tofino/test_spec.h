@@ -106,6 +106,12 @@ class IndexMap : public TestObject {
         return baseCells;
     }
 
+    /// The base cells with their values fixed by @p model. The cells are snapshot pins' variables,
+    /// and the pins live only in the phase that seeded them, so a copy carried or evaluated
+    /// elsewhere must hold constants.
+    [[nodiscard]] std::vector<std::pair<const IR::Expression *, const IR::Expression *>>
+    evaluatedBaseCells(const Model &model) const;
+
     /// @returns the value of @p index before any write: the matching snapshot base cell, else the
     /// initial value. Struct values are selected field by field.
     [[nodiscard]] const IR::Expression *getBaseValueAtIndex(const IR::Expression *index) const;
