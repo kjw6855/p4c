@@ -1,0 +1,100 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# hand-written from the program's static rules
+# source: FLM-SpecRegex/simple_cuckoo_firewall_build/lucid.py:init
+program: "FLM-SpecRegex_simple_cuckoo_firewall_build_lucid"
+target: "tofino"
+snapshot_id: "static"
+captured_at: "2026-10-15T04:36:49.226399+00:00"
+topology {
+  port { port: 128 role: PORT_ROLE_HOST name: "h128" }
+  port { port: 129 role: PORT_ROLE_HOST name: "h129" }
+  port { port: 130 role: PORT_ROLE_HOST name: "h130" }
+  port { port: 131 role: PORT_ROLE_HOST name: "h131" }
+  port { port: 196 role: PORT_ROLE_RECIRC name: "recirc" }
+  port { port: 132 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x28\x00" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 129 int_arr_val: 130 int_arr_val: 131 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x02\x80" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 10240 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x28\x10" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 128 int_arr_val: 130 int_arr_val: 131 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x02\x81" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 10256 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x28\x20" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 128 int_arr_val: 129 int_arr_val: 131 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x02\x82" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 10272 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x28\x30" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 128 int_arr_val: 129 int_arr_val: 130 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x02\x83" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 10288 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x10" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 196 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x01" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 16 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x20" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 196 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x21" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 196 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x02" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 32 int_arr_val: 33 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false bool_arr_val: false }
+}
