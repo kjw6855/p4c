@@ -1,0 +1,13 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on bmv2: no controller in the repo (topology only)
+# no control plane in P4LTL/NdN; nothing to run
+program: "P4LTL_NdN_main"
+target: "bmv2"
+snapshot_id: "live"
+captured_at: "2026-10-19T06:18:24.219181+00:00"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
