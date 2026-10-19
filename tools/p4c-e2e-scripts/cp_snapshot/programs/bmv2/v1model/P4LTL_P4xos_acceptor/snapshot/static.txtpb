@@ -1,0 +1,77 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# hand-written from the program's static rules
+# source: P4LTL/P4xos/control plane/config-acceptor.txt
+# note: no transport_tbl forward row in the shipped config (the default drops every Paxos packet)
+program: "P4LTL_P4xos_acceptor"
+target: "bmv2"
+snapshot_id: "static"
+captured_at: "2026-10-15T04:50:56.801304+00:00"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+entities {
+  table_entry {
+    table_name: "ingress.arp_tbl"
+    match { field_name: "hdr.arp.op" exact { value: "\x01" } }
+    action { action { action_name: "ingress.handle_arp_request"  } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "ingress.arp_tbl"
+    match { field_name: "hdr.arp.op" exact { value: "\x02" } }
+    action { action { action_name: "ingress.handle_arp_reply"  } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "ingress.icmp_tbl"
+    match { field_name: "hdr.icmp.icmpType" exact { value: "\x08" } }
+    action { action { action_name: "ingress.handle_icmp_request"  } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "ingress.icmp_tbl"
+    match { field_name: "hdr.icmp.icmpType" exact { value: "\x00" } }
+    action { action { action_name: "ingress.handle_icmp_reply"  } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "ingress.acceptor_tbl"
+    match { field_name: "hdr.paxos.msgtype" exact { value: "\x00" } }
+    action { action { action_name: "ingress.handle_1a" params { param_name: "learner_port" value: "\x88\x88" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "ingress.acceptor_tbl"
+    match { field_name: "hdr.paxos.msgtype" exact { value: "\x02" } }
+    action { action { action_name: "ingress.handle_2a" params { param_name: "learner_port" value: "\x88\x88" } } }
+  }
+}
+entities {
+  register_entry {
+    register_id: 369716921
+    index { index: 0 }
+    data { bitstring: "\x01" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 382106357
+    index { index: 0 }
+    data { bitstring: "\x11\x22\x33\x44\x55\x66" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 374256307
+    index { index: 0 }
+    data { bitstring: "\xc0\xa8\x04\x61" }
+  }
+}
