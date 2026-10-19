@@ -1,0 +1,343 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on tofino: initial_script/ PTF tests (runTest) via a BfRt gRPC harness; reactor not started
+# patch edge/coremelt/initial_script/mew_edge_coremelt.py: program name: the authors compiled it as mew_edge_coremelt
+# patch edge/coremelt/initial_script/mew_edge_coremelt_local.py: program name: the authors compiled it as mew_edge_coremelt
+# dump: pipe.request_version: shadow read failed (_MultiThreadedRendezvous); read from the device
+# dump: pipe.request_version: read failed (<_MultiThreadedRendezvous of RPC that terminated with: status = StatusCode.UNKNOWN details = "Read Error Status" debug_error_string = "UNKNOWN:Error received from peer ipv4:127.0.0.1:50052 {created_time:"2026-10-19T08:09:03.113018777+00:00", grpc_status:2, grpc_message:"Read Error Status"}" >)
+# dump: flow_bigtime: shadow read failed (_MultiThreadedRendezvous); read from the device
+# dump: flow_bigtime: read failed (<_MultiThreadedRendezvous of RPC that terminated with: status = StatusCode.UNKNOWN details = "Read Error Status" debug_error_string = "UNKNOWN:Error received from peer ipv4:127.0.0.1:50052 {created_time:"2026-10-19T08:09:36.054619633+00:00", grpc_status:2, grpc_message:"Read Error Status"}" >)
+program: "Mew-prototype_edge_coremelt_mew-edge-coremelt"
+target: "tofino"
+snapshot_id: "live"
+captured_at: "2026-10-19T08:11:05.409323+00:00"
+topology {
+  port { port: 0 role: PORT_ROLE_HOST name: "host0" }
+  port { port: 2 role: PORT_ROLE_HOST name: "host2" }
+  port { port: 1 role: PORT_ROLE_LINK name: "to-core" }
+  port { port: 10 role: PORT_ROLE_CPU name: "cpu" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.all_route"
+  action_name: "SwitchIngress.route_nat"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x00" } }
+  data { field_name: "dst_addr" value: "\x08\x00\x27\x55\x7a\xff" }
+  data { field_name: "dst_port" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.all_route"
+  action_name: "SwitchIngress.route_nat"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x02" } }
+  data { field_name: "dst_addr" value: "\x08\x00\x27\x55\x7a\xff" }
+  data { field_name: "dst_port" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.all_route"
+  action_name: "SwitchIngress.remove_vlan"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x01" } }
+  data { field_name: "dst_addr" value: "\x00" }
+  data { field_name: "dst_port" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_plus"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_read"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_read"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_update"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_plus"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_read"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_read"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_update"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update1"
+  action_name: "SwitchIngress.fstate1_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_plus"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_read"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_read"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_update"
+  key { field_name: "cur_defense_type" exact { value: "\x00" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_plus"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_read"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_read"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_update"
+  key { field_name: "cur_defense_type" exact { value: "\x02" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x80" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.flow_state_update2"
+  action_name: "SwitchIngress.fstate2_clear"
+  key { field_name: "cur_defense_type" exact { value: "\x82" } }
+  key { field_name: "cur_flow_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update1"
+  action_name: "SwitchIngress.lstate1_plus"
+  key { field_name: "cur_link_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update1"
+  action_name: "SwitchIngress.lstate1_read"
+  key { field_name: "cur_link_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update1"
+  action_name: "SwitchIngress.lstate1_read"
+  key { field_name: "cur_link_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update1"
+  action_name: "SwitchIngress.lstate1_update"
+  key { field_name: "cur_link_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update2"
+  action_name: "SwitchIngress.lstate2_read"
+  key { field_name: "cur_link_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update2"
+  action_name: "SwitchIngress.lstate2_update"
+  key { field_name: "cur_link_time_window" exact { value: "\x00" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update2"
+  action_name: "SwitchIngress.lstate2_plus"
+  key { field_name: "cur_link_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.link_state_update2"
+  action_name: "SwitchIngress.lstate2_read"
+  key { field_name: "cur_link_time_window" exact { value: "\x01" } }
+  key { field_name: "global_time_window" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.get_defense_info"
+  action_name: "SwitchIngress.return_defense_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x01" } }
+  data { field_name: "curt" value: "\x02" }
+  data { field_name: "curv" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.get_defense_info"
+  action_name: "SwitchIngress.return_defense_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x00" } }
+  data { field_name: "curt" value: "\x02" }
+  data { field_name: "curv" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.blocktable"
+  action_name: "SwitchIngress.return_block_flag"
+  key { field_name: "hdr.ipv4.src_addr" exact { value: "\xff\xff\xff\xff" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.inform_others"
+  action_name: "SwitchIngress.upload_to_cpu_coremelt"
+  key { field_name: "old_blockstate" exact { value: "\x00" } }
+  data { field_name: "dst_port" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.thre_check_coremelt"
+  action_name: "SwitchIngress.update_blocklist"
+  key { field_name: "flow_state" range { low: "\x08\x00" high: "\xff\xff" } }
+}
