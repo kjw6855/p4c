@@ -36,6 +36,8 @@ for pdir in "$CAMP"/*/; do
     docker run --rm --net=host --privileged -v /root/jiwon:/root/jiwon -w "$E2E" \
         p4lang/behavioral-model:latest bash -c '
           printf "#!/bin/sh\nexec \"\$@\"\n" > /usr/local/bin/sudo && chmod +x /usr/local/bin/sudo
+          # the host AppArmor tcpdump profile attaches to /usr/bin/tcpdump; a copy elsewhere runs
+          cp /usr/bin/tcpdump /usr/local/bin/tcpdump && hash -r
           python3 tampering.py --target bmv2 --stage run --p4-file "$0" --target-name "$1" \
               --output-root "$2" --csv "$2/results.csv" --tamper-mode both --no-ui' \
         "$p4" "$P" "$out" > "$out/$P.log" 2>&1
