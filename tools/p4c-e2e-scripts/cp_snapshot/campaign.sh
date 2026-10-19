@@ -3,11 +3,12 @@
 # Capturable-H2S2 generation: every program that has a --cp-snapshot, for each output-chain category
 # (OUTK, OUTC, O) in which its nightly chain cache has chains, with --diverge-output PORT. One job
 # per (program, category), at most JOBS (10) at a time, 32GB and TIMEOUT (1800s) each; CATS (e.g. "O")
-# restricts the categories.
+# restricts the categories. SNAPS picks the snapshot directory (e.g. .../cp_snapshots/live) and REGS
+# (SEED|INITIAL) passes --cp-snapshot-registers.
 set -uo pipefail
 OUT="$1"; shift
 R=/root/jiwon/Workspace/p4c
-SNAPS=/root/jiwon/Workspace-remote/sp27/cp_snapshots
+SNAPS=${SNAPS:-/root/jiwon/Workspace-remote/sp27/cp_snapshots}
 LIST=/root/jiwon/Workspace-remote/usenix27/program_list_151_no_oom.txt
 CACHE=/root/jiwon/Workspace-remote/sp27/p4symbex_nightly/sochain_cache
 SX="${P4SYMBEX:-$R/build/p4symbex}"
@@ -37,10 +38,10 @@ run_job() {
       --packet-size-range 14:9600 --track-coverage STATEMENTS --max-tests "${MAX_TESTS:-8}" \
       --out-dir "$d" --state-dep --path-selection "$pol" --state-dep-sinks "$sinks" \
       --diverge-output PORT --state-dep-cache "$cache" \
-      --cp-snapshot "/root/jiwon/Workspace-remote/sp27/cp_snapshots/$P.txtpb" "$p4" \
+      --cp-snapshot "$SNAPS/$P.txtpb" ${REGS:+--cp-snapshot-registers "$REGS"} "$p4" \
       --state-tamper-value 0xdeadbeef > "$d/p4symbex.log" 2>&1 )
   echo "$P $sinks chains=$n rc=$? $(grep -h 'Symbex Summary' "$d/p4symbex.log" | tail -1 | grep -o 'tests=[0-9]* status=[a-z]*') files=$(ls "$d"/*.txtpb 2>/dev/null | wc -l)"
 }
-export -f run_job; export R SX OUT
+export -f run_job; export R SX OUT SNAPS REGS
 wc -l < "$jobs_file"
 xargs -a "$jobs_file" -d '\n' -P "${JOBS:-10}" -I{} bash -c 'run_job "$@"' _ {} | tee "$OUT/summary.txt"
