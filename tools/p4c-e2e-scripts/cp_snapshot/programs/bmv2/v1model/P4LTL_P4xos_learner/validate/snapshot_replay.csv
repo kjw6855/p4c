@@ -1,0 +1,7 @@
+category,case,status,reason
+OUTC,learner_1_1_m2h.txtpb,OK,"VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit=0 vs attack=None) [Phase-2 reg: NOT-written (register ingress.registerHistory2B[0]=0x5, want == 0x3)]"
+OUTC,learner_1_2_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit=0 vs attack=None) [Phase-2 reg: written]
+OUTC,learner_1_3_m2h.txtpb,FAIL,"no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on 0 in both runs [Phase-2 reg: NOT-written (register ingress.registerHistory2B[0]=0x2, want == 0x3)]"
+OUTC,learner_1_4_m2h.txtpb,FAIL,"no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on 0 in both runs [Phase-2 reg: NOT-written (register ingress.registerHistory2B[0]=0x2, want == 0x5)]"
+OUTC,learner_1_5_m2h.txtpb,FAIL,"no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on 0 in both runs [Phase-2 reg: NOT-written (register ingress.registerHistory2B[0]=0x4, want == 0x3)]"
+OUTC,learner_1_6_m2h.txtpb,FAIL,"no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on 0 in both runs [Phase-2 reg: NOT-written (register ingress.registerHistory2B[0]=0x4, want == 0x5)]"

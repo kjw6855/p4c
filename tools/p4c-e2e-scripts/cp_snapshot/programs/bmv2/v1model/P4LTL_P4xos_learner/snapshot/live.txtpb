@@ -1,0 +1,26 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on bmv2: simple_switch_CLI < control plane/config-learner.txt
+program: "P4LTL_P4xos_learner"
+target: "bmv2"
+snapshot_id: "live"
+captured_at: "2026-10-19T06:17:29.990441+00:00"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+entities {
+  table_entry {
+    table_name: "ingress.learner_tbl"
+    match { field_name: "hdr.paxos.msgtype" exact { value: "\x03" } }
+    action { action { action_name: "ingress.handle_2b"  } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "ingress.transport_tbl"
+    match { field_name: "meta.paxos_metadata.set_drop" exact { value: "\x01" } }
+    action { action { action_name: "ingress._drop"  } }
+  }
+}

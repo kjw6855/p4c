@@ -1,0 +1,7 @@
+category,case,status,reason,controller_rc,runtime_rows,baseline,agree
+OUTC,learner_1_1_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[0] vs attack ports=drop) [Phase-2 reg: ingress.registerHistory2B[0]=3:NOT-written (read 5)],0/0,,OK,yes
+OUTC,learner_1_2_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[0] vs attack ports=drop) [Phase-2 reg: ingress.registerHistory2B[0]=5:written],0/0,,OK,yes
+OUTC,learner_1_3_m2h.txtpb,FAIL,no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on [0] in both runs [Phase-2 reg: ingress.registerHistory2B[0]=3:NOT-written (read 2)],0/0,,FAIL,yes
+OUTC,learner_1_4_m2h.txtpb,FAIL,no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on [0] in both runs [Phase-2 reg: ingress.registerHistory2B[0]=5:NOT-written (read 2)],0/0,,FAIL,yes
+OUTC,learner_1_5_m2h.txtpb,FAIL,no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on [0] in both runs [Phase-2 reg: ingress.registerHistory2B[0]=3:NOT-written (read 4)],0/0,,FAIL,yes
+OUTC,learner_1_6_m2h.txtpb,FAIL,no port divergence (--diverge-output PORT): the replayed Phase-3 packet leaves on [0] in both runs [Phase-2 reg: ingress.registerHistory2B[0]=5:NOT-written (read 4)],0/0,,FAIL,yes

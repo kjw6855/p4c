@@ -1,0 +1,2 @@
+P4LTL_P4xos_learner: post-setup state of run learner_1_1_m2h_legit vs /root/jiwon/Workspace-remote/sp27/cp_live/P4LTL_P4xos_learner/entities.pkl
+capture 196614  validate 196614  differ 0  only-capture 0  only-validate 0

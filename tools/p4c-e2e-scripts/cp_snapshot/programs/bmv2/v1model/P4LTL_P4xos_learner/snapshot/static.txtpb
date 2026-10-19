@@ -1,0 +1,28 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# hand-written from the program's static rules
+# source: P4LTL/P4xos/control plane/config-learner.txt
+# skipped (the switch rejects it): table_add forward_tbl forward => 1  -- "'forward_tbl' matches 0"
+program: "P4LTL_P4xos_learner"
+target: "bmv2"
+snapshot_id: "static"
+captured_at: "2026-10-15T04:51:01.689876+00:00"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+entities {
+  table_entry {
+    table_name: "ingress.transport_tbl"
+    match { field_name: "meta.paxos_metadata.set_drop" exact { value: "\x01" } }
+    action { action { action_name: "ingress._drop"  } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "ingress.learner_tbl"
+    match { field_name: "hdr.paxos.msgtype" exact { value: "\x03" } }
+    action { action { action_name: "ingress.handle_2b"  } }
+  }
+}
