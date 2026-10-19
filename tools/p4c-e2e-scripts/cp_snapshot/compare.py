@@ -4,7 +4,7 @@
     compare.py <program> [--work DIR]
 
 Reads <work>/entities.pkl from capture.py and rebuilds the static entities from
-static/<program>.py, then normalizes representation only:
+the program's static.py (packages.static_path), then normalizes representation only:
   - key-field order;
   - a ternary value under its mask (the switch stores value & mask; p4symbex matches
     (key & mask) == (value & mask), so both spellings are the same rule);
