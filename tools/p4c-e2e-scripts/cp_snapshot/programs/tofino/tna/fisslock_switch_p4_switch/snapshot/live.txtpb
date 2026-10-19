@@ -1,0 +1,398 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on tofino: switch/control fisslock_decider (C BfRt, embedded switchd) driver_init()
+# patch bfrt.c: SDE API: open-p4studio is built with BFRT_GENERIC_FLAGS (entry add/mod take flags)
+# patch bfrt.c: SDE API: open-p4studio is built with BFRT_GENERIC_FLAGS (entry add/mod take flags)
+# patch bfrt.h: program name: the authors compiled the P4 program as fisslock_decider
+# patch main.c: keep the process (and so the switch state) up for the capture instead of exiting
+# fisslock_decider built against open-p4studio libdriver.so (shim headers)
+# $pre from static/fisslock_switch_p4_switch.py (setup_mgrps: 25 groups); bf_mc groups are not visible through BfRt
+# supplemented 50 entities the target does not read back
+program: "fisslock_switch_p4_switch"
+target: "tofino"
+snapshot_id: "live"
+captured_at: "2026-10-19T07:59:50.089740+00:00"
+topology {
+  port { port: 24 role: PORT_ROLE_HOST name: "pro0-1" mac: "1070fd0de230" ip: "10.0.2.4" }
+  port { port: 16 role: PORT_ROLE_HOST name: "pro1-1" mac: "08c0ebfd52c4" ip: "10.0.2.1" }
+  port { port: 4 role: PORT_ROLE_HOST name: "pro2-1" mac: "08c0ebfe8c50" ip: "10.0.2.2" }
+  port { port: 12 role: PORT_ROLE_HOST name: "pro3-1" mac: "1070fd0de448" ip: "10.0.2.3" }
+  port { port: 56 role: PORT_ROLE_HOST name: "pro0-2" mac: "08c0ebde0156" ip: "10.0.2.5" }
+  port { port: 48 role: PORT_ROLE_HOST name: "pro1-2" mac: "08c0ebdcb30a" ip: "10.0.2.6" }
+  port { port: 40 role: PORT_ROLE_HOST name: "pro2-2" mac: "08c0ebde011a" ip: "10.0.2.7" }
+  port { port: 32 role: PORT_ROLE_HOST name: "pro3-2" mac: "08c0ebdca15a" ip: "10.0.2.8" }
+  port { port: 0 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x10\x70\xfd\x0d\xe2\x30" } }
+  data { field_name: "port" value: "\x18" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x08\xc0\xeb\xfd\x52\xc4" } }
+  data { field_name: "port" value: "\x10" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x08\xc0\xeb\xfe\x8c\x50" } }
+  data { field_name: "port" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x10\x70\xfd\x0d\xe4\x48" } }
+  data { field_name: "port" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x08\xc0\xeb\xde\x01\x56" } }
+  data { field_name: "port" value: "\x38" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x08\xc0\xeb\xdc\xb3\x0a" } }
+  data { field_name: "port" value: "\x30" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x08\xc0\xeb\xde\x01\x1a" } }
+  data { field_name: "port" value: "\x28" }
+}
+bfrt_entities {
+  table_name: "pipe.IngressPipe.eth_fallback"
+  action_name: "IngressPipe.eth_forward"
+  key { field_name: "hdr.ethernet.dst_mac" exact { value: "\x08\xc0\xeb\xdc\xa1\x5a" } }
+  data { field_name: "port" value: "\x20" }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x10" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 24 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x01" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 16 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x10" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 24 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x81" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2064 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x10" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 12 int_arr_val: 16 int_arr_val: 32 int_arr_val: 40 int_arr_val: 48 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc1" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3088 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x20" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 16 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x02" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 32 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x20" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 16 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x82" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2080 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x20" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 12 int_arr_val: 24 int_arr_val: 32 int_arr_val: 40 int_arr_val: 48 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc2" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3104 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x30" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x03" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 48 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x30" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x83" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2096 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x30" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 12 int_arr_val: 16 int_arr_val: 24 int_arr_val: 32 int_arr_val: 40 int_arr_val: 48 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc3" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3120 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x40" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 12 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x04" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 64 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x40" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 12 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x84" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2112 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x40" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 16 int_arr_val: 24 int_arr_val: 32 int_arr_val: 40 int_arr_val: 48 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc4" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3136 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x50" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x05" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 80 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x50" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x85" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2128 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x50" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 12 int_arr_val: 16 int_arr_val: 24 int_arr_val: 32 int_arr_val: 40 int_arr_val: 48 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc5" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3152 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x60" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 48 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x06" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 96 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x60" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 48 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x86" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2144 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x60" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 12 int_arr_val: 16 int_arr_val: 24 int_arr_val: 32 int_arr_val: 40 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc6" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3168 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x70" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 40 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x07" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 112 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x70" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 40 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x87" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2160 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x70" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 12 int_arr_val: 16 int_arr_val: 24 int_arr_val: 32 int_arr_val: 48 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc7" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3184 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x80" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 32 }
+  data { field_name: "$MULTICAST_RID" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x08" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 128 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x08\x80" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 32 }
+  data { field_name: "$MULTICAST_RID" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\x88" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 2176 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0c\x80" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 12 int_arr_val: 16 int_arr_val: 24 int_arr_val: 40 int_arr_val: 48 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xc8" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 3200 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
+bfrt_entities {
+  table_name: "$pre.node"
+  key { field_name: "$MULTICAST_NODE_ID" exact { value: "\x0f\xf0" } }
+  data { field_name: "$DEV_PORT" int_arr_val: 4 int_arr_val: 12 int_arr_val: 16 int_arr_val: 24 int_arr_val: 32 int_arr_val: 40 int_arr_val: 48 int_arr_val: 56 }
+  data { field_name: "$MULTICAST_RID" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "$pre.mgid"
+  key { field_name: "$MGID" exact { value: "\xff" } }
+  data { field_name: "$MULTICAST_NODE_ID" int_arr_val: 4080 }
+  data { field_name: "$MULTICAST_NODE_L1_XID" int_arr_val: 0 }
+  data { field_name: "$MULTICAST_NODE_L1_XID_VALID" bool_arr_val: false }
+}
