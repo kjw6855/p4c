@@ -181,7 +181,7 @@ def _to_client_data(ent: BfRtEntity) -> List[BfRtDataField]:
 
 @dataclass
 class PacketTester:
-    client: BfRtClient
+    client: Optional[BfRtClient]    # None: install nothing (a live controller owns the state)
     phase_timeout: float
     capture_dir: Path
     port_to_iface: Dict[int, str]   # switch port → host veth
@@ -520,11 +520,13 @@ class PacketTester:
         after that phase (before Phase 3 overwrites it) and return a human diagnostic."""
         # A --cp-snapshot case carries its multicast groups in the snapshot; the per-case group
         # block (a single representative port) would clash with them.
-        if not case.snapshot_entities:
+        install = self.client is not None
+        if install and not case.snapshot_entities:
             self._install_multicast(case)
         try:
-            self._install_snapshot(case.snapshot_entities)
-            self._install_entities(case.entities)
+            if install:
+                self._install_snapshot(case.snapshot_entities)
+                self._install_entities(case.entities)
             last_cap: Dict[int, List[bytes]] = {}
             reg_diag = ""
             for i in phase_indices:
@@ -548,7 +550,8 @@ class PacketTester:
                     reg_diag = self._diag_registers(case.affected_registers)
             return last_cap, reg_diag
         finally:
-            self._remove_multicast(case)
+            if install:
+                self._remove_multicast(case)
 
     # Fixed tables a snapshot entry may depend on come first ($pre.mgid names $pre.node nodes).
     _SNAPSHOT_ORDER = ("$pre.node", "$pre.mgid", "$mirror.cfg")

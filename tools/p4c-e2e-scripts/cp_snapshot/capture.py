@@ -3,9 +3,10 @@
 
     capture.py <program> [--out FILE] [--work DIR]
 
-Runs the program's original controller (scenario live/<program>.py) against tofino-model +
-bf_switchd, dumps the pipeline over BF-Runtime before and after it, and writes what the controller
-changed as a CpSnapshot (default sp27/cp_snapshots/live/<program>.txtpb).
+Runs the program's original controller (scenario programs/*/*/<program>/scenario.py, else
+live/<program>.py) against tofino-model + bf_switchd, dumps the pipeline over BF-Runtime before and
+after it, and writes what the controller changed as a CpSnapshot (default
+sp27/cp_snapshots/live/<program>.txtpb).
 
 A scenario module defines:
     PORTS    [Port]: the device ports the controller uses, with their roles (plus one ATTACKER).
@@ -14,6 +15,10 @@ A scenario module defines:
              ("{SRC}" in `new` is the copy's absolute path).
              Only environment patches (names, paths, hardware-only calls, runtime loops) and
              outright bug fixes; rule-producing logic stays as written.
+    SETUP_ONLY_PATCHES  like PATCHES, but applied only by capture (e.g. stopping the controller
+             after its setup); validate_live.py runs the controller without them.
+    READY_MARKER  optional: the controller keeps running after its setup (a reactive loop) and
+             prints this once set up; validate_live.py then runs it in the background.
     prepare(ctx)  optional, before the target starts (e.g. building the program).
     supplement(ctx)  optional: entities the controller set that the dump cannot read back.
     run(ctx)      the controller step; raises on failure.
@@ -21,12 +26,12 @@ A scenario module defines:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import logging
 import os
 import pickle
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -43,7 +48,7 @@ os.environ.update(SDE=SDE, SDE_INSTALL=SDE_INSTALL, HOME="/root/jiwon")
 os.environ["PATH"] = f"{SDE_INSTALL}/bin:" + os.environ["PATH"]
 os.environ.setdefault("BFRT_SUBSCRIBE_TRIES", "30")
 
-from cp_snapshot import dump_bfrt, snapshot as snap  # noqa: E402
+from cp_snapshot import dump_bfrt, packages, snapshot as snap  # noqa: E402
 from tofino import tofino_driver as td  # noqa: E402
 from tofino.bfrt_grpc_client import BfRtClient  # noqa: E402
 
@@ -72,11 +77,7 @@ def bfrt_name(program: str) -> str:
 
 
 def load_scenario(program: str):
-    path = HERE / "live" / f"{program}.py"
-    spec = importlib.util.spec_from_file_location(f"live_{abs(hash(program))}", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return packages.load_module(packages.scenario_path(program), "live")
 
 
 class Context:
@@ -89,6 +90,9 @@ class Context:
         self.notes: List[str] = []
         self.site = SITE
         self.env: Dict[str, str] = dict(os.environ, PYTHONPATH=f"{SITE}:{SITE}/tofino")
+        # When set, commands run in the background until they print this (see READY_MARKER).
+        self.ready_marker: Optional[str] = None
+        self.background: List[subprocess.Popen] = []
 
     def note(self, text: str) -> None:
         log.info("note: %s", text)
@@ -104,6 +108,8 @@ class Context:
         with logf.open("a") as fd:
             fd.write(f"$ {' '.join(map(str, argv))}\n")
             fd.flush()
+            if self.ready_marker:
+                return self._start_until_ready(argv, cwd, env, timeout, fd, logf)
             piped = stdin is not None or hold_stdin
             proc = subprocess.Popen(list(map(str, argv)), cwd=cwd, env=env, stdout=fd,
                                     stderr=subprocess.STDOUT, text=True, start_new_session=True,
@@ -119,6 +125,40 @@ class Context:
                 proc.wait()
                 raise RuntimeError(f"{tag} timed out after {timeout}s (log {logf})")
         return subprocess.CompletedProcess(argv, proc.returncode)
+
+    def _start_until_ready(self, argv, cwd, env, timeout, fd, logf) -> subprocess.CompletedProcess:
+        """Starts argv and returns once its log shows ready_marker, leaving it running (stopped by
+        stop_background). Returns its exit code if it exits before that."""
+        start = fd.tell()
+        proc = subprocess.Popen(list(map(str, argv)), cwd=cwd, env=dict(env, PYTHONUNBUFFERED="1"),
+                                stdout=fd, stderr=subprocess.STDOUT, text=True,
+                                start_new_session=True, stdin=subprocess.DEVNULL)
+        deadline = time.time() + timeout
+        while True:
+            with logf.open() as rd:
+                rd.seek(start)
+                if self.ready_marker in rd.read():
+                    self.background.append(proc)
+                    log.info("%s is set up (%r) and keeps running", argv[-1], self.ready_marker)
+                    return subprocess.CompletedProcess(argv, 0)
+            if proc.poll() is not None:
+                return subprocess.CompletedProcess(argv, proc.returncode)
+            if time.time() > deadline:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+                raise RuntimeError(f"no {self.ready_marker!r} after {timeout}s (log {logf})")
+            time.sleep(0.2)
+
+    def stop_background(self) -> None:
+        for proc in self.background:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGTERM)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait()
+        self.background.clear()
 
     def python(self, argv: Sequence[str], cwd: Path, env: Optional[Dict[str, str]] = None,
                timeout: int = 1800, tag: str = "controller") -> int:
@@ -164,8 +204,10 @@ def apply_patches(ctx: Context, patches) -> None:
             ctx.notes.append(f"patch {rel}: {reason}")
 
 
-def dump_once(program: str, tag: str):
-    client = BfRtClient(td.BFRT_GRPC_ADDR, client_id=0, p4_name=program)
+def dump_once(program: str, tag: str, client_id: int = 0):
+    # Any client_id but 0 leaves digests to a running controller (which holds client 0).
+    client = BfRtClient(td.BFRT_GRPC_ADDR, client_id=client_id, p4_name=program,
+                        enable_learn=client_id == 0)
     try:
         t0 = time.time()
         entities, notes = dump_bfrt.dump(client)
@@ -221,11 +263,16 @@ def _tofino_session(program: str, ctx: Context, ports_json: Path, tag: str, swit
         model.stop()
 
 
+def write_ports_json(path: Path, ports: List[int]) -> Path:
+    """tofino-model port map: device port p on veth{2p+1}; the host side is veth{2p}."""
+    path.write_text(json.dumps({"PortToVeth": [
+        {"device_port": p, "veth1": 2 * p, "veth2": 2 * p + 1} for p in ports]}, indent=2))
+    return path
+
+
 def _tofino(program: str, scen, ctx: Context, ports: List[int]):
     work = ctx.work
-    ports_json = work / "ports.json"
-    ports_json.write_text(json.dumps({"PortToVeth": [
-        {"device_port": p, "veth1": 2 * p, "veth2": 2 * p + 1} for p in ports]}, indent=2))
+    ports_json = write_ports_json(work / "ports.json", ports)
     stock = td.BfSwitchdProcess(program, SDE, work / "bf_switchd.log")
     if not hasattr(scen, "switchd_argv"):
         def body():
@@ -247,7 +294,8 @@ def _tofino(program: str, scen, ctx: Context, ports: List[int]):
     return _tofino_session(program, ctx, ports_json, "_controller", custom, body)
 
 
-def _bmv2(program: str, scen, ctx: Context, ports: List[int]):
+def bmv2_switch(program: str, ctx: Context, ports: List[int]):
+    """Compiles the program and returns (switch, p4info), with ctx.cli feeding that switch."""
     from cp_snapshot import bmv2_live
     js, info = bmv2_live.compile_program(program_p4(program), ctx.work)
     sw = bmv2_live.Switch(js, ports, ctx.work)
@@ -259,6 +307,12 @@ def _bmv2(program: str, scen, ctx: Context, ports: List[int]):
         return text
 
     ctx.cli = cli
+    return sw, info
+
+
+def _bmv2(program: str, scen, ctx: Context, ports: List[int]):
+    from cp_snapshot import bmv2_live
+    sw, info = bmv2_switch(program, ctx, ports)
     try:
         sw.start()
         before, _ = bmv2_live.to_entities(sw.dump(), info)
@@ -269,9 +323,9 @@ def _bmv2(program: str, scen, ctx: Context, ports: List[int]):
     return before, after, notes, rc
 
 
-def capture(program: str, out: Path, work: Path) -> int:
-    scen = load_scenario(program)
-    target = getattr(scen, "TARGET", "tofino")
+def prepare_work(program: str, scen, work: Path, setup_only: bool = True) -> Context:
+    """Fresh work dir: the patched controller copy (SETUP_ONLY_PATCHES too when setup_only) and
+    the scenario's prepare step."""
     work.mkdir(parents=True, exist_ok=True)
     os.chdir(work)  # tofino-model and bf_switchd write their logs into the current directory
     for f in ("controller.log", "patches.log"):
@@ -282,20 +336,40 @@ def capture(program: str, out: Path, work: Path) -> int:
         if ctx.src.exists():
             shutil.rmtree(ctx.src)
         shutil.copytree(REPOS / scen.SOURCE, ctx.src, symlinks=True)
-        apply_patches(ctx, getattr(scen, "PATCHES", []))
+        patches = list(getattr(scen, "PATCHES", []))
+        if setup_only:
+            patches += getattr(scen, "SETUP_ONLY_PATCHES", [])
+        apply_patches(ctx, patches)
     if hasattr(scen, "prepare"):
         scen.prepare(ctx)
+    return ctx
 
-    ports = [p.port for p in scen.PORTS]
+
+def make_veths(ports) -> List[int]:
+    """Creates the veth{2p}/veth{2p+1} pairs missing for `ports`; returns the ports created."""
     created = [p for p in ports if not td._veth_exists(f"veth{2 * p}")]
     for p in created:
         td._ensure_veth_pair(2 * p, 2 * p + 1)
+    return created
+
+
+def drop_veths(created: List[int]) -> None:
+    for p in created:
+        subprocess.run(["ip", "link", "del", f"veth{2 * p}"], capture_output=True)
+
+
+def capture(program: str, out: Path, work: Path) -> int:
+    scen = load_scenario(program)
+    target = getattr(scen, "TARGET", "tofino")
+    ctx = prepare_work(program, scen, work)
+
+    ports = [p.port for p in scen.PORTS]
+    created = make_veths(ports)
     try:
         run = _bmv2 if target == "bmv2" else _tofino
         before, after, dump_notes, rc = run(program, scen, ctx, ports)
     finally:
-        for p in created:
-            subprocess.run(["ip", "link", "del", f"veth{2 * p}"], capture_output=True)
+        drop_veths(created)
 
     changed = snap.diff(before, after)
     if hasattr(scen, "supplement"):

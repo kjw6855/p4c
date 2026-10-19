@@ -89,7 +89,7 @@ class BfRtClient:
 
     def __init__(self, grpc_address: str = "127.0.0.1:50052", device_id: int = 0,
                  client_id: int = 0, p4_name: Optional[str] = None,
-                 pipe_id: int = 0xFFFF) -> None:
+                 pipe_id: int = 0xFFFF, enable_learn: bool = True) -> None:
         _lazy_import_bfrt()
         self.device_id = device_id
         self.client_id = client_id
@@ -101,8 +101,11 @@ class BfRtClient:
             tries = int(os.environ.get("BFRT_SUBSCRIBE_TRIES", "5"))
         except ValueError:
             tries = 5
+        # enable_learn=False leaves digests to another client (a running controller's own).
+        notifications = None if enable_learn else _gc.Notifications(enable_learn=False)
         self.interface = _gc.ClientInterface(grpc_address, client_id=client_id,
-                                             device_id=device_id, num_tries=max(1, tries))
+                                             device_id=device_id, notifications=notifications,
+                                             num_tries=max(1, tries))
         self.target = _gc.Target(device_id=device_id, pipe_id=pipe_id)
         # `bfrt_info` is populated after `bind_pipeline(p4_name)`.
         self.bfrt_info = None
