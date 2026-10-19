@@ -1,0 +1,25 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on tofino: set_lru_table.py (bfrt_python, bfshell -b)
+# patch set_lru_table.py: program name: the testbed compiled it as lru_table
+program: "P4-LRU_testbed_LRUTable_P4_lru_table"
+target: "tofino"
+snapshot_id: "live"
+captured_at: "2026-10-19T06:42:18.281550+00:00"
+topology {
+  port { port: 128 role: PORT_ROLE_HOST name: "h128" }
+  port { port: 144 role: PORT_ROLE_HOST name: "h144" }
+  port { port: 136 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe1.Ingress1.send_table"
+  action_name: "Ingress1.send"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x80" } }
+  data { field_name: "port" value: "\x90" }
+}
+bfrt_entities {
+  table_name: "pipe1.Ingress1.send_table"
+  action_name: "Ingress1.send"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x90" } }
+  data { field_name: "port" value: "\x80" }
+}
