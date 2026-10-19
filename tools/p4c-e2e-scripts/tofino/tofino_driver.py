@@ -59,6 +59,13 @@ def _veth_exists(name: str) -> bool:
     return Path(f"/sys/class/net/{name}").exists()
 
 
+def disable_ipv6(iface: str) -> None:
+    """A fresh interface's kernel IPv6 traffic (router solicitations, MLD reports) shows up in the
+    host-side capture as if the switch had sent it, so the harness veths carry no IPv6."""
+    subprocess.run(["sudo", "sysctl", "-qw", f"net.ipv6.conf.{iface}.disable_ipv6=1"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def _ensure_veth_pair(host_v: int, model_v: int) -> bool:
     """Create + bring up a veth pair (idempotent), disabling offloads like the
     SDE's veth_setup.sh. Returns True if the pair is present afterwards.
@@ -71,6 +78,7 @@ def _ensure_veth_pair(host_v: int, model_v: int) -> bool:
                         "peer", "name", model],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for v in (host, model):
+        disable_ipv6(v)
         subprocess.run(["sudo", "ip", "link", "set", "dev", v, "up"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["sudo", "ip", "link", "set", "dev", v, "mtu", "10240"],
