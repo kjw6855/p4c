@@ -1,0 +1,2 @@
+FANcY_tofino_p4_16_fancy_p4src_fancy: post-setup state of run fancy_1_1_m2h_legit vs /root/jiwon/Workspace-remote/sp27/cp_live/FANcY_tofino_p4_16_fancy_p4src_fancy/entities.pkl
+capture 170272  validate 170272  differ 0  only-capture 0  only-validate 0

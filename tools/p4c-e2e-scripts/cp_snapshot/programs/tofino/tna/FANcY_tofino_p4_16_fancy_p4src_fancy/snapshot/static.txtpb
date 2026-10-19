@@ -1,0 +1,877 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# hand-written from the program's static rules
+# source: FANcY/tofino/p4_16/fancy/control_plane/control_plane.py:configure_all (model mode)
+# source: FANcY/tofino/p4_16/fancy/includes/constants.p4
+# note: model ports PORT0_M..PORT6_M = 0..6; attacker on 7
+program: "FANcY_tofino_p4_16_fancy_p4src_fancy"
+target: "tofino"
+snapshot_id: "static"
+captured_at: "2026-10-15T04:40:40.651176+00:00"
+topology {
+  port { port: 0 role: PORT_ROLE_HOST name: "p0" }
+  port { port: 1 role: PORT_ROLE_HOST name: "p1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "p2" }
+  port { port: 3 role: PORT_ROLE_HOST name: "p3" }
+  port { port: 4 role: PORT_ROLE_HOST name: "p4" }
+  port { port: 5 role: PORT_ROLE_HOST name: "p5" }
+  port { port: 6 role: PORT_ROLE_HOST name: "p6" }
+  port { port: 7 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x00" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x01" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x01" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x01" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x01" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x02" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x02" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x01" mask: "\xff\xff\xff\xff" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_type" value: "\x01" }
+  data { field_name: "next_state" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x03" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x02" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x03" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x04" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x00" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x03" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x01" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.table_next_state_in"
+  action_name: "Ingress.set_next_state_in"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x03" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x03\xe8" mask: "\xff\xff\xff\xff" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_type" value: "\x01" }
+  data { field_name: "next_state" value: "\x03" }
+  priority: 2
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x00" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x01" mask: "\xff\xff\xff\xff" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_type" value: "\x01" }
+  data { field_name: "next_state" value: "\x01" }
+  priority: 2
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x00" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x04" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x00" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x01" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x04" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x01" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x01" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x02" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x01" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x03\xe8" mask: "\xff\xff\xff\xff" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_type" value: "\x01" }
+  data { field_name: "next_state" value: "\x01" }
+  priority: 2
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x02" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x01\x86\xa0" mask: "\xff\xff\xff\xff" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_type" value: "\x01" }
+  data { field_name: "next_state" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x03" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x03\xe8" mask: "\xff\xff\xff\xff" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_type" value: "\x01" }
+  data { field_name: "next_state" value: "\x03" }
+  priority: 2
+}
+bfrt_entities {
+  table_name: "pipe.Egress.table_next_state_out"
+  action_name: "Egress.set_next_state_out"
+  key { field_name: "meta.fancy.current_state" exact { value: "\x03" } }
+  key { field_name: "meta.fancy.current_counter" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy.action_value" ternary { value: "\x04" mask: "\x1f" } }
+  key { field_name: "hdr.fancy.ack" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "hdr.fancy.fsm" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "hdr.fancy.$valid" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "counter_type" value: "\x00" }
+  data { field_name: "next_state" value: "\x00" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.forward"
+  action_name: "Ingress.set_port"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x04" } }
+  data { field_name: "port" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.forward"
+  action_name: "Ingress.set_port"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x01" } }
+  data { field_name: "port" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.forward"
+  action_name: "Ingress.set_port"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x02" } }
+  data { field_name: "port" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.forward"
+  action_name: "Ingress.set_port"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x05" } }
+  data { field_name: "port" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.forward"
+  action_name: "Ingress.set_port"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x06" } }
+  data { field_name: "port" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x01" } }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x00" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x02" } }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x01" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x03" } }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x02" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x04" } }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x03" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x05" } }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x04" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x06" } }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x05" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x07" } }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x06" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.clone_to_recirculation"
+  action_name: "Egress._clone_to_recirculation"
+  key { field_name: "eg_intr_md.egress_port[8:7]" exact { value: "\x00" } }
+  data { field_name: "mirror_id" value: "\x64" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x64" } }
+  data { field_name: "$direction" str_val: "EGRESS" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x44" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.clone_to_recirculation"
+  action_name: "Egress._clone_to_recirculation"
+  key { field_name: "eg_intr_md.egress_port[8:7]" exact { value: "\x01" } }
+  data { field_name: "mirror_id" value: "\x65" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x65" } }
+  data { field_name: "$direction" str_val: "EGRESS" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\xc4" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.failed_port_to_reroute_address_set"
+  action_name: "Ingress.set_reroute_address"
+  key { field_name: "hdr.fancy_pre.port" exact { value: "\x00" } }
+  data { field_name: "address_offset" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.read_reroute_register"
+  action_name: "Ingress.read_reroute_address"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x00" } }
+  data { field_name: "address_offset" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.failed_port_to_reroute_address_set"
+  action_name: "Ingress.set_reroute_address"
+  key { field_name: "hdr.fancy_pre.port" exact { value: "\x01" } }
+  data { field_name: "address_offset" value: "\x02\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.read_reroute_register"
+  action_name: "Ingress.read_reroute_address"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x01" } }
+  data { field_name: "address_offset" value: "\x02\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.failed_port_to_reroute_address_set"
+  action_name: "Ingress.set_reroute_address"
+  key { field_name: "hdr.fancy_pre.port" exact { value: "\x02" } }
+  data { field_name: "address_offset" value: "\x04\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.read_reroute_register"
+  action_name: "Ingress.read_reroute_address"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x02" } }
+  data { field_name: "address_offset" value: "\x04\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.failed_port_to_reroute_address_set"
+  action_name: "Ingress.set_reroute_address"
+  key { field_name: "hdr.fancy_pre.port" exact { value: "\x03" } }
+  data { field_name: "address_offset" value: "\x05\xfc" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.read_reroute_register"
+  action_name: "Ingress.read_reroute_address"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x03" } }
+  data { field_name: "address_offset" value: "\x05\xfc" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.failed_port_to_reroute_address_set"
+  action_name: "Ingress.set_reroute_address"
+  key { field_name: "hdr.fancy_pre.port" exact { value: "\x04" } }
+  data { field_name: "address_offset" value: "\x08\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.read_reroute_register"
+  action_name: "Ingress.read_reroute_address"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x04" } }
+  data { field_name: "address_offset" value: "\x08\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.failed_port_to_reroute_address_set"
+  action_name: "Ingress.set_reroute_address"
+  key { field_name: "hdr.fancy_pre.port" exact { value: "\x05" } }
+  data { field_name: "address_offset" value: "\x0a\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.read_reroute_register"
+  action_name: "Ingress.read_reroute_address"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x05" } }
+  data { field_name: "address_offset" value: "\x0a\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.failed_port_to_reroute_address_set"
+  action_name: "Ingress.set_reroute_address"
+  key { field_name: "hdr.fancy_pre.port" exact { value: "\x06" } }
+  data { field_name: "address_offset" value: "\x0c\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.read_reroute_register"
+  action_name: "Ingress.read_reroute_address"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x06" } }
+  data { field_name: "address_offset" value: "\x0c\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.dedicated_reroute"
+  action_name: "Ingress.set_port"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x01" } }
+  data { field_name: "port" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.ingress_port_info"
+  action_name: "Ingress.set_ingress_port_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x00" } }
+  data { field_name: "address_offset" value: "\x00" }
+  data { field_name: "ingress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.egress_port_info"
+  action_name: "Egress.set_egress_port_info"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x00" } }
+  data { field_name: "address_offset" value: "\x00" }
+  data { field_name: "egress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.ingress_port_info"
+  action_name: "Ingress.set_ingress_port_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x01" } }
+  data { field_name: "address_offset" value: "\x02\x00" }
+  data { field_name: "ingress_type" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.egress_port_info"
+  action_name: "Egress.set_egress_port_info"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x01" } }
+  data { field_name: "address_offset" value: "\x02\x00" }
+  data { field_name: "egress_type" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.ingress_port_info"
+  action_name: "Ingress.set_ingress_port_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x02" } }
+  data { field_name: "address_offset" value: "\x04\x00" }
+  data { field_name: "ingress_type" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.egress_port_info"
+  action_name: "Egress.set_egress_port_info"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x02" } }
+  data { field_name: "address_offset" value: "\x04\x00" }
+  data { field_name: "egress_type" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.ingress_port_info"
+  action_name: "Ingress.set_ingress_port_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x03" } }
+  data { field_name: "address_offset" value: "\x05\xfc" }
+  data { field_name: "ingress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.egress_port_info"
+  action_name: "Egress.set_egress_port_info"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x03" } }
+  data { field_name: "address_offset" value: "\x05\xfc" }
+  data { field_name: "egress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.ingress_port_info"
+  action_name: "Ingress.set_ingress_port_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x04" } }
+  data { field_name: "address_offset" value: "\x08\x00" }
+  data { field_name: "ingress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.egress_port_info"
+  action_name: "Egress.set_egress_port_info"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x04" } }
+  data { field_name: "address_offset" value: "\x08\x00" }
+  data { field_name: "egress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.ingress_port_info"
+  action_name: "Ingress.set_ingress_port_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x05" } }
+  data { field_name: "address_offset" value: "\x0a\x00" }
+  data { field_name: "ingress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.egress_port_info"
+  action_name: "Egress.set_egress_port_info"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x05" } }
+  data { field_name: "address_offset" value: "\x0a\x00" }
+  data { field_name: "egress_type" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.ingress_port_info"
+  action_name: "Ingress.set_ingress_port_info"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x06" } }
+  data { field_name: "address_offset" value: "\x0c\x00" }
+  data { field_name: "ingress_type" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.egress_port_info"
+  action_name: "Egress.set_egress_port_info"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x06" } }
+  data { field_name: "address_offset" value: "\x0c\x00" }
+  data { field_name: "egress_type" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x01" } }
+  data { field_name: "packet_id" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x02" } }
+  data { field_name: "packet_id" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x03" } }
+  data { field_name: "packet_id" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x04" } }
+  data { field_name: "packet_id" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x05" } }
+  data { field_name: "packet_id" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x06" } }
+  data { field_name: "packet_id" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x07" } }
+  data { field_name: "packet_id" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x08" } }
+  data { field_name: "packet_id" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x09" } }
+  data { field_name: "packet_id" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.packet_to_id"
+  action_name: "Ingress.set_packet_id_dedicated"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0b\x00\x02\x0a" } }
+  data { field_name: "packet_id" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x00" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x00" }
+  data { field_name: "simple_offset" value: "\x00" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x00" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x00" }
+  data { field_name: "simple_offset" value: "\x00" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x01" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x01" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x20" }
+  data { field_name: "simple_offset" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x01" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x01" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x20" }
+  data { field_name: "simple_offset" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x02" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x02" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x40" }
+  data { field_name: "simple_offset" value: "\x02" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x02" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x02" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x40" }
+  data { field_name: "simple_offset" value: "\x02" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x03" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x03" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x60" }
+  data { field_name: "simple_offset" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x03" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x03" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x60" }
+  data { field_name: "simple_offset" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x04" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x04" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x80" }
+  data { field_name: "simple_offset" value: "\x04" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x04" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x04" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x80" }
+  data { field_name: "simple_offset" value: "\x04" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x05" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x05" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\xa0" }
+  data { field_name: "simple_offset" value: "\x05" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_port_to_offsets"
+  action_name: "Ingress.set_ingress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "ig_intr_md.ingress_port" ternary { value: "\x05" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x05" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\xa0" }
+  data { field_name: "simple_offset" value: "\x05" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.zooming_reroute"
+  action_name: "Ingress.set_port"
+  key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x01" } }
+  data { field_name: "port" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x00" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x00" }
+  data { field_name: "simple_offset" value: "\x00" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x00" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x00" }
+  data { field_name: "simple_offset" value: "\x00" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x01" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x01" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x20" }
+  data { field_name: "simple_offset" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x01" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x01" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x20" }
+  data { field_name: "simple_offset" value: "\x01" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x02" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x02" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x40" }
+  data { field_name: "simple_offset" value: "\x02" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x02" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x02" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x40" }
+  data { field_name: "simple_offset" value: "\x02" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x03" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x03" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x60" }
+  data { field_name: "simple_offset" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x03" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x03" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x60" }
+  data { field_name: "simple_offset" value: "\x03" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x04" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x04" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\x80" }
+  data { field_name: "simple_offset" value: "\x04" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x04" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x04" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\x80" }
+  data { field_name: "simple_offset" value: "\x04" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_normal"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x00" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x05" mask: "\x01\xff" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x05" mask: "\x00" } }
+  data { field_name: "counter_offset" value: "\xa0" }
+  data { field_name: "simple_offset" value: "\x05" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_port_to_offsets"
+  action_name: "Egress.set_egress_address_offsets_recirc"
+  key { field_name: "hdr.fancy_pre.$valid" exact { value: "\x01" } }
+  key { field_name: "eg_intr_md.egress_port" ternary { value: "\x05" mask: "\x00" } }
+  key { field_name: "hdr.fancy_pre.port" ternary { value: "\x05" mask: "\x01\xff" } }
+  data { field_name: "counter_offset" value: "\xa0" }
+  data { field_name: "simple_offset" value: "\x05" }
+  priority: 1
+}
+bfrt_entities {
+  table_name: "pipe.Egress.set_fancy_pre_type_to_update"
+  action_name: "Egress._set_fancy_pre_type"
+  key { field_name: "hdr.fancy_counters_length._length" exact { value: "\x00" } }
+  key { field_name: "meta.fancy.zooming_stage" exact { value: "\x00" } }
+  data { field_name: "_type" value: "\x24" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.set_fancy_pre_type_to_update"
+  action_name: "Egress._set_fancy_pre_type"
+  key { field_name: "hdr.fancy_counters_length._length" exact { value: "\x00" } }
+  key { field_name: "meta.fancy.zooming_stage" exact { value: "\x01" } }
+  data { field_name: "_type" value: "\x25" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.set_fancy_pre_type_to_update"
+  action_name: "Egress._set_fancy_pre_type"
+  key { field_name: "hdr.fancy_counters_length._length" exact { value: "\x00" } }
+  key { field_name: "meta.fancy.zooming_stage" exact { value: "\x02" } }
+  data { field_name: "_type" value: "\x26" }
+}
+bfrt_entities {
+  table_name: "pipe.Ingress.in_state"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x02" } }
+  data { field_name: "Ingress.in_state.f1" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.Egress.out_state"
+  key { field_name: "$REGISTER_INDEX" exact { value: "\x01" } }
+  data { field_name: "Egress.out_state.f1" value: "\x02" }
+}

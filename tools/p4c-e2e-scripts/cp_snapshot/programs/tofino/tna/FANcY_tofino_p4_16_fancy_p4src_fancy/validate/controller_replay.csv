@@ -1,0 +1,9 @@
+category,case,status,reason,controller_rc,runtime_rows,baseline,agree
+OUTC,fancy_1_1_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
+OUTC,fancy_1_2_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
+OUTC,fancy_1_3_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
+OUTC,fancy_1_4_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
+OUTC,fancy_1_5_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
+OUTC,fancy_1_6_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
+OUTC,fancy_1_7_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
+OUTC,fancy_1_8_m2h.txtpb,OK,VULNERABLE: attacker's Phase-2 write moves the replayed Phase-3 packet (--diverge-output PORT: legit ports=[1] vs attack ports=[6]) [Phase-2 reg: Ingress.reroute_register[512]=01:written],0/0,,OK,yes
