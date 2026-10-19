@@ -1091,21 +1091,25 @@ def install_snapshot(client: P4RuntimeClient, thrift_client, p4info: p4info_pb2.
                 raise
             client.update(entity)
 
+    # Snapshot blocks name their objects through p4c's p4runtime fork; a block already rewritten
+    # to ids (snapshot_ids.py, for an upstream P4Runtime stack) is sent as is.
+    named = "table_name" in p4runtime_pb2.TableEntry.DESCRIPTOR.fields_by_name
     for ent in entities:
         if ent.HasField("table_entry"):
             te = p4runtime_pb2.TableEntry()
             te.CopyFrom(ent.table_entry)
-            t = tables[te.table_name]
-            te.table_id = t.preamble.id
-            fields = {m.name: m.id for m in t.match_fields}
-            for fm in te.match:
-                fm.field_id = fields[fm.field_name]
-            if te.action.HasField("action"):
-                a = actions[te.action.action.action_name]
-                te.action.action.action_id = a.preamble.id
-                params = {p.name: p.id for p in a.params}
-                for p in te.action.action.params:
-                    p.param_id = params[p.param_name]
+            if named and te.table_name:
+                t = tables[te.table_name]
+                te.table_id = t.preamble.id
+                fields = {m.name: m.id for m in t.match_fields}
+                for fm in te.match:
+                    fm.field_id = fields[fm.field_name]
+                if te.action.HasField("action"):
+                    a = actions[te.action.action.action_name]
+                    te.action.action.action_id = a.preamble.id
+                    params = {p.name: p.id for p in a.params}
+                    for p in te.action.action.params:
+                        p.param_id = params[p.param_name]
             if te.is_default_action:
                 client.update(te)
             else:
