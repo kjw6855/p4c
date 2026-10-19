@@ -1,0 +1,475 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on bmv2: simple_switch_CLI < s1-commands-stateful.txt (p4app-stateful.json cli_input)
+program: "cheetah-p4_cheetah-stateful"
+target: "bmv2"
+snapshot_id: "live"
+captured_at: "2026-10-19T06:18:04.924216+00:00"
+topology {
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" ip: "10.0.0.1" }
+  port { port: 2 role: PORT_ROLE_HOST name: "h2" ip: "10.0.0.2" }
+  port { port: 3 role: PORT_ROLE_HOST name: "h3" ip: "10.0.0.3" }
+  port { port: 4 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_id"
+    match { field_name: "meta.server_id" exact { value: "\x00" } }
+    action { action { action_name: "MyIngress.fwd_2" params { param_name: "egress_port" value: "\x02" } params { param_name: "dip" value: "\x0a\x00\x00\x02" } params { param_name: "mac_server" value: "\x0a\x00\x00\x02" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_id"
+    match { field_name: "meta.server_id" exact { value: "\x01" } }
+    action { action { action_name: "MyIngress.fwd_2" params { param_name: "egress_port" value: "\x03" } params { param_name: "dip" value: "\x0a\x00\x00\x03" } params { param_name: "mac_server" value: "\x0a\x00\x00\x03" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_bucket"
+    match { field_name: "meta.bucket_id" exact { value: "\x00" } }
+    action { action { action_name: "MyIngress.fwd" params { param_name: "egress_port" value: "\x02" } params { param_name: "dip" value: "\x0a\x00\x00\x02" } params { param_name: "mac_server" value: "\x0a\x00\x00\x02" } params { param_name: "server_id_input" value: "\x00" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_bucket"
+    match { field_name: "meta.bucket_id" exact { value: "\x01" } }
+    action { action { action_name: "MyIngress.fwd" params { param_name: "egress_port" value: "\x02" } params { param_name: "dip" value: "\x0a\x00\x00\x02" } params { param_name: "mac_server" value: "\x0a\x00\x00\x02" } params { param_name: "server_id_input" value: "\x00" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_bucket"
+    match { field_name: "meta.bucket_id" exact { value: "\x02" } }
+    action { action { action_name: "MyIngress.fwd" params { param_name: "egress_port" value: "\x02" } params { param_name: "dip" value: "\x0a\x00\x00\x02" } params { param_name: "mac_server" value: "\x0a\x00\x00\x02" } params { param_name: "server_id_input" value: "\x00" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_bucket"
+    match { field_name: "meta.bucket_id" exact { value: "\x03" } }
+    action { action { action_name: "MyIngress.fwd" params { param_name: "egress_port" value: "\x02" } params { param_name: "dip" value: "\x0a\x00\x00\x02" } params { param_name: "mac_server" value: "\x0a\x00\x00\x02" } params { param_name: "server_id_input" value: "\x00" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_bucket"
+    match { field_name: "meta.bucket_id" exact { value: "\x04" } }
+    action { action { action_name: "MyIngress.fwd" params { param_name: "egress_port" value: "\x03" } params { param_name: "dip" value: "\x0a\x00\x00\x03" } params { param_name: "mac_server" value: "\x0a\x00\x00\x03" } params { param_name: "server_id_input" value: "\x01" } } }
+  }
+}
+entities {
+  table_entry {
+    table_name: "MyIngress.get_server_from_bucket"
+    match { field_name: "meta.bucket_id" exact { value: "\x05" } }
+    action { action { action_name: "MyIngress.fwd" params { param_name: "egress_port" value: "\x03" } params { param_name: "dip" value: "\x0a\x00\x00\x03" } params { param_name: "mac_server" value: "\x0a\x00\x00\x03" } params { param_name: "server_id_input" value: "\x01" } } }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 0 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 1 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 2 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 3 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 4 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 5 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 6 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 7 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 8 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 9 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 10 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 11 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 12 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 13 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 14 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 15 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 16 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 17 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 18 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 383712447
+    index { index: 19 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 0 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 1 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 2 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 3 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 4 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 5 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 6 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 7 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 8 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 9 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 10 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 11 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 12 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 13 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 14 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 15 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 16 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 17 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 18 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 385171080
+    index { index: 19 }
+    data { bitstring: "\x0a" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 1 }
+    data { bitstring: "\x01" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 2 }
+    data { bitstring: "\x02" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 3 }
+    data { bitstring: "\x03" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 4 }
+    data { bitstring: "\x04" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 5 }
+    data { bitstring: "\x05" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 6 }
+    data { bitstring: "\x06" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 7 }
+    data { bitstring: "\x07" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 8 }
+    data { bitstring: "\x08" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 9 }
+    data { bitstring: "\x09" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 11 }
+    data { bitstring: "\x01" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 12 }
+    data { bitstring: "\x02" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 13 }
+    data { bitstring: "\x03" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 14 }
+    data { bitstring: "\x04" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 15 }
+    data { bitstring: "\x05" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 16 }
+    data { bitstring: "\x06" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 17 }
+    data { bitstring: "\x07" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 18 }
+    data { bitstring: "\x08" }
+  }
+}
+entities {
+  register_entry {
+    register_id: 378303468
+    index { index: 19 }
+    data { bitstring: "\x09" }
+  }
+}
