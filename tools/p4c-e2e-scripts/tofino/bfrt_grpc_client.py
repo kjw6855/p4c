@@ -95,8 +95,14 @@ class BfRtClient:
         self.client_id = client_id
         self.p4_name = p4_name
         # `gc.ClientInterface(grpc_addr, client_id, device_id, num_tries=...)`
+        # num_tries is the subscribe budget (~1 s each). bf_switchd binds 50052 seconds before it
+        # can serve a subscription on a loaded host, so BFRT_SUBSCRIBE_TRIES may raise it.
+        try:
+            tries = int(os.environ.get("BFRT_SUBSCRIBE_TRIES", "5"))
+        except ValueError:
+            tries = 5
         self.interface = _gc.ClientInterface(grpc_address, client_id=client_id,
-                                             device_id=device_id, num_tries=5)
+                                             device_id=device_id, num_tries=max(1, tries))
         self.target = _gc.Target(device_id=device_id, pipe_id=pipe_id)
         # `bfrt_info` is populated after `bind_pipeline(p4_name)`.
         self.bfrt_info = None

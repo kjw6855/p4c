@@ -177,7 +177,7 @@ ROLE_ENUM = {r: f"PORT_ROLE_{r}" for r in ("HOST", "LINK", "ATTACKER", "CPU", "R
 
 def to_textproto(s: Snapshot) -> str:
     lines = ["# proto-file: p4symbex.proto", "# proto-message: symbex.CpSnapshot"]
-    lines += [f"# {n}" for n in s.notes]
+    lines += [f"# {line}" for n in s.notes for line in str(n).splitlines() or [""]]
     lines += [f"program: {_quote(s.program)}", f"target: {_quote(s.target)}",
               f"snapshot_id: {_quote(s.snapshot_id)}", f"captured_at: {_quote(s.captured_at)}"]
     if s.ports:
