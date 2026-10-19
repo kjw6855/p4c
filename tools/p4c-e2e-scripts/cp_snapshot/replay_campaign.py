@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,23 @@ sys.path.insert(0, str(HERE.parent))
 
 from cp_snapshot import capture  # noqa: E402,F401  (sets the SDE environment)
 from tofino import tofino_driver as td  # noqa: E402
+
+
+def _case_ports(cases):
+    from tofino.packet_tester import parse_case
+    ports = set()
+    for tx in cases:
+        c = parse_case(tx)
+        for ph in c.phases:
+            for p in (ph.in_port, ph.exp_port):
+                if p is not None and 0 <= p < 512:
+                    ports.add(p)
+        for ent in c.snapshot_entities:
+            if ent.table_name == "$pre.node":
+                for d in ent.data:
+                    if d.field_name == "$DEV_PORT" and isinstance(d.value, list):
+                        ports.update(int(x) for x in d.value)
+    return ports
 
 
 def main() -> int:
@@ -49,7 +67,19 @@ def main() -> int:
             def writer(prog, case, status, reason, _cat=cdir.name):
                 rows.append((prog, _cat, case, status, reason))
 
-            td.do_testing(spec, Path(), cases, args, writer, lambda *x: None, manage_procs=True)
+            # do_testing assumes veth_setup.sh made veth pairs for ports 0-31 (it only adds pairs
+            # for ports outside that range); make them for every port the cases use.
+            created = []
+            for p in sorted(_case_ports(cases)):
+                if not td._veth_exists(f"veth{2 * p}"):
+                    td._ensure_veth_pair(2 * p, 2 * p + 1)
+                    created.append(p)
+            try:
+                td.do_testing(spec, Path(), cases, args, writer, lambda *x: None,
+                              manage_procs=True)
+            finally:
+                for p in created:
+                    subprocess.run(["ip", "link", "del", f"veth{2 * p}"], capture_output=True)
     out = camp / "replay.csv"
     with out.open("a", newline="") as fd:
         csv.writer(fd).writerows(rows)

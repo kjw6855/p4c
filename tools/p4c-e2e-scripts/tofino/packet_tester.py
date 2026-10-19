@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -63,6 +64,14 @@ def _start_tcpdump(iface: str, pcap_path: Path) -> subprocess.Popen:
 
 
 def _stop_tcpdump(proc: subprocess.Popen, pcap_path: Path) -> None:
+    if proc.poll() is None and not _sudo_prefix():
+        # No sudo wrapper: proc is tcpdump itself (the pkill -P below only reaches sudo's child).
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
     if proc.poll() is None:
         subprocess.run([*_sudo_prefix(), "pkill", "-INT", "-P", str(proc.pid)],
                        check=False, stdin=subprocess.DEVNULL,
