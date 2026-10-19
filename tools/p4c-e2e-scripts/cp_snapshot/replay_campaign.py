@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,9 @@ def main() -> int:
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     camp = a.campaign.resolve()
+    # tofino-model and bf_switchd write their logs into the working directory.
+    (camp / "_replay").mkdir(exist_ok=True)
+    os.chdir(camp / "_replay")
     rows = []
     for pdir in sorted(d for d in camp.iterdir() if d.is_dir()):
         if a.programs and pdir.name not in a.programs:
