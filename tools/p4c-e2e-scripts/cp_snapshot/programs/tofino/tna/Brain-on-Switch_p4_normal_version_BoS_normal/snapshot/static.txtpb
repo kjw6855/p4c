@@ -1,0 +1,1617 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# hand-written from the program's static rules
+# source: Brain-on-Switch/p4/testbed_version/setup/setup_forward.py
+# source: Brain-on-Switch/p4/testbed_version/setup/setup_mirror.py
+# source: Brain-on-Switch/p4/testbed_version/setup/setup_threshold.py (collision part only)
+# note: tab_execute_forward_action rules all have priority 0 in the script; kept in script order
+# note: omitted (needs install/threshold.json, not in repo): tab_confidence_threshold, tab_t_esc
+program: "Brain-on-Switch_p4_normal_version_BoS_normal"
+target: "tofino"
+snapshot_id: "static"
+captured_at: "2026-10-15T04:38:09.782838+00:00"
+topology {
+  port { port: 24 role: PORT_ROLE_HOST name: "normal" }
+  port { port: 28 role: PORT_ROLE_LINK name: "escalation" }
+  port { port: 68 role: PORT_ROLE_LINK name: "mirror_pipe0" }
+  port { port: 196 role: PORT_ROLE_LINK name: "mirror_pipe1" }
+  port { port: 0 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_execute_forward_action"
+  action_name: "SwitchIngress.forward"
+  key { field_name: "ig_use_rnn" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_use_per_packet" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "ig_collision" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "ig_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_stored_escalation_flag" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "port" value: "\x1c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_execute_forward_action"
+  action_name: "SwitchIngress.forward"
+  key { field_name: "ig_use_rnn" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "ig_use_per_packet" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_collision" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_stored_escalation_flag" ternary { value: "\xff" mask: "\xff" } }
+  data { field_name: "port" value: "\x1c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_execute_forward_action"
+  action_name: "SwitchIngress.forward"
+  key { field_name: "ig_use_rnn" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_use_per_packet" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_collision" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_stored_escalation_flag" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "port" value: "\x18" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x04" } }
+  data { field_name: "$direction" str_val: "EGRESS" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x44" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_set_egr_mir_ses"
+  action_name: "SwitchIngress.set_egr_mir_ses"
+  key { field_name: "ig_pipe" exact { value: "\x00" } }
+  data { field_name: "egr_mir_ses" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "normal"
+  key { field_name: "$sid" exact { value: "\x05" } }
+  data { field_name: "$direction" str_val: "EGRESS" }
+  data { field_name: "$max_pkt_len" value: "\x40\x00" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\xc4" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_set_egr_mir_ses"
+  action_name: "SwitchIngress.set_egr_mir_ses"
+  key { field_name: "ig_pipe" exact { value: "\x01" } }
+  data { field_name: "egr_mir_ses" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x00" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x01" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x02" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x03" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x04" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x05" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x06" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x07" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x08" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x09" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x0a" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x0b" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x0c" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x0d" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x0e" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x0f" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x10" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x11" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x12" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x13" } }
+  data { field_name: "threshold" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x14" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x15" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x16" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x17" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x18" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x19" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x1a" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x1b" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x1c" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x1d" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x1e" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x1f" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x20" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x21" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x22" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x23" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x24" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x25" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x26" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x27" } }
+  data { field_name: "threshold" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x28" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x29" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x2a" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x2b" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x2c" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x2d" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x2e" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x2f" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x30" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x31" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x32" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x33" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x34" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x35" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x36" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x37" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x38" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x39" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x3a" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x3b" } }
+  data { field_name: "threshold" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x3c" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x3d" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x3e" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x3f" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x40" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x41" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x42" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x43" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x44" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x45" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x46" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x47" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x48" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x49" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x4a" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x4b" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x4c" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x4d" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x4e" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x4f" } }
+  data { field_name: "threshold" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x50" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x51" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x52" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x53" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x54" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x55" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x56" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x57" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x58" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x59" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x5a" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x5b" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x5c" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x5d" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x5e" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x5f" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x60" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x61" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x62" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x63" } }
+  data { field_name: "threshold" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x64" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x65" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x66" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x67" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x68" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x69" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x6a" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x6b" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x6c" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x6d" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x6e" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x6f" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x70" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x71" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x72" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x73" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x74" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x75" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x76" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x77" } }
+  data { field_name: "threshold" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x78" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x79" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x7a" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x7b" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x7c" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x7d" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x7e" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x7f" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x80" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x81" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x82" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x83" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x84" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x85" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x86" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x87" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x88" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x89" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x8a" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x8b" } }
+  data { field_name: "threshold" value: "\x06" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x8c" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x8d" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x8e" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x8f" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x90" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x91" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x92" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x93" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x94" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x95" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x96" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x97" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x98" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x99" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x9a" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x9b" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x9c" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x9d" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x9e" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\x9f" } }
+  data { field_name: "threshold" value: "\x07" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa0" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa1" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa2" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa3" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa4" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa5" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa6" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa7" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa8" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xa9" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xaa" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xab" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xac" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xad" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xae" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xaf" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb0" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb1" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb2" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb3" } }
+  data { field_name: "threshold" value: "\x08" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb4" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb5" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb6" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb7" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb8" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xb9" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xba" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xbb" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xbc" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xbd" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xbe" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xbf" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc0" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc1" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc2" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc3" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc4" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc5" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc6" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc7" } }
+  data { field_name: "threshold" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc8" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xc9" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xca" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xcb" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xcc" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xcd" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xce" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xcf" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd0" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd1" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd2" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd3" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd4" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd5" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd6" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd7" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd8" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xd9" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xda" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xdb" } }
+  data { field_name: "threshold" value: "\x0a" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xdc" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xdd" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xde" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xdf" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe0" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe1" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe2" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe3" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe4" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe5" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe6" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe7" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe8" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xe9" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xea" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xeb" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xec" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xed" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xee" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xef" } }
+  data { field_name: "threshold" value: "\x0b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf0" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf1" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf2" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf3" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf4" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf5" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf6" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf7" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf8" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xf9" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xfa" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xfb" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xfc" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xfd" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xfe" } }
+  data { field_name: "threshold" value: "\x0c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_global_collision_escalation_threshold"
+  action_name: "SwitchIngress.act_global_collision_escalation_threshold"
+  key { field_name: "ig_md.global_pkt_cnt" exact { value: "\xff" } }
+  data { field_name: "threshold" value: "\x0c" }
+}

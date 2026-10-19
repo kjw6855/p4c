@@ -1,0 +1,115 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on tofino: testbed_version/setup/setup_all.py (bfrt_python, bfshell -b)
+# patch setup/setup_all.py: path: the authors' checkout location
+# patch setup/setup_forward.py: program name: testbed builds BoS_testbed with pipes pipe_a/pipe_b; normal has one pipe
+# patch setup/setup_mirror.py: program name: testbed builds BoS_testbed with pipes pipe_a/pipe_b; normal has one pipe
+# patch setup/install_per_packet_entry.py: program name: testbed builds BoS_testbed with pipes pipe_a/pipe_b; normal has one pipe
+# patch setup/setup_threshold.py: program name: testbed builds BoS_testbed with pipes pipe_a/pipe_b; normal has one pipe
+# patch setup/setup_threshold.py: program name: testbed builds BoS_testbed with pipes pipe_a/pipe_b; normal has one pipe
+# patch setup/install_table_entry.py: program name: testbed builds BoS_testbed with pipes pipe_a/pipe_b; normal has one pipe
+# patch setup/install_table_entry.py: program name: testbed builds BoS_testbed with pipes pipe_a/pipe_b; normal has one pipe
+# setup_all.py stopped at setup_threshold: install/threshold.json is not in the repo (model translation output)
+# dump: pipe.SwitchIngress.r_ig_global_recir_pkt_cnt: shadow read failed (_MultiThreadedRendezvous); read from the device
+# dump: pipe.SwitchIngress.r_ig_global_recir_pkt_cnt: read failed (<_MultiThreadedRendezvous of RPC that terminated with: status = StatusCode.UNKNOWN details = "Read Error Status" debug_error_string = "UNKNOWN:Error received from peer ipv4:127.0.0.1:50052 {grpc_message:"Read Error Status", grpc_status:2, created_time:"2026-10-19T08:06:15.535820584+00:00"}" >)
+program: "Brain-on-Switch_p4_normal_version_BoS_normal"
+target: "tofino"
+snapshot_id: "live"
+captured_at: "2026-10-19T08:06:41.868267+00:00"
+topology {
+  port { port: 24 role: PORT_ROLE_HOST name: "normal" }
+  port { port: 28 role: PORT_ROLE_LINK name: "escalation" }
+  port { port: 68 role: PORT_ROLE_LINK name: "mirror_pipe0" }
+  port { port: 196 role: PORT_ROLE_LINK name: "mirror_pipe1" }
+  port { port: 0 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_set_egr_mir_ses"
+  action_name: "SwitchIngress.set_egr_mir_ses"
+  key { field_name: "ig_pipe" exact { value: "\x00" } }
+  data { field_name: "egr_mir_ses" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_set_egr_mir_ses"
+  action_name: "SwitchIngress.set_egr_mir_ses"
+  key { field_name: "ig_pipe" exact { value: "\x01" } }
+  data { field_name: "egr_mir_ses" value: "\x05" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_execute_forward_action"
+  action_name: "SwitchIngress.forward"
+  key { field_name: "ig_collision" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "ig_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_stored_escalation_flag" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_use_per_packet" ternary { value: "\x00" mask: "\x01" } }
+  key { field_name: "ig_use_rnn" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "port" value: "\x1c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_execute_forward_action"
+  action_name: "SwitchIngress.forward"
+  key { field_name: "ig_collision" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_stored_escalation_flag" ternary { value: "\xff" mask: "\xff" } }
+  key { field_name: "ig_use_per_packet" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_use_rnn" ternary { value: "\x01" mask: "\x01" } }
+  data { field_name: "port" value: "\x1c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.tab_execute_forward_action"
+  action_name: "SwitchIngress.forward"
+  key { field_name: "ig_collision" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_port" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_stored_escalation_flag" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_use_per_packet" ternary { value: "\x00" mask: "\x00" } }
+  key { field_name: "ig_use_rnn" ternary { value: "\x00" mask: "\x00" } }
+  data { field_name: "port" value: "\x18" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "$normal"
+  key { field_name: "$sid" exact { value: "\x04" } }
+  data { field_name: "$copy_to_cpu" value: "\x00" }
+  data { field_name: "$direction" str_val: "EGRESS" }
+  data { field_name: "$egress_port_queue" value: "\x00" }
+  data { field_name: "$icos_for_copy_to_cpu" value: "\x00" }
+  data { field_name: "$ingress_cos" value: "\x00" }
+  data { field_name: "$level1_mcast_hash" value: "\x00" }
+  data { field_name: "$level2_mcast_hash" value: "\x00" }
+  data { field_name: "$max_pkt_len" value: "\x00" }
+  data { field_name: "$mcast_grp_a" value: "\x00" }
+  data { field_name: "$mcast_grp_a_valid" value: "\x00" }
+  data { field_name: "$mcast_grp_b" value: "\x00" }
+  data { field_name: "$mcast_grp_b_valid" value: "\x00" }
+  data { field_name: "$mcast_l1_xid" value: "\x00" }
+  data { field_name: "$mcast_l2_xid" value: "\x00" }
+  data { field_name: "$mcast_rid" value: "\x00" }
+  data { field_name: "$packet_color" str_val: "GREEN" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x44" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "$normal"
+  key { field_name: "$sid" exact { value: "\x05" } }
+  data { field_name: "$copy_to_cpu" value: "\x00" }
+  data { field_name: "$direction" str_val: "EGRESS" }
+  data { field_name: "$egress_port_queue" value: "\x00" }
+  data { field_name: "$icos_for_copy_to_cpu" value: "\x00" }
+  data { field_name: "$ingress_cos" value: "\x00" }
+  data { field_name: "$level1_mcast_hash" value: "\x00" }
+  data { field_name: "$level2_mcast_hash" value: "\x00" }
+  data { field_name: "$max_pkt_len" value: "\x00" }
+  data { field_name: "$mcast_grp_a" value: "\x00" }
+  data { field_name: "$mcast_grp_a_valid" value: "\x00" }
+  data { field_name: "$mcast_grp_b" value: "\x00" }
+  data { field_name: "$mcast_grp_b_valid" value: "\x00" }
+  data { field_name: "$mcast_l1_xid" value: "\x00" }
+  data { field_name: "$mcast_l2_xid" value: "\x00" }
+  data { field_name: "$mcast_rid" value: "\x00" }
+  data { field_name: "$packet_color" str_val: "GREEN" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\xc4" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
