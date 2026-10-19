@@ -1,0 +1,69 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on tofino: ptf-tests/test.py setup_env(bfrt_info, 0, TOR) via a BfRt gRPC harness
+# patch ptf-tests/test.py: PTF port map: get_sw_ports() shuffles the ports at random; fix the sorted default map
+program: "SwitchV2P_p4-prototype_p4_switchv2p"
+target: "tofino"
+snapshot_id: "live"
+captured_at: "2026-10-19T07:15:51.038481+00:00"
+topology {
+  port { port: 0 role: PORT_ROLE_HOST name: "h0" ip: "132.68.0.2" }
+  port { port: 1 role: PORT_ROLE_HOST name: "gw" ip: "132.68.0.3" }
+  port { port: 2 role: PORT_ROLE_LINK name: "mirror" }
+  port { port: 3 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchV2PIngress.cache.check_misdelivered"
+  action_name: "SwitchV2PIngress.cache.set_misdelivered"
+  key { field_name: "hdr.ipv4_outter.src_addr" exact { value: "\x85\x44\x00\x02" } }
+  data { field_name: "misdelivered" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchV2PIngress.fw.l3_forwarding"
+  action_name: "SwitchV2PIngress.fw.l3_forward"
+  key { field_name: "hdr.ipv4_outter.dst_addr" exact { value: "\x84\x44\x00\x02" } }
+  data { field_name: "port" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchV2PIngress.fw.l3_forwarding"
+  action_name: "SwitchV2PIngress.fw.l3_forward"
+  key { field_name: "hdr.ipv4_outter.dst_addr" exact { value: "\x84\x44\x00\x03" } }
+  data { field_name: "port" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchV2PIngress.switch_config"
+  action_name: "SwitchV2PIngress.set_config"
+  data { field_name: "switch_id" value: "\x00" }
+  data { field_name: "switch_type" value: "\x00" }
+  is_default_entry: true
+}
+bfrt_entities {
+  table_name: "pipe.SwitchV2PIngress.match_gw"
+  action_name: "SwitchV2PIngress.set_to_gw"
+  key { field_name: "hdr.ipv4_outter.dst_addr" exact { value: "\x84\x44\x00\x03" } }
+  data { field_name: "to_gw" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "$normal"
+  key { field_name: "$sid" exact { value: "\x01" } }
+  data { field_name: "$copy_to_cpu" value: "\x00" }
+  data { field_name: "$direction" str_val: "BOTH" }
+  data { field_name: "$egress_port_queue" value: "\x00" }
+  data { field_name: "$icos_for_copy_to_cpu" value: "\x00" }
+  data { field_name: "$ingress_cos" value: "\x00" }
+  data { field_name: "$level1_mcast_hash" value: "\x00" }
+  data { field_name: "$level2_mcast_hash" value: "\x00" }
+  data { field_name: "$max_pkt_len" value: "\x45" }
+  data { field_name: "$mcast_grp_a" value: "\x00" }
+  data { field_name: "$mcast_grp_a_valid" value: "\x00" }
+  data { field_name: "$mcast_grp_b" value: "\x00" }
+  data { field_name: "$mcast_grp_b_valid" value: "\x00" }
+  data { field_name: "$mcast_l1_xid" value: "\x00" }
+  data { field_name: "$mcast_l2_xid" value: "\x00" }
+  data { field_name: "$mcast_rid" value: "\x00" }
+  data { field_name: "$packet_color" str_val: "GREEN" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x02" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}

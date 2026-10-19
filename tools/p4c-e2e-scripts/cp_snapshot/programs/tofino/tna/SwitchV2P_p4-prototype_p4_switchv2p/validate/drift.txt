@@ -1,0 +1,2 @@
+SwitchV2P_p4-prototype_p4_switchv2p: post-setup state of run switchv2p_3_1_odiv_legit vs /root/jiwon/Workspace-remote/sp27/cp_live/SwitchV2P_p4-prototype_p4_switchv2p/entities.pkl
+capture 16478  validate 16478  differ 0  only-capture 0  only-validate 0
