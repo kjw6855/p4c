@@ -306,8 +306,12 @@ class BfRtClient:
             else:
                 if isinstance(v, (bytes, bytearray)):
                     v = int.from_bytes(v, "big")
-                if table_name.startswith("$") and d.field_name in (
-                        "$session_enable", "$ucast_egress_port_valid", "$mcast_grp_a_valid"):
+                try:  # the schema's type, so every bool field of a fixed table gets bool_val
+                    ftype = str(table.info.data_field_type_get(d.field_name, action_name))
+                except Exception:  # noqa: BLE001 - unknown to the schema: keep the int form
+                    ftype = ""
+                if ftype.lower() == "bool" or (table_name.startswith("$") and d.field_name in (
+                        "$session_enable", "$ucast_egress_port_valid", "$mcast_grp_a_valid")):
                     tuples.append(_gc.DataTuple(d.field_name, bool_val=bool(v)))
                 else:
                     tuples.append(_gc.DataTuple(d.field_name, v))
