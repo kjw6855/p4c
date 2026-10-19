@@ -128,6 +128,20 @@ for t in tna v1model; do
     elif [ "$h2m" -ne 0 ]; then failed "$t noreg" "$h2m HIT->MISS case(s) although the victim reads 0 and MISSes"
     else pass "$t noreg" "no HIT->MISS case without the controller-written cell ($n other)"; fi
 
+    # initial: the full snapshot, but the search starts from declared initial values (the
+    # attacker's view). Like noreg the victim then MISSes; any case still carries the deployed cell
+    # in its snapshot block, and is tagged "initial".
+    rc=$(run_one "$t.initial" "$stem" "$t" "${pol[@]}" --cp-snapshot "$tmp/$t.txtpb" \
+        --cp-snapshot-registers INITIAL)
+    read -r n h2m bad < <(check_cases "$tmp/$t.initial")
+    if [ "$rc" -ne 0 ]; then failed "$t initial" "p4symbex exit $rc" "$t.initial"
+    elif [ "$h2m" -ne 0 ]; then failed "$t initial" "$h2m HIT->MISS case(s) although the search reads the declared 0"
+    elif [ "$n" -gt 0 ] && ! grep -qlE 'REGISTER_INDEX|register_entry' "$tmp/$t.initial"/*.txtpb; then
+        failed "$t initial" "cases lost the deployed register cell from the snapshot block"
+    elif [ "$n" -gt 0 ] && [ -n "$(grep -L 'Register knowledge: initial' "$tmp/$t.initial"/*.txtpb)" ]; then
+        failed "$t initial" "cases are not tagged 'Register knowledge: initial'"
+    else pass "$t initial" "no HIT->MISS case from declared initial values ($n other)"; fi
+
     rc=$(run_one "$t.nodefault" "$stem" "$t" "${pol[@]}" --cp-snapshot "$tmp/$t.nodefault.txtpb")
     read -r n h2m bad < <(check_cases "$tmp/$t.nodefault")
     if [ "$rc" -ne 0 ]; then failed "$t nodefault" "p4symbex exit $rc" "$t.nodefault"
@@ -147,6 +161,8 @@ expect_error err.annotation "mutually exclusive" --path-selection STATE_DEP_TAMP
 expect_error err.policy "requires --path-selection" --cp-snapshot "$tmp/tna.txtpb"
 expect_error err.two "multiple snapshots" --path-selection STATE_DEP_TAMPERING \
     --cp-snapshot "$tmp/tna.txtpb" --cp-snapshot "$tmp/tna.txtpb"
+expect_error err.registers "requires --cp-snapshot" --path-selection STATE_DEP_TAMPERING \
+    --cp-snapshot-registers INITIAL
 sed 's/"Ingress.fwd"/"Ingress.no_such_action"/' "$tmp/tna.txtpb" > "$tmp/tna.badaction.txtpb"
 expect_error err.action "has no action" --path-selection STATE_DEP_TAMPERING \
     --cp-snapshot "$tmp/tna.badaction.txtpb"

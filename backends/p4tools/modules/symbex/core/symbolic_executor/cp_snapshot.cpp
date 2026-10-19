@@ -663,11 +663,15 @@ const IR::Expression *cellValueOf(const IR::Type *type, const std::string &name,
 
 }  // namespace
 
+bool seedSnapshotRegisters() {
+    return SymbexOptions::get().cpSnapshotRegisters == SymbexOptions::CpSnapshotRegisters::Seed;
+}
+
 SnapshotRegisterSeed snapshotRegisterSeed(cstring cpName, const IR::Type *indexType,
                                           const IR::Type *type) {
     SnapshotRegisterSeed seed;
     const auto *snap = loadedCpSnapshot();
-    if (snap == nullptr) return seed;
+    if (snap == nullptr || !seedSnapshotRegisters()) return seed;
     const auto *cells = snap->registerCells(cpName);
     if (cells == nullptr) return seed;
     for (const auto &[index, values] : *cells) {
@@ -681,7 +685,7 @@ SnapshotRegisterSeed snapshotRegisterSeed(cstring cpName, const IR::Type *indexT
 const IR::Expression *snapshotRegisterParam(cstring cpName, const IR::Type *type,
                                             std::vector<const IR::Expression *> &pins) {
     const auto *snap = loadedCpSnapshot();
-    if (snap == nullptr) return nullptr;
+    if (snap == nullptr || !seedSnapshotRegisters()) return nullptr;
     const auto value = snap->registerParam(cpName);
     if (!value.has_value()) return nullptr;
     return pinnedVariable(type, cpName.string(), *value, pins);
@@ -737,6 +741,8 @@ const IR::Expression *fixedPathCondition(const FinalState &fs, std::set<cstring>
 
 cstring checkRegisterKnowledge(const FinalState &phase1, const FinalState &phase2) {
     if (loadedCpSnapshot() == nullptr) return {};
+    // The search never saw a CP-set value: the attack is built from declared initial values.
+    if (!seedSnapshotRegisters()) return "initial"_cs;
     std::set<cstring> keptPhase1;
     std::set<cstring> keptPhase2;
     const IR::Expression *pc1 = nullptr;

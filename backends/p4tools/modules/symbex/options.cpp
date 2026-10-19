@@ -695,6 +695,26 @@ SymbexOptions::SymbexOptions()
         "--cp-annotation. Only one snapshot is accepted.");
 
     registerOption(
+        "--cp-snapshot-registers", "SEED|INITIAL",
+        [this](const char *arg) {
+            if (std::string(arg) == "SEED") {
+                cpSnapshotRegisters = CpSnapshotRegisters::Seed;
+            } else if (std::string(arg) == "INITIAL") {
+                cpSnapshotRegisters = CpSnapshotRegisters::Initial;
+            } else {
+                error(ErrorType::ERR_INVALID, "--cp-snapshot-registers: expected SEED or INITIAL");
+                return false;
+            }
+            cpSnapshotRegistersSet = true;
+            return true;
+        },
+        "Where the search's register cells come from under --cp-snapshot. SEED (default): the "
+        "snapshot's control-plane-set cells (each finding is tagged with whether the attack needs "
+        "to know them). INITIAL: the P4-declared initial values, what a data-plane attacker can "
+        "know; the snapshot cells are still emitted in the phase-0 block, so replay runs the "
+        "exploit against the deployed values.");
+
+    registerOption(
         "--state-dep-cache", "file",
         [this](const char *arg) {
             stateDepCachePath = std::string(arg);
@@ -960,6 +980,10 @@ bool SymbexOptions::validateOptions() const {
                   "--state-dep-sinks O/OUTK/OUTC need p4ccx chains; --staged-ide has none.");
             return false;
         }
+    }
+    if (cpSnapshotRegistersSet && cpSnapshotPaths.empty()) {
+        error(ErrorType::ERR_INVALID, "--cp-snapshot-registers requires --cp-snapshot.");
+        return false;
     }
     if (!cpSnapshotPaths.empty()) {
         if (cpSnapshotPaths.size() > 1) {

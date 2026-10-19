@@ -158,6 +158,10 @@ struct SnapshotRegisterSeed {
 SnapshotRegisterSeed snapshotRegisterSeed(cstring cpName, const IR::Type *indexType,
                                           const IR::Type *type);
 
+/// Whether the search starts from the snapshot's register cells (--cp-snapshot-registers SEED,
+/// the default) rather than the P4-declared initial values (INITIAL). Emission is unaffected.
+bool seedSnapshotRegisters();
+
 /// Seed @p registerValue's base cells from the snapshot and pin them in @p state.
 template <class RegisterValue, class State>
 void seedRegisterFromSnapshot(RegisterValue &registerValue, State &state, cstring cpName,
@@ -185,7 +189,8 @@ const IR::Expression *snapshotRegisterParam(cstring cpName, const IR::Type *type
 /// keeps the victim's Phase-1 path also keeps the attacker's Phase-2 path:
 ///   UNSAT( PC1[cp] && !PC2[cp] )  ->  "none"
 ///   SAT                            ->  "required: <the CP-set variables Phase 2 reads>"
-/// "none" also when Phase 2 reads no CP-set value; "unknown" when the solver gives up. Empty
+/// "none" also when Phase 2 reads no CP-set value; "unknown" when the solver gives up;
+/// "initial" under --cp-snapshot-registers INITIAL (the search used no CP-set value). Empty
 /// when no snapshot is loaded. Phase 3 is not covered: its registers are carried as folded
 /// constants, so its dependence on CP-set values is not visible here.
 cstring checkRegisterKnowledge(const FinalState &phase1, const FinalState &phase2);

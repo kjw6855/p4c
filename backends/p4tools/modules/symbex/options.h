@@ -164,6 +164,15 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// A vector so that a snapshot sequence can be accepted later; only one file is allowed today.
     std::vector<std::string> cpSnapshotPaths;
 
+    /// --cp-snapshot-registers: where the search's register cells come from. Seed (default): the
+    /// snapshot's CP-set cells, tagged by register knowledge. Initial: the P4-declared initial
+    /// values, i.e. what a data-plane attacker can know; the snapshot cells still go to the
+    /// emitted phase-0 block, so replay checks the exploit against the deployed values.
+    enum class CpSnapshotRegisters { Seed, Initial };
+    CpSnapshotRegisters cpSnapshotRegisters = CpSnapshotRegisters::Seed;
+    /// Whether --cp-snapshot-registers was given (it requires --cp-snapshot).
+    bool cpSnapshotRegistersSet = false;
+
     /// Port role the input port must have in the phase being executed under --cp-snapshot:
     /// HOST for the victim (Phases 1 and 3), ATTACKER for the attacker (Phase 2). Set by the
     /// tampering tracker per phase; unset outside tampering or without a snapshot topology.
