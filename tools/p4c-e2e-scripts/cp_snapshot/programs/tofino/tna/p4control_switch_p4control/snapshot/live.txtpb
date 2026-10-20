@@ -1,0 +1,98 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on tofino: switch/controller.py up to print('DONE'); digest loop not run
+# patch netcl.py: bug: SyntaxError (missing parameter list)
+# patch controller.py: bug: insert_rules uses controller.py's tables, target, gc, struct, socket
+# patch controller.py: stop before the digest loop (runtime table_conn updates)
+program: "p4control_switch_p4control"
+target: "tofino"
+snapshot_id: "live"
+captured_at: "2026-10-19T07:02:50.168507+00:00"
+topology {
+  port { port: 60 role: PORT_ROLE_HOST name: "h1" ip: "10.0.0.1" }
+  port { port: 61 role: PORT_ROLE_HOST name: "h2" ip: "10.0.0.2" }
+  port { port: 62 role: PORT_ROLE_HOST name: "h3" ip: "10.0.0.3" }
+  port { port: 63 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_forward"
+  action_name: "SwitchIngress.route"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+  data { field_name: "dst_port" value: "\x3e" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_forward"
+  action_name: "SwitchIngress.route"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x02" } }
+  data { field_name: "dst_port" value: "\x3d" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_forward"
+  action_name: "SwitchIngress.route"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x01" } }
+  data { field_name: "dst_port" value: "\x3c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_dst_tag_label"
+  action_name: "SwitchIngress.get_dst_label"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x01" } }
+  data { field_name: "dst_label" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_dst_tag_label"
+  action_name: "SwitchIngress.get_dst_label"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x02" } }
+  data { field_name: "dst_label" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_dst_tag_label"
+  action_name: "SwitchIngress.get_dst_label"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+  data { field_name: "dst_label" value: "\x04" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_dec"
+  action_name: "NoAction"
+  key { field_name: "ig_md.decision" exact { value: "\x00" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_dec"
+  action_name: "SwitchIngress.miss"
+  key { field_name: "ig_md.decision" exact { value: "\x01" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_dec"
+  action_name: "SwitchIngress.modify"
+  key { field_name: "ig_md.decision" exact { value: "\x02" } }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.table_dec"
+  action_name: "SwitchIngress.reroute"
+  key { field_name: "ig_md.decision" exact { value: "\x03" } }
+  data { field_name: "egress_port" value: "\x3e" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.t_table_action2"
+  action_name: "SwitchIngress.table_action2"
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+  key { field_name: "hdr.ipv4.src_addr" exact { value: "\x0a\x00\x00\x02" } }
+  data { field_name: "decision" value: "\x00" }
+  data { field_name: "declassify_label" value: "\xfe" }
+  data { field_name: "priority" value: "\x09" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.t_table_action3"
+  action_name: "SwitchIngress.table_action3"
+  key { field_name: "hdr.flowtag.tag_label" ternary { value: "\x01" mask: "\x01" } }
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+  data { field_name: "decision" value: "\x02" }
+  data { field_name: "priority" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.t_table_action4"
+  action_name: "SwitchIngress.table_action4"
+  key { field_name: "hdr.flowtag_id.tag_id" exact { value: "\x01" } }
+  key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+  data { field_name: "decision" value: "\x02" }
+  data { field_name: "priority" value: "\x05" }
+}

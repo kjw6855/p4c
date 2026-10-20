@@ -1,6 +1,7 @@
 """p4control: switch/controller.py (BfRt gRPC; the program name is auto-detected), up to its
 print("DONE"). After that it loops forever on digests, adding table_conn rows per connection:
-runtime (A2S), not part of the post-setup state.
+runtime (A2S), not part of the post-setup state. capture.py stops it at DONE; validate_live.py
+keeps the loop running while the case's packets go out.
 
 netcl.py, which controller.py imports for the policy rules, does not parse (`def insert_rules:`)
 and refers to controller.py's globals; both are fixed minimally, the rules themselves untouched.
@@ -17,9 +18,18 @@ PATCHES = [
      "bug: SyntaxError (missing parameter list)"),
     ("controller.py", "netcl.insert_rules()", "netcl.__dict__.update(globals()); netcl.insert_rules()",
      "bug: insert_rules uses controller.py's tables, target, gc, struct, socket"),
+    ("controller.py", "    tag_id = data_dict['tag_id']", "    tag_id = data_dict.get('tag_id')",
+     "bug: digest_t has no tag_id; the KeyError (swallowed) dropped every digest"),
+    ("controller.py", "    block_dst_addr = data_dict['block_dst_addr']",
+     "    block_dst_addr = data_dict.get('block_dst_addr')", "bug: digest_t has no block_dst_addr"),
+    ("controller.py", "    tag_decision = data_dict['tag_decision']",
+     "    tag_decision = data_dict.get('tag_decision')", "bug: digest_t has no tag_decision"),
+]
+SETUP_ONLY_PATCHES = [
     ("controller.py", 'print("DONE")', 'print("DONE"); interface.tear_down_stream(); sys.exit(0)',
      "stop before the digest loop (runtime table_conn updates)"),
 ]
+READY_MARKER = "DONE"
 
 
 def run(ctx):

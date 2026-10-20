@@ -1,0 +1,2 @@
+p4control_switch_p4control: post-setup state of run p4control_1_1_odiv_legit vs /root/jiwon/Workspace-remote/sp27/cp_live/p4control_switch_p4control/entities.pkl
+capture 210021  validate 210021  differ 0  only-capture 0  only-validate 0
