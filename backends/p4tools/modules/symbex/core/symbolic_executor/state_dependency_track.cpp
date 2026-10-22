@@ -323,12 +323,13 @@ static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramIn
 /// forwarding path).
 ///
 /// With SymbexOptions::pinDefaultActionData (on unless --no-pin-default-action-data) the override
-/// is carried as the configuration the case installs: Phase 2 keeps every argument Phase 1's path constrained (constrainedDefaultSubset)
-/// and the replays get the whole call (installedDefaults). Carrying a value the solver picked is
-/// sound because the picks are installable: open-world p4symbex invents every entry anyway, and
-/// SymbexOptions::enumActionDomain keeps enum-typed data inside the declared members. Without it only
-/// annotation-backed arguments are carried and everything else is checked afterwards by
-/// crossPhaseCpAgrees.
+/// is carried as the configuration the case installs. Phase 2 runs the same default action under
+/// Phase 1's own conditions on its data (injectPinnedDefaultActions), so it can pick a value both
+/// phases accept. The replays and both emission re-solves then use that one configuration
+/// (installedDefaults). The data p4symbex picks this way is installable: open-world p4symbex
+/// invents every entry anyway, and SymbexOptions::enumActionDomain keeps enum-typed data inside
+/// the declared members. Without the option only annotation-backed arguments are carried, and
+/// crossPhaseCpAgrees checks the rest afterwards.
 ///
 /// Consumed by TableStepper::setTableDefaultEntries, the single producer of those symbols on both
 /// targets. Kept out of "preexisting_tableconfigs": that category is read only on the keyed path,
@@ -344,70 +345,126 @@ static void injectPinnedDefaultAction(ExecutionState &init, cstring tableName,
     }
 }
 
-/// The part of Phase 1's override @p rec that Phase 2 must keep: the arguments Phase 1's path
-/// constrained, plus the annotation-backed ones. An argument Phase 1 never read stays free for
-/// Phase 2 to choose. The call is returned even when no argument is left, because carrying it also
-/// fixes WHICH default action Phase 2 runs.
-static const ActionCall *constrainedDefaultSubset(cstring tableName,
-                                                  const DefaultActionRecord &rec) {
-    std::vector<ActionArg> kept;
-    if (const auto *args = rec.call->getArgs(); args != nullptr) {
+/// Replaces every symbol of an expression with its value in a model, except those labelled in
+/// @p keep. Sets @p failed when a replaced symbol has no value in the model.
+class SubstituteAllBut : public Transform {
+    const Model &model;
+    const std::set<cstring> &keep;
+
+ public:
+    bool failed = false;
+
+    SubstituteAllBut(const Model &model, const std::set<cstring> &keep) : model(model), keep(keep) {}
+
+    const IR::Node *preorder(IR::SymbolicVariable *var) override {
+        prune();
+        if (keep.count(var->label) != 0) return var;
+        const auto *value = model.get(var, /*checked=*/false);
+        if (value == nullptr) {
+            failed = true;
+            return var;
+        }
+        return value;
+    }
+};
+
+/// Phase 1's path conditions on its default-action data, as constraints a later phase can share:
+/// every conjunct of @p fs1's path constraint that reads a default-action argument symbol of @p cond,
+/// with every OTHER symbol replaced by its value in @p fs1's model. Any data satisfying them still
+/// sends Phase 1's own packet down its path, so a later phase may choose a value that suits itself
+/// too, rather than inherit Phase 1's arbitrary model pick (SwitchV2P: Phase 1 picked GW_SPINE,
+/// which only reads the cache, while the attacker's write needs TOR). A conjunct holding taint or a
+/// concolic value is skipped; the emission re-solve, pinned to the installed data, catches anything
+/// that leaves out.
+static std::vector<const IR::Expression *> phase1DefaultDataConstraints(
+    const FinalState &fs1, const PhaseConditions &cond) {
+    std::set<cstring> keep;
+    for (const auto &[tblName, rec] : cond.tableDefaultActionMap) {
+        const auto *args = rec.call->getArgs();
+        if (args == nullptr) continue;
         for (const auto &arg : *args) {
-            if (rec.constrainedArgs.count(arg.getActionParamName()) != 0 ||
-                argIsAnnotationBacked(tableName, rec.call->getActionName(), arg)) {
-                kept.push_back(arg);
+            if (const auto *param = arg.getActionParam(); param != nullptr) {
+                keep.insert(tblName + "_" + rec.call->getActionName() + "_arg_" + param->name.name);
             }
         }
     }
-    return new ActionCall(rec.call->getActionName(), rec.call->getAction(), kept);
+    std::vector<const IR::Expression *> out;
+    if (keep.empty()) return out;
+    const auto &model = fs1.getFinalModel();
+    for (const auto *pc : fs1.getExecutionState()->getPathConstraint()) {
+        if (pc == nullptr) continue;
+        bool mentions = false;
+        bool opaque = false;
+        forAllMatching<IR::SymbolicVariable>(pc, [&](const IR::SymbolicVariable *var) {
+            if (keep.count(var->label) != 0) mentions = true;
+            if (var->is<IR::ConcolicVariable>()) opaque = true;
+        });
+        if (!mentions) continue;
+        forAllMatching<IR::TaintExpression>(pc, [&](const IR::TaintExpression *) { opaque = true; });
+        if (opaque) continue;
+        SubstituteAllBut subst(model, keep);
+        const auto *projected = pc->apply(subst);
+        if (!subst.failed) out.push_back(projected->checkedTo<IR::Expression>());
+    }
+    return out;
 }
 
 /// Same pin, driven from an already-built PhaseConditions: for EVERY table that carries a default
 /// override, not just the size-1 tables — a keyless table has no key and so never appears there.
-static void injectPinnedDefaultActions(ExecutionState &init, const PhaseConditions &cond) {
+/// With pinDefaultActionData the later phase runs Phase 1's default ACTION (the call carries only
+/// annotation-backed data) and shares Phase 1's path conditions on the data, from @p rep, Phase 1's
+/// representative terminal.
+static void injectPinnedDefaultActions(ExecutionState &init, const PhaseConditions &cond,
+                                       const FinalState *rep) {
     if (!SymbexOptions::get().crossPhaseDefaultActionPin) return;
+    const bool full = SymbexOptions::get().pinDefaultActionData;
     for (const auto &[tableName, rec] : cond.tableDefaultActionMap) {
-        const auto *pinnable = SymbexOptions::get().pinDefaultActionData
-                                   ? constrainedDefaultSubset(tableName, rec)
-                                   : annotationBackedSubset(tableName, rec.call);
+        const auto *pinnable = annotationBackedSubset(tableName, rec.call);
+        if (full && pinnable == nullptr) {
+            pinnable = new ActionCall(rec.call->getActionName(), rec.call->getAction(), {});
+        }
         if (pinnable != nullptr) {
             init.addTestObject("pinned_default_actions"_cs, tableName, pinnable);
         }
     }
+    if (full && rep != nullptr) {
+        for (const auto *constraint : phase1DefaultDataConstraints(*rep, cond)) {
+            init.pushPathConstraint(constraint);
+        }
+    }
 }
 
-/// The default-action configuration a case installs, per table: Phase 1's override, except that an
-/// argument only Phase 2's path constrained takes Phase 2's value. Phase 2 was pinned to everything
-/// Phase 1 constrained, so the two never disagree on an argument either of them read. A table only
-/// Phase 2 reached contributes Phase 2's override. @p fs2 may be null (no Phase 2 involved).
+/// The default-action configuration a case installs, per table: Phase 1's override, with each
+/// argument taking Phase 2's model value wherever Phase 2's query bound it. Phase 2 was solved
+/// under Phase 1's own conditions on that data (phase1DefaultDataConstraints), so its values serve
+/// both phases; an argument Phase 2 never saw keeps Phase 1's value. A table only Phase 2 reached
+/// contributes Phase 2's override. @p fs2 may be null (no Phase 2 involved).
 static std::map<cstring, const ActionCall *> installedDefaults(const FinalState *fs1,
                                                                const FinalState *fs2) {
     std::map<cstring, const ActionCall *> out;
     const auto d1 = collectCpState(*fs1).defaults;
     std::map<cstring, DefaultActionRecord> d2;
-    if (fs2 != nullptr && fs2 != fs1) d2 = collectCpState(*fs2).defaults;
+    const Model *model2 = nullptr;
+    if (fs2 != nullptr && fs2 != fs1) {
+        d2 = collectCpState(*fs2).defaults;
+        model2 = &fs2->getFinalModel();
+    }
     for (const auto &[tblName, rec1] : d1) {
-        auto it = d2.find(tblName);
         const auto *args1 = rec1.call->getArgs();
-        if (it == d2.end() || args1 == nullptr || it->second.call->getArgs() == nullptr ||
-            it->second.call->getActionName() != rec1.call->getActionName()) {
+        if (model2 == nullptr || args1 == nullptr) {
             out[tblName] = rec1.call;
             continue;
         }
         std::vector<ActionArg> merged;
         for (const auto &a1 : *args1) {
-            const ActionArg *pick = &a1;
-            const cstring name = a1.getActionParamName();
-            if (rec1.constrainedArgs.count(name) == 0 &&
-                it->second.constrainedArgs.count(name) != 0) {
-                for (const auto &a2 : *it->second.call->getArgs()) {
-                    if (a2.getActionParamName() == name) {
-                        pick = &a2;
-                        break;
-                    }
-                }
+            const auto *param = a1.getActionParam();
+            const IR::Expression *value = nullptr;
+            if (param != nullptr) {
+                const auto *sym = ControlPlaneState::getTableActionArgument(
+                    tblName, rec1.call->getActionName(), param->name, param->type);
+                value = model2->get(sym, /*checked=*/false);
             }
-            merged.push_back(*pick);
+            merged.emplace_back(param, value != nullptr ? value : a1.getEvaluatedValue());
         }
         out[tblName] = new ActionCall(rec1.call->getActionName(), rec1.call->getAction(), merged);
     }
@@ -528,7 +585,11 @@ static bool crossPhaseCpAgrees(
                           rec1.call->getActionName());
                 return false;
             }
-            if (!actionDataAgrees("default action data", tblName, rec1.call, rec1.constrainedArgs,
+            // Under pinDefaultActionData the later phases deliberately re-choose the data within
+            // Phase 1's own conditions, and the replays and emission are pinned to one installed
+            // value, so only the action has to match here.
+            if (!SymbexOptions::get().pinDefaultActionData &&
+                !actionDataAgrees("default action data", tblName, rec1.call, rec1.constrainedArgs,
                                   rec2.call, rec2.constrainedArgs, chainId, chainName,
                                   phaseLabel)) {
                 return false;
@@ -572,16 +633,16 @@ static bool crossPhaseCpAgrees(
 /// harness, so this is triage output rather than a gap report -- naming the control-plane state a
 /// case depends on is still worth doing, because a wrong default action is otherwise invisible in
 /// the emitted file.
-static void reportDefaultActionOverrides(const PhaseConditions &cond, size_t chainId,
-                                         size_t subTestId) {
-    if (cond.tableDefaultActionMap.empty()) return;
+static void reportDefaultActions(const std::map<cstring, const ActionCall *> &defaults,
+                                 size_t chainId, size_t subTestId) {
+    if (defaults.empty()) return;
     std::stringstream list;
     bool isFirst = true;
-    for (const auto &[tableName, rec] : cond.tableDefaultActionMap) {
+    for (const auto &[tableName, call] : defaults) {
         if (!isFirst) list << ", ";
         isFirst = false;
-        list << tableName << ": " << rec.call->getActionName() << "(";
-        const auto *args = rec.call->getArgs();
+        list << tableName << ": " << call->getActionName() << "(";
+        const auto *args = call->getArgs();
         if (args != nullptr) {
             bool isFirstArg = true;
             for (const auto &arg : *args) {
@@ -595,6 +656,19 @@ static void reportDefaultActionOverrides(const PhaseConditions &cond, size_t cha
     printInfo("[Tampering] chain id=%1% sub=%2%: default-action override(s) emitted as default "
               "entries: %3%",
               chainId, subTestId, list.str());
+}
+
+/// Phase 1's overrides. Under pinDefaultActionData the case installs data the later phases may
+/// have re-chosen, so runTampering reports installedDefaults at emission instead.
+static void reportDefaultActionOverrides(const PhaseConditions &cond, size_t chainId,
+                                         size_t subTestId) {
+    if (SymbexOptions::get().crossPhaseDefaultActionPin &&
+        SymbexOptions::get().pinDefaultActionData) {
+        return;
+    }
+    std::map<cstring, const ActionCall *> defaults;
+    for (const auto &[tableName, rec] : cond.tableDefaultActionMap) defaults[tableName] = rec.call;
+    reportDefaultActions(defaults, chainId, subTestId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,6 +1131,7 @@ void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
                              SymbexOptions::get().pinDefaultActionData;
     auto pinned = [&callBack, pinDefaults](const TamperingFinalState &ts) {
         if (!pinDefaults) return callBack(ts);
+        reportDefaultActions(installedDefaults(&ts.phase1, &ts.phase2), ts.chainId, ts.subTestId);
         TamperingFinalState out = ts;
         for (const auto *pin : installedDefaultActionPins(ts.phase1, ts.phase2)) {
             out.phase1ExtraConstraints.push_back(pin);
@@ -4048,7 +4123,7 @@ size_t StateDependencyTracker::runTamperingChain(
         // Pin every table whose Phase-1 state was a default-action override to that same action and
         // data. Independent of size1Tables above: a keyless table has no key, so it never appears in
         // cond1.tableKeyMap and no size/skip mechanism reaches it.
-        injectPinnedDefaultActions(phase2Init, cond1);
+        injectPinnedDefaultActions(phase2Init, cond1, repPhase1State);
 
         // Hash/sketch/bloom-indexed SO register (tainted access index): pin Phase 2 to the exact
         // Phase-1 flow so the attacker collides with the victim's bucket (equal hash inputs ⇒ equal
@@ -5083,7 +5158,7 @@ size_t StateDependencyTracker::runConditionChain(
         }
         // Same cross-phase default-action pin as the key path: every table carrying a default
         // override, keyless tables included (they never show up in cond1.tableKeyMap).
-        injectPinnedDefaultActions(phase2Init, cond1);
+        injectPinnedDefaultActions(phase2Init, cond1, repPhase1State);
         // Hash/sketch/bloom-indexed SO register: its access index is tainted, so symbex can't tell
         // which bucket a packet maps to. The attacker packet must COLLIDE with the Phase-1 flow's
         // bucket, so pin Phase-2 to the exact Phase-1 packet (equal hash inputs ⇒ equal bucket)
