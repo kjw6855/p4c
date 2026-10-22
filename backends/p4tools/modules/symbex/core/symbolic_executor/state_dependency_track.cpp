@@ -481,6 +481,35 @@ static void pinInstalledDefaults(ExecutionState &init, const FinalState *fs1,
     }
 }
 
+/// The keyed table configuration a case installs: every table configuration the given phase
+/// terminals hold, evaluated in each terminal's own model and merged per table (rules appended, the
+/// first terminal's properties kept). @p skip names a table to leave out (the sink, which a replay
+/// handles itself); a null terminal or a repeated one contributes nothing.
+static std::map<cstring, const TableConfig *> installedTableConfigs(
+    std::vector<const FinalState *> phases, cstring skip) {
+    std::map<cstring, const TableConfig *> merged;
+    std::set<const FinalState *> seen;
+    for (const auto *fs : phases) {
+        if (fs == nullptr || !seen.insert(fs).second) continue;
+        const auto &model = fs->getFinalModel();
+        for (const auto &[tblName, tblObj] :
+             fs->getExecutionState()->getTestObjectCategory("tableconfigs"_cs)) {
+            if (!skip.isNullOrEmpty() && tblName == skip) continue;
+            const auto *cfg = tblObj->evaluate(model, /*doComplete=*/true)->to<TableConfig>();
+            if (cfg == nullptr) continue;
+            auto &slot = merged[tblName];
+            if (slot == nullptr) {
+                slot = cfg;
+                continue;
+            }
+            std::vector<TableRule> rules(*slot->getRules());
+            for (const auto &rule : *cfg->getRules()) rules.push_back(rule);
+            slot = new TableConfig(slot->getTable(), rules, *slot->getProperties());
+        }
+    }
+    return merged;
+}
+
 std::vector<const IR::Expression *> installedDefaultActionPins(const FinalState &fs1,
                                                                const FinalState &fs2) {
     std::vector<const IR::Expression *> pins;
@@ -3255,6 +3284,32 @@ static bool violatesCpAssumptions(const FinalState *fs) {
 // and the sole reader (runSymbolicPhase3) live in this translation unit.
 static bool pinSinkEntryForLegit = false;
 
+// Set while a MISS->HIT candidate whose Phase 3 hit a sink entry only Phase 3 synthesized is
+// re-checked (shareTableEntries). The case installs that entry before Phase 1, so every replay and
+// re-derivation that runs meanwhile sees it pinned in the sink table: an entry the victim's own key
+// matches, or one that diverts the attacker's packet, has to show up before the case is emitted.
+static const FinalState *phase3SinkEntrySource = nullptr;
+
+struct ScopedPhase3SinkEntry {
+    explicit ScopedPhase3SinkEntry(const FinalState *fs3) { phase3SinkEntrySource = fs3; }
+    ~ScopedPhase3SinkEntry() { phase3SinkEntrySource = nullptr; }
+    ScopedPhase3SinkEntry(const ScopedPhase3SinkEntry &) = delete;
+    ScopedPhase3SinkEntry &operator=(const ScopedPhase3SinkEntry &) = delete;
+};
+
+/// Pins @p sink in @p init to @p own's sink entries plus phase3SinkEntrySource's (no synthesis).
+static void pinPhase3SinkEntry(ExecutionState &init, std::vector<cstring> &skipTables,
+                               cstring sink, const FinalState *own) {
+    if (phase3SinkEntrySource == nullptr || sink.isNullOrEmpty()) return;
+    if (std::find(skipTables.begin(), skipTables.end(), sink) == skipTables.end()) {
+        skipTables.push_back(sink);
+    }
+    const auto configs = installedTableConfigs({own, phase3SinkEntrySource}, cstring());
+    if (auto it = configs.find(sink); it != configs.end()) {
+        init.addTestObject("preexisting_tableconfigs"_cs, sink, it->second);
+    }
+}
+
 const FinalState *StateDependencyTracker::runSymbolicPhase3(
     const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
@@ -3305,8 +3360,6 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
     // same one. The sink table is left to its own handling (the tamper acts on its key).
     std::vector<cstring> phase3SkipTables;
     {
-        const auto &model1 = fs1->getFinalModel();
-        const auto *es1 = fs1->getExecutionState();
         for (const auto &[tblName, tbl] : tableByName_) {
             // Normally the sink keeps its own entries (the tamper acts on its key). For an
             // attack-attribution legit replay (pinSinkEntry) the sink must ALSO use Phase 1's exact
@@ -3315,16 +3368,18 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
             if (!pinSinkEntryForLegit && tblName == chain.sinkTableControlPlaneName) continue;
             phase3SkipTables.push_back(tblName);
         }
-        for (const auto &[tblName, tblObj] : es1->getTestObjectCategory("tableconfigs"_cs)) {
-            if (!pinSinkEntryForLegit && tblName == chain.sinkTableControlPlaneName) continue;
-            const auto *evalCfg = tblObj->evaluate(model1, /*doComplete=*/true)->to<TableConfig>();
-            if (evalCfg != nullptr) {
-                phase3Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
-                // Skipping synthesis does not reach a keyless table (its stepper returns before the
-                // immutability check), so its default action + data need their own pin.
-                if (!SymbexOptions::get().pinDefaultActionData) {
-                    injectPinnedDefaultAction(phase3Init, tblName, evalCfg);
-                }
+        // With shareTableEntries the replay also sees Phase 2's entries: the device holds both
+        // phases' rules when Phase 3 runs, and an entry the attacker's own packet needed (an
+        // l3_forwarding route for 0xDEADBEEF, say) can catch the victim too.
+        const auto installed = installedTableConfigs(
+            {fs1, SymbexOptions::get().shareTableEntries ? phase2 : nullptr},
+            pinSinkEntryForLegit ? cstring() : chain.sinkTableControlPlaneName);
+        for (const auto &[tblName, evalCfg] : installed) {
+            phase3Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+            // Skipping synthesis does not reach a keyless table (its stepper returns before the
+            // immutability check), so its default action + data need their own pin.
+            if (!SymbexOptions::get().pinDefaultActionData) {
+                injectPinnedDefaultAction(phase3Init, tblName, evalCfg);
             }
         }
         // The replay runs the default-action configuration the case installs, whole.
@@ -3332,6 +3387,8 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
             SymbexOptions::get().pinDefaultActionData) {
             pinInstalledDefaults(phase3Init, fs1, phase2);
         }
+        pinPhase3SinkEntry(phase3Init, phase3SkipTables, chain.sinkTableControlPlaneName,
+                           pinSinkEntryForLegit ? fs1 : nullptr);
     }
 
     std::vector<const FinalState *> phase3States;
@@ -3396,30 +3453,34 @@ const FinalState *StateDependencyTracker::reDeriveConcretePhase(
     concretizeInputPacket(init, fs, inputPort, inputPortSymExpr);
 
     // Cross-phase control-plane consistency for the tamper replay (mirror runSymbolicPhase3): pin
-    // non-sink tables to Phase 1's choice. The Phase-1 reference picks its own state (no pinning).
+    // non-sink tables to the earlier choice. Without shareTableEntries the Phase-1 reference picks
+    // its own state; with it, it keeps its own entries (sink included) plus Phase 2's, because a
+    // free re-pick can leave the read path for another with the same disposition (SwitchV2P's
+    // re-derived victims took the misdelivered branch and never read the cache).
     std::vector<cstring> skipTables;
-    if (!isPhase1) {
-        const auto &model = fs->getFinalModel();
-        const auto *es1 = fs->getExecutionState();
+    const bool share = SymbexOptions::get().shareTableEntries;
+    if (!isPhase1 || share) {
+        const cstring sink = isPhase1 ? cstring() : chain.sinkTableControlPlaneName;
         for (const auto &[tblName, tbl] : tableByName_) {
-            if (tblName == chain.sinkTableControlPlaneName) continue;
+            if (!sink.isNullOrEmpty() && tblName == sink) continue;
             skipTables.push_back(tblName);
         }
-        for (const auto &[tblName, tblObj] : es1->getTestObjectCategory("tableconfigs"_cs)) {
-            if (tblName == chain.sinkTableControlPlaneName) continue;
-            const auto *evalCfg = tblObj->evaluate(model, /*doComplete=*/true)->to<TableConfig>();
-            if (evalCfg != nullptr) {
-                init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
-                // Same keyless-table gap as runSymbolicPhase3: pin the default action + data.
-                if (!SymbexOptions::get().pinDefaultActionData) {
-                    injectPinnedDefaultAction(init, tblName, evalCfg);
-                }
+        std::vector<const FinalState *> sources{fs};
+        if (share) sources = isPhase1 ? std::vector<const FinalState *>{fs, partner}
+                                      : std::vector<const FinalState *>{partner, fs};
+        for (const auto &[tblName, evalCfg] : installedTableConfigs(sources, sink)) {
+            init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
+            // Same keyless-table gap as runSymbolicPhase3: pin the default action + data.
+            if (!SymbexOptions::get().pinDefaultActionData) {
+                injectPinnedDefaultAction(init, tblName, evalCfg);
             }
         }
+        pinPhase3SinkEntry(init, skipTables, chain.sinkTableControlPlaneName,
+                           isPhase1 ? fs : nullptr);
     }
     // Both re-derived phases run the default-action configuration the case installs -- the
     // Phase-1 reference too, which otherwise picks its own (the OUTK "must be 6 for Phase 1 and 0
-    // for the re-derived Phase 1" drops). Its keyed entries stay its own choice.
+    // for the re-derived Phase 1" drops).
     if (SymbexOptions::get().crossPhaseDefaultActionPin &&
         SymbexOptions::get().pinDefaultActionData) {
         if (isPhase1) {
@@ -4846,13 +4907,37 @@ size_t StateDependencyTracker::runTamperingChain(
             continue;
         }
 
-        for (const auto *fs2 : phase2StateMap[phase1StateToCondition[i]]) {
+        for (const auto *fs2Gen : phase2StateMap[phase1StateToCondition[i]]) {
             if (maxPerChain != 0 && emitted >= maxPerChain) break;
 
+            const int ip2 = IR::getIntFromLiteral(fs2Gen->getFinalModel().evaluate(
+                fs2Gen->getExecutionState()->get(programInfo.getTargetInputPortVar()), true));
+            // Open world: Phase 3 HITs an entry keyed on whatever Phase 2 wrote, and the solver's
+            // own pick is often the value the victim already reads -- an entry the victim's legit
+            // replay would hit as well. Steer a pinnable Phase-2 write to --state-tamper-value,
+            // keeping its input port, as the H2S2O candidate loop does; otherwise keep the terminal.
+            const FinalState *fs2 = fs2Gen;
+            if (SymbexOptions::get().shareTableEntries && SymbexOptions::get().pinWriteValue &&
+                SymbexOptions::get().stateTamperValue.has_value() &&
+                drivenFs3.count(fs2Gen) == 0) {
+                const auto *es2Gen = fs2Gen->getExecutionState();
+                if (const auto *pin = writePin(lastWriteOf(fs2Gen, chain.soName),
+                                               *SymbexOptions::get().stateTamperValue)) {
+                    const auto *portExpr = es2Gen->get(programInfo.getTargetInputPortVar());
+                    std::vector<const IR::Expression *> pins{
+                        pin, new IR::Equ(portExpr, IR::Constant::get(portExpr->type, ip2))};
+                    auto asserts = es2Gen->getPathConstraint();
+                    asserts.insert(asserts.end(), pins.begin(), pins.end());
+                    auto sat = fs2Gen->getSolver().checkSat(asserts);
+                    if (sat.has_value() && *sat) {
+                        if (auto pinned = fs2Gen->computeConcolicState({}, pins)) {
+                            fs2 = &pinned->get();
+                        }
+                    }
+                }
+            }
             const auto &model2 = fs2->getFinalModel();
             const auto *es2 = fs2->getExecutionState();
-            int ip2 = IR::getIntFromLiteral(
-                model2.evaluate(es2->get(programInfo.getTargetInputPortVar()), true));
             // Drive the sink to flip MISS→HIT: one send if it suffices, else replay the same Phase-2
             // packet (accumulating the register) until the sink HITs. repeat = packet count.
             size_t repeat = 1;
@@ -4875,6 +4960,26 @@ size_t StateDependencyTracker::runTamperingChain(
             // end-to-end output divergence is the harness's call — we only drop provably-invisible
             // flips here. (Sound-toward-emitting.)
             if (!sinkActionsDiverge(fs3, currentSinkTable_, chain.sinkTableControlPlaneName)) continue;
+            // Phase 3 HITs an entry only it synthesized (open world). The case installs that entry
+            // before Phase 1, so everything below re-checks the earlier phases with it in place:
+            // the victim's legit replay must still MISS, the re-derived Phase 1 must still MISS
+            // with its disposition, and the re-derived Phase 2 must still write the victim's cell.
+            // Only an entry Phase 3 SYNTHESIZED needs this: a const (e.g. --cp-snapshot) entry is
+            // installed in every phase already and leaves fs3 no sink table configuration.
+            const auto phase3SinkCfgs = installedTableConfigs({fs3}, cstring());
+            const auto sinkCfgIt = phase3SinkCfgs.find(chain.sinkTableControlPlaneName);
+            const bool carriesPhase3Entry = SymbexOptions::get().shareTableEntries &&
+                                            sinkCfgIt != phase3SinkCfgs.end() &&
+                                            !sinkCfgIt->second->getRules()->empty();
+            ScopedPhase3SinkEntry phase3EntryScope(carriesPhase3Entry ? fs3 : nullptr);
+            if (carriesPhase3Entry &&
+                legitPhase3Sink(chain, initState, fs1, cond1.inputPort, inputPortSymExpr) == 1) {
+                printInfo("[Tampering MISS→HIT] chain id=%1%: the sink entry Phase 3 hits also "
+                          "HITs the victim's legit replay; installing it defeats the attack — "
+                          "skipping.",
+                          chain.id);
+                continue;
+            }
             // Disposition of fs1 (MISS) vs fs3 (HIT) — informational only, for the case label.
             bool d3Drop = false;
             int d3Port = -1;
@@ -4922,6 +5027,16 @@ size_t StateDependencyTracker::runTamperingChain(
             if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
             const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
                                                      /*isPhase1=*/false, p1Carry, fs1);
+            // reDeriveConcretePhase falls back to its input when no terminal matches, which here
+            // would hide a Phase 1 or Phase 2 the Phase-3 entry changed: require real re-derivations,
+            // and a Phase 1 that still MISSes.
+            if (carriesPhase3Entry && (fs1c == fs1 || fs2c == fs2 || evalSinkFlip(fs1c) != 0)) {
+                printInfo("[Tampering MISS→HIT] chain id=%1%: with the sink entry Phase 3 hits "
+                          "installed, Phase 1 or Phase 2 no longer re-derives as generated — "
+                          "skipping.",
+                          chain.id);
+                continue;
+            }
             // Same re-check as the HIT→MISS paths: the concrete re-derivation substituted terminals
             // the Phase-2 gate never saw, so confirm the emitted pair still shares the cell.
             if (!phasesShareIndexCell(fs1c, fs2c, chain.soName, programInfo)) {
@@ -5007,6 +5122,11 @@ size_t StateDependencyTracker::runTamperingChain(
             ts.subTestId = ++emitted;
             ts.phase2RepeatCount = repeat;
             ts.kind = TamperKind::MissToHit;
+            // The HIT is on an entry only Phase 3 synthesized (open world: nothing installs it
+            // otherwise), so the case carries it.
+            if (carriesPhase3Entry) {
+                ts.phase3Tables[chain.sinkTableControlPlaneName] = sinkCfgIt->second;
+            }
             ts.caseLabel = cstring("MISS_TO_HIT/" + disp);
             if (repeat > 1)
                 printInfo("[Tampering MISS→HIT] chain id=%1% sub=%2%: accumulation needs %3% Phase-2 "

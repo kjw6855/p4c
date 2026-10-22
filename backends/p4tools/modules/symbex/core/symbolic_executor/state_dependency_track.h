@@ -19,6 +19,7 @@
 #include "backends/p4tools/modules/symbex/lib/final_state.h"
 #include "backends/p4tools/modules/symbex/lib/tamper_kind.h"
 #include "backends/p4tools/modules/symbex/lib/test_object.h"
+#include "backends/p4tools/modules/symbex/lib/test_spec.h"
 #include "backends/p4tools/modules/symbex/options.h"
 
 namespace P4::P4Tools::Symbex {
@@ -133,6 +134,11 @@ struct TamperingFinalState {
     /// (Phase 2 writes the value Phase 3 assumed, see --no-pin-write-value) when the emitted Phase 2
     /// is still symbolic. Assigned by name, like the fields around it.
     std::vector<const IR::Expression *> phase2ExtraConstraints;
+
+    /// Table configurations only Phase 3 synthesized and the case must install too (evaluated):
+    /// the sink entry a MISS->HIT replay hits on the attacker's value. Emitted with Phase 2's rules.
+    /// Assigned by name, like the fields around it (--no-shared-table-entries leaves it empty).
+    std::map<cstring, const TableConfig *> phase3Tables;
 
     /// What the sink did in the legit Phase 3 and what it did in the attack Phase 3 — an action
     /// stamp plus its concrete arguments. Report-only, and the only account a case that reaches the

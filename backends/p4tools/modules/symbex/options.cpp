@@ -1012,6 +1012,18 @@ SymbexOptions::SymbexOptions()
         "Let a synthesized action argument of a serializable-enum type take any value of its "
         "underlying bit type. By default it is restricted to the enum's declared members, the only "
         "values a controller can install. This flag exists for regression comparison.");
+
+    registerOption(
+        "--no-shared-table-entries", nullptr,
+        [this](const char *) {
+            shareTableEntries = false;
+            return true;
+        },
+        "Replay Phase 3 under Phase 1's table entries only, let the re-derived Phase 1 choose its "
+        "own entries, and do not emit the sink entry a MISS->HIT Phase 3 hits. By default every "
+        "phase runs on the one table configuration the case installs (Phase 1's and Phase 2's "
+        "entries, plus that Phase-3 sink entry, which is emitted). This flag exists for "
+        "regression comparison.");
 }
 
 bool SymbexOptions::validateOptions() const {

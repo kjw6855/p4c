@@ -363,6 +363,12 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// declared members. --no-enum-action-domain lets it take any value of the underlying type.
     bool enumActionDomain = true;
 
+    /// Every tampering phase runs on the one table configuration the case installs: Phase 3 and
+    /// the re-derived Phase 2 see Phase 1's and Phase 2's entries, the re-derived Phase 1 keeps its
+    /// own entries, and the sink entry a MISS->HIT Phase 3 hits is emitted with the case.
+    /// --no-shared-table-entries restores Phase-1-only replays and phase-local re-derivation.
+    bool shareTableEntries = true;
+
  protected:
     bool validateOptions() const override;
 };

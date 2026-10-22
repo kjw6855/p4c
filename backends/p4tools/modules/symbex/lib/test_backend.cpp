@@ -779,6 +779,21 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
         testCount++;
         return needsToTerminate(testCount);
     }
+    // Entries only Phase 3 synthesized (a MISS->HIT sink entry) ride with Phase 2's rules; the
+    // spec was created by processPhase above and is not shared yet.
+    for (const auto &[tableName, cfg] : state.phase3Tables) {
+        auto *spec2 = const_cast<TestSpec *>(res2->testSpec);
+        const auto *existing =
+            spec2->getTestObject("tables"_cs, tableName, /*checked=*/false);
+        if (const auto *prev = existing == nullptr ? nullptr : existing->to<TableConfig>()) {
+            std::vector<TableRule> rules(*prev->getRules());
+            for (const auto &rule : *cfg->getRules()) rules.push_back(rule);
+            spec2->addTestObject("tables"_cs, tableName,
+                                 new TableConfig(prev->getTable(), rules, *prev->getProperties()));
+        } else {
+            spec2->addTestObject("tables"_cs, tableName, cfg);
+        }
+    }
 
     // Both phases have now been re-solved independently, each under its own port overrides and
     // concolic assert set. That re-solve is free to pick a different value for any control-plane
