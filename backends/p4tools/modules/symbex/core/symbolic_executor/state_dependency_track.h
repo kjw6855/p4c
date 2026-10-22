@@ -149,6 +149,12 @@ struct TamperingFinalState {
 /// Callback type for the three-phase tampering scenario.
 using TamperingCallback = std::function<bool(const TamperingFinalState &)>;
 
+/// Equalities fixing every default-action argument symbol to the configuration the case installs
+/// (Phase 1's override, with Phase 2's value for arguments only Phase 2 constrained). Appended to
+/// both phases' emission constraints so their independent re-solves cannot re-roll the data.
+std::vector<const IR::Expression *> installedDefaultActionPins(const FinalState &fs1,
+                                                               const FinalState &fs2);
+
 /// Symbolic executor that steers path selection toward SOChains from state-dependency
 /// analysis. For each SOChain the executor runs an independent DFS from the initial
 /// program state, preferring branches that cover the chain's required IR nodes. A test
@@ -383,10 +389,13 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// "accept any terminal" condition-replay. Used by the analytical drive-register path to
     /// re-validate that the full (branch-gated) write path is covered once the register is pre-set
     /// past the gate.
+    /// @param phase2 the Phase-2 terminal whose installed default-action data the replay must share
+    /// (with --pin-default-action-data); nullptr when the replay involves no Phase 2.
     const FinalState *runSymbolicPhase3(
         const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
-        const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage = false);
+        const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage = false,
+        const FinalState *phase2 = nullptr);
 
     /// The attack-attribution replay itself: a LEGIT Phase 3 for @p fs1 — Phase 1's OWN register
     /// writes carried and NO attacker Phase-2 write, with Phase 1's sink-table entry pinned (see the
@@ -436,11 +445,13 @@ class StateDependencyTracker : public SymbolicExecutor {
     /// terminal does not). Returns the terminal matching @p fs's disposition; falls back to @p fs if
     /// none matches (so this is strictly additive — it can only fix the 0-emit case).
     /// @p carriedRegs / @p sinkTableName mirror runSymbolicPhase3's Phase-2 setup (empty / "" for the
-    /// no-tamper Phase-1 reference).
+    /// no-tamper Phase-1 reference). @p partner is the other phase of the case (Phase 2 when
+    /// @p isPhase1, else Phase 1): both phases replay the default-action data the case installs.
     const FinalState *reDeriveConcretePhase(
         const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
         const FinalState *fs, int inputPort, const IR::Expression *inputPortSymExpr, bool isPhase1,
-        const std::map<cstring, const TestObject *> &carriedRegs);
+        const std::map<cstring, const TestObject *> &carriedRegs,
+        const FinalState *partner = nullptr);
 
     /// Collects the packet-field SymbolicVariable leaves of @p soReg's index expression(s) — the
     /// index-determining inputs (e.g. the operands of a concolic CRC hash). Empty when the index is a

@@ -381,11 +381,9 @@ bool sameCpName(cstring a, cstring b) { return a == b || cpNameTail(a) == cpName
 /// because that one is consumed only on the keyed path (evalTablePreExistingConfig BUG_CHECKs on a
 /// null key), while a keyless table has no key at all and never reaches it.
 ///
-/// The injected call carries ONLY arguments a --cp-annotation `action_data` clause fixed to a
-/// literal (state_dependency_track.cpp's annotationBackedSubset): a value nobody constrained is
-/// whatever the earlier phase's solver happened to pick, and forcing a later phase to it invents a
-/// control-plane state that may not be deployable. Unconstrained data is left free here and the
-/// tampering executor drops the candidate afterwards if the phases turn out to contradict.
+/// The injected call carries the arguments the later phase must keep: by default those the earlier
+/// phase's path constrained (all of them for a replay), and only those a --cp-annotation
+/// `action_data` clause fixed under --no-pin-default-action-data. Arguments it omits stay free.
 const ActionCall *pinnedDefaultActionFor(const ExecutionState &state, cstring tableName) {
     const auto *obj = state.getTestObject("pinned_default_actions"_cs, tableName, /*checked=*/false);
     return obj == nullptr ? nullptr : obj->to<ActionCall>();
@@ -538,22 +536,26 @@ void TableStepper::setTableDefaultEntries(
     // Cross-phase control-plane consistency, constructive half. The device installs ONE default
     // action per table for every phase, but this function mints a fresh
     // `<table>_<action>_arg_<param>` symbol on each phase's own solver query, so the phases can
-    // disagree on the default action's data. Only an ANNOTATION-BACKED value is carried over from
-    // the recorded phase (the injector filters to those): it is a stated control-plane fact, and
-    // the annotation filter/cpActionArgPin re-derive the same value in every phase anyway, so the
-    // pin only restates what is already true. A value nobody constrained is deliberately NOT
-    // carried -- propagating one phase's arbitrary model pick would invent a device configuration
-    // -- and the ACTION CHOICE is likewise not forced here; both are checked after the fact by the
-    // tampering executor, which drops a candidate whose phases contradict each other.
+    // disagree on the default action's data. The tampering executor injects what a later phase must
+    // keep (state_dependency_track.cpp's injectPinnedDefaultAction(s) / pinInstalledDefaults): by
+    // default the action plus every argument the earlier phase constrained (the replays get the
+    // whole call), and only annotation-backed arguments under --no-pin-default-action-data, where
+    // the action choice is not forced and contradictions are dropped after the fact.
     const auto *pinnedDefault = pinnedDefaultActionFor(stepper->state, properties.tableName);
     for (const auto *action : actionList) {
         const auto *tableAction = action->expression->checkedTo<IR::MethodCallExpression>();
         const auto *actionType = stepper->state.getP4Action(tableAction);
 
-        auto &nextState = stepper->state.clone();
-
         // We get the control plane name of the action we are calling.
         cstring actionName = actionType->controlPlaneName();
+        // The default-action pin (pinDefaultActionData) carries the installed default, so the pinned
+        // phase runs the same default ACTION as well, not just the same data.
+        if (pinnedDefault != nullptr && SymbexOptions::get().pinDefaultActionData &&
+            !sameCpName(actionName, pinnedDefault->getActionName())) {
+            continue;
+        }
+
+        auto &nextState = stepper->state.clone();
 
         // Synthesize arguments for the call based on the action parameters.
         const auto &parameters = actionType->parameters;

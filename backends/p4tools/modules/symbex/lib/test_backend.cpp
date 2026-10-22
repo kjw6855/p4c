@@ -162,12 +162,13 @@ bool emittedActionDataAgrees(const char *what, cstring tableName, const ActionCa
 /// installs of one entry -- the second either fails or silently overwrites the first, and whichever
 /// phase depended on the losing value no longer behaves as symbex predicted.
 ///
-/// Action data nobody constrained is not something p4symbex may invent a value for -- only a
-/// --cp-annotation `action_data` clause states what the controller installs, and such a clause pins
-/// every phase to the same literal (TableStepper::cpActionArgPin re-applies it inside every phase's
-/// own query), so it never trips this check. Everything else fails closed: a test whose two packets
-/// need different action data for the same installed entry describes a device configuration that
-/// cannot exist, and is dropped rather than emitted with two contradictory values.
+/// Default-action data is pinned to one installed configuration in both phases' emission
+/// constraints (installedDefaultActionPins, unless --no-pin-default-action-data), and a
+/// --cp-annotation `action_data` clause pins every phase to the same literal
+/// (TableStepper::cpActionArgPin), so neither trips this check. Everything else fails closed: a
+/// test whose two packets need different action data for the same installed entry describes a
+/// device configuration that cannot exist, and is dropped rather than emitted with two
+/// contradictory values.
 ///
 /// Names are compared with ==: both specs' table labels come from IR::P4Table::controlPlaneName()
 /// and both action names from IR::P4Action::controlPlaneName(), so they are spelled identically.

@@ -990,6 +990,18 @@ SymbexOptions::SymbexOptions()
         "packet really writes. This flag restores the earlier generation, where the record could "
         "name --state-tamper-value or a candidate the packet does not write; it exists for "
         "regression comparison.");
+
+    registerOption(
+        "--no-pin-default-action-data", nullptr,
+        [this](const char *) {
+            pinDefaultActionData = false;
+            return true;
+        },
+        "Carry only annotation-backed default-action data from Phase 1 into the later tampering "
+        "phases. By default the device's one default action per table is carried whole: Phase 2 "
+        "keeps every argument Phase 1's path constrained, and Phase 3 and the re-derived phases "
+        "replay exactly the configuration the case installs. This flag exists for regression "
+        "comparison.");
 }
 
 bool SymbexOptions::validateOptions() const {

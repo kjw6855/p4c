@@ -353,6 +353,12 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// value recorded as affected_register.attacker_value). --no-pin-write-value turns it off.
     bool pinWriteValue = true;
 
+    /// Carry the default-action data of keyless and default-overridden tables across tampering
+    /// phases as one installed configuration: every argument Phase 1's path constrained pins Phase
+    /// 2, and Phase 3 and the re-derived phases replay the full configuration the case emits.
+    /// --no-pin-default-action-data restores the annotation-only pin.
+    bool pinDefaultActionData = true;
+
  protected:
     bool validateOptions() const override;
 };

@@ -203,9 +203,9 @@ static bool argIsAnnotationBacked(cstring tableName, cstring actionName, const A
 }
 
 /// The annotation-backed subset of @p call: only the arguments a --cp-annotation `action_data`
-/// clause fixed. nullptr when the call carries no such argument, in which case NOTHING from it may
-/// be propagated to another phase — the remaining values are free symbols whose model assignment is
-/// an arbitrary solver pick, not a control-plane fact.
+/// clause fixed. nullptr when the call carries no such argument. This is the whole cross-phase pin
+/// under --no-pin-default-action-data, where the remaining values are treated as arbitrary solver
+/// picks rather than a control-plane fact.
 static const ActionCall *annotationBackedSubset(cstring tableName, const ActionCall *call) {
     if (call == nullptr) return nullptr;
     const auto *args = call->getArgs();
@@ -315,16 +315,21 @@ static PhaseConditions buildPhaseCondition(const FinalState &fs, const ProgramIn
     return cond;
 }
 
-/// Carry a table's default-action override into a later phase's initial state — but ONLY the part
-/// of it that a --cp-annotation clause fixed. The device installs ONE default action per table for
-/// all three phases, and the action-data symbols (`<table>_<action>_arg_<param>`) are not
-/// phase-scoped while every phase is a SEPARATE solver query, so the phases can disagree on the very
-/// action data the attack depends on. The answer is NOT to propagate whichever value Z3 happened to
-/// pick for a free symbol: that manufactures a control-plane state nobody asked for and may not even
-/// be deployable (SwitchV2P's switch_type is `enum bit<3>` with five declared roles, so a propagated
-/// 6 is merely representable, not installable). Only an annotation knows what the controller
-/// installs, so only an annotation-backed value is carried; everything else is left free and checked
-/// afterwards by crossPhaseCpAgrees, which drops the candidate when the phases contradict.
+/// Carry a table's default-action override into a later phase's initial state. The device installs
+/// ONE default action per table for all three phases, and the action-data symbols
+/// (`<table>_<action>_arg_<param>`) are not phase-scoped while every phase is a SEPARATE solver
+/// query, so without a pin the phases can disagree on the very action data the attack depends on
+/// (SwitchV2P's Phase 3 re-picked `switch_config`'s switch_type and left the cache read off the
+/// forwarding path).
+///
+/// With SymbexOptions::pinDefaultActionData (on unless --no-pin-default-action-data) the override
+/// is carried as the configuration the case installs: Phase 2 keeps every argument Phase 1's path constrained (constrainedDefaultSubset)
+/// and the replays get the whole call (installedDefaults). Carrying a value the solver picked is
+/// sound because the picks are installable: open-world p4symbex invents every entry anyway, and
+/// SymbexOptions::enumActionDomain keeps enum-typed data inside the declared members. Without it only
+/// annotation-backed arguments are carried and everything else is checked afterwards by
+/// crossPhaseCpAgrees.
+///
 /// Consumed by TableStepper::setTableDefaultEntries, the single producer of those symbols on both
 /// targets. Kept out of "preexisting_tableconfigs": that category is read only on the keyed path,
 /// and a keyless table — the whole point here — never gets there.
@@ -339,16 +344,106 @@ static void injectPinnedDefaultAction(ExecutionState &init, cstring tableName,
     }
 }
 
+/// The part of Phase 1's override @p rec that Phase 2 must keep: the arguments Phase 1's path
+/// constrained, plus the annotation-backed ones. An argument Phase 1 never read stays free for
+/// Phase 2 to choose. The call is returned even when no argument is left, because carrying it also
+/// fixes WHICH default action Phase 2 runs.
+static const ActionCall *constrainedDefaultSubset(cstring tableName,
+                                                  const DefaultActionRecord &rec) {
+    std::vector<ActionArg> kept;
+    if (const auto *args = rec.call->getArgs(); args != nullptr) {
+        for (const auto &arg : *args) {
+            if (rec.constrainedArgs.count(arg.getActionParamName()) != 0 ||
+                argIsAnnotationBacked(tableName, rec.call->getActionName(), arg)) {
+                kept.push_back(arg);
+            }
+        }
+    }
+    return new ActionCall(rec.call->getActionName(), rec.call->getAction(), kept);
+}
+
 /// Same pin, driven from an already-built PhaseConditions: for EVERY table that carries a default
 /// override, not just the size-1 tables — a keyless table has no key and so never appears there.
 static void injectPinnedDefaultActions(ExecutionState &init, const PhaseConditions &cond) {
     if (!SymbexOptions::get().crossPhaseDefaultActionPin) return;
     for (const auto &[tableName, rec] : cond.tableDefaultActionMap) {
-        const auto *pinnable = annotationBackedSubset(tableName, rec.call);
+        const auto *pinnable = SymbexOptions::get().pinDefaultActionData
+                                   ? constrainedDefaultSubset(tableName, rec)
+                                   : annotationBackedSubset(tableName, rec.call);
         if (pinnable != nullptr) {
             init.addTestObject("pinned_default_actions"_cs, tableName, pinnable);
         }
     }
+}
+
+/// The default-action configuration a case installs, per table: Phase 1's override, except that an
+/// argument only Phase 2's path constrained takes Phase 2's value. Phase 2 was pinned to everything
+/// Phase 1 constrained, so the two never disagree on an argument either of them read. A table only
+/// Phase 2 reached contributes Phase 2's override. @p fs2 may be null (no Phase 2 involved).
+static std::map<cstring, const ActionCall *> installedDefaults(const FinalState *fs1,
+                                                               const FinalState *fs2) {
+    std::map<cstring, const ActionCall *> out;
+    const auto d1 = collectCpState(*fs1).defaults;
+    std::map<cstring, DefaultActionRecord> d2;
+    if (fs2 != nullptr && fs2 != fs1) d2 = collectCpState(*fs2).defaults;
+    for (const auto &[tblName, rec1] : d1) {
+        auto it = d2.find(tblName);
+        const auto *args1 = rec1.call->getArgs();
+        if (it == d2.end() || args1 == nullptr || it->second.call->getArgs() == nullptr ||
+            it->second.call->getActionName() != rec1.call->getActionName()) {
+            out[tblName] = rec1.call;
+            continue;
+        }
+        std::vector<ActionArg> merged;
+        for (const auto &a1 : *args1) {
+            const ActionArg *pick = &a1;
+            const cstring name = a1.getActionParamName();
+            if (rec1.constrainedArgs.count(name) == 0 &&
+                it->second.constrainedArgs.count(name) != 0) {
+                for (const auto &a2 : *it->second.call->getArgs()) {
+                    if (a2.getActionParamName() == name) {
+                        pick = &a2;
+                        break;
+                    }
+                }
+            }
+            merged.push_back(*pick);
+        }
+        out[tblName] = new ActionCall(rec1.call->getActionName(), rec1.call->getAction(), merged);
+    }
+    for (const auto &[tblName, rec2] : d2) out.emplace(tblName, rec2.call);
+    return out;
+}
+
+/// Pins @p init to the installed default-action configuration of @p fs1 (+ @p fs2), whole: the
+/// replays (Phase 3, the re-derived phases) must run exactly the configuration the case emits.
+static void pinInstalledDefaults(ExecutionState &init, const FinalState *fs1,
+                                 const FinalState *fs2) {
+    for (const auto &[tblName, call] : installedDefaults(fs1, fs2)) {
+        init.addTestObject("pinned_default_actions"_cs, tblName, call);
+    }
+}
+
+std::vector<const IR::Expression *> installedDefaultActionPins(const FinalState &fs1,
+                                                               const FinalState &fs2) {
+    std::vector<const IR::Expression *> pins;
+    for (const auto &[tblName, call] : installedDefaults(&fs1, &fs2)) {
+        const auto *args = call->getArgs();
+        if (args == nullptr) continue;
+        for (const auto &arg : *args) {
+            const auto *param = arg.getActionParam();
+            if (param == nullptr) continue;
+            const auto *value = arg.getEvaluatedValue();
+            const auto *sym = ControlPlaneState::getTableActionArgument(
+                tblName, call->getActionName(), param->name, param->type);
+            if (param->type->is<IR::Type_Boolean>()) {
+                pins.push_back(new IR::Equ(sym, IR::BoolLiteral::get(value->value != 0)));
+            } else if (const auto *bits = sym->type->to<IR::Type_Bits>()) {
+                pins.push_back(new IR::Equ(sym, IR::Constant::get(bits, value->value)));
+            }
+        }
+    }
+    return pins;
 }
 
 /// Per-argument half of the cross-phase check, shared by the keyless (default-action) and the keyed
@@ -956,16 +1051,29 @@ void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
         return;
     }
     auto &initState = ExecutionState::create(&programInfo.getP4Program());
+    // Both phases are re-solved independently at emission, so pin the default-action data each
+    // re-solve may otherwise re-roll to the configuration the generator replayed.
+    const bool pinDefaults = SymbexOptions::get().crossPhaseDefaultActionPin &&
+                             SymbexOptions::get().pinDefaultActionData;
+    auto pinned = [&callBack, pinDefaults](const TamperingFinalState &ts) {
+        if (!pinDefaults) return callBack(ts);
+        TamperingFinalState out = ts;
+        for (const auto *pin : installedDefaultActionPins(ts.phase1, ts.phase2)) {
+            out.phase1ExtraConstraints.push_back(pin);
+            out.phase2ExtraConstraints.push_back(pin);
+        }
+        return callBack(out);
+    };
     if (loadedCpSnapshot() == nullptr) {
-        runTamperingScenario(callBack, initState);
+        runTamperingScenario(pinned, initState);
     } else {
         // --cp-snapshot: tag every case with whether the attacker must know CP-set values.
-        auto tagged = [&callBack](const TamperingFinalState &ts) {
+        auto tagged = [&pinned](const TamperingFinalState &ts) {
             TamperingFinalState out = ts;
             out.registerKnowledge = checkRegisterKnowledge(ts.phase1, ts.phase2);
             printInfo("[Tampering] Register knowledge: chain id=%1% sub=%2% %3%", ts.chainId,
                       ts.subTestId, out.registerKnowledge);
-            return callBack(out);
+            return pinned(out);
         };
         runTamperingScenario(tagged, initState);
     }
@@ -3075,7 +3183,8 @@ static bool pinSinkEntryForLegit = false;
 const FinalState *StateDependencyTracker::runSymbolicPhase3(
     const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs1, int inputPort, const IR::Expression *inputPortSymExpr,
-    const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage) {
+    const std::map<cstring, const TestObject *> &carriedRegs, bool keepWriteCoverage,
+    const FinalState *phase2) {
     if (keepWriteCoverage) {
         // Analytical drive-register re-validation: keep the REAL Phase-2 write-coverage ACCEPTANCE
         // (allCovered over writeNodes) so the terminal is accepted only if the full (branch-gated)
@@ -3138,8 +3247,15 @@ const FinalState *StateDependencyTracker::runSymbolicPhase3(
                 phase3Init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
                 // Skipping synthesis does not reach a keyless table (its stepper returns before the
                 // immutability check), so its default action + data need their own pin.
-                injectPinnedDefaultAction(phase3Init, tblName, evalCfg);
+                if (!SymbexOptions::get().pinDefaultActionData) {
+                    injectPinnedDefaultAction(phase3Init, tblName, evalCfg);
+                }
             }
+        }
+        // The replay runs the default-action configuration the case installs, whole.
+        if (SymbexOptions::get().crossPhaseDefaultActionPin &&
+            SymbexOptions::get().pinDefaultActionData) {
+            pinInstalledDefaults(phase3Init, fs1, phase2);
         }
     }
 
@@ -3188,7 +3304,7 @@ ConstEntryOutcome StateDependencyTracker::legitPhase3ConstEntry(
 const FinalState *StateDependencyTracker::reDeriveConcretePhase(
     const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const FinalState *fs, int inputPort, const IR::Expression *inputPortSymExpr, bool isPhase1,
-    const std::map<cstring, const TestObject *> &carriedRegs) {
+    const std::map<cstring, const TestObject *> &carriedRegs, const FinalState *partner) {
     // Accept any terminal: the concrete packet makes the path (near-)deterministic and the CRC
     // resolves eagerly, so there is no per-cell fork to steer around.
     setPhase(TamperingPhase::Phase3_Read);
@@ -3220,8 +3336,21 @@ const FinalState *StateDependencyTracker::reDeriveConcretePhase(
             if (evalCfg != nullptr) {
                 init.addTestObject("preexisting_tableconfigs"_cs, tblName, evalCfg);
                 // Same keyless-table gap as runSymbolicPhase3: pin the default action + data.
-                injectPinnedDefaultAction(init, tblName, evalCfg);
+                if (!SymbexOptions::get().pinDefaultActionData) {
+                    injectPinnedDefaultAction(init, tblName, evalCfg);
+                }
             }
+        }
+    }
+    // Both re-derived phases run the default-action configuration the case installs -- the
+    // Phase-1 reference too, which otherwise picks its own (the OUTK "must be 6 for Phase 1 and 0
+    // for the re-derived Phase 1" drops). Its keyed entries stay its own choice.
+    if (SymbexOptions::get().crossPhaseDefaultActionPin &&
+        SymbexOptions::get().pinDefaultActionData) {
+        if (isPhase1) {
+            pinInstalledDefaults(init, fs, partner);
+        } else {
+            pinInstalledDefaults(init, partner != nullptr ? partner : fs, fs);
         }
     }
 
@@ -3282,14 +3411,15 @@ const FinalState *StateDependencyTracker::accumulatePhase2Flip(
 
     const auto cap = static_cast<size_t>(SymbexOptions::get().maxPhase2Packets);
     size_t k = 1;
-    const FinalState *fs3 =
-        runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, carried);
+    const FinalState *fs3 = runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr,
+                                              carried, /*keepWriteCoverage=*/false, fs2);
 
     while ((fs3 == nullptr || !goal(fs3)) && k < cap) {
         // Replay the SAME Phase-2 packet (fs2's pinned input) from the current carried state to
         // apply one more increment; runSymbolicPhase3 pins the input + pre-sets the carried regs.
         const FinalState *fs2Next =
-            runSymbolicPhase3(chain, initState, fs2, inputPort2, inputPortSymExpr, carried);
+            runSymbolicPhase3(chain, initState, fs2, inputPort2, inputPortSymExpr, carried,
+                              /*keepWriteCoverage=*/false, fs2);
         if (fs2Next == nullptr) break;  // packet no longer reaches a terminal — cannot progress
         std::map<cstring, const TestObject *> nextCarried;
         if (!carryAll(fs2Next, nextCarried)) break;
@@ -3299,7 +3429,8 @@ const FinalState *StateDependencyTracker::accumulatePhase2Flip(
         if (prevVal && nextVal && *prevVal == *nextVal) break;
         carried = std::move(nextCarried);
         ++k;
-        fs3 = runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, carried);
+        fs3 = runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, carried,
+                                /*keepWriteCoverage=*/false, fs2);
     }
 
     if (fs3 != nullptr && goal(fs3)) {
@@ -3531,7 +3662,8 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
         auto coverVal = carrySO(fs2real, afterCover);
         if (!coverVal) { ++candNoCarry; continue; }
         const FinalState *fs3 =
-            runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, afterCover);
+            runSymbolicPhase3(chain, initState, fs1, inputPort1, inputPortSymExpr, afterCover,
+                              /*keepWriteCoverage=*/false, fs2real);
         if (fs3 == nullptr || !goal(fs3)) { ++candGoalUnmet; continue; }
 
         outFs2 = fs2real;
@@ -4290,14 +4422,15 @@ size_t StateDependencyTracker::runTamperingChain(
                     std::map<cstring, cstring> accRegSinkTables;
                     accRegSinkTables[chain.soName] = chain.sinkTableControlPlaneName;
                     const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
-                                                             inputPortSymExpr, /*isPhase1=*/true, {});
+                                                             inputPortSymExpr, /*isPhase1=*/true, {},
+                                                             fs2);
                     std::map<cstring, const TestObject *> p1Carry;
                     for (const auto &[regName, regObj] :
                          fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
                         p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
                     const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ipAcc,
                                                              inputPortSymExpr, /*isPhase1=*/false,
-                                                             p1Carry);
+                                                             p1Carry, fs1);
                     // The Phase-2 gate never saw this pair: reDeriveConcretePhase re-ran both
                     // phases with concrete packets and substituted fresh terminals, and fs1 is any
                     // state of the bucket rather than the representative the gate compared against.
@@ -4482,8 +4615,9 @@ size_t StateDependencyTracker::runTamperingChain(
                 // register values (K runs never reach this).
                 if (SymbexOptions::get().outputSinks() &&
                     SymbexOptions::get().divergeOutput == SymbexOptions::DivergeOutput::Port) {
-                    const auto *fs3Gate = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
-                                                            inputPortSymExpr, attackerRegValues);
+                    const auto *fs3Gate = runSymbolicPhase3(
+                        chain, initState, fs1, cond1.inputPort, inputPortSymExpr, attackerRegValues,
+                        /*keepWriteCoverage=*/false, fs2);
                     if (fs3Gate == nullptr) {
                         printInfo("[Tampering] chain id=%1% SO=%2%: attacked Phase 3 replay found no "
                                   "terminal; cannot confirm a port change, skipping.",
@@ -4511,14 +4645,15 @@ size_t StateDependencyTracker::runTamperingChain(
                 bool reDerived = false;
                 if (phase2ModelOverrides.empty()) {
                     const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
-                                                             inputPortSymExpr, /*isPhase1=*/true, {});
+                                                             inputPortSymExpr, /*isPhase1=*/true, {},
+                                                             fs2);
                     std::map<cstring, const TestObject *> p1Carry;
                     for (const auto &[regName, regObj] :
                          fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
                         p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
                     const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2,
                                                              inputPortSymExpr, /*isPhase1=*/false,
-                                                             p1Carry);
+                                                             p1Carry, fs1);
                     // reDeriveConcretePhase returns its input on failure: fs2c==fs2 means no concrete
                     // terminal matched fs2's disposition, so fall back to the raw pair (today's
                     // emission — strictly additive).
@@ -4703,7 +4838,7 @@ size_t StateDependencyTracker::runTamperingChain(
             // carries the re-derived Phase-1's registers (same victim) and reuses fs2's own packet
             // bytes, which already hash to the victim's bucket (pinIndexInputsToPhase1 at generation).
             const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
-                                                     inputPortSymExpr, /*isPhase1=*/true, {});
+                                                     inputPortSymExpr, /*isPhase1=*/true, {}, fs2);
             std::map<cstring, const TestObject *> p1Carry;
             for (const auto &[regName, regObj] :
                  fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
@@ -4711,7 +4846,7 @@ size_t StateDependencyTracker::runTamperingChain(
             labelAttackerPort(chain, ip2);
             if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
             const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
-                                                     /*isPhase1=*/false, p1Carry);
+                                                     /*isPhase1=*/false, p1Carry, fs1);
             // Same re-check as the HIT→MISS paths: the concrete re-derivation substituted terminals
             // the Phase-2 gate never saw, so confirm the emitted pair still shares the cell.
             if (!phasesShareIndexCell(fs1c, fs2c, chain.soName, programInfo)) {
@@ -5161,7 +5296,8 @@ size_t StateDependencyTracker::runConditionChain(
                                 value, {})
                             .testObject;
                     const auto *cand = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
-                                                         inputPortSymExpr, carried);
+                                                         inputPortSymExpr, carried,
+                                                         /*keepWriteCoverage=*/false, candFs2);
                     if (cand != nullptr && goalFor(fs1)(cand)) {
                         fs3 = cand;
                         outputAttackerValue = value;
@@ -5229,13 +5365,15 @@ size_t StateDependencyTracker::runConditionChain(
             // reDeriveConcretePhase falls back to its input, so fs2c==fs2 emits exactly today's pair
             // (strictly additive — a case emitted today is never lost).
             const auto *fs1c = reDeriveConcretePhase(chain, initState, fs1, cond1.inputPort,
-                                                     inputPortSymExpr, /*isPhase1=*/true, {});
+                                                     inputPortSymExpr, /*isPhase1=*/true, {},
+                                                     fs2Emit);
             std::map<cstring, const TestObject *> p1Carry;
             for (const auto &[regName, regObj] :
                  fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
                 p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
             const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2Emit, ip2,
-                                                     inputPortSymExpr, /*isPhase1=*/false, p1Carry);
+                                                     inputPortSymExpr, /*isPhase1=*/false, p1Carry,
+                                                     fs1);
             // Single send: source from the re-derived Phase-2 (its packet is the one emitted, so the
             // value and packet agree). Accumulation (repeat>1) keeps Phase 3 -- the emitted packet is
             // sent k times and no single state holds base+k, so the value rides AT_LEAST + min_value.
