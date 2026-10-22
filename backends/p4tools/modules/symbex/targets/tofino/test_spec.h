@@ -139,6 +139,10 @@ class IndexMap : public TestObject {
 
     [[nodiscard]] bool wasWritten() const override { return !indexConditions.empty(); }
 
+    [[nodiscard]] const IR::Expression *getLastWrittenValue() const override {
+        return indexConditions.empty() ? nullptr : indexConditions.back().getValue();
+    }
+
     DECLARE_TYPEINFO(IndexMap, TestObject);
 };
 

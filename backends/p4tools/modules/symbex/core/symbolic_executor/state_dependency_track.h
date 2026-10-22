@@ -129,6 +129,11 @@ struct TamperingFinalState {
     /// next positional argument. Assign this and everything below it by name after construction.
     std::map<cstring, big_int> attackerRegisterMinValues;
 
+    /// Extra path constraints for processPhase(phase2)'s computeConcolicState: the write-value pin
+    /// (Phase 2 writes the value Phase 3 assumed, see --no-pin-write-value) when the emitted Phase 2
+    /// is still symbolic. Assigned by name, like the fields around it.
+    std::vector<const IR::Expression *> phase2ExtraConstraints;
+
     /// What the sink did in the legit Phase 3 and what it did in the attack Phase 3 — an action
     /// stamp plus its concrete arguments. Report-only, and the only account a case that reaches the
     /// sink in BOTH runs can give of itself, since such a case has no hit_phase/miss_phase to name.

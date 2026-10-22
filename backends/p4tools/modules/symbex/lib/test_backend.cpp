@@ -771,7 +771,8 @@ bool TestBackEnd::runTampering(const TamperingFinalState &state) {
         return needsToTerminate(testCount);
     }
 
-    auto res2 = processPhase(state.phase2, p2in, p2out, state.phase2ModelOverrides, {},
+    auto res2 = processPhase(state.phase2, p2in, p2out, state.phase2ModelOverrides,
+                             state.phase2ExtraConstraints,
                              /*allowTaintedOutput=*/true);
     if (!res2.has_value()) {
         testCount++;

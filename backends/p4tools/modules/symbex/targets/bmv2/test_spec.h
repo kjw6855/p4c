@@ -129,6 +129,10 @@ class IndexMap : public TestObject {
     /// terminal, silently disabling tampering generation on BMv2.
     [[nodiscard]] bool wasWritten() const override { return !indexConditions.empty(); }
 
+    [[nodiscard]] const IR::Expression *getLastWrittenValue() const override {
+        return indexConditions.empty() ? nullptr : indexConditions.back().getValue();
+    }
+
     DECLARE_TYPEINFO(IndexMap, TestObject);
 };
 

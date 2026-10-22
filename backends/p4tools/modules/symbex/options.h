@@ -349,6 +349,10 @@ class SymbexOptions : public AbstractP4cToolOptions {
     enum class UninitializedReads { TargetDefault, Taint, Stored };
     UninitializedReads uninitializedReads = UninitializedReads::TargetDefault;
 
+    /// Constrain each emitted Phase-2 packet to write the register value its Phase 3 assumed (the
+    /// value recorded as affected_register.attacker_value). --no-pin-write-value turns it off.
+    bool pinWriteValue = true;
+
  protected:
     bool validateOptions() const override;
 };

@@ -92,6 +92,11 @@ class TestObject : public ICastable {
         return evaluate(model, /*doComplete=*/true);
     }
 
+    /// The symbolic value of the most recent write this object recorded, or nullptr when it
+    /// recorded none (or does not track writes). The tampering executor constrains it to the value
+    /// Phase 3 assumes, so the emitted Phase-2 packet really writes that value.
+    [[nodiscard]] virtual const IR::Expression *getLastWrittenValue() const { return nullptr; }
+
     /// For a stateful object already snapshotted by evaluateForCarry(): the folded scalar value, if
     /// it is a single concrete integer. Used by the multi-packet Phase-2 accumulation loop to detect
     /// a fixpoint — when replaying the attacker packet stops changing this value, no further replay

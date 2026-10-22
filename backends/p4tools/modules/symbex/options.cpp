@@ -863,8 +863,12 @@ SymbexOptions::SymbexOptions()
             }
             return true;
         },
-        "Attacker-chosen register value for the tampering scenario. "
-        "Phase 2 writes this exact value to the register instead of a random one. "
+        "Attacker-chosen register value for the tampering scenario, used instead of a random one "
+        "when Phase 2's write is packet-controllable. Key (HIT->MISS) chains inject it into the "
+        "Phase-2 packet; output-sink (H2S2O) chains try it first among their candidate values and "
+        "keep it only if it moves the victim's packet; other chains record the value the Phase-2 "
+        "packet really writes (unless --no-pin-write-value). A program-fixed write is never "
+        "replaced. "
         "Accepts decimal or 0x-prefixed hex (e.g. --state-tamper-value 0xdeadbeef).");
 
     registerOption(
@@ -973,6 +977,19 @@ SymbexOptions::SymbexOptions()
         "default on Tofino, where tofino-model reads 0 because the PHV container is never written "
         "for the packet; it assumes the field shares no container with a mutually exclusive field "
         "the program uses, which would be read instead.");
+
+    registerOption(
+        "--no-pin-write-value", nullptr,
+        [this](const char *) {
+            pinWriteValue = false;
+            return true;
+        },
+        "Do not constrain the emitted Phase-2 packet to write the register value Phase 3 assumed. "
+        "By default an output-sink (H2S2O) candidate value is accepted only if the Phase-2 packet "
+        "can write it, the packet is re-solved to write it, and every case records the value the "
+        "packet really writes. This flag restores the earlier generation, where the record could "
+        "name --state-tamper-value or a candidate the packet does not write; it exists for "
+        "regression comparison.");
 }
 
 bool SymbexOptions::validateOptions() const {

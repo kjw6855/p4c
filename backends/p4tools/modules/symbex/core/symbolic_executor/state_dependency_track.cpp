@@ -3553,6 +3553,56 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
     return nullptr;
 }
 
+namespace {
+
+/// True when a register write cannot be constrained to a chosen constant: it carries Taint, or a
+/// concolic (deferred extern, e.g. CRC) result the solver does not invert.
+bool isUnpinnableWrite(const IR::Expression *expr) {
+    if (Taint::hasTaint(expr)) return true;
+    struct FindConcolic : public Inspector {
+        bool found = false;
+        bool preorder(const IR::ConcolicVariable *) override {
+            found = true;
+            return false;
+        }
+    } finder;
+    expr->apply(finder);
+    return finder.found;
+}
+
+/// The symbolic value of @p fs's last write to @p soName, or nullptr.
+const IR::Expression *lastWriteOf(const FinalState *fs, cstring soName) {
+    const auto *reg =
+        fs->getExecutionState()->getTestObject("registervalues"_cs, soName, false);
+    return reg == nullptr ? nullptr : reg->getLastWrittenValue();
+}
+
+/// The value @p fs's last write to @p soName takes under @p fs's own model, if it is a constant.
+std::optional<big_int> concreteLastWrite(const FinalState *fs, cstring soName) {
+    const auto *val = lastWriteOf(fs, soName);
+    if (val == nullptr || Taint::hasTaint(val)) return std::nullopt;
+    const auto *c = fs->getFinalModel().evaluate(val, /*doComplete=*/true)->to<IR::Constant>();
+    if (c == nullptr) return std::nullopt;
+    return c->value;
+}
+
+/// `write == value`, with @p value truncated to the write's width; nullptr when the write is not a
+/// pinnable bit-vector expression (a constant needs no pin and is compared by the caller).
+const IR::Expression *writePin(const IR::Expression *write, const big_int &value) {
+    if (write == nullptr || write->is<IR::Constant>() || isUnpinnableWrite(write)) return nullptr;
+    const auto *bits = write->type->to<IR::Type_Bits>();
+    if (bits == nullptr) return nullptr;
+    return new IR::Equ(write, IR::Constant::get(bits, value & IR::getMaxBvVal(bits->width_bits())));
+}
+
+/// @p value truncated to @p write's width (unchanged for a non-bit-vector write).
+big_int truncatedTo(const IR::Expression *write, const big_int &value) {
+    const auto *bits = write == nullptr ? nullptr : write->type->to<IR::Type_Bits>();
+    return bits == nullptr ? value : (value & IR::getMaxBvVal(bits->width_bits()));
+}
+
+}  // namespace
+
 size_t StateDependencyTracker::runTamperingChain(
     const P4ChainExtractor::DependencyGraphs::SOChain &chain, const ExecutionState &initState,
     const std::vector<const FinalState *> &phase1Bucket, const TamperingCallback &callBack,
@@ -4700,6 +4750,7 @@ size_t StateDependencyTracker::runTamperingChain(
             //
             // Empty forbidden set: feasibility is always true here; the value is the real Phase-2
             // write, and the symbolic Phase-3 confirmation (evalSinkHit==HIT above) is the gate.
+            std::vector<const IR::Expression *> m2hPhase2Pin;
             {
                 // The semantic condition is "did the ATTACKER write?", tested on the Phase-2 state
                 // itself, independent of which state supplies the emitted value. A terminal can
@@ -4719,16 +4770,28 @@ size_t StateDependencyTracker::runTamperingChain(
                 const auto *srcSoReg = regSrc->getExecutionState()->getTestObject(
                     "registervalues"_cs, chain.soName, false);
                 if (srcSoReg == nullptr) continue;
+                // Record what the single-send Phase-2 packet really writes (Phase 3 was confirmed
+                // with that write), not --state-tamper-value; keep it if Phase 2 is re-solved at
+                // emission. --no-pin-write-value restores the earlier record.
+                std::optional<big_int> recordValue = SymbexOptions::get().stateTamperValue;
+                if (SymbexOptions::get().pinWriteValue && repeat == 1) {
+                    if (auto realWrite = concreteLastWrite(fs2c, chain.soName)) {
+                        recordValue = realWrite;
+                        if (const auto *pin = writePin(lastWriteOf(fs2c, chain.soName), *realWrite))
+                            m2hPhase2Pin.push_back(pin);
+                    }
+                }
                 attackerRegValues[chain.soName] =
                     srcSoReg
                         ->withAttackerValues(
                             modelWithResolvedIndices(regSrc, chain.soName, programInfo),
-                            SymbexOptions::get().stateTamperValue, {})
+                            recordValue, {})
                         .testObject;
             }
             TamperingFinalState ts{*fs1c, *fs2c, false,
                                    cond1.inputPort, cond1.outputPort, ip2, op2,
                                    attackerRegValues, {}, attackerRegSinkTables, {}};
+            ts.phase2ExtraConstraints = m2hPhase2Pin;
             // AT_LEAST bound for an analytically-driven accumulation: the value at which the
             // sink/condition flips. The harness cannot observe an exact value -- it stops driving
             // the register once it reaches its target and packet loss moves where that lands -- so
@@ -5025,6 +5088,10 @@ size_t StateDependencyTracker::runConditionChain(
             const FinalState *fs3 = nullptr;
             // Output mode: the attacker value that moved the victim's packet (see below).
             std::optional<big_int> outputAttackerValue = SymbexOptions::get().stateTamperValue;
+            // The Phase-2 state the case is emitted from: fs2, or fs2 re-solved to write the
+            // pinned output-mode value (writePinned).
+            const FinalState *fs2Emit = fs2;
+            bool writePinned = false;
             if (auto drivenIt = drivenFs3.find(fs2); drivenIt != drivenFs3.end()) {
                 // Analytical drive-register result: precomputed flip terminal + k, valid only for the
                 // representative Phase-1 state it was derived against.
@@ -5050,6 +5117,20 @@ size_t StateDependencyTracker::runConditionChain(
                 candidates.emplace_back(0);
                 candidates.emplace_back(1);
                 const auto *p2Reg = es2->getTestObject("registervalues"_cs, chain.soName, false);
+                // Write-value pin: a candidate counts only if this Phase-2 packet can write it, and
+                // the Phase-2 state the case is emitted from is re-solved to write it. A tainted or
+                // hash-derived write cannot be pinned and keeps the unpinned search.
+                const IR::Expression *p2Write = (SymbexOptions::get().pinWriteValue &&
+                                                 p2Reg != nullptr)
+                                                    ? p2Reg->getLastWrittenValue()
+                                                    : nullptr;
+                const bool pinWrite = p2Write != nullptr && !isUnpinnableWrite(p2Write) &&
+                                      p2Write->type->is<IR::Type_Bits>();
+                if (p2Write != nullptr && !pinWrite)
+                    printInfo("[Tampering H2S2O] chain id=%1%: the Phase-2 write to '%2%' cannot be "
+                              "pinned to a candidate value (%3%); searching unpinned.",
+                              chain.id, chain.soName, p2Write);
+                const auto *p2PortExpr = es2->get(programInfo.getTargetInputPortVar());
                 std::map<cstring, const TestObject *> p1Carry;
                 for (const auto &[regName, regObj] :
                      fs1->getExecutionState()->getTestObjectCategory("registervalues"_cs))
@@ -5058,17 +5139,40 @@ size_t StateDependencyTracker::runConditionChain(
                 for (const auto &value : candidates) {
                     const std::string key = value.has_value() ? value->str() : "default";
                     if (!tried.insert(key).second || p2Reg == nullptr) continue;
+                    const FinalState *candFs2 = fs2;
+                    std::vector<const IR::Expression *> candPin;
+                    if (pinWrite) {
+                        if (!value.has_value()) continue;  // a random pick cannot be pinned
+                        if (const auto *fixed = p2Write->to<IR::Constant>()) {
+                            // Program-fixed write: only its own value is attainable.
+                            if (fixed->value != truncatedTo(p2Write, *value)) continue;
+                        } else {
+                            candPin = {writePin(p2Write, *value),
+                                       new IR::Equ(p2PortExpr,
+                                                   IR::Constant::get(p2PortExpr->type, ip2))};
+                            auto asserts = es2->getPathConstraint();
+                            asserts.insert(asserts.end(), candPin.begin(), candPin.end());
+                            auto sat = fs2->getSolver().checkSat(asserts);
+                            if (!sat.has_value() || !*sat) continue;
+                            auto pinned = fs2->computeConcolicState({}, candPin);
+                            if (!pinned.has_value()) continue;
+                            candFs2 = &pinned->get();
+                        }
+                    }
                     auto carried = p1Carry;
                     carried[chain.soName] =
                         p2Reg
                             ->withAttackerValues(
-                                modelWithResolvedIndices(fs2, chain.soName, programInfo), value, {})
+                                modelWithResolvedIndices(candFs2, chain.soName, programInfo),
+                                value, {})
                             .testObject;
                     const auto *cand = runSymbolicPhase3(chain, initState, fs1, cond1.inputPort,
                                                          inputPortSymExpr, carried);
                     if (cand != nullptr && goalFor(fs1)(cand)) {
                         fs3 = cand;
                         outputAttackerValue = value;
+                        fs2Emit = candFs2;
+                        writePinned = pinWrite;
                         break;
                     }
                 }
@@ -5117,10 +5221,10 @@ size_t StateDependencyTracker::runConditionChain(
                 return IR::getIntFromLiteral(fs->getFinalModel().evaluate(op, true));
             };
             int p1OutPort = openOutputPort(fs1);
-            int p2OutPort = openOutputPort(fs2);
+            int p2OutPort = openOutputPort(fs2Emit);
             // Condition sink: no table, so attackerRegisterSinkTables stays empty.
             labelAttackerPort(chain, ip2);
-            if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2)) continue;
+            if (violatesCpAssumptions(fs3) || violatesCpAssumptions(fs1) || violatesCpAssumptions(fs2Emit)) continue;
             // Re-derive both emitted packets with CONCRETE bytes so their CRC hashes resolve eagerly
             // (fork-free) and TestBackEnd::processPhase re-solves them SAT — a raw shared-traversal
             // terminal carries an arbitrary hash-branch fork that contradicts the real CRC and is
@@ -5136,8 +5240,8 @@ size_t StateDependencyTracker::runConditionChain(
             for (const auto &[regName, regObj] :
                  fs1c->getExecutionState()->getTestObjectCategory("registervalues"_cs))
                 p1Carry[regName] = regObj->evaluateForCarry(fs1c->getFinalModel());
-            const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2, ip2, inputPortSymExpr,
-                                                     /*isPhase1=*/false, p1Carry);
+            const auto *fs2c = reDeriveConcretePhase(chain, initState, fs2Emit, ip2,
+                                                     inputPortSymExpr, /*isPhase1=*/false, p1Carry);
             // Single send: source from the re-derived Phase-2 (its packet is the one emitted, so the
             // value and packet agree). Accumulation (repeat>1) keeps Phase 3 -- the emitted packet is
             // sent k times and no single state holds base+k, so the value rides AT_LEAST + min_value.
@@ -5146,11 +5250,39 @@ size_t StateDependencyTracker::runConditionChain(
             const auto *fs3SoReg = regSrc->getExecutionState()->getTestObject(
                 "registervalues"_cs, chain.soName, false);
             if (fs3SoReg == nullptr) continue;
+            // The value the case records. Output mode: the candidate Phase 3 was replayed with.
+            // Otherwise (and unless --no-pin-write-value): what the emitted single-send Phase-2
+            // packet really writes, not --state-tamper-value.
+            std::optional<big_int> recordValue =
+                outputMode ? outputAttackerValue : SymbexOptions::get().stateTamperValue;
+            std::vector<const IR::Expression *> p2EmitPin;
+            if (SymbexOptions::get().pinWriteValue && repeat == 1) {
+                const auto realWrite = concreteLastWrite(fs2c, chain.soName);
+                if (writePinned) {
+                    // Self-check: the emitted Phase 2 must write the value Phase 3 assumed.
+                    const auto *w = lastWriteOf(fs2c, chain.soName);
+                    if (!realWrite.has_value() || !recordValue.has_value() ||
+                        *realWrite != truncatedTo(w, *recordValue)) {
+                        printInfo("[Tampering H2S2O] chain id=%1% (%2%): the emitted Phase-2 packet "
+                                  "does not write the pinned value to '%3%'; skipping.",
+                                  chain.id, currentChainName, chain.soName);
+                        continue;
+                    }
+                } else if (!outputMode && realWrite.has_value()) {
+                    recordValue = realWrite;
+                }
+                // A Phase 2 still symbolic at emission is re-solved there: keep the write on the
+                // recorded value.
+                if (recordValue.has_value()) {
+                    if (const auto *pin = writePin(lastWriteOf(fs2c, chain.soName), *recordValue))
+                        p2EmitPin.push_back(pin);
+                }
+            }
             attackerRegValues[chain.soName] =
                 fs3SoReg
                     ->withAttackerValues(
-                        modelWithResolvedIndices(regSrc, chain.soName, programInfo),
-                        outputMode ? outputAttackerValue : SymbexOptions::get().stateTamperValue, {})
+                        modelWithResolvedIndices(regSrc, chain.soName, programInfo), recordValue,
+                        {})
                     .testObject;
             // The Phase-2 gate compared against the bucket's representative Phase-1 state, and never
             // saw the terminals reDeriveConcretePhase re-ran; two packets can share ports and table
@@ -5173,6 +5305,7 @@ size_t StateDependencyTracker::runConditionChain(
             }
             TamperingFinalState ts{*fs1c, *fs2c, false, cond1.inputPort, p1OutPort, ip2, p2OutPort,
                                    attackerRegValues, {}, {}, {}};
+            ts.phase2ExtraConstraints = p2EmitPin;
             // AT_LEAST bound for an analytically-driven accumulation: the value at which the
             // sink/condition flips. The harness cannot observe an exact value -- it stops driving
             // the register once it reaches its target and packet loss moves where that lands -- so
