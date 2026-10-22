@@ -34,7 +34,9 @@ def _case_ports(cases):
         c = parse_case(tx)
         for ph in c.phases:
             for p in (ph.in_port, ph.exp_port):
-                if p is not None and 0 <= p < 512:
+                # Front-panel ports only (0-71 on each pipe): tofino-model rejects a PortToVeth entry
+                # such as 510, which open-world cases can name through made-up action data.
+                if p is not None and 0 <= p < 512 and p % 128 < 72:
                     ports.add(p)
         for ent in c.snapshot_entities:
             if ent.table_name == "$pre.node":

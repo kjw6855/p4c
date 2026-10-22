@@ -25,7 +25,14 @@ def _index(p4info: dict):
 
 def rewrite(text: str, tables: dict, actions: dict) -> str:
     out, table, action = [], None, None
-    for line in text.splitlines(keepends=True):
+    lines = text.splitlines(keepends=True)
+    # Open-world (no --cp-snapshot) cases already carry p4symbex's own `<kind>_id` next to each
+    # `<kind>_name`; drop that id so the name is translated against this build's P4Info, not kept twice.
+    lines = [l for i, l in enumerate(lines)
+             if not (i + 1 < len(lines)
+                     and (m := re.match(r"\s*(table|field|action|param)_id: \d+\s*$", l))
+                     and re.match(rf"\s*{m.group(1)}_name: ", lines[i + 1]))]
+    for line in lines:
         if line.lstrip().startswith("#"):
             out.append(line)
             continue
