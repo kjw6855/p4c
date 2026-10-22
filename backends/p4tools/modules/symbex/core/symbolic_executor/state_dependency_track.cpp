@@ -3555,19 +3555,13 @@ const FinalState *StateDependencyTracker::driveRegisterPhase2(
 
 namespace {
 
-/// True when a register write cannot be constrained to a chosen constant: it carries Taint, or a
-/// concolic (deferred extern, e.g. CRC) result the solver does not invert.
+/// True when a register write is not pinned to a chosen constant. Only a bare packet variable (the
+/// attacker writes a header field as is) or a program constant is pinned: Taint and concolic (e.g.
+/// CRC) results cannot be inverted, and a compound expression is left alone because the Z3
+/// translator rejects some P4 forms (a shift whose operands differ in width, as in NdN's
+/// `1 << ingress_port`) and a rejected assertion leaves the incremental solver mid-push.
 bool isUnpinnableWrite(const IR::Expression *expr) {
-    if (Taint::hasTaint(expr)) return true;
-    struct FindConcolic : public Inspector {
-        bool found = false;
-        bool preorder(const IR::ConcolicVariable *) override {
-            found = true;
-            return false;
-        }
-    } finder;
-    expr->apply(finder);
-    return finder.found;
+    return !expr->is<IR::SymbolicVariable>() && !expr->is<IR::Constant>();
 }
 
 /// The symbolic value of @p fs's last write to @p soName, or nullptr.
