@@ -149,8 +149,9 @@ THRIFT_PORT = 9090
 DEVICE_ID = 0  # simple_switch_grpc defaults to device_id 0
 ELECTION_ID = (0, 1)
 
-# Switch sees veth{2N} (even); host injects/sniffs on veth{2N+1} (odd).
-NUM_PORTS = 8
+# Switch sees veth{2N} (even); host injects/sniffs on veth{2N+1} (odd). Ports 0..8: p4symbex's
+# bmv2 --max-port bound is exclusive (inputs 1..NUM_PORTS-1), so generation and replay share it.
+NUM_PORTS = 9
 # Minimum packet size (bytes) used as the lower bound of p4symbex's --packet-size-range AND
 # as the validity floor when reading input_packet blocks from generated .txtpb files.
 # 14 = one Ethernet header; below this scapy's Ether() cannot dissect the frame and replay
@@ -1683,6 +1684,15 @@ def do_testing(spec: TargetSpec, json_path: Path, p4info_path: Path,
                         if too_short is not None:
                             emit(tx.name, "SKIP",
                                  f"packet {too_short}B < min {GLOBAL_MIN_PACKET_SIZE}B")
+                            progress_cb(idx, total, tx.name)
+                            continue
+                        # A phase entering on a port outside the topology is never sent, which
+                        # would read as a FAIL; it is a replay limit, not a verdict.
+                        unmapped = next((ph.in_port for ph in case.phases
+                                         if ph.in_port not in PORT_TO_HOST_IFACE), None)
+                        if unmapped is not None:
+                            emit(tx.name, "ERROR",
+                                 f"input port {unmapped} outside the {NUM_PORTS}-port topology")
                             progress_cb(idx, total, tx.name)
                             continue
                         # Differential oracle: legit (Phase 1 -> Phase 3) vs attack (Phase 1 ->

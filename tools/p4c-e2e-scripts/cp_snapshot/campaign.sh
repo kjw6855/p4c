@@ -49,7 +49,8 @@ run_job() {
     T=(--target tofino --arch "$arch" --std p4-16 -D__TARGET_TOFINO__=1
        -I$R/backends/tofino/bf-p4c/p4include -I$R/p4include --test-backend BFRT --max-port 32)
   else
-    T=(--target bmv2 --arch v1model --std p4-16 -I$R/p4include --test-backend protobuf --max-port 32)
+    # bmv2 replays on tampering.py's NUM_PORTS (9) ports; p4symbex's bound is exclusive.
+    T=(--target bmv2 --arch v1model --std p4-16 -I$R/p4include --test-backend protobuf --max-port 9)
   fi
   ( cd "$d" && HOME=/root/jiwon prlimit --as=34359738368 timeout "${TIMEOUT:-1800}" "$SX" "${T[@]}" \
       --packet-size-range 14:9600 --track-coverage STATEMENTS --max-tests "${MAX_TESTS:-8}" \

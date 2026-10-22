@@ -11,7 +11,8 @@ R=/root/jiwon/Workspace/p4c
 E2E=$R/tools/p4c-e2e-scripts
 LIST=/root/jiwon/Workspace-remote/usenix27/program_list_151_no_oom.txt
 created=()
-for n in $(seq 0 7); do                      # tampering.py: port n <-> veth{2n}/veth{2n+1}
+NP=$(sed -n 's/^NUM_PORTS = \([0-9]*\).*/\1/p' "$E2E/tampering.py")   # tampering.py's topology size
+for n in $(seq 0 $((NP - 1))); do            # tampering.py: port n <-> veth{2n}/veth{2n+1}
   if [ ! -e /sys/class/net/veth$((2 * n)) ]; then
     ip link add veth$((2 * n)) type veth peer name veth$((2 * n + 1))
     created+=($((2 * n)))
