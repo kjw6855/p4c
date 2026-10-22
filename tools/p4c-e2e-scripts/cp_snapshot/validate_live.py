@@ -65,7 +65,7 @@ def case_ports(case: TamperCase) -> set:
     ports = set()
     for ph in case.phases:
         for p in (ph.in_port, ph.exp_port):
-            if p is not None and 0 <= p < 512:
+            if p is not None and 0 <= p < 512 and p % 128 < 72:  # front-panel ports only
                 ports.add(p)
     for ent in case.snapshot_entities:
         if ent.table_name == "$pre.node":

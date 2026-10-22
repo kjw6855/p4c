@@ -103,7 +103,13 @@ def prepare_ports_json(used_ports, work_dir: Path) -> Tuple[Path, dict]:
     data = json.loads(_PORTS_JSON_PATH.read_text())
     entries = data.get("PortToVeth", [])
     have = {e["device_port"] for e in entries}
-    extra = sorted(p for p in used_ports if p not in have and p >= 0)
+    # Front-panel device ports only (0-71 on each pipe): the model refuses to start on a PortToVeth
+    # entry such as 510, which an open-world case can name through made-up action data. A packet
+    # sent there is then simply not observed, i.e. it reads as a drop.
+    invalid = sorted(p for p in used_ports if p not in have and not (0 <= p < 512 and p % 128 < 72))
+    if invalid:
+        log.warning("not mapping non-front-panel ports %s (tofino-model rejects them)", invalid)
+    extra = sorted(p for p in used_ports if p not in have and 0 <= p < 512 and p % 128 < 72)
 
     def _host_map(es):
         return {e["device_port"]: f"veth{e['veth1']}" for e in es}
