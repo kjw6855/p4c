@@ -30,18 +30,19 @@ snapshot_of() {
 mkdir -p "$OUT"
 jobs_file="$OUT/jobs.txt"; : > "$jobs_file"
 for P in "${programs[@]}"; do
-  read -r _ p4 tgt arch _ < <(grep -E "^$P " "$LIST" | sed 's#~/#/root/#g')
+  read -r _ p4 tgt arch _ extra < <(grep -E "^$P " "$LIST" | sed 's#~/#/root/#g')
   cache="$CACHE/$tgt/$arch/$P.chains"
   snap=$(snapshot_of "$P"); [ "$snap" = missing ] && continue
   for cat in h2s2outk:OUTK:STATE_DEP_TAMPERING h2s2outc:OUTC:STATE_DEP_TAMPERING_COND h2s2o:O:STATE_DEP_TAMPERING; do
     IFS=: read -r key sinks pol <<< "$cat"
     [[ " ${CATS:-OUTK OUTC O} " == *" $sinks "* ]] || continue
     n=$(python3 -I -c "import json,sys; c=json.load(open(sys.argv[1])); print(sum(len(v) for v in c.get(sys.argv[2],{}).values()))" "$cache" "$key")
-    [ "$n" -gt 0 ] && echo "$P $tgt $arch $p4 $cache $sinks $pol $n $snap" >> "$jobs_file"
+    [ "$n" -gt 0 ] && echo "$P $tgt $arch $p4 $cache $sinks $pol $n $snap $extra" >> "$jobs_file"
   done
 done
 run_job() {
-  read -r P tgt arch p4 cache sinks pol n snap <<< "$1"
+  read -r P tgt arch p4 cache sinks pol n snap extra <<< "$1"
+  read -r -a X <<< "$extra"  # the program list's trailing compiler args (e.g. -I include dirs)
   cp=(); [ "$snap" != - ] && cp=(--cp-snapshot "$snap" ${REGS:+--cp-snapshot-registers "$REGS"})
   d="$OUT/$P/$sinks"; rm -rf "$d"; mkdir -p "$d"
   if [ "$tgt" = tofino ]; then
@@ -54,7 +55,7 @@ run_job() {
       --packet-size-range 14:9600 --track-coverage STATEMENTS --max-tests "${MAX_TESTS:-8}" \
       --out-dir "$d" --state-dep --path-selection "$pol" --state-dep-sinks "$sinks" \
       --diverge-output PORT --state-dep-cache "$cache" \
-      "${cp[@]}" "$p4" \
+      "${cp[@]}" "${X[@]}" "$p4" \
       --state-tamper-value 0xdeadbeef > "$d/p4symbex.log" 2>&1 )
   echo "$P $sinks chains=$n rc=$? $(grep -h 'Symbex Summary' "$d/p4symbex.log" | tail -1 | grep -o 'tests=[0-9]* status=[a-z]*') files=$(ls "$d"/*.txtpb 2>/dev/null | wc -l)"
 }
