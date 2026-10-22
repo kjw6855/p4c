@@ -12,6 +12,7 @@ WORK=${WORK:-/root/jiwon/Workspace-remote/sp27/cp_live/$P}
 OUT=${OUT:-$WORK/snapshot/$P.txtpb}
 LOCK=/root/jiwon/Workspace-remote/sp27/cp_live/.capture.lock
 SYMBEX=0 VALIDATE=0 CAPTURE=1 CASES=$PKG/exploits/SEED
+VOUT=${VOUT:-$PKG/validate}
 DESC=$(cd "$E2E" && python3 -c "
 import sys; sys.path.insert(0, '.')
 from cp_snapshot import packages
@@ -29,7 +30,7 @@ Options:
   -o, --output FILE        where capture writes the snapshot (default: $(realpath -m "$OUT"))
       --symbex             after the capture, run p4symbex H2S2 {OUTK,OUTC,O} into $WORK/symbex
       --validate [DIR]     no capture: replay DIR/<category>/*.txtpb (default exploits/SEED) with the
-                           program's controller in the loop; verdicts into $PKG/validate
+                           program's controller in the loop; verdicts into $VOUT
   -h, --help               show this help
 
 Package (committed): $PKG
@@ -39,7 +40,7 @@ Package (committed): $PKG
 Work dir (patched controller copy, logs, pcaps; not committed): $WORK
 
 Env: WORK, OUT; --symbex: REGS=SEED|INITIAL (SEED), TIMEOUT (1800), JOBS (3), CATS ("OUTK OUTC O");
---validate: SETTLE seconds after each phase (1.0).
+--validate: SETTLE seconds after each phase (1.0), VOUT verdict directory (the package's validate/).
 USAGE
 }
 
@@ -71,13 +72,13 @@ fi
 
 if [ "$VALIDATE" = 1 ]; then
   CASES=$(realpath "$CASES")
-  echo "== controller-in-the-loop validation of $CASES -> $PKG/validate"
+  echo "== controller-in-the-loop validation of $CASES -> $VOUT"
   base=()
-  [ -f "$PKG/validate/snapshot_replay.csv" ] && base=(--baseline "$PKG/validate/snapshot_replay.csv")
+  [ -f "$VOUT/snapshot_replay.csv" ] && base=(--baseline "$VOUT/snapshot_replay.csv")
   ref=()
   [ -f "$WORK/entities.pkl" ] && ref=(--reference "$WORK/entities.pkl")
   HOME=/root/jiwon python3 "$E2E/cp_snapshot/validate_live.py" "$P" "$CASES" \
-      --work "$WORK/_validate" --out "$PKG/validate" --settle "${SETTLE:-1.0}" "${base[@]}" "${ref[@]}"
+      --work "$WORK/_validate" --out "$VOUT" --settle "${SETTLE:-1.0}" "${base[@]}" "${ref[@]}"
 fi
 flock -u 9
 

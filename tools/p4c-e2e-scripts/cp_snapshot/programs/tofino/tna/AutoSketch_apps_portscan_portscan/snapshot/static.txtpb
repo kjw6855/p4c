@@ -1,0 +1,13 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# hand-written from the program's static rules
+# note: no control plane in the repo; snapshot = topology only (closed world: defaults)
+program: "AutoSketch_apps_portscan_portscan"
+target: "tofino"
+snapshot_id: "static"
+captured_at: "2026-10-21T23:59:50.244874+00:00"
+topology {
+  port { port: 0 role: PORT_ROLE_HOST name: "h0" }
+  port { port: 1 role: PORT_ROLE_HOST name: "h1" }
+  port { port: 2 role: PORT_ROLE_ATTACKER name: "attacker" }
+}

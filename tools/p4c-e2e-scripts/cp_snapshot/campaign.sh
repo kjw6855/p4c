@@ -4,7 +4,9 @@
 # (OUTK, OUTC, O) in which its nightly chain cache has chains, with --diverge-output PORT. One job
 # per (program, category), at most JOBS (10) at a time, 32GB and TIMEOUT (1800s) each; CATS (e.g. "O")
 # restricts the categories. SNAPS picks the snapshot directory (e.g. .../cp_snapshots/live) and REGS
-# (SEED|INITIAL) passes --cp-snapshot-registers.
+# (SEED|INITIAL) passes --cp-snapshot-registers. MODE=snapshot reads each program's package snapshot
+# (snapshot/live.txtpb, else static.txtpb) instead of SNAPS; MODE=symbolic runs without --cp-snapshot
+# (open world: p4symbex makes up the table entries; REGS is ignored). DRY=1 only writes jobs.txt.
 set -uo pipefail
 OUT="$1"; shift
 R=/root/jiwon/Workspace/p4c
@@ -12,21 +14,35 @@ SNAPS=${SNAPS:-/root/jiwon/Workspace-remote/sp27/cp_snapshots}
 LIST=/root/jiwon/Workspace-remote/usenix27/program_list_151_no_oom.txt
 CACHE=/root/jiwon/Workspace-remote/sp27/p4symbex_nightly/sochain_cache
 SX="${P4SYMBEX:-$R/build/p4symbex}"
+MODE=${MODE:-}
 programs=("$@"); [ ${#programs[@]} -eq 0 ] && programs=($(ls $SNAPS/*.txtpb | xargs -n1 basename | sed 's/\.txtpb$//'))
+# The snapshot a program's jobs load: "-" under MODE=symbolic.
+snapshot_of() {
+  case "$MODE" in
+    symbolic) echo - ;;
+    snapshot) local pkg; pkg=$(ls -d "$R"/tools/p4c-e2e-scripts/cp_snapshot/programs/*/*/"$1" 2>/dev/null | head -1)
+              if [ -f "$pkg/snapshot/live.txtpb" ]; then echo "$pkg/snapshot/live.txtpb"
+              elif [ -f "$pkg/snapshot/static.txtpb" ]; then echo "$pkg/snapshot/static.txtpb"
+              else echo "no package snapshot for $1" >&2; echo missing; fi ;;
+    *) echo "$SNAPS/$1.txtpb" ;;
+  esac
+}
 mkdir -p "$OUT"
 jobs_file="$OUT/jobs.txt"; : > "$jobs_file"
 for P in "${programs[@]}"; do
   read -r _ p4 tgt arch _ < <(grep -E "^$P " "$LIST" | sed 's#~/#/root/#g')
   cache="$CACHE/$tgt/$arch/$P.chains"
+  snap=$(snapshot_of "$P"); [ "$snap" = missing ] && continue
   for cat in h2s2outk:OUTK:STATE_DEP_TAMPERING h2s2outc:OUTC:STATE_DEP_TAMPERING_COND h2s2o:O:STATE_DEP_TAMPERING; do
     IFS=: read -r key sinks pol <<< "$cat"
     [[ " ${CATS:-OUTK OUTC O} " == *" $sinks "* ]] || continue
     n=$(python3 -I -c "import json,sys; c=json.load(open(sys.argv[1])); print(sum(len(v) for v in c.get(sys.argv[2],{}).values()))" "$cache" "$key")
-    [ "$n" -gt 0 ] && echo "$P $tgt $arch $p4 $cache $sinks $pol $n" >> "$jobs_file"
+    [ "$n" -gt 0 ] && echo "$P $tgt $arch $p4 $cache $sinks $pol $n $snap" >> "$jobs_file"
   done
 done
 run_job() {
-  read -r P tgt arch p4 cache sinks pol n <<< "$1"
+  read -r P tgt arch p4 cache sinks pol n snap <<< "$1"
+  cp=(); [ "$snap" != - ] && cp=(--cp-snapshot "$snap" ${REGS:+--cp-snapshot-registers "$REGS"})
   d="$OUT/$P/$sinks"; rm -rf "$d"; mkdir -p "$d"
   if [ "$tgt" = tofino ]; then
     T=(--target tofino --arch "$arch" --std p4-16 -D__TARGET_TOFINO__=1
@@ -38,10 +54,11 @@ run_job() {
       --packet-size-range 14:9600 --track-coverage STATEMENTS --max-tests "${MAX_TESTS:-8}" \
       --out-dir "$d" --state-dep --path-selection "$pol" --state-dep-sinks "$sinks" \
       --diverge-output PORT --state-dep-cache "$cache" \
-      --cp-snapshot "$SNAPS/$P.txtpb" ${REGS:+--cp-snapshot-registers "$REGS"} "$p4" \
+      "${cp[@]}" "$p4" \
       --state-tamper-value 0xdeadbeef > "$d/p4symbex.log" 2>&1 )
   echo "$P $sinks chains=$n rc=$? $(grep -h 'Symbex Summary' "$d/p4symbex.log" | tail -1 | grep -o 'tests=[0-9]* status=[a-z]*') files=$(ls "$d"/*.txtpb 2>/dev/null | wc -l)"
 }
 export -f run_job; export R SX OUT SNAPS REGS
 wc -l < "$jobs_file"
+[ -n "${DRY:-}" ] && exit 0
 xargs -a "$jobs_file" -d '\n' -P "${JOBS:-10}" -I{} bash -c 'run_job "$@"' _ {} | tee "$OUT/summary.txt"

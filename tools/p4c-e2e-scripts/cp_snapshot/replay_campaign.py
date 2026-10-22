@@ -23,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 from cp_snapshot import capture  # noqa: E402,F401  (sets the SDE environment)
+from cp_snapshot import packages  # noqa: E402
 from tofino import tofino_driver as td  # noqa: E402
 
 
@@ -60,8 +61,8 @@ def main() -> int:
             continue
         for cdir in sorted(d for d in pdir.iterdir() if d.is_dir()):
             cases = sorted(cdir.glob("*.txtpb"))
-            snap = (capture.SNAPS / "live" / f"{pdir.name}.txtpb")
-            if not cases or "target: \"tofino\"" not in snap.read_text()[:2000]:
+            pkg = packages.package_dir(pdir.name)  # programs/<target>/<arch>/<program>
+            if not cases or pkg is None or pkg.parent.parent.name != "tofino":
                 continue
             spec = SimpleNamespace(name=pdir.name, p4_name=pdir.name)
             args = SimpleNamespace(output_root=str(camp / "_replay" / cdir.name), arch="tna",
