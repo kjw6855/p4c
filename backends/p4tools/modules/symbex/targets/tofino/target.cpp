@@ -35,6 +35,7 @@
 
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
+#include "backends/p4tools/modules/symbex/lib/action_param_domains.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/compiler_result.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/map_direct_externs.h"
 #include "backends/p4tools/modules/symbex/targets/tofino/rename_keys.h"
@@ -102,6 +103,9 @@ CompilerResultOrError AbstractTofinoSymbexTarget::runCompilerImpl(
     if (errorCount() > 0) {
         return std::nullopt;
     }
+
+    // Serializable-enum action parameters lose their member list in the midend (EliminateSerEnums).
+    ActionParamDomains::collect(program);
 
     program = runMidEnd(options, program);
     if (program == nullptr) {

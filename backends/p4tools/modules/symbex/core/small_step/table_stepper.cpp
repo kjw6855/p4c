@@ -34,6 +34,7 @@
 #include "backends/p4tools/modules/symbex/core/small_step/expr_stepper.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/path_selection.h"
+#include "backends/p4tools/modules/symbex/lib/action_param_domains.h"
 #include "backends/p4tools/modules/symbex/lib/collect_coverable_nodes.h"
 #include "backends/p4tools/modules/symbex/lib/continuation.h"
 #include "backends/p4tools/modules/symbex/lib/exceptions.h"
@@ -393,6 +394,25 @@ const ActionCall *pinnedDefaultActionFor(const ExecutionState &state, cstring ta
 /// pinned call recorded for the same parameter; nullptr when @p pinned does not cover @p parameter,
 /// or when @p actionName is a different action than the one the pin was recorded for (each fork
 /// mints its own symbols, so a same-named parameter of another action is a different variable).
+/// Restricts the synthesized argument @p actionArg of @p actionName's @p parameter to the declared
+/// members of its serializable-enum type (ActionParamDomains), the only values a controller can
+/// install; nullptr when the parameter is not enum-typed or --no-enum-action-domain is set.
+const IR::Expression *enumDomainConstraint(cstring actionName, const IR::Parameter *parameter,
+                                           const IR::Expression *actionArg) {
+    if (!SymbexOptions::get().enumActionDomain || parameter == nullptr) return nullptr;
+    const auto *bits = actionArg->type->to<IR::Type_Bits>();
+    if (bits == nullptr) return nullptr;
+    const auto *values = ActionParamDomains::lookup(actionName, parameter->controlPlaneName());
+    if (values == nullptr) values = ActionParamDomains::lookup(actionName, parameter->name.name);
+    if (values == nullptr || values->empty()) return nullptr;
+    const IR::Expression *domain = nullptr;
+    for (const auto &value : *values) {
+        const IR::Expression *eq = new IR::Equ(actionArg, IR::Constant::get(bits, value));
+        domain = domain == nullptr ? eq : new IR::LOr(domain, eq);
+    }
+    return domain;
+}
+
 const IR::Expression *pinnedDefaultArgPin(const ActionCall *pinned, cstring actionName,
                                           const IR::Parameter *parameter,
                                           const IR::Expression *actionArg) {
@@ -578,6 +598,9 @@ void TableStepper::setTableDefaultEntries(
                     dropPortActionArgConstraint(actionType, parameter, actionArg)) {
                 cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
             }
+            if (const auto *pin = enumDomainConstraint(actionName, parameter, actionArg)) {
+                cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
+            }
             if (const auto *pin =
                     pinnedDefaultArgPin(pinnedDefault, actionName, parameter, actionArg)) {
                 cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
@@ -661,6 +684,9 @@ void TableStepper::evalTableControlEntries(
             }
             if (const auto *pin =
                     dropPortActionArgConstraint(actionType, parameter, actionArg)) {
+                cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
+            }
+            if (const auto *pin = enumDomainConstraint(actionName, parameter, actionArg)) {
                 cpPin = cpPin == nullptr ? pin : new IR::LAnd(cpPin, pin);
             }
         }

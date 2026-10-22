@@ -17,6 +17,7 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/symbolic_executor.h"
 #include "backends/p4tools/modules/symbex/core/target.h"
+#include "backends/p4tools/modules/symbex/lib/action_param_domains.h"
 #include "backends/p4tools/modules/symbex/lib/execution_state.h"
 #include "backends/p4tools/modules/symbex/targets/bmv2/cmd_stepper.h"
 #include "backends/p4tools/modules/symbex/targets/bmv2/cmd_visitor.h"
@@ -50,6 +51,9 @@ CompilerResultOrError Bmv2V1ModelSymbexTarget::runCompilerImpl(
     if (program == nullptr) {
         return std::nullopt;
     }
+
+    // Serializable-enum action parameters lose their member list in the midend (EliminateSerEnums).
+    ActionParamDomains::collect(program);
 
     /// After the front end, get the P4Runtime API for the V1model architecture.
     auto p4runtimeApi = P4::P4RuntimeSerializer::get()->generateP4Runtime(program, "v1model"_cs);

@@ -359,6 +359,10 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// --no-pin-default-action-data restores the annotation-only pin.
     bool pinDefaultActionData = true;
 
+    /// Restrict a synthesized action argument whose P4 type is a serializable enum to the enum's
+    /// declared members. --no-enum-action-domain lets it take any value of the underlying type.
+    bool enumActionDomain = true;
+
  protected:
     bool validateOptions() const override;
 };

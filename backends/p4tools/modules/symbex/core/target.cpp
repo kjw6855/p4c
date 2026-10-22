@@ -14,6 +14,7 @@
 
 #include "backends/p4tools/modules/symbex/core/compiler_result.h"
 #include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/lib/action_param_domains.h"
 #include "backends/p4tools/modules/symbex/toolname.h"
 
 namespace P4::P4Tools::Symbex {
@@ -79,6 +80,9 @@ CompilerResultOrError SymbexTarget::runCompilerImpl(const CompilerOptions &optio
     if (program == nullptr) {
         return std::nullopt;
     }
+
+    // Serializable-enum action parameters lose their member list in the midend (EliminateSerEnums).
+    ActionParamDomains::collect(program);
 
     // Run the full midend (required by pna/ebpf targets that rely on this base implementation).
     program = runMidEnd(options, program);

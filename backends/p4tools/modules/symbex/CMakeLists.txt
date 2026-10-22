@@ -89,6 +89,7 @@ set(
   lib/concolic.cpp
   lib/visit_concolic.cpp
   lib/continuation.cpp
+  lib/action_param_domains.cpp
   lib/deadline.cpp
   lib/execution_state.cpp
   lib/final_state.cpp

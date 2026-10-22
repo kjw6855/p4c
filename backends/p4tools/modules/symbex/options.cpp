@@ -1002,6 +1002,16 @@ SymbexOptions::SymbexOptions()
         "keeps every argument Phase 1's path constrained, and Phase 3 and the re-derived phases "
         "replay exactly the configuration the case installs. This flag exists for regression "
         "comparison.");
+
+    registerOption(
+        "--no-enum-action-domain", nullptr,
+        [this](const char *) {
+            enumActionDomain = false;
+            return true;
+        },
+        "Let a synthesized action argument of a serializable-enum type take any value of its "
+        "underlying bit type. By default it is restricted to the enum's declared members, the only "
+        "values a controller can install. This flag exists for regression comparison.");
 }
 
 bool SymbexOptions::validateOptions() const {
