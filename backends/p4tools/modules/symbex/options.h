@@ -342,6 +342,13 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// --no-const-entry-action-divergence.
     bool constEntryActionDivergence = true;
 
+    /// What a read of a field of an invalid header returns. Taint: always Taint (the pre-2026-10
+    /// behaviour). Stored: the stored value, i.e. 0 for a header that was never valid and Taint
+    /// after setInvalid(). TargetDefault: Stored on Tofino (tofino-model re-zeroes the PHV for each
+    /// packet), Taint elsewhere (bmv2 keeps the previous packet's field values).
+    enum class UninitializedReads { TargetDefault, Taint, Stored };
+    UninitializedReads uninitializedReads = UninitializedReads::TargetDefault;
+
  protected:
     bool validateOptions() const override;
 };

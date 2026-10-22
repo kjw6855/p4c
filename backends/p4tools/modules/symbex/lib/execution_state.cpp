@@ -29,6 +29,7 @@
 #include "lib/ordered_map.h"
 #include "lib/source_file.h"
 
+#include "backends/p4tools/modules/symbex/core/target.h"
 #include "backends/p4tools/modules/symbex/lib/graphs/graphs.h"
 #include "backends/p4tools/modules/symbex/lib/graphs/controls.h"
 #include "backends/p4tools/modules/symbex/lib/graphs/parsers.h"
@@ -144,6 +145,25 @@ std::optional<const Continuation::Command> ExecutionState::getNextCmd() const {
     return body.next();
 }
 
+namespace {
+
+/// Whether a read of a field of an invalid header returns Taint rather than the stored value
+/// (see SymbexOptions::uninitializedReads).
+bool taintsUninitializedReads() {
+    using UninitializedReads = SymbexOptions::UninitializedReads;
+    switch (SymbexOptions::get().uninitializedReads) {
+        case UninitializedReads::Taint:
+            return true;
+        case UninitializedReads::Stored:
+            return false;
+        case UninitializedReads::TargetDefault:
+            break;
+    }
+    return SymbexTarget::get().spec.deviceName.rfind("tofino", 0) != 0;
+}
+
+}  // namespace
+
 const IR::Expression *ExecutionState::get(const IR::StateVariable &var) const {
     auto varType = resolveType(var->type);
 
@@ -173,7 +193,11 @@ const IR::Expression *ExecutionState::get(const IR::StateVariable &var) const {
                 bool markTainted = !SymbexOptions::get().interactive;
 
                 if (markTainted) {
-                    isTainted = !isValid;
+                    // A header that was never valid still holds the value its declaration gave it
+                    // (0, see initializeStructLike), which is what tofino-model reads; a
+                    // setInvalid() stores Taint in the fields, so env.get() returns Taint there.
+                    // bmv2 reads the previous packet's value instead, so it keeps the Taint.
+                    isTainted = !isValid && taintsUninitializedReads();
 
                 } else if (!isValid) {
                     // Set as default

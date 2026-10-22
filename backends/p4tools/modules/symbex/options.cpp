@@ -951,6 +951,28 @@ SymbexOptions::SymbexOptions()
         "pre-default generation (which is byte-identical with the pass off), or to A/B how much of "
         "a program's yield the pass accounts for, or to drop its cost on a program whose budget is "
         "tight -- it is a third pass over every chain, on top of HIT->MISS and MISS->HIT.");
+
+    registerOption(
+        "--taint-uninitialized-reads", nullptr,
+        [this](const char *) {
+            uninitializedReads = UninitializedReads::Taint;
+            return true;
+        },
+        "Make every read of a field of an invalid header Taint, on every target (the earlier "
+        "generation). By default this holds only off Tofino: bmv2 keeps an invalid header's field "
+        "values from the previous packet, so the value is unknown.");
+
+    registerOption(
+        "--zero-uninitialized-reads", nullptr,
+        [this](const char *) {
+            uninitializedReads = UninitializedReads::Stored;
+            return true;
+        },
+        "Make a read of a field of an invalid header return the stored value on every target: 0 "
+        "for a header that was never extracted or set valid, Taint after setInvalid(). This is the "
+        "default on Tofino, where tofino-model reads 0 because the PHV container is never written "
+        "for the packet; it assumes the field shares no container with a mutually exclusive field "
+        "the program uses, which would be read instead.");
 }
 
 bool SymbexOptions::validateOptions() const {
