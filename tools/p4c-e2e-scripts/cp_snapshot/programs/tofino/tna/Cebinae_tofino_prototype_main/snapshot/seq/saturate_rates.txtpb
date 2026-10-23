@@ -1,0 +1,173 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshotSequence
+# snapshot sequence on tofino: main.py cebinae (BfRt gRPC + PD fixed-function thrift); C++ rate loop not run
+# scenario saturate_rates: saturate -> rates
+# patch main.py: program name: the authors compiled it as main
+# cebinae interval at headq=0: top 2660000000 B, bottom 465000000 B
+# step saturate (rc=0): 2 updates, 0 data-plane register changes dropped
+# step rates (rc=0): 6 updates, 0 data-plane register changes dropped
+program: "Cebinae_tofino_prototype_main"
+target: "tofino"
+scenario: "saturate_rates"
+init {
+  program: "Cebinae_tofino_prototype_main"
+  target: "tofino"
+  snapshot_id: "init"
+  captured_at: "2026-10-23T06:50:50.948432+00:00"
+  topology {
+    port { port: 144 role: PORT_ROLE_HOST name: "plum" }
+    port { port: 155 role: PORT_ROLE_HOST name: "peacock" }
+    port { port: 153 role: PORT_ROLE_HOST name: "green" }
+    port { port: 163 role: PORT_ROLE_HOST name: "mustard" }
+    port { port: 128 role: PORT_ROLE_LINK name: "bottleneck1" }
+    port { port: 136 role: PORT_ROLE_LINK name: "bottleneck2" }
+    port { port: 140 role: PORT_ROLE_ATTACKER name: "attacker" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiToggleCebinae"
+    action_name: "Ingress.t_igr.aiToggleCebinae"
+    data { field_name: "isOn" value: "\x01" }
+    is_default_entry: true
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiRotateF"
+    action_name: "Ingress.t_igr.aiRotateF"
+    key { field_name: "hdr.pktgen.packet_id" exact { value: "\x00" } }
+    data { field_name: "fval" value: "\x80" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiRotateF"
+    action_name: "Ingress.t_igr.aiRotateF"
+    key { field_name: "hdr.pktgen.packet_id" exact { value: "\x01" } }
+    data { field_name: "fval" value: "\x01\x00" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiForward"
+    action_name: "Ingress.t_igr.aiSetEgress"
+    key { field_name: "hdr.ethernet.dst_addr" exact { value: "\xec\x0d\x9a\x7e\x91\x82" } }
+    key { field_name: "md.ingress_port" exact { value: "\x90" } }
+    data { field_name: "egr_port" value: "\x80" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiForward"
+    action_name: "Ingress.t_igr.aiSetEgress"
+    key { field_name: "hdr.ethernet.dst_addr" exact { value: "\xec\x0d\x9a\x7e\x91\x82" } }
+    key { field_name: "md.ingress_port" exact { value: "\x88" } }
+    data { field_name: "egr_port" value: "\x9b" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiForward"
+    action_name: "Ingress.t_igr.aiSetEgress"
+    key { field_name: "hdr.ethernet.dst_addr" exact { value: "\xec\x0d\x9a\x6d\xe1\x6d" } }
+    key { field_name: "md.ingress_port" exact { value: "\x9b" } }
+    data { field_name: "egr_port" value: "\x90" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiForward"
+    action_name: "Ingress.t_igr.aiSetEgress"
+    key { field_name: "hdr.ethernet.dst_addr" exact { value: "\xec\x0d\x9a\x6d\xe0\xc8" } }
+    key { field_name: "md.ingress_port" exact { value: "\x99" } }
+    data { field_name: "egr_port" value: "\x80" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiForward"
+    action_name: "Ingress.t_igr.aiSetEgress"
+    key { field_name: "hdr.ethernet.dst_addr" exact { value: "\xec\x0d\x9a\x6d\xe0\xc8" } }
+    key { field_name: "md.ingress_port" exact { value: "\x88" } }
+    data { field_name: "egr_port" value: "\xa3" }
+  }
+  bfrt_entities {
+    table_name: "pipe.Ingress.t_igr.tiForward"
+    action_name: "Ingress.t_igr.aiSetEgress"
+    key { field_name: "hdr.ethernet.dst_addr" exact { value: "\xec\x0d\x9a\x6d\xe0\xc0" } }
+    key { field_name: "md.ingress_port" exact { value: "\xa3" } }
+    data { field_name: "egr_port" value: "\x99" }
+  }
+}
+steps {
+  step_id: "saturate"
+  trigger: "cebinae_loop: port 128 saturated, 10.0.0.1->10.0.0.2 is the heavy hitter (tiCalcSaturated, tiCalcF)"
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiCalcF"
+      action_name: "Ingress.t_igr.aiSetFTop"
+      key { field_name: "hdr.ip.dst_addr" exact { value: "\x0a\x00\x00\x02" } }
+      key { field_name: "hdr.ip.src_addr" exact { value: "\x0a\x00\x00\x01" } }
+    }
+  }
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiCalcSaturated"
+      action_name: "Ingress.t_igr.aiSaturated"
+      key { field_name: "ig_tm_md.ucast_egress_port" exact { value: "\x80" } }
+    }
+  }
+}
+steps {
+  step_id: "rates"
+  trigger: "cebinae_loop: top/bottom rates at the current headq (tiGetRates_head/_tail, tiReadLastSize)"
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiReadLastSize"
+      action_name: "Ingress.t_igr.aiReadLastSize"
+      key { field_name: "f" exact { value: "\x01\x00" } }
+      data { field_name: "lastRate_x_dT" value: "\x00" }
+    }
+  }
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiReadLastSize"
+      action_name: "Ingress.t_igr.aiReadLastSize"
+      key { field_name: "f" exact { value: "\x80" } }
+      data { field_name: "lastRate_x_dT" value: "\x00" }
+    }
+  }
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiGetRates_head"
+      action_name: "Ingress.t_igr.aiGetRates_head"
+      key { field_name: "f" exact { value: "\x01\x00" } }
+      key { field_name: "headq" exact { value: "\x00" } }
+      data { field_name: "r_head" value: "\x0a\x64" }
+      data { field_name: "r_head_x_dT" value: "\x9e\x8c\x61\x00" }
+    }
+  }
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiGetRates_head"
+      action_name: "Ingress.t_igr.aiGetRates_head"
+      key { field_name: "f" exact { value: "\x80" } }
+      key { field_name: "headq" exact { value: "\x00" } }
+      data { field_name: "r_head" value: "\x01\xd1" }
+      data { field_name: "r_head_x_dT" value: "\x1b\xb7\x56\x40" }
+    }
+  }
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiGetRates_tail"
+      action_name: "Ingress.t_igr.aiGetRates_tail"
+      key { field_name: "f" exact { value: "\x01\x00" } }
+      key { field_name: "tailq" exact { value: "\x00" } }
+      data { field_name: "r_tail" value: "\x0a\x64" }
+      data { field_name: "r_tail_x_dT" value: "\x9e\x8c\x61\x00" }
+    }
+  }
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.Ingress.t_igr.tiGetRates_tail"
+      action_name: "Ingress.t_igr.aiGetRates_tail"
+      key { field_name: "f" exact { value: "\x80" } }
+      key { field_name: "tailq" exact { value: "\x00" } }
+      data { field_name: "r_tail" value: "\x01\xd1" }
+      data { field_name: "r_tail_x_dT" value: "\x1b\xb7\x56\x40" }
+    }
+  }
+}
