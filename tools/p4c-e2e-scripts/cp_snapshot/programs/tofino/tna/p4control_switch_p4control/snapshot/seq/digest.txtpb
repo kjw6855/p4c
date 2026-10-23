@@ -1,0 +1,123 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshotSequence
+# snapshot sequence on tofino: switch/controller.py up to print('DONE'); digest loop not run
+# scenario digest: digest
+# patch netcl.py: bug: SyntaxError (missing parameter list)
+# patch controller.py: bug: insert_rules uses controller.py's tables, target, gc, struct, socket
+# patch controller.py: bug: digest_t has no tag_id; the KeyError (swallowed) dropped every digest
+# patch controller.py: bug: digest_t has no block_dst_addr
+# patch controller.py: bug: digest_t has no tag_decision
+# step digest (rc=0): 1 updates, 0 data-plane register changes dropped
+program: "p4control_switch_p4control"
+target: "tofino"
+scenario: "digest"
+init {
+  program: "p4control_switch_p4control"
+  target: "tofino"
+  snapshot_id: "init"
+  captured_at: "2026-10-23T05:45:18.929912+00:00"
+  topology {
+    port { port: 60 role: PORT_ROLE_HOST name: "h1" ip: "10.0.0.1" }
+    port { port: 61 role: PORT_ROLE_HOST name: "h2" ip: "10.0.0.2" }
+    port { port: 62 role: PORT_ROLE_HOST name: "h3" ip: "10.0.0.3" }
+    port { port: 63 role: PORT_ROLE_ATTACKER name: "attacker" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_forward"
+    action_name: "SwitchIngress.route"
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+    data { field_name: "dst_port" value: "\x3e" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_forward"
+    action_name: "SwitchIngress.route"
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x02" } }
+    data { field_name: "dst_port" value: "\x3d" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_forward"
+    action_name: "SwitchIngress.route"
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x01" } }
+    data { field_name: "dst_port" value: "\x3c" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_dst_tag_label"
+    action_name: "SwitchIngress.get_dst_label"
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x01" } }
+    data { field_name: "dst_label" value: "\x01" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_dst_tag_label"
+    action_name: "SwitchIngress.get_dst_label"
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x02" } }
+    data { field_name: "dst_label" value: "\x02" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_dst_tag_label"
+    action_name: "SwitchIngress.get_dst_label"
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+    data { field_name: "dst_label" value: "\x04" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_dec"
+    action_name: "NoAction"
+    key { field_name: "ig_md.decision" exact { value: "\x00" } }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_dec"
+    action_name: "SwitchIngress.miss"
+    key { field_name: "ig_md.decision" exact { value: "\x01" } }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_dec"
+    action_name: "SwitchIngress.modify"
+    key { field_name: "ig_md.decision" exact { value: "\x02" } }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.table_dec"
+    action_name: "SwitchIngress.reroute"
+    key { field_name: "ig_md.decision" exact { value: "\x03" } }
+    data { field_name: "egress_port" value: "\x3e" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.t_table_action2"
+    action_name: "SwitchIngress.table_action2"
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+    key { field_name: "hdr.ipv4.src_addr" exact { value: "\x0a\x00\x00\x02" } }
+    data { field_name: "decision" value: "\x00" }
+    data { field_name: "declassify_label" value: "\xfe" }
+    data { field_name: "priority" value: "\x09" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.t_table_action3"
+    action_name: "SwitchIngress.table_action3"
+    key { field_name: "hdr.flowtag.tag_label" ternary { value: "\x01" mask: "\x01" } }
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+    data { field_name: "decision" value: "\x02" }
+    data { field_name: "priority" value: "\x01" }
+  }
+  bfrt_entities {
+    table_name: "pipe.SwitchIngress.t_table_action4"
+    action_name: "SwitchIngress.table_action4"
+    key { field_name: "hdr.flowtag_id.tag_id" exact { value: "\x01" } }
+    key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x03" } }
+    data { field_name: "decision" value: "\x02" }
+    data { field_name: "priority" value: "\x05" }
+  }
+}
+steps {
+  step_id: "digest"
+  trigger: "h1 -> h2 TCP 1234->80 with ipv4.flags[15]=1 (digest: controller adds a table_conn row)"
+  updates {
+    type: CP_UPDATE_INSERT
+    bfrt_entity {
+      table_name: "pipe.SwitchIngress.table_conn"
+      action_name: "SwitchIngress.enforce_dec"
+      key { field_name: "hdr.ipv4.dst_addr" exact { value: "\x0a\x00\x00\x02" } }
+      key { field_name: "hdr.ipv4.src_addr" exact { value: "\x0a\x00\x00\x01" } }
+      key { field_name: "hdr.tcp.dst_port" exact { value: "\x50" } }
+      key { field_name: "hdr.tcp.src_port" exact { value: "\x04\xd2" } }
+      data { field_name: "decision" value: "\x00" }
+    }
+  }
+}

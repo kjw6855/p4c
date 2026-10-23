@@ -6,6 +6,7 @@ keeps the loop running while the case's packets go out.
 netcl.py, which controller.py imports for the policy rules, does not parse (`def insert_rules:`)
 and refers to controller.py's globals; both are fixed minimally, the rules themselves untouched.
 """
+from cp_snapshot.packages import ControllerStep
 from cp_snapshot.snapshot import Port
 
 DESCRIPTION = "switch/controller.py up to print('DONE'); digest loop not run"
@@ -36,3 +37,16 @@ def run(ctx):
     rc = ctx.python(["controller.py"], ctx.src)
     if rc != 0:
         raise RuntimeError(f"controller.py rc={rc}")
+
+
+def _digest(ctx):
+    """h1 opens a connection to h2 with ipv4.flags[15] set (the reserved bit): the data plane
+    digests it (conn_add, DIGEST_ADD_CONN) and the controller's loop adds one table_conn row."""
+    from scapy.all import IP, TCP, Ether
+    pkt = Ether() / IP(src="10.0.0.1", dst="10.0.0.2", flags="evil") / TCP(sport=1234, dport=80)
+    ctx.send(60, bytes(pkt))
+
+
+STEPS = {"digest": ControllerStep(_digest, "h1 -> h2 TCP 1234->80 with ipv4.flags[15]=1 "
+                                           "(digest: controller adds a table_conn row)")}
+SCENARIOS = {"digest": ["digest"]}
