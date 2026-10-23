@@ -26,6 +26,10 @@ A scenario module defines:
              runtime update: a digest-triggering packet, a CLI line, one timer tick), and
     SCENARIOS  {scenario: [step names]}: the orders in which they run.
 
+    TARGET   "tofino" (default; tofino-model + bf_switchd, BfRt), "bmv2" (simple_switch, Thrift), or
+             a P4Runtime target the operator started and loaded: "dpdk" (infrap4d) or "p4rt" (any
+             server; P4RT_ADDR, P4INFO, P4RT_DEVICE_ID). Sequences on those need reset_target(ctx).
+
     capture.py <program> --sequence SCENARIO [--out FILE] writes a CpSnapshotSequence instead:
     `init` (what the setup changed, as above) and, per step, the updates it made. Every prefix of
     the scenario runs on a fresh target (setup, steps 1..j, then the controller is stopped and the
@@ -339,6 +343,34 @@ def _bmv2(program: str, scen, ctx: Context, ports: List[int]):
     return before, after, notes, rc
 
 
+# P4Runtime targets the operator starts and loads (dpdk: infrap4d on a PNA-DPDK host; p4rt: any
+# P4Runtime server). capture.py only attaches: P4RT_ADDR (default the scenario's P4RT_ADDR, else
+# 127.0.0.1:9559), P4INFO (else the scenario's P4INFO) and P4RT_DEVICE_ID name the server; the
+# P4Runtime python bindings (p4.v1, grpc) must be importable.
+P4RT_TARGETS = ("p4rt", "dpdk")
+
+
+def _p4rt_dump(scen, tag: str):
+    from cp_snapshot import p4rt_dump
+    addr = os.environ.get("P4RT_ADDR") or getattr(scen, "P4RT_ADDR", "127.0.0.1:9559")
+    p4info = os.environ.get("P4INFO") or getattr(scen, "P4INFO", None)
+    if not p4info:
+        raise SystemExit("P4Runtime target: set P4INFO (or the scenario's P4INFO)")
+    t0 = time.time()
+    records, notes = p4rt_dump.dump(addr, p4rt_dump.load_p4info(Path(p4info)),
+                                    int(os.environ.get("P4RT_DEVICE_ID", "0")))
+    log.info("%s: %d entities in %.0fs, %d notes", tag, len(records), time.time() - t0,
+             len(notes))
+    return p4rt_dump.records_to_entities(records), notes
+
+
+def _p4rt(program: str, scen, ctx: Context, ports: List[int]):
+    before, _ = _p4rt_dump(scen, "before")
+    rc = _run_controller(scen, ctx)
+    after, notes = _p4rt_dump(scen, "after")
+    return before, after, notes, rc
+
+
 def prepare_work(program: str, scen, work: Path, setup_only: bool = True) -> Context:
     """Fresh work dir: the patched controller copy (SETUP_ONLY_PATCHES too when setup_only) and
     the scenario's prepare step."""
@@ -380,9 +412,10 @@ def capture(program: str, out: Path, work: Path) -> int:
     ctx = prepare_work(program, scen, work)
 
     ports = [p.port for p in scen.PORTS]
-    created = make_veths(ports)
+    # A P4Runtime target's ports belong to its own host setup (DPDK/TAP), not to veth pairs here.
+    created = [] if target in P4RT_TARGETS else make_veths(ports)
     try:
-        run = _bmv2 if target == "bmv2" else _tofino
+        run = {"bmv2": _bmv2, "p4rt": _p4rt, "dpdk": _p4rt}.get(target, _tofino)
         before, after, dump_notes, rc = run(program, scen, ctx, ports)
     finally:
         drop_veths(created)
@@ -494,10 +527,21 @@ def capture_sequence(program: str, scenario: str, out: Path, work: Path, settle:
     ctx.ready_marker = getattr(scen, "READY_MARKER", None)
     ctx.target = target
     ports = [p.port for p in scen.PORTS]
-    created = make_veths(ports)
+    created = [] if target in P4RT_TARGETS else make_veths(ports)
     p4info = None
     try:
-        if target == "bmv2":
+        if target in P4RT_TARGETS:
+            # Every prefix needs a fresh target; only the scenario knows how to restart this one.
+            if not hasattr(scen, "reset_target"):
+                raise SystemExit(f"{program}: a {target} sequence needs scenario.reset_target(ctx)")
+
+            def prefix(j, pristine):
+                scen.reset_target(ctx)
+                before = _p4rt_dump(scen, "pristine")[0] if pristine else None
+                rc = _run_prefix(scen, ctx, steps[:j], settle)
+                after, notes = _p4rt_dump(scen, f"after {j} step(s)")
+                return before, after, notes, rc
+        elif target == "bmv2":
             sw_info = bmv2_switch(program, ctx, ports)
             p4info = sw_info[1]
 
