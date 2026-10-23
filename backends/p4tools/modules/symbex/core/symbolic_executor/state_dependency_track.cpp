@@ -1,6 +1,7 @@
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/state_dependency_track.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <map>
@@ -24,6 +25,7 @@
 #include "backends/p4tools/common/lib/variables.h"
 
 #include "backends/p4tools/modules/symbex/core/program_info.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/a2s_relevance.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/sink_divergence.h"
@@ -1013,15 +1015,20 @@ StateDependencyTracker::collectChains() const {
     };
 
     using Sinks = SymbexOptions::StateDepSinks;
+    // --state-dep-source A2S: the chains a control-plane action parameter starts.
+    const bool a2s = SymbexOptions::get().stateDepSource == SymbexOptions::StateDepSource::A2S;
     switch (SymbexOptions::get().stateDepSinks) {
         case Sinks::OutK:
-            addChains(sdResult.dataWriteOutKeyChains, "Write OutKey"_cs);
+            addChains(a2s ? sdResult.dataWriteA2SOutKeyChains : sdResult.dataWriteOutKeyChains,
+                      a2s ? "A2S Write OutKey"_cs : "Write OutKey"_cs);
             return result;
         case Sinks::OutC:
-            addChains(sdResult.dataWriteOutCondChains, "Write OutCondition"_cs);
+            addChains(a2s ? sdResult.dataWriteA2SOutCondChains : sdResult.dataWriteOutCondChains,
+                      a2s ? "A2S Write OutCondition"_cs : "Write OutCondition"_cs);
             return result;
         case Sinks::O:
-            addChains(sdResult.dataWriteOutChains, "Write Output"_cs);
+            addChains(a2s ? sdResult.dataWriteA2SOutChains : sdResult.dataWriteOutChains,
+                      a2s ? "A2S Write Output"_cs : "Write Output"_cs);
             return result;
         default:
             break;
@@ -1144,12 +1151,59 @@ void StateDependencyTracker::emitSummary() const {
         Deadline::elapsedSeconds());
 }
 
+namespace {
+
+/// --state-dep-source A2S: which updates of the step under study reach which chain. Logged per
+/// match and written to <out-dir>/a2s_relevance.csv.
+void reportA2SRelevance(
+    const std::map<cstring, std::vector<const P4ChainExtractor::DependencyGraphs::SOChain *>>
+        &chains) {
+    using Sinks = SymbexOptions::StateDepSinks;
+    const auto sinks = SymbexOptions::get().stateDepSinks;
+    const cstring category = sinks == Sinks::OutK   ? "a2s2outk"_cs
+                             : sinks == Sinks::OutC ? "a2s2outc"_cs
+                                                    : "a2s2o"_cs;
+    const auto updates = loadedCpStepUpdates();
+    const auto stepId = loadedCpStepId();
+    std::vector<A2SRelevance> rows;
+    size_t total = 0;
+    size_t relevant = 0;
+    for (const auto &[name, list] : chains) {
+        for (const auto *chain : list) {
+            total++;
+            auto chainRows = a2sRelevance(*chain, category, stepId, updates);
+            if (!chainRows.empty()) relevant++;
+            for (const auto &r : chainRows) {
+                printInfo("[A2S] chain id=%1% (%2%, %3%) %4%: step %5% update %6% on %7%: %8%",
+                          r.chainId, chain->soName, category, r.kind, r.step, r.updateIndex,
+                          r.table, r.reason);
+            }
+            rows.insert(rows.end(), chainRows.begin(), chainRows.end());
+        }
+    }
+    const auto &outDir = SymbexOptions::get().outputDir;
+    const std::string path =
+        (outDir.has_value() ? *outDir / "a2s_relevance.csv" : std::filesystem::path("a2s_relevance.csv"))
+            .string();
+    writeA2SRelevanceCsv(path, rows);
+    printInfo("[A2S] relevant=%1%/%2% chains (step %3%: %4% table/register updates); %5%", relevant,
+              total, stepId, updates.size(), path);
+}
+
+}  // namespace
+
 void StateDependencyTracker::runTampering(const TamperingCallback &callBack) {
     auto chains = collectChains();
     if (chains.empty()) {
         warning("State-dependency analysis produced no chains for the selected policy.");
         // Still summarised: a run with no chains and a run that died before reaching them are very
         // different outcomes, and only this line tells them apart downstream.
+        emitSummary();
+        return;
+    }
+    if (SymbexOptions::get().stateDepSource == SymbexOptions::StateDepSource::A2S) {
+        // Relevance only for now: the A2S search across the update comes in a later step.
+        reportA2SRelevance(chains);
         emitSummary();
         return;
     }

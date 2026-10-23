@@ -74,6 +74,7 @@ set(
   core/small_visit/table_visitor.cpp
   core/small_visit/small_visit.cpp
   core/symbolic_executor/cp_annotation.cpp
+  core/symbolic_executor/a2s_relevance.cpp
   core/symbolic_executor/cp_snapshot.cpp
   core/symbolic_executor/depth_first.cpp
   core/symbolic_executor/selected_branches.cpp

@@ -196,6 +196,12 @@ class SymbexOptions : public AbstractP4cToolOptions {
     enum class StateDepSinks { Default, K, C, O, OutK, OutC };
     StateDepSinks stateDepSinks = StateDepSinks::Default;
 
+    /// --state-dep-source: whose write starts a chain. H2S (default): a packet header (the
+    /// attacker's Phase-2 packet). A2S: a control-plane action parameter -- the a2s2{o,outk,outc}
+    /// chains, checked against the step of --cp-snapshot-sequence (needs O/OUTK/OUTC sinks).
+    enum class StateDepSource { H2S, A2S };
+    StateDepSource stateDepSource = StateDepSource::H2S;
+
     /// --diverge-output: what an output-chain (OutK/OutC/O) finding must change. Port (default):
     /// where the victim's packet goes -- drop, unicast egress port or multicast group -- differs
     /// between Phase 1 and the attacked Phase 3. PortAndBytes also accepts a change of the packet

@@ -695,6 +695,24 @@ SymbexOptions::SymbexOptions()
         "--cp-annotation. Only one snapshot is accepted.");
 
     registerOption(
+        "--state-dep-source", "H2S|A2S",
+        [this](const char *arg) {
+            if (std::string(arg) == "H2S") {
+                stateDepSource = StateDepSource::H2S;
+            } else if (std::string(arg) == "A2S") {
+                stateDepSource = StateDepSource::A2S;
+            } else {
+                error(ErrorType::ERR_INVALID, "--state-dep-source: expected H2S or A2S");
+                return false;
+            }
+            return true;
+        },
+        "Whose write starts the consumed chains. H2S (default): a packet header. A2S: a "
+        "control-plane action parameter (a2s2o/a2s2outk/a2s2outc for --state-dep-sinks "
+        "O/OUTK/OUTC), checked against step --cp-step of --cp-snapshot-sequence: writes "
+        "a2s_relevance.csv (which step updates reach which chain) to --out-dir.");
+
+    registerOption(
         "--cp-snapshot-sequence", "file",
         [this](const char *arg) {
             cpSnapshotSequencePath = std::string(arg);
@@ -1084,6 +1102,19 @@ bool SymbexOptions::validateOptions() const {
         error(ErrorType::ERR_INVALID,
               "--cp-snapshot-registers requires --cp-snapshot or --cp-snapshot-sequence.");
         return false;
+    }
+    if (stateDepSource == StateDepSource::A2S) {
+        if (!cpSnapshotSequencePath.has_value()) {
+            error(ErrorType::ERR_INVALID,
+                  "--state-dep-source A2S needs --cp-snapshot-sequence and --cp-step.");
+            return false;
+        }
+        if (stateDepSinks != StateDepSinks::O && stateDepSinks != StateDepSinks::OutK &&
+            stateDepSinks != StateDepSinks::OutC) {
+            error(ErrorType::ERR_INVALID, "--state-dep-source A2S needs --state-dep-sinks O, OUTK "
+                  "or OUTC.");
+            return false;
+        }
     }
     if (cpSnapshotSequencePath.has_value() != (cpStep > 0)) {
         error(ErrorType::ERR_INVALID, "--cp-snapshot-sequence and --cp-step go together.");

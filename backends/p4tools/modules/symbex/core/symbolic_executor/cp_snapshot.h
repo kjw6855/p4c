@@ -89,6 +89,14 @@ class CpSnapshot {
     /// nullopt when the snapshot does not set it.
     [[nodiscard]] std::optional<big_int> registerParam(cstring cpName) const;
 
+    /// The rule of snapshot table @p tableName (spelled as in the snapshot) with @p key's match
+    /// keys and priority, or its default action when @p isDefault; nullptr when there is none.
+    [[nodiscard]] const CpSnapshotRule *findRule(cstring tableName, bool isDefault,
+                                                 const CpSnapshotRule &key) const;
+
+    /// The name of P4Runtime register @p id once bindP4Info ran, else "register_id:<id>".
+    [[nodiscard]] cstring registerName(uint32_t id) const;
+
     /// Resolve P4Runtime register ids (bmv2 RegisterEntry carries no name) through @p p4Info.
     void bindP4Info(const p4::config::v1::P4Info &p4Info);
 
@@ -124,6 +132,7 @@ class CpSnapshot {
     std::map<cstring, std::map<big_int, std::vector<big_int>>> registers_;
     /// bmv2 register cells keyed by P4Runtime register id until bindP4Info names them.
     std::map<uint32_t, std::map<big_int, std::vector<big_int>>> registersById_;
+    std::map<uint32_t, cstring> registerNames_;
     std::map<cstring, big_int> registerParams_;
     std::map<int, std::set<int>> multicastPorts_;
     std::set<int> topologyPorts_;
@@ -143,6 +152,28 @@ CpSnapshot *loadedCpSnapshotNext();
 
 /// The parsed --cp-snapshot-sequence file (its steps go into emitted cases), or nullptr.
 const symbex::CpSnapshotSequence *loadedCpSnapshotSequence();
+
+/// One update of the step under study (--cp-step K), decoded against S(K-1).
+struct CpStepUpdate {
+    size_t index = 0;            ///< position in the step's update list
+    int type = 0;                ///< symbex::tofino::CpUpdateType
+    cstring table;               ///< table or register, spelled as in the snapshot
+    bool isDefault = false;
+    bool isRegister = false;
+    std::optional<CpSnapshotRule> before;  ///< the rule in S(K-1), if any
+    std::optional<CpSnapshotRule> after;   ///< the rule in S(K); absent for DELETE
+};
+
+/// The updates of step K of the loaded sequence (tables, defaults and register cells; PRE, mirror
+/// and register-param updates are left out), or empty without --cp-snapshot-sequence.
+std::vector<CpStepUpdate> loadedCpStepUpdates();
+
+/// The step id of step K of the loaded sequence, or "" without one.
+cstring loadedCpStepId();
+
+/// Whether two control-plane names name the same object: equal, or one a dotted suffix of the
+/// other (BfRt prefixes the pipeline; P4Info and the chain cache may differ in the control).
+bool cpNamesMatch(std::string_view a, std::string_view b);
 
 /// The loaded snapshot as `snapshot_entities { ... }` blocks of a TamperingTestCase textproto
 /// (P4Runtime entities when @p bfrt is false, BfRt entities otherwise), preceded by a

@@ -404,6 +404,22 @@ bool CpSnapshot::applyStep(const symbex::CpSnapshotStep &step) {
     return true;
 }
 
+const CpSnapshotRule *CpSnapshot::findRule(cstring tableName, bool isDefault,
+                                           const CpSnapshotRule &key) const {
+    auto it = tables_.find(tableName);
+    if (it == tables_.end()) return nullptr;
+    if (isDefault) return it->second.defaultAction ? &*it->second.defaultAction : nullptr;
+    for (const auto &r : it->second.rules) {
+        if (sameRuleKey(r, key)) return &r;
+    }
+    return nullptr;
+}
+
+cstring CpSnapshot::registerName(uint32_t id) const {
+    auto it = registerNames_.find(id);
+    return it != registerNames_.end() ? it->second : cstring("register_id:" + std::to_string(id));
+}
+
 const CpSnapshotTable *CpSnapshot::table(cstring cpName) const {
     const CpSnapshotTable *found = nullptr;
     cstring foundName;
@@ -471,6 +487,7 @@ std::optional<big_int> CpSnapshot::registerParam(cstring cpName) const {
 
 void CpSnapshot::bindP4Info(const p4::config::v1::P4Info &p4Info) {
     for (const auto &reg : p4Info.registers()) {
+        registerNames_[reg.preamble().id()] = cstring(reg.preamble().name());
         auto it = registersById_.find(reg.preamble().id());
         if (it == registersById_.end()) continue;
         registers_[cstring(reg.preamble().name())] = std::move(it->second);
@@ -559,6 +576,63 @@ CpSnapshot *loadedCpSnapshotNext() {
 
 const symbex::CpSnapshotSequence *loadedCpSnapshotSequence() {
     return loadedSnapshots().sequence.get();
+}
+
+cstring loadedCpStepId() {
+    const auto *seq = loadedCpSnapshotSequence();
+    if (seq == nullptr) return ""_cs;
+    return cstring(seq->steps(SymbexOptions::get().cpStep - 1).step_id());
+}
+
+std::vector<CpStepUpdate> loadedCpStepUpdates() {
+    std::vector<CpStepUpdate> out;
+    const auto *seq = loadedCpSnapshotSequence();
+    const auto *prev = loadedCpSnapshot();
+    if (seq == nullptr || prev == nullptr) return out;
+    const auto &step = seq->steps(SymbexOptions::get().cpStep - 1);
+    for (int i = 0; i < step.updates_size(); i++) {
+        const auto &u = step.updates(i);
+        CpStepUpdate cu;
+        cu.index = static_cast<size_t>(i);
+        cu.type = u.type();
+        std::optional<CpSnapshotRule> rule;
+        if (u.has_entity() && u.entity().has_table_entry()) {
+            const auto &te = u.entity().table_entry();
+            cu.table = cstring(te.table_name());
+            cu.isDefault = te.is_default_action();
+            rule = ruleFromP4Runtime(te);
+        } else if (u.has_entity() && u.entity().has_register_entry()) {
+            cu.table = prev->registerName(u.entity().register_entry().register_id());
+            cu.isRegister = true;
+        } else if (u.has_bfrt_entity()) {
+            const auto &e = u.bfrt_entity();
+            cu.table = cstring(e.table_name());
+            if (isBfRtRegisterCell(e)) {
+                cu.isRegister = true;
+            } else if (isInternalBfRtTable(e.table_name()) || isBfRtRegisterParam(e)) {
+                continue;
+            } else {
+                cu.isDefault = e.is_default_entry();
+                rule = ruleFromBfRt(e);
+            }
+        } else {
+            continue;  // PRE entries
+        }
+        if (rule.has_value()) {
+            if (const auto *old = prev->findRule(cu.table, cu.isDefault, *rule)) cu.before = *old;
+            if (cu.type != symbex::tofino::CP_UPDATE_DELETE) {
+                cu.after = rule;
+            } else if (!cu.before.has_value()) {
+                cu.before = rule;  // the deleted rule as the update spells it
+            }
+        }
+        out.push_back(std::move(cu));
+    }
+    return out;
+}
+
+bool cpNamesMatch(std::string_view a, std::string_view b) {
+    return !bare(a).empty() && !bare(b).empty() && (nameMatches(a, b) || nameMatches(b, a));
 }
 
 namespace {
