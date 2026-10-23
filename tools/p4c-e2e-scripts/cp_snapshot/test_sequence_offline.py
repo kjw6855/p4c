@@ -108,8 +108,53 @@ def test_package_snapshots() -> None:
         check(again == body, f"re-parse {f.relative_to(HERE)}")
 
 
+def test_a2s_sources() -> None:
+    """a2s_sources: a step covers a chain through its cp sources or its stateful object."""
+    from cp_snapshot import a2s_sources
+    lab = "pipe.SwitchIngress.table_dst_tag_label"
+    idx = "pipe.SwitchIngress.find_index"
+
+    def label(ip: int, v: int, extra: int = 0) -> Entity:
+        return Entity(lab, (Key("hdr.ipv4.dst_addr", "exact", ip),), "SwitchIngress.get_dst_label",
+                      (("dst_label", v), ("other", extra)))
+
+    def index(key: int, v: int) -> Entity:
+        return Entity(idx, (Key("hdr.nc.key", "exact", key),), "SwitchIngress.find_index_act",
+                      (("index", v),))
+    chains = {"a2s2o": {"SwitchIngress": [
+        {"id": 0, "soName": "SwitchIngress.cache_conn", "cp": {
+            "writeData": [{"tables": ["SwitchIngress.table_dst_tag_label"],
+                           "action": "SwitchIngress.get_dst_label", "param": "dst_label"}]}},
+        {"id": 1, "soName": "SwitchIngress.seq_reg", "cp": {
+            "writeIdx": [{"tables": ["SwitchIngress.find_index"],
+                          "action": "SwitchIngress.find_index_act", "param": "index"}],
+            "readIdx": [{"tables": ["SwitchIngress.find_index"],
+                         "action": "SwitchIngress.find_index_act", "param": "index"}]}},
+    ]}}
+    init = snap.Snapshot(program="p", target="tofino", entities=[label(1, 5), index(7, 3)])
+
+    def cover(*ups):
+        seq = snap.Sequence(init=init, scenario="s", steps=[snap.Step("s1", "", list(ups))])
+        return {(r["chain_id"], r["kind"]) for r in a2s_sources.coverage(seq, chains)}
+    check(cover(("MODIFY", label(1, 6))) == {(0, "inconsistency")},
+          "MODIFY of a writeData param -> inconsistency")
+    check(cover(("MODIFY", label(1, 5, extra=9))) == set(),
+          "MODIFY of another param -> not covered")
+    check(cover(("INSERT", index(8, 4))) == {(1, "residual")},
+          "INSERT into a writeIdx table -> residual")
+    check(cover(("MODIFY", Entity("pipe.SwitchIngress.seq_reg",
+                                  (Key("$REGISTER_INDEX", "exact", 3),), "", (("f1", 1),),
+                                  is_register=True))) == {(1, "residual")},
+          "register cell of the stateful object -> covered")
+    check(cover(("INSERT", Entity("pipe.SwitchIngress.table_conn",
+                                  (Key("hdr.ipv4.src_addr", "exact", 1),),
+                                  "SwitchIngress.enforce_dec", (("decision", 0),)))) == set(),
+          "an unrelated table -> not covered")
+
+
 if __name__ == "__main__":
     test_updates()
     test_round_trip()
+    test_a2s_sources()
     test_package_snapshots()
     print("all passed")
