@@ -100,6 +100,32 @@ message BfRtEntity {
     bool is_default_entry = 7;
 }
 
+// How a control-plane step changed one entity between two captured snapshots (a snapshot
+// sequence, or the update an A2S case applies between its packets). A register cell is always a
+// MODIFY; DELETE of a default entry restores the table's P4 default action.
+enum CpUpdateType {
+    CP_UPDATE_UNSPECIFIED = 0;
+    CP_UPDATE_INSERT = 1;
+    CP_UPDATE_MODIFY = 2;
+    CP_UPDATE_DELETE = 3;
+}
+
+// One BfRt entity change. For MODIFY and DELETE, `entity` holds the entry's key (and, for MODIFY,
+// its new action and data).
+message BfRtCpUpdate {
+    CpUpdateType type = 1;
+    BfRtEntity entity = 2;
+}
+
+// The updates one controller step made, in BfRt form. Defined here rather than reusing
+// symbex.CpSnapshotStep because this file is compiled without the P4Runtime protos.
+message BfRtCpStep {
+    string step_id = 1;
+    // The command or scenario step that produced the updates, for the reader and the validator.
+    string trigger = 2;
+    repeated BfRtCpUpdate updates = 3;
+}
+
 // Register write that the attacker performs in Phase 2 of a tampering test.
 // The harness uses these to verify that the register actually holds
 // attacker_value after Phase 2 has been replayed.

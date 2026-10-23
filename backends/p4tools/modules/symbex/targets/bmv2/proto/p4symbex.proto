@@ -188,6 +188,34 @@ message CpSnapshot {
     repeated symbex.tofino.BfRtEntity bfrt_entities = 7;
 }
 
+// One entity change between two captured snapshots: a P4Runtime entity (bmv2, P4Runtime targets)
+// or a BfRt entity (tofino), as in CpSnapshot. A register cell is always a MODIFY.
+message CpUpdate {
+    symbex.tofino.CpUpdateType type = 1;
+    oneof entity_kind {
+        p4.v1.Entity entity = 2;
+        symbex.tofino.BfRtEntity bfrt_entity = 3;
+    }
+}
+
+// The updates one controller step made: the diff between the snapshots before and after it.
+message CpSnapshotStep {
+    string step_id = 1;
+    // The command or scenario step that produced the updates, for the reader and the validator.
+    string trigger = 2;
+    repeated CpUpdate updates = 3;
+}
+
+// The control-plane state after setup (`init`) and the diff each later controller step made, in
+// the order one scenario ran them: S(0) = init, S(k) = S(k-1) with steps[k-1] applied.
+message CpSnapshotSequence {
+    string program = 1;
+    string target = 2;       // "bmv2" | "tofino" | "dpdk"
+    string scenario = 3;
+    CpSnapshot init = 4;
+    repeated CpSnapshotStep steps = 5;
+}
+
 message TestCase {
     // The input packet.
     InputPacketAtPort input_packet = 1;
