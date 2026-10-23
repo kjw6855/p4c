@@ -5,11 +5,26 @@ exploits/, validate/). Programs not packaged yet keep live/<program>.py and stat
 from __future__ import annotations
 
 import importlib.util
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 PROGRAMS = HERE / "programs"
+
+
+@dataclass(frozen=True)
+class ControllerStep:
+    """One controller action of a snapshot-sequence scenario (scenario.py STEPS): capture.py
+    --sequence dumps the target after each, and validate_live.py runs it between an A2S case's
+    packets."""
+    run: Callable  # run(ctx): perform the step against the running target (after the setup)
+    trigger: str = ""  # what the step does, recorded in the sequence
+    # Registers whose cells this step's control plane writes (control-plane names, matched by
+    # dotted suffix). Other register changes are data-plane writes by packets the step sends, and
+    # stay out of the step's updates. Table changes always count. (Tofino dumps read the driver's
+    # shadow copy, which data-plane writes do not reach; bmv2 dumps read the switch itself.)
+    registers: Tuple[str, ...] = ()
 
 
 def package_dir(program: str) -> Optional[Path]:

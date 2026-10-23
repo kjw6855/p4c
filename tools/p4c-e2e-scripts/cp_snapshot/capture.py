@@ -22,6 +22,14 @@ A scenario module defines:
     prepare(ctx)  optional, before the target starts (e.g. building the program).
     supplement(ctx)  optional: entities the controller set that the dump cannot read back.
     run(ctx)      the controller step; raises on failure.
+    STEPS    optional {name: packages.ControllerStep}: controller actions after the setup (a
+             runtime update: a digest-triggering packet, a CLI line, one timer tick), and
+    SCENARIOS  {scenario: [step names]}: the orders in which they run.
+
+    capture.py <program> --sequence SCENARIO [--out FILE] writes a CpSnapshotSequence instead:
+    `init` (what the setup changed, as above) and, per step, the updates it made. Every prefix of
+    the scenario runs on a fresh target (setup, steps 1..j, then the controller is stopped and the
+    target dumped), because a running BfRt controller keeps other clients from reading.
 """
 from __future__ import annotations
 
@@ -93,6 +101,14 @@ class Context:
         # When set, commands run in the background until they print this (see READY_MARKER).
         self.ready_marker: Optional[str] = None
         self.background: List[subprocess.Popen] = []
+        self.target = "tofino"
+
+    def send(self, port: int, packet: bytes, count: int = 1) -> None:
+        """Send `packet` into device port `port` (for steps a packet triggers, e.g. a digest)."""
+        from tofino.packet_tester import _sudo_sendp
+        # bmv2 binds veth{2p} and is fed through its peer; tofino-model owns veth{2p+1}.
+        iface = f"veth{2 * port + 1}" if self.target == "bmv2" else f"veth{2 * port}"
+        _sudo_sendp(packet, iface, count=count)
 
     def note(self, text: str) -> None:
         log.info("note: %s", text)
@@ -389,15 +405,176 @@ def capture(program: str, out: Path, work: Path) -> int:
     return rc
 
 
+# --- snapshot sequences (--sequence) -----------------------------------------------------------
+
+def _dump_unbound(program: str, tag: str, tries: int = 30):
+    """Dump through BfRt client 1: the controller (client 0) may still be releasing its binding,
+    which the server drops lazily."""
+    for n in range(tries):
+        try:
+            return dump_once(program, tag, client_id=1)
+        except Exception:  # noqa: BLE001
+            if n == tries - 1:
+                raise
+            time.sleep(1)
+    raise AssertionError("unreachable")
+
+
+def _run_prefix(scen, ctx: Context, steps, settle: float) -> int:
+    """The setup, then `steps` [(name, ControllerStep)]; the controller is stopped on return. A
+    reactive controller (READY_MARKER) keeps running in the background while the steps run."""
+    try:
+        rc = _run_controller(scen, ctx)
+        marker, ctx.ready_marker = ctx.ready_marker, None  # steps' own commands run to completion
+        try:
+            for name, st in steps:
+                log.info("step %s: %s", name, st.trigger)
+                with (ctx.work / "controller.log").open("a") as fd:
+                    fd.write(f"\n===== step {name}: {st.trigger} =====\n")
+                st.run(ctx)
+                time.sleep(settle)
+        finally:
+            ctx.ready_marker = marker
+        return rc
+    finally:
+        ctx.stop_background()
+
+
+def _tofino_prefix(program: str, scen, ctx: Context, ports_json: Path, steps, settle: float,
+                   pristine: bool):
+    switchd = td.BfSwitchdProcess(program, SDE, ctx.work / "bf_switchd.log")
+
+    def body():
+        before = dump_once(program, "pristine")[0] if pristine else None
+        rc = _run_prefix(scen, ctx, steps, settle)
+        after, notes = _dump_unbound(program, f"after {len(steps)} step(s)")
+        return before, after, notes, rc
+    return _tofino_session(program, ctx, ports_json, f"_seq{len(steps)}", switchd, body)
+
+
+def _bmv2_prefix(program: str, scen, ctx: Context, sw_info, steps, settle: float, pristine: bool):
+    from cp_snapshot import bmv2_live
+    sw, info = sw_info
+    try:
+        sw.start()
+        before = bmv2_live.to_entities(sw.dump(), info)[0] if pristine else None
+        rc = _run_prefix(scen, ctx, steps, settle)
+        after, notes = bmv2_live.to_entities(sw.dump(), info)
+    finally:
+        sw.stop()
+    return before, after, notes, rc
+
+
+def _register_name(e: snap.Entity, p4info: Optional[dict]) -> str:
+    """A register cell's register name (bmv2 cells carry their P4Info id)."""
+    if e.table.startswith("register_id:") and p4info:
+        rid = int(e.table.split(":", 1)[1])
+        for r in p4info.get("registers", []):
+            if r["preamble"]["id"] == rid:
+                return r["preamble"]["name"]
+    return e.table
+
+
+def _suffix_match(name: str, wanted: str) -> bool:
+    return name == wanted or name.endswith("." + wanted) or wanted.endswith("." + name)
+
+
+def capture_sequence(program: str, scenario: str, out: Path, work: Path, settle: float = 1.0,
+                     check_determinism: bool = False) -> int:
+    scen = load_scenario(program)
+    steps_by_name = getattr(scen, "STEPS", {})
+    scenarios = getattr(scen, "SCENARIOS", {})
+    if scenario not in scenarios:
+        raise SystemExit(f"{program}: no scenario {scenario!r} (have {sorted(scenarios)})")
+    steps = [(name, steps_by_name[name]) for name in scenarios[scenario]]
+    target = getattr(scen, "TARGET", "tofino")
+    # The full controller (no SETUP_ONLY_PATCHES): a reactive one must keep running for steps
+    # that make it act (a digest, a timer tick).
+    ctx = prepare_work(program, scen, work, setup_only=False)
+    ctx.ready_marker = getattr(scen, "READY_MARKER", None)
+    ctx.target = target
+    ports = [p.port for p in scen.PORTS]
+    created = make_veths(ports)
+    p4info = None
+    try:
+        if target == "bmv2":
+            sw_info = bmv2_switch(program, ctx, ports)
+            p4info = sw_info[1]
+
+            def prefix(j, pristine):
+                return _bmv2_prefix(program, scen, ctx, sw_info, steps[:j], settle, pristine)
+        else:
+            ports_json = write_ports_json(work / "ports.json", ports)
+
+            def prefix(j, pristine):
+                return _tofino_prefix(program, scen, ctx, ports_json, steps[:j], settle, pristine)
+        dumps, rcs, dump_notes = [], [], []
+        pristine = None
+        for j in range(len(steps) + 1):
+            before, after, notes, rc = prefix(j, j == 0)
+            if j == 0:
+                pristine = before
+            dumps.append(after)
+            rcs.append(rc)
+            dump_notes += notes
+        if check_determinism:
+            _, again, _, _ = prefix(0, False)
+            drift = snap.updates(dumps[0], again)
+            if drift:
+                raise SystemExit(f"{program}: the setup is not deterministic: {len(drift)} "
+                                 f"entities differ between two runs, e.g. {drift[0]}")
+            log.info("determinism: two setup runs dump identically")
+    finally:
+        drop_veths(created)
+
+    init = snap.diff(pristine, dumps[0])
+    if hasattr(scen, "supplement"):
+        init += scen.supplement(ctx)
+    notes = [f"snapshot sequence on {target}: {getattr(scen, 'DESCRIPTION', '')}",
+             f"scenario {scenario}: {' -> '.join(n for n, _ in steps)}"] + ctx.notes
+    seq_steps = []
+    for j, (name, st) in enumerate(steps, 1):
+        kept, dropped = [], 0
+        for op, e in snap.updates(dumps[j - 1], dumps[j]):
+            if e.is_register and not any(_suffix_match(_register_name(e, p4info), r)
+                                         for r in st.registers):
+                dropped += 1  # a data-plane write by a packet the step sent
+                continue
+            kept.append((op, e))
+        notes.append(f"step {name} (rc={rcs[j]}): {len(kept)} updates, {dropped} data-plane "
+                     f"register changes dropped")
+        seq_steps.append(snap.Step(name, st.trigger, kept))
+    s = snap.Snapshot(program=program, target=target, ports=list(scen.PORTS), entities=init,
+                      snapshot_id="init")
+    seq = snap.Sequence(init=s, scenario=scenario, steps=seq_steps,
+                        notes=notes + [f"dump: {n}" for n in dict.fromkeys(dump_notes)])
+    (work / f"sequence_{scenario}.pkl").write_bytes(pickle.dumps(
+        {"pristine": pristine, "dumps": dumps}))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(snap.sequence_to_textproto(seq))
+    log.info("wrote %s: init %d entities, steps %s", out, len(init),
+             [len(st.updates) for st in seq_steps])
+    return max(rcs)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("program")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--work", type=Path)
+    ap.add_argument("--sequence", metavar="SCENARIO",
+                    help="capture init plus one diff per controller step of SCENARIO")
+    ap.add_argument("--settle", type=float, default=1.0,
+                    help="seconds to wait after each step (--sequence)")
+    ap.add_argument("--check-determinism", action="store_true",
+                    help="run the setup twice and fail if the dumps differ (--sequence)")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    out = (a.out or SNAPS / "live" / f"{a.program}.txtpb").resolve()
     work = (a.work or WORK / a.program).resolve()
+    if a.sequence:
+        out = (a.out or work / "snapshot" / "seq" / f"{a.sequence}.txtpb").resolve()
+        return capture_sequence(a.program, a.sequence, out, work, a.settle, a.check_determinism)
+    out = (a.out or SNAPS / "live" / f"{a.program}.txtpb").resolve()
     return capture(a.program, out, work)
 
 
