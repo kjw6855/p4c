@@ -109,6 +109,42 @@ IndexMap::evaluatedBaseCells(const Model &model) const {
     return out;
 }
 
+std::vector<std::pair<const IR::Expression *, const IR::Expression *>>
+IndexMap::evaluatedCells(const Model &model) const {
+    auto out = evaluatedBaseCells(model);
+    for (const auto &cond : indexConditions) {
+        const auto *index = model.evaluate(cond.getIndex(), /*doComplete=*/true);
+        const auto *value = cond.getValue();
+        if (const auto *st = value->to<IR::StructExpression>()) {
+            out.emplace_back(index, model.evaluateStructExpr(st, /*doComplete=*/true));
+        } else {
+            out.emplace_back(index, model.evaluate(value, /*doComplete=*/true));
+        }
+    }
+    return out;
+}
+
+const IR::Expression *IndexMap::evaluatedInitialValue(const Model &model) const {
+    if (const auto *st = initialValue->to<IR::StructExpression>()) {
+        return model.evaluateStructExpr(st, /*doComplete=*/true);
+    }
+    return model.evaluate(initialValue, /*doComplete=*/true);
+}
+
+const IR::Expression *IndexMap::cellValue(const std::vector<big_int> &values) const {
+    if (const auto *init = initialValue->to<IR::StructExpression>()) {
+        IR::IndexedVector<IR::NamedExpression> fields;
+        for (size_t i = 0; i < init->components.size(); i++) {
+            const auto *field = init->components.at(i);
+            const big_int v = i < values.size() ? values.at(i) : big_int(0);
+            fields.push_back(
+                new IR::NamedExpression(field->name, IR::Constant::get(field->expression->type, v)));
+        }
+        return new IR::StructExpression(init->type, init->structType, fields);
+    }
+    return IR::Constant::get(initialValue->type, values.empty() ? big_int(0) : values.front());
+}
+
 const IR::Expression *IndexMap::getBaseValueAtIndex(const IR::Expression *index) const {
     if (baseCells.empty()) return initialValue;
     if (const auto *init = initialValue->to<IR::StructExpression>()) {
@@ -180,6 +216,33 @@ const TofinoRegisterValue *TofinoRegisterValue::evaluate(const Model &model,
     auto *evaluatedRegister = new TofinoRegisterValue(decl, evaluatedValue, evaluatedInitialIndex);
     evaluatedRegister->setBaseCells(evaluatedBaseCells(model));
     return evaluatedRegister;
+}
+
+const TestObject *TofinoRegisterValue::evaluateForCellCarry(const Model &model) const {
+    // Keep the initial value and record every cell: the snapshot cells, then each write.
+    auto *carried = new TofinoRegisterValue(
+        decl, evaluatedInitialValue(model),
+        initialIndex != nullptr ? model.evaluate(initialIndex, /*doComplete=*/true) : nullptr);
+    carried->setBaseCells(evaluatedCells(model));
+    return carried;
+}
+
+const TestObject *TofinoRegisterValue::withCellWrites(
+    const std::map<big_int, std::vector<big_int>> &cells) const {
+    if (cells.empty()) return this;
+    const IR::Type *indexType = IR::Type_Bits::get(32);
+    if (initialIndex != nullptr) {
+        indexType = initialIndex->type;
+    } else if (!baseCells.empty()) {
+        indexType = baseCells.front().first->type;
+    }
+    auto *out = new TofinoRegisterValue(decl, initialValue, initialIndex);
+    auto all = baseCells;
+    for (const auto &[index, values] : cells) {
+        all.emplace_back(IR::Constant::get(indexType, index), cellValue(values));
+    }
+    out->setBaseCells(std::move(all));
+    return out;
 }
 
 const TestObject *TofinoRegisterValue::evaluateForCarry(const Model &model) const {

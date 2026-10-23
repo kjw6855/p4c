@@ -188,18 +188,57 @@ std::string cpSnapshotTxtpbBlock(bool bfrt);
 /// override. Run after the midend, so key names are final (tofino's RenameKeys has run).
 class ApplyCpSnapshot : public Transform {
  public:
-    explicit ApplyCpSnapshot(const CpSnapshot &snapshot) : snapshot(snapshot) {
+    /// @p next (--cp-snapshot-sequence): S(K); the tables it changes are also materialized into
+    /// cpSnapshotNextTables().
+    explicit ApplyCpSnapshot(const CpSnapshot &snapshot, const CpSnapshot *next = nullptr)
+        : snapshot(snapshot), next(next) {
         setName("ApplyCpSnapshot");
     }
     const IR::Node *preorder(IR::P4Table *table) override;
     const IR::Node *postorder(IR::P4Program *program) override;
 
  private:
+    [[nodiscard]] IR::Vector<IR::Entry> buildEntries(const IR::P4Table *table,
+                                                     const IR::P4Control *control,
+                                                     const CpSnapshotTable *snapTable) const;
+    [[nodiscard]] const IR::Expression *buildDefault(const IR::P4Table *table,
+                                                     const IR::P4Control *control,
+                                                     const CpSnapshotTable *snapTable) const;
+
     const CpSnapshot &snapshot;
+    const CpSnapshot *next;
     size_t tablesWithEntries = 0;
     size_t closedTables = 0;
     size_t entryCount = 0;
 };
+
+/// S(K) of a table the step of --cp-snapshot-sequence changes, materialized like ApplyCpSnapshot
+/// materializes S(K-1).
+struct CpSnapshotNextTable {
+    const IR::EntriesList *entries = nullptr;      ///< nullptr: keyless table or P4 const entries
+    const IR::Expression *defaultAction = nullptr;  ///< nullptr: P4 const default action
+};
+
+/// The tables whose S(K) differs from S(K-1), by control-plane name.
+std::map<cstring, CpSnapshotNextTable> &cpSnapshotNextTables();
+
+/// While alive, the control plane is S(K): table evaluation reads cpSnapshotNextTables() and
+/// register seeding reads S(K)'s cells (activeCpSnapshot()). For the phases an A2S case runs after
+/// the update. --cp-snapshot-use-next makes it permanently active (a whole run under S(K)).
+class ScopedCpSnapshotNext {
+ public:
+    ScopedCpSnapshotNext() { depth++; }
+    ~ScopedCpSnapshotNext() { depth--; }
+    ScopedCpSnapshotNext(const ScopedCpSnapshotNext &) = delete;
+    ScopedCpSnapshotNext &operator=(const ScopedCpSnapshotNext &) = delete;
+    static bool active();
+
+ private:
+    static int depth;
+};
+
+/// S(K) while ScopedCpSnapshotNext is active, else loadedCpSnapshot().
+const CpSnapshot *activeCpSnapshot();
 
 /// Register @p cpName's snapshot cells as (index, value) base cells. Each value is a symbolic
 /// variable named "cpsnap_<register>_<index>[_<field>]", pinned to the captured value by the

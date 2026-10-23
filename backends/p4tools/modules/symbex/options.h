@@ -169,6 +169,9 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// steps 1..K-1 applied), as --cp-snapshot would be; S(K) is kept for the A2S search.
     std::optional<std::string> cpSnapshotSequencePath;
     int cpStep = 0;
+    /// --cp-snapshot-use-next: run every phase under S(K) instead of S(K-1) (checks that the S(K)
+    /// materialization equals --cp-snapshot of the materialized S(K)).
+    bool cpSnapshotUseNext = false;
     /// Whether a snapshot (--cp-snapshot or --cp-snapshot-sequence) decides the control plane.
     [[nodiscard]] bool hasCpSnapshot() const {
         return !cpSnapshotPaths.empty() || cpSnapshotSequencePath.has_value();

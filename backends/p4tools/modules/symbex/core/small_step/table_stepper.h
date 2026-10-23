@@ -120,6 +120,11 @@ class TableStepper {
     /// @returns tableMissCondition reference to the current constraints of the miss condition.
     /// Any constant entry we hit implies that the table is hit, and the default action is not
     /// executed.
+    /// The table's entries / default action: S(K)'s while ScopedCpSnapshotNext is active and the
+    /// step changes this table (--cp-snapshot-sequence), else the IR's.
+    [[nodiscard]] const IR::EntriesList *activeEntries() const;
+    [[nodiscard]] const IR::Expression *activeDefaultAction() const;
+
     const IR::Expression *evalTableConstEntries();
 
     /// Evaluates a pre-injected @param cfg (e.g. Phase 1's evaluated TableConfig for a size-1

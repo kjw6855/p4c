@@ -739,6 +739,15 @@ SymbexOptions::SymbexOptions()
         "setup): the run starts from the state before it.");
 
     registerOption(
+        "--cp-snapshot-use-next", nullptr,
+        [this](const char *) {
+            cpSnapshotUseNext = true;
+            return true;
+        },
+        "Testing aid: run every phase under S(K), the state after step --cp-step of "
+        "--cp-snapshot-sequence, instead of S(K-1).");
+
+    registerOption(
         "--cp-snapshot-registers", "SEED|INITIAL",
         [this](const char *arg) {
             if (std::string(arg) == "SEED") {
@@ -1118,6 +1127,10 @@ bool SymbexOptions::validateOptions() const {
     }
     if (cpSnapshotSequencePath.has_value() != (cpStep > 0)) {
         error(ErrorType::ERR_INVALID, "--cp-snapshot-sequence and --cp-step go together.");
+        return false;
+    }
+    if (cpSnapshotUseNext && !cpSnapshotSequencePath.has_value()) {
+        error(ErrorType::ERR_INVALID, "--cp-snapshot-use-next requires --cp-snapshot-sequence.");
         return false;
     }
     if (cpSnapshotSequencePath.has_value() && !cpSnapshotPaths.empty()) {

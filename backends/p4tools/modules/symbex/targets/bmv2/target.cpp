@@ -74,7 +74,7 @@ CompilerResultOrError Bmv2V1ModelSymbexTarget::runCompilerImpl(
         if (auto *next = loadedCpSnapshotNext(); next != nullptr) {
             next->bindP4Info(*p4runtimeApi.p4Info);
         }
-        program = program->apply(ApplyCpSnapshot(*snapshot));
+        program = program->apply(ApplyCpSnapshot(*snapshot, loadedCpSnapshotNext()));
         if (errorCount() > 0) {
             return std::nullopt;
         }

@@ -92,6 +92,23 @@ class TestObject : public ICastable {
         return evaluate(model, /*doComplete=*/true);
     }
 
+    /// As evaluateForCarry(), but cell-accurate: a register keeps its initial value and records the
+    /// value of every cell it was written at (snapshot cells first, then each recorded write), so a
+    /// later phase reading any index sees exactly that cell. The A2S search needs this: its second
+    /// packet may read a different cell than the first wrote. Default: evaluateForCarry().
+    [[nodiscard]] virtual const TestObject *evaluateForCellCarry(const Model &model) const {
+        return evaluateForCarry(model);
+    }
+
+    /// For a cell-accurate carry (evaluateForCellCarry()): a copy with @p cells (index -> field
+    /// values; one value for a scalar register) overwritten, as a control-plane update writes them.
+    /// Default: returns this (not a register).
+    [[nodiscard]] virtual const TestObject *withCellWrites(
+        const std::map<big_int, std::vector<big_int>> &cells) const {
+        (void)cells;
+        return this;
+    }
+
     /// The symbolic value of the most recent write this object recorded, or nullptr when it
     /// recorded none (or does not track writes). The tampering executor constrains it to the value
     /// Phase 3 assumes, so the emitted Phase-2 packet really writes that value.

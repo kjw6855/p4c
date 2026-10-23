@@ -33,6 +33,7 @@
 #include "backends/p4tools/modules/symbex/core/program_info.h"
 #include "backends/p4tools/modules/symbex/core/small_step/expr_stepper.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_annotation.h"
+#include "backends/p4tools/modules/symbex/core/symbolic_executor/cp_snapshot.h"
 #include "backends/p4tools/modules/symbex/core/symbolic_executor/path_selection.h"
 #include "backends/p4tools/modules/symbex/lib/action_param_domains.h"
 #include "backends/p4tools/modules/symbex/lib/collect_coverable_nodes.h"
@@ -161,13 +162,31 @@ const IR::StringLiteral *TableStepper::getTableActionString(
     return IR::StringLiteral::get(actionCall->method->toString());
 }
 
+const IR::EntriesList *TableStepper::activeEntries() const {
+    if (ScopedCpSnapshotNext::active()) {
+        const auto &next = cpSnapshotNextTables();
+        auto it = next.find(table->controlPlaneName());
+        if (it != next.end() && it->second.entries != nullptr) return it->second.entries;
+    }
+    return table->getEntries();
+}
+
+const IR::Expression *TableStepper::activeDefaultAction() const {
+    if (ScopedCpSnapshotNext::active()) {
+        const auto &next = cpSnapshotNextTables();
+        auto it = next.find(table->controlPlaneName());
+        if (it != next.end() && it->second.defaultAction != nullptr) return it->second.defaultAction;
+    }
+    return table->getDefaultAction();
+}
+
 const IR::Expression *TableStepper::evalTableConstEntries() {
     const IR::Expression *tableMissCondition = IR::BoolLiteral::get(true);
 
     const auto *key = table->getKey();
     BUG_CHECK(key != nullptr, "An empty key list should have been handled earlier.");
 
-    const auto *entries = table->getEntries();
+    const auto *entries = activeEntries();
     // Sometimes, there are no entries.
     if (entries == nullptr) {
         // If a pre-existing TableConfig was injected into the state (e.g. Phase 1's entry for
@@ -757,7 +776,7 @@ void TableStepper::evalTaintedTable() {
     auto currentTaint = stepper->state.getProperty<bool>("inUndefinedState"_cs);
     replacements.emplace_back(Continuation::PropertyUpdate("inUndefinedState"_cs, true));
 
-    const auto *entries = table->getEntries();
+    const auto *entries = activeEntries();
     // Sometimes, there are no entries. Just return.
     if (entries == nullptr) {
         return;
@@ -858,7 +877,7 @@ bool TableStepper::resolveTableKeys() {
 }
 
 void TableStepper::addDefaultAction(std::optional<const IR::Expression *> tableMissCondition) {
-    const auto *defaultAction = table->getDefaultAction();
+    const auto *defaultAction = activeDefaultAction();
     const auto *tableAction = defaultAction->checkedTo<IR::MethodCallExpression>();
     const auto *actionType = stepper->state.getP4Action(tableAction);
     auto &nextState = stepper->state.clone();

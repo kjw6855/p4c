@@ -112,6 +112,17 @@ class IndexMap : public TestObject {
     [[nodiscard]] std::vector<std::pair<const IR::Expression *, const IR::Expression *>>
     evaluatedBaseCells(const Model &model) const;
 
+    /// The base cells followed by every recorded write (index, value), evaluated by @p model: the
+    /// register's contents cell by cell (a later cell overrides an earlier one at the same index).
+    [[nodiscard]] std::vector<std::pair<const IR::Expression *, const IR::Expression *>>
+    evaluatedCells(const Model &model) const;
+
+    /// The initial value evaluated by @p model (field by field for a struct register).
+    [[nodiscard]] const IR::Expression *evaluatedInitialValue(const Model &model) const;
+
+    /// A cell value of this register's type from field values (one for a scalar register).
+    [[nodiscard]] const IR::Expression *cellValue(const std::vector<big_int> &values) const;
+
     /// @returns the value of @p index before any write: the matching snapshot base cell, else the
     /// initial value. Struct values are selected field by field.
     [[nodiscard]] const IR::Expression *getBaseValueAtIndex(const IR::Expression *index) const;
@@ -219,6 +230,11 @@ class TofinoRegisterValue : public IndexMap {
     /// folded value directly (no Mux), which initializeRegisterParameters can consume via the
     /// literal flat-field path even for struct-typed registers.
     [[nodiscard]] const TestObject *evaluateForCarry(const Model &model) const override;
+
+    [[nodiscard]] const TestObject *evaluateForCellCarry(const Model &model) const override;
+
+    [[nodiscard]] const TestObject *withCellWrites(
+        const std::map<big_int, std::vector<big_int>> &cells) const override;
 
     DECLARE_TYPEINFO(TofinoRegisterValue, TestObject);
 };

@@ -115,7 +115,7 @@ CompilerResultOrError AbstractTofinoSymbexTarget::runCompilerImpl(
     // --cp-snapshot: the captured control-plane state, as closed-world const entries. Applied after
     // the midend so key names are final (RenameKeys spells them as bf-rt.json does).
     if (const auto *snapshot = loadedCpSnapshot(); snapshot != nullptr) {
-        program = program->apply(ApplyCpSnapshot(*snapshot));
+        program = program->apply(ApplyCpSnapshot(*snapshot, loadedCpSnapshotNext()));
         if (errorCount() > 0) {
             return std::nullopt;
         }

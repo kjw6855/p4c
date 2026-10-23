@@ -804,6 +804,66 @@ const IR::MethodCallExpression *actionCallOf(const IR::P4Table *table, const IR:
 
 }  // namespace
 
+namespace {
+
+bool sameRule(const CpSnapshotRule &a, const CpSnapshotRule &b) {
+    return sameRuleKey(a, b) && a.action == b.action && a.params == b.params;
+}
+
+/// Same rules (in the same order) and the same default action.
+bool sameTable(const CpSnapshotTable *a, const CpSnapshotTable *b) {
+    static const CpSnapshotTable kEmpty;
+    const auto &x = a != nullptr ? *a : kEmpty;
+    const auto &y = b != nullptr ? *b : kEmpty;
+    if (x.rules.size() != y.rules.size()) return false;
+    for (size_t i = 0; i < x.rules.size(); i++) {
+        if (!sameRule(x.rules[i], y.rules[i])) return false;
+    }
+    if (x.defaultAction.has_value() != y.defaultAction.has_value()) return false;
+    return !x.defaultAction.has_value() || sameRule(*x.defaultAction, *y.defaultAction);
+}
+
+}  // namespace
+
+IR::Vector<IR::Entry> ApplyCpSnapshot::buildEntries(const IR::P4Table *table,
+                                                     const IR::P4Control *control,
+                                                     const CpSnapshotTable *snapTable) const {
+    const cstring cpName = table->controlPlaneName();
+    const auto *key = table->getKey();
+    std::vector<const CpSnapshotRule *> rules;
+    if (snapTable != nullptr) {
+        for (const auto &r : snapTable->rules) rules.push_back(&r);
+    }
+    // First match wins in the const-entry evaluator; LPM tables are re-sorted by prefix there.
+    std::stable_sort(rules.begin(), rules.end(),
+                     [](const auto *a, const auto *b) { return a->priority > b->priority; });
+    IR::Vector<IR::Entry> entries;
+    for (const auto *rule : rules) {
+        IR::Vector<IR::Expression> keyset;
+        for (const auto *keyElement : key->keyElements) {
+            keyset.push_back(keysetOf(keyElement, findKey(*rule, keyName(keyElement)), cpName));
+        }
+        const auto *call = actionCallOf(table, control, *rule);
+        if (call == nullptr) continue;
+        entries.push_back(new IR::Entry(/*isConst=*/true, /*priority=*/nullptr,
+                                        new IR::ListExpression(keyset), call,
+                                        /*singleton=*/false));
+    }
+    return entries;
+}
+
+const IR::Expression *ApplyCpSnapshot::buildDefault(const IR::P4Table *table,
+                                                    const IR::P4Control *control,
+                                                    const CpSnapshotTable *snapTable) const {
+    const IR::Expression *defaultCall = table->getDefaultAction();
+    if (snapTable != nullptr && snapTable->defaultAction.has_value()) {
+        if (const auto *call = actionCallOf(table, control, *snapTable->defaultAction)) {
+            defaultCall = call;
+        }
+    }
+    return defaultCall;
+}
+
 const IR::Node *ApplyCpSnapshot::preorder(IR::P4Table *table) {
     prune();
     const cstring cpName = table->controlPlaneName();
@@ -820,6 +880,24 @@ const IR::Node *ApplyCpSnapshot::preorder(IR::P4Table *table) {
     const auto *key = table->getKey();
     const bool keyed = key != nullptr && !key->keyElements.empty();
 
+    // --cp-snapshot-sequence: S(K) of a table the step changes, kept beside the baked S(K-1) for
+    // phases that run after the update (ScopedCpSnapshotNext). Built from the original properties.
+    if (next != nullptr) {
+        const auto *nextTable = next->table(cpName);
+        if (!sameTable(snapTable, nextTable)) {
+            CpSnapshotNextTable entry;
+            if (keyed && !p4ConstEntries) {
+                entry.entries = new IR::EntriesList(buildEntries(table, control, nextTable));
+            }
+            if (defaultProp != nullptr && !p4ConstDefault) {
+                entry.defaultAction = buildDefault(table, control, nextTable);
+            }
+            cpSnapshotNextTables()[cpName] = entry;
+            printInfo("[CP snapshot] %1% changes at the next step: %2% entries", cpName,
+                      entry.entries != nullptr ? entry.entries->size() : 0);
+        }
+    }
+
     if (p4ConstEntries) {
         if (snapTable != nullptr && !snapTable->rules.empty()) {
             warning(ErrorType::WARN_IGNORE,
@@ -827,25 +905,7 @@ const IR::Node *ApplyCpSnapshot::preorder(IR::P4Table *table) {
                     cpName, snapTable->rules.size());
         }
     } else if (keyed) {
-        std::vector<const CpSnapshotRule *> rules;
-        if (snapTable != nullptr) {
-            for (const auto &r : snapTable->rules) rules.push_back(&r);
-        }
-        // First match wins in the const-entry evaluator; LPM tables are re-sorted by prefix there.
-        std::stable_sort(rules.begin(), rules.end(),
-                         [](const auto *a, const auto *b) { return a->priority > b->priority; });
-        IR::Vector<IR::Entry> entries;
-        for (const auto *rule : rules) {
-            IR::Vector<IR::Expression> keyset;
-            for (const auto *keyElement : key->keyElements) {
-                keyset.push_back(keysetOf(keyElement, findKey(*rule, keyName(keyElement)), cpName));
-            }
-            const auto *call = actionCallOf(table, control, *rule);
-            if (call == nullptr) continue;
-            entries.push_back(new IR::Entry(/*isConst=*/true, /*priority=*/nullptr,
-                                            new IR::ListExpression(keyset), call,
-                                            /*singleton=*/false));
-        }
+        auto entries = buildEntries(table, control, snapTable);
         // Show how small tables were materialized, in evaluation order (first match wins).
         if (!entries.empty() && entries.size() <= 8) {
             for (size_t i = 0; i < entries.size(); i++) {
@@ -869,12 +929,7 @@ const IR::Node *ApplyCpSnapshot::preorder(IR::P4Table *table) {
     }
 
     if (defaultProp != nullptr && !p4ConstDefault) {
-        const IR::Expression *defaultCall = table->getDefaultAction();
-        if (snapTable != nullptr && snapTable->defaultAction.has_value()) {
-            if (const auto *call = actionCallOf(table, control, *snapTable->defaultAction)) {
-                defaultCall = call;
-            }
-        }
+        const IR::Expression *defaultCall = buildDefault(table, control, snapTable);
         props->properties.removeByName(IR::TableProperties::defaultActionPropertyName);
         props->properties.push_back(new IR::Property(IR::TableProperties::defaultActionPropertyName,
                                                      new IR::ExpressionValue(defaultCall),
@@ -928,6 +983,22 @@ const IR::Expression *cellValueOf(const IR::Type *type, const std::string &name,
 
 }  // namespace
 
+int ScopedCpSnapshotNext::depth = 0;
+
+bool ScopedCpSnapshotNext::active() {
+    return depth > 0 || (SymbexOptions::get().cpSnapshotUseNext && loadedCpSnapshotNext() != nullptr);
+}
+
+std::map<cstring, CpSnapshotNextTable> &cpSnapshotNextTables() {
+    static std::map<cstring, CpSnapshotNextTable> tables;
+    return tables;
+}
+
+const CpSnapshot *activeCpSnapshot() {
+    if (ScopedCpSnapshotNext::active()) return loadedCpSnapshotNext();
+    return loadedCpSnapshot();
+}
+
 bool seedSnapshotRegisters() {
     return SymbexOptions::get().cpSnapshotRegisters == SymbexOptions::CpSnapshotRegisters::Seed;
 }
@@ -935,7 +1006,7 @@ bool seedSnapshotRegisters() {
 SnapshotRegisterSeed snapshotRegisterSeed(cstring cpName, const IR::Type *indexType,
                                           const IR::Type *type) {
     SnapshotRegisterSeed seed;
-    const auto *snap = loadedCpSnapshot();
+    const auto *snap = activeCpSnapshot();
     if (snap == nullptr || !seedSnapshotRegisters()) return seed;
     const auto *cells = snap->registerCells(cpName);
     if (cells == nullptr) return seed;
@@ -949,7 +1020,7 @@ SnapshotRegisterSeed snapshotRegisterSeed(cstring cpName, const IR::Type *indexT
 
 const IR::Expression *snapshotRegisterParam(cstring cpName, const IR::Type *type,
                                             std::vector<const IR::Expression *> &pins) {
-    const auto *snap = loadedCpSnapshot();
+    const auto *snap = activeCpSnapshot();
     if (snap == nullptr || !seedSnapshotRegisters()) return nullptr;
     const auto value = snap->registerParam(cpName);
     if (!value.has_value()) return nullptr;
