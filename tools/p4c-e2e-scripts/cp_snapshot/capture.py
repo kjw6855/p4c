@@ -35,9 +35,11 @@ A scenario module defines:
     the scenario runs on a fresh target (setup, steps 1..j, then the controller is stopped and the
     target dumped), because a running BfRt controller keeps other clients from reading.
 
-    capture.py <program> --manual init|step [--sequence SCENARIO] [--step-id N] [--trigger TEXT]
-    is the same for a P4Runtime target updated by hand, without run/reset_target: `init` dumps the
-    rules installed now, each `step` (after manual updates) dumps again and appends the diff.
+    capture.py <program> --manual init|step|clear [--sequence SCENARIO] [--step-id N]
+    [--trigger TEXT] [--yes] is the same for a P4Runtime target updated by hand, without
+    run/reset_target: `init` dumps the rules installed now, each `step` (after manual updates)
+    dumps again and appends the diff, `clear` deletes the sequence and its last dump. `init` on
+    existing files asks once whether to delete them, and quits if not (--yes: delete).
     PROGRAM in the scenario names the snapshot's program when it differs from the package name;
     CP_WORK replaces the default work root.
 """
@@ -607,17 +609,48 @@ def capture_sequence(program: str, scenario: str, out: Path, work: Path, settle:
     return max(rcs)
 
 
+def _confirm(question: str, assume_yes: bool) -> bool:
+    """Asks once on the terminal; --yes answers for scripts, and without a terminal it is a no."""
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print(f"{question} [y/N] no (no terminal to ask; pass --yes)")
+        return False
+    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+
+
 def capture_manual(program: str, scenario: str, phase: str, out: Path, work: Path,
-                   step_id: Optional[str] = None, trigger: str = "") -> int:
+                   step_id: Optional[str] = None, trigger: str = "",
+                   assume_yes: bool = False) -> int:
     """A P4Runtime target updated by hand (no run/reset_target): `init` dumps the rules installed
     now as the sequence's init; each `step` dumps again and appends the updates since the previous
-    dump. The last dump is kept in <work>/manual_<scenario>.pkl between the invocations."""
+    dump. The last dump is kept in <work>/manual_<scenario>.pkl between the invocations. `clear`
+    deletes the sequence and the last dump; `init` offers to when they exist."""
     scen = load_scenario(program)
     target = getattr(scen, "TARGET", "tofino")
     if target not in P4RT_TARGETS:
         raise SystemExit(f"{program}: --manual needs a P4Runtime target (TARGET is {target})")
-    work.mkdir(parents=True, exist_ok=True)
     state = work / f"manual_{scenario}.pkl"
+    files = [p for p in (out, state, out.with_name(out.name + ".tmp"),
+                         state.with_name(state.name + ".tmp")) if p.exists()]
+    if phase in ("init", "clear") and files:
+        if state.exists():
+            seq = pickle.loads(state.read_bytes())["seq"]
+            print(f"scenario {scenario}: init {len(seq.init.entities)} entities, "
+                  f"{len(seq.steps)} steps")
+        print("existing files:\n" + "".join(f"  {p}\n" for p in files), end="")
+        if not _confirm("Delete them" + (" and start a new sequence?" if phase == "init"
+                                         else "?"), assume_yes):
+            print("kept; nothing done")
+            return 1
+    if phase == "clear":
+        for p in files:
+            p.unlink()
+        print(f"deleted {len(files)} files" if files else f"scenario {scenario}: nothing to clear")
+        return 0
+    # init replaces the confirmed files only once its dump succeeded (below); a failed dump
+    # leaves them as they were.
+    work.mkdir(parents=True, exist_ok=True)
     dump, notes = _p4rt_dump(scen, f"manual {phase}")
     if phase == "init":
         s = snap.Snapshot(program=getattr(scen, "PROGRAM", program), target=target,
@@ -645,6 +678,8 @@ def capture_manual(program: str, scenario: str, phase: str, out: Path, work: Pat
     tmp_out.write_text(snap.sequence_to_textproto(seq))
     tmp_out.replace(out)
     tmp_state.replace(state)
+    if phase == "init" and files:
+        print(f"replaced the old sequence ({len(files)} files)")
     log.info("wrote %s: init %d entities, steps %s", out, len(seq.init.entities),
              [len(st.updates) for st in seq.steps])
     return 0
@@ -661,10 +696,12 @@ def main() -> int:
                     help="seconds to wait after each step (--sequence)")
     ap.add_argument("--check-determinism", action="store_true",
                     help="run the setup twice and fail if the dumps differ (--sequence)")
-    ap.add_argument("--manual", choices=("init", "step"),
+    ap.add_argument("--manual", choices=("init", "step", "clear"),
                     help="P4Runtime target updated by hand: init dumps the installed rules, each "
-                         "step dumps again and appends the diff (scenario: --sequence, default "
-                         "manual)")
+                         "step dumps again and appends the diff, clear deletes the sequence and "
+                         "its last dump (scenario: --sequence, default manual)")
+    ap.add_argument("--yes", "-y", action="store_true",
+                    help="--manual init/clear: delete existing files without asking")
     ap.add_argument("--step-id", help="--manual step: the step's name (default stepN)")
     ap.add_argument("--trigger", default="", help="--manual step: what was done by hand")
     a = ap.parse_args()
@@ -674,7 +711,8 @@ def main() -> int:
         scenario = a.sequence or "manual"
         pkg = packages.package_dir(a.program)
         out = (a.out or (pkg or work) / "snapshot" / "seq" / f"{scenario}.txtpb").resolve()
-        return capture_manual(a.program, scenario, a.manual, out, work, a.step_id, a.trigger)
+        return capture_manual(a.program, scenario, a.manual, out, work, a.step_id, a.trigger,
+                              a.yes)
     if a.sequence:
         out = (a.out or work / "snapshot" / "seq" / f"{a.sequence}.txtpb").resolve()
         return capture_sequence(a.program, a.sequence, out, work, a.settle, a.check_determinism)

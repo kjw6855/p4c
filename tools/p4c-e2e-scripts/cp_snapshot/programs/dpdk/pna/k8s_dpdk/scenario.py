@@ -7,6 +7,9 @@ then captures over P4Runtime with capture.py --manual:
     ... update rules by hand (p4rt-ctl, a P4Runtime client) ...
     capture.py k8s_dpdk --manual step [--sequence NAME] [--trigger TEXT]   # (2) the diff
     (repeat (2) for 3-2, 4-3, ...)
+    capture.py k8s_dpdk --manual clear [--sequence NAME]       # delete the sequence, start over
+
+init on an existing sequence asks once whether to delete it and quits if not (--yes: delete).
 
 The sequence goes to snapshot/seq/<NAME>.txtpb (NAME defaults to "manual"). P4RT_ADDR, P4INFO and
 P4RT_DEVICE_ID in the environment override the values below.
