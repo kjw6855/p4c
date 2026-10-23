@@ -695,6 +695,32 @@ SymbexOptions::SymbexOptions()
         "--cp-annotation. Only one snapshot is accepted.");
 
     registerOption(
+        "--cp-snapshot-sequence", "file",
+        [this](const char *arg) {
+            cpSnapshotSequencePath = std::string(arg);
+            return true;
+        },
+        "Load a control-plane snapshot sequence (a symbex.CpSnapshotSequence textproto: the "
+        "post-setup state and the updates each later controller step made). With --cp-step K the "
+        "run is closed-world under S(K-1), the state before step K, exactly as --cp-snapshot of that "
+        "state would be. Excludes --cp-snapshot and --cp-annotation.");
+
+    registerOption(
+        "--cp-step", "K",
+        [this](const char *arg) {
+            char *end = nullptr;
+            const long k = std::strtol(arg, &end, 10);
+            if (end == arg || *end != '\0' || k < 1) {
+                error(ErrorType::ERR_INVALID, "--cp-step: expected a step number >= 1");
+                return false;
+            }
+            cpStep = static_cast<int>(k);
+            return true;
+        },
+        "The controller step of --cp-snapshot-sequence under study (1 = the first step after "
+        "setup): the run starts from the state before it.");
+
+    registerOption(
         "--cp-snapshot-registers", "SEED|INITIAL",
         [this](const char *arg) {
             if (std::string(arg) == "SEED") {
@@ -1054,11 +1080,21 @@ bool SymbexOptions::validateOptions() const {
             return false;
         }
     }
-    if (cpSnapshotRegistersSet && cpSnapshotPaths.empty()) {
-        error(ErrorType::ERR_INVALID, "--cp-snapshot-registers requires --cp-snapshot.");
+    if (cpSnapshotRegistersSet && !hasCpSnapshot()) {
+        error(ErrorType::ERR_INVALID,
+              "--cp-snapshot-registers requires --cp-snapshot or --cp-snapshot-sequence.");
         return false;
     }
-    if (!cpSnapshotPaths.empty()) {
+    if (cpSnapshotSequencePath.has_value() != (cpStep > 0)) {
+        error(ErrorType::ERR_INVALID, "--cp-snapshot-sequence and --cp-step go together.");
+        return false;
+    }
+    if (cpSnapshotSequencePath.has_value() && !cpSnapshotPaths.empty()) {
+        error(ErrorType::ERR_INVALID,
+              "--cp-snapshot-sequence and --cp-snapshot are mutually exclusive.");
+        return false;
+    }
+    if (hasCpSnapshot()) {
         if (cpSnapshotPaths.size() > 1) {
             error(ErrorType::ERR_INVALID, "--cp-snapshot: multiple snapshots are not supported yet.");
             return false;

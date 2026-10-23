@@ -2,6 +2,7 @@
 #define BACKENDS_P4TOOLS_MODULES_SYMBEX_CORE_SYMBOLIC_EXECUTOR_CP_SNAPSHOT_H_
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -18,6 +19,8 @@ class P4Info;
 
 namespace symbex {
 class CpSnapshot;
+class CpSnapshotSequence;
+class CpSnapshotStep;
 }  // namespace symbex
 
 namespace P4::P4Tools::Symbex {
@@ -58,6 +61,16 @@ class CpSnapshot {
  public:
     /// Parse @p path. Raises a P4 error() and returns std::nullopt on any error.
     static std::optional<CpSnapshot> load(const std::string &path);
+    /// Build from a parsed message (@p source names it in messages), as load() does.
+    static std::optional<CpSnapshot> fromProto(std::shared_ptr<symbex::CpSnapshot> msg,
+                                               const std::string &source);
+
+    /// Apply one controller step of a snapshot sequence: INSERT/MODIFY/DELETE of rules and default
+    /// actions (a rule is identified by its keys and priority; DELETE of a default restores the P4
+    /// default), register cells and register params. PRE and mirror changes are counted but not
+    /// modelled. Raises a P4 error() and returns false when an update names an absent rule (or
+    /// INSERTs an existing one). The emitted snapshot block (proto()) is not changed.
+    bool applyStep(const symbex::CpSnapshotStep &step);
 
     [[nodiscard]] cstring target() const { return target_; }
     [[nodiscard]] cstring program() const { return program_; }
@@ -101,6 +114,9 @@ class CpSnapshot {
     [[nodiscard]] const symbex::CpSnapshot &proto() const { return *proto_; }
 
  private:
+    bool applyRule(cstring tableName, bool isDefault, CpSnapshotRule rule, int type,
+                   const std::string &stepId);
+
     cstring target_;
     cstring program_;
     std::map<cstring, CpSnapshotTable> tables_;
@@ -117,8 +133,16 @@ class CpSnapshot {
 };
 
 /// The snapshot named by --cp-snapshot, loaded once on first use, or nullptr when the flag is
-/// absent (or the file failed to load - the error is raised at that point).
+/// absent (or the file failed to load - the error is raised at that point). Under
+/// --cp-snapshot-sequence/--cp-step K it is S(K-1): the sequence's init with steps 1..K-1 applied.
 CpSnapshot *loadedCpSnapshot();
+
+/// Under --cp-snapshot-sequence/--cp-step K: S(K), i.e. loadedCpSnapshot() with step K applied;
+/// nullptr otherwise.
+CpSnapshot *loadedCpSnapshotNext();
+
+/// The parsed --cp-snapshot-sequence file (its steps go into emitted cases), or nullptr.
+const symbex::CpSnapshotSequence *loadedCpSnapshotSequence();
 
 /// The loaded snapshot as `snapshot_entities { ... }` blocks of a TamperingTestCase textproto
 /// (P4Runtime entities when @p bfrt is false, BfRt entities otherwise), preceded by a

@@ -164,6 +164,16 @@ class SymbexOptions : public AbstractP4cToolOptions {
     /// A vector so that a snapshot sequence can be accepted later; only one file is allowed today.
     std::vector<std::string> cpSnapshotPaths;
 
+    /// --cp-snapshot-sequence / --cp-step K: a symbex.CpSnapshotSequence (the post-setup state and
+    /// the diff each later controller step made). The run is closed-world under S(K-1) (init with
+    /// steps 1..K-1 applied), as --cp-snapshot would be; S(K) is kept for the A2S search.
+    std::optional<std::string> cpSnapshotSequencePath;
+    int cpStep = 0;
+    /// Whether a snapshot (--cp-snapshot or --cp-snapshot-sequence) decides the control plane.
+    [[nodiscard]] bool hasCpSnapshot() const {
+        return !cpSnapshotPaths.empty() || cpSnapshotSequencePath.has_value();
+    }
+
     /// --cp-snapshot-registers: where the search's register cells come from. Seed (default): the
     /// snapshot's CP-set cells, tagged by register knowledge. Initial: the P4-declared initial
     /// values, i.e. what a data-plane attacker can know; the snapshot cells still go to the

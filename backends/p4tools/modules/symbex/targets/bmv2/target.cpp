@@ -71,6 +71,9 @@ CompilerResultOrError Bmv2V1ModelSymbexTarget::runCompilerImpl(
     // register entries name their register by P4Runtime id, so bind the P4Info first.
     if (auto *snapshot = loadedCpSnapshot(); snapshot != nullptr) {
         snapshot->bindP4Info(*p4runtimeApi.p4Info);
+        if (auto *next = loadedCpSnapshotNext(); next != nullptr) {
+            next->bindP4Info(*p4runtimeApi.p4Info);
+        }
         program = program->apply(ApplyCpSnapshot(*snapshot));
         if (errorCount() > 0) {
             return std::nullopt;

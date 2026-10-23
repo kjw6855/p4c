@@ -165,6 +165,43 @@ CpSnapshotRule ruleFromBfRt(const symbex::tofino::BfRtEntity &e) {
     return rule;
 }
 
+/// A BfRt register cell: the entity keys the register table by $REGISTER_INDEX.
+bool isBfRtRegisterCell(const symbex::tofino::BfRtEntity &e) {
+    return std::any_of(e.key().begin(), e.key().end(),
+                       [](const auto &k) { return k.field_name() == "$REGISTER_INDEX"; });
+}
+
+/// (index, field values) of a BfRt register cell.
+std::pair<big_int, std::vector<big_int>> bfrtRegisterCell(const symbex::tofino::BfRtEntity &e) {
+    big_int index = 0;
+    for (const auto &k : e.key()) {
+        if (k.field_name() == "$REGISTER_INDEX") index = bytesToInt(k.exact().value());
+    }
+    std::vector<big_int> values;
+    for (const auto &d : e.data()) values.push_back(bytesToInt(d.value()));
+    return {index, values};
+}
+
+/// A RegisterParam: no key, no action, a single data field ("value").
+bool isBfRtRegisterParam(const symbex::tofino::BfRtEntity &e) {
+    return e.key_size() == 0 && e.action_name().empty() && e.data_size() == 1;
+}
+
+/// Same match keys and priority: the identity of a rule across snapshot updates.
+bool sameRuleKey(const CpSnapshotRule &a, const CpSnapshotRule &b) {
+    if (a.priority != b.priority || a.keys.size() != b.keys.size()) return false;
+    for (const auto &[name, k] : a.keys) {
+        auto it = b.keys.find(name);
+        if (it == b.keys.end()) return false;
+        const auto &o = it->second;
+        if (k.kind != o.kind || k.value != o.value || k.mask != o.mask ||
+            k.prefixLen != o.prefixLen || k.high != o.high) {
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 std::optional<CpSnapshot> CpSnapshot::load(const std::string &path) {
@@ -181,6 +218,11 @@ std::optional<CpSnapshot> CpSnapshot::load(const std::string &path) {
               path);
         return std::nullopt;
     }
+    return fromProto(msg, path);
+}
+
+std::optional<CpSnapshot> CpSnapshot::fromProto(std::shared_ptr<symbex::CpSnapshot> msg,
+                                                const std::string &path) {
     CpSnapshot snap;
     snap.proto_ = msg;
     snap.target_ = cstring(msg->target());
@@ -202,23 +244,14 @@ std::optional<CpSnapshot> CpSnapshot::load(const std::string &path) {
         // PRE entries (multicast groups, clone sessions) are kept in the proto for emission.
     }
     for (const auto &e : msg->bfrt_entities()) {
-        const bool isRegister =
-            std::any_of(e.key().begin(), e.key().end(),
-                        [](const auto &k) { return k.field_name() == "$REGISTER_INDEX"; });
-        if (isRegister) {
-            big_int index = 0;
-            for (const auto &k : e.key()) {
-                if (k.field_name() == "$REGISTER_INDEX") index = bytesToInt(k.exact().value());
-            }
-            std::vector<big_int> values;
-            for (const auto &d : e.data()) values.push_back(bytesToInt(d.value()));
+        if (isBfRtRegisterCell(e)) {
+            auto [index, values] = bfrtRegisterCell(e);
             snap.registers_[cstring(e.table_name())][index] = values;
             continue;
         }
         // $mirror.cfg, $pre.*, $PORT_METADATA: replay-only state, kept in the proto for emission.
         if (isInternalBfRtTable(e.table_name())) continue;
-        // A RegisterParam: no key, no action, a single data field ("value").
-        if (e.key_size() == 0 && e.action_name().empty() && e.data_size() == 1) {
+        if (isBfRtRegisterParam(e)) {
             snap.registerParams_[cstring(e.table_name())] = bytesToInt(e.data(0).value());
             continue;
         }
@@ -279,6 +312,96 @@ std::optional<CpSnapshot> CpSnapshot::load(const std::string &path) {
               path, snap.tables_.size(), rules, snap.registers_.size() + snap.registersById_.size(),
               snap.hostPorts_.size(), snap.attackerPorts_.size());
     return snap;
+}
+
+bool CpSnapshot::applyRule(cstring tableName, bool isDefault, CpSnapshotRule rule, int type,
+                           const std::string &stepId) {
+    auto &table = tables_[tableName];
+    if (isDefault) {
+        if (type == symbex::tofino::CP_UPDATE_DELETE) {
+            table.defaultAction.reset();
+        } else {
+            table.defaultAction = std::move(rule);
+        }
+        return true;
+    }
+    auto it = std::find_if(table.rules.begin(), table.rules.end(),
+                           [&rule](const auto &r) { return sameRuleKey(r, rule); });
+    if (type == symbex::tofino::CP_UPDATE_INSERT) {
+        if (it != table.rules.end()) {
+            error(ErrorType::ERR_INVALID, "--cp-snapshot-sequence: step %1% inserts an existing %2% "
+                  "entry", stepId, tableName);
+            return false;
+        }
+        table.rules.push_back(std::move(rule));
+        return true;
+    }
+    if (it == table.rules.end()) {
+        error(ErrorType::ERR_INVALID, "--cp-snapshot-sequence: step %1% %2% an absent %3% entry",
+              stepId, type == symbex::tofino::CP_UPDATE_DELETE ? "deletes" : "modifies", tableName);
+        return false;
+    }
+    if (type == symbex::tofino::CP_UPDATE_DELETE) {
+        table.rules.erase(it);
+    } else {
+        *it = std::move(rule);
+    }
+    return true;
+}
+
+bool CpSnapshot::applyStep(const symbex::CpSnapshotStep &step) {
+    size_t applied = 0;
+    size_t unmodelled = 0;
+    for (const auto &u : step.updates()) {
+        const int type = u.type();
+        if (type == symbex::tofino::CP_UPDATE_UNSPECIFIED) {
+            error(ErrorType::ERR_INVALID, "--cp-snapshot-sequence: step %1% has an update without "
+                  "a type", step.step_id());
+            return false;
+        }
+        if (u.has_entity()) {
+            const auto &entity = u.entity();
+            if (entity.has_table_entry()) {
+                const auto &te = entity.table_entry();
+                if (!applyRule(cstring(te.table_name()), te.is_default_action(),
+                               ruleFromP4Runtime(te), type, step.step_id())) {
+                    return false;
+                }
+            } else if (entity.has_register_entry()) {
+                const auto &re = entity.register_entry();
+                registersById_[re.register_id()][re.index().index()] = p4DataValues(re.data());
+            } else {
+                unmodelled++;  // PRE entries (multicast groups, clone sessions)
+                continue;
+            }
+        } else if (u.has_bfrt_entity()) {
+            const auto &e = u.bfrt_entity();
+            if (isBfRtRegisterCell(e)) {
+                auto [index, values] = bfrtRegisterCell(e);
+                registers_[cstring(e.table_name())][index] = values;
+            } else if (isInternalBfRtTable(e.table_name())) {
+                unmodelled++;  // $pre.*, $mirror.cfg, $PORT_METADATA
+                continue;
+            } else if (isBfRtRegisterParam(e)) {
+                registerParams_[cstring(e.table_name())] = bytesToInt(e.data(0).value());
+            } else if (!applyRule(cstring(e.table_name()), e.is_default_entry(), ruleFromBfRt(e),
+                                  type, step.step_id())) {
+                return false;
+            }
+        } else {
+            error(ErrorType::ERR_INVALID, "--cp-snapshot-sequence: step %1% has an update without "
+                  "an entity", step.step_id());
+            return false;
+        }
+        applied++;
+    }
+    if (unmodelled > 0) {
+        warning(ErrorType::WARN_UNSUPPORTED,
+                "--cp-snapshot-sequence: step %1%: %2% PRE/mirror/port updates are not modelled",
+                step.step_id(), unmodelled);
+    }
+    printInfo("[CP snapshot] step %1%: %2% updates applied", step.step_id(), applied);
+    return true;
 }
 
 const CpSnapshotTable *CpSnapshot::table(cstring cpName) const {
@@ -359,15 +482,83 @@ void CpSnapshot::bindP4Info(const p4::config::v1::P4Info &p4Info) {
     registersById_.clear();
 }
 
-CpSnapshot *loadedCpSnapshot() {
-    static std::optional<CpSnapshot> cache;
+namespace {
+
+struct LoadedSnapshots {
+    /// --cp-snapshot, or S(K-1) of --cp-snapshot-sequence.
+    std::optional<CpSnapshot> current;
+    /// S(K) of --cp-snapshot-sequence.
+    std::optional<CpSnapshot> next;
+    std::shared_ptr<symbex::CpSnapshotSequence> sequence;
+};
+
+/// S(K-1) and S(K) of the sequence at @p path: its init with steps 1..K-1, then step K, applied.
+void loadSequence(const std::string &path, int step, LoadedSnapshots &out) {
+    std::ifstream in(path);
+    if (!in) {
+        error(ErrorType::ERR_IO, "--cp-snapshot-sequence: cannot open %1%", path);
+        return;
+    }
+    std::stringstream buf;
+    buf << in.rdbuf();
+    auto seq = std::make_shared<symbex::CpSnapshotSequence>();
+    if (!google::protobuf::TextFormat::ParseFromString(buf.str(), seq.get())) {
+        error(ErrorType::ERR_INVALID,
+              "--cp-snapshot-sequence: %1% is not a symbex.CpSnapshotSequence textproto", path);
+        return;
+    }
+    if (step < 1 || step > seq->steps_size()) {
+        error(ErrorType::ERR_INVALID, "--cp-step %1%: %2% has steps 1..%3%", step, path,
+              seq->steps_size());
+        return;
+    }
+    auto init = std::make_shared<symbex::CpSnapshot>(seq->init());
+    if (init->target().empty()) init->set_target(seq->target());
+    auto current = CpSnapshot::fromProto(init, path);
+    if (!current.has_value()) return;
+    for (int i = 0; i + 1 < step; i++) {
+        if (!current->applyStep(seq->steps(i))) return;
+    }
+    auto next = current;
+    if (!next->applyStep(seq->steps(step - 1))) return;
+    printInfo("[CP snapshot] sequence %1% (scenario %2%): S(%3%) after %4%, next step %5%",
+              path, seq->scenario(), step - 1,
+              step == 1 ? std::string("init") : seq->steps(step - 2).step_id(),
+              seq->steps(step - 1).step_id());
+    out.current = std::move(current);
+    out.next = std::move(next);
+    out.sequence = seq;
+}
+
+LoadedSnapshots &loadedSnapshots() {
+    static LoadedSnapshots state;
     static bool tried = false;
     if (!tried) {
         tried = true;
-        const auto &paths = SymbexOptions::get().cpSnapshotPaths;
-        if (!paths.empty()) cache = CpSnapshot::load(paths.front());
+        const auto &opts = SymbexOptions::get();
+        if (opts.cpSnapshotSequencePath.has_value()) {
+            loadSequence(*opts.cpSnapshotSequencePath, opts.cpStep, state);
+        } else if (!opts.cpSnapshotPaths.empty()) {
+            state.current = CpSnapshot::load(opts.cpSnapshotPaths.front());
+        }
     }
-    return cache.has_value() ? &cache.value() : nullptr;
+    return state;
+}
+
+}  // namespace
+
+CpSnapshot *loadedCpSnapshot() {
+    auto &state = loadedSnapshots();
+    return state.current.has_value() ? &state.current.value() : nullptr;
+}
+
+CpSnapshot *loadedCpSnapshotNext() {
+    auto &state = loadedSnapshots();
+    return state.next.has_value() ? &state.next.value() : nullptr;
+}
+
+const symbex::CpSnapshotSequence *loadedCpSnapshotSequence() {
+    return loadedSnapshots().sequence.get();
 }
 
 namespace {
