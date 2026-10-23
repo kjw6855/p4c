@@ -353,7 +353,9 @@ def _bmv2(program: str, scen, ctx: Context, ports: List[int]):
 
 # P4Runtime targets the operator starts and loads (dpdk: infrap4d on a PNA-DPDK host; p4rt: any
 # P4Runtime server). capture.py only attaches: P4RT_ADDR (default the scenario's P4RT_ADDR, else
-# 127.0.0.1:9559), P4INFO (else the scenario's P4INFO) and P4RT_DEVICE_ID name the server; the
+# 127.0.0.1:9559), P4INFO and P4RT_DEVICE_ID (0) name the server, P4RT_CERTS (a directory with
+# ca.crt[, client.crt, client.key]) and P4RT_SERVER_NAME set up TLS; each environment variable
+# overrides the scenario attribute of the same name. The
 # P4Runtime python bindings (p4.v1, grpc) must be importable.
 P4RT_TARGETS = ("p4rt", "dpdk")
 
@@ -365,8 +367,12 @@ def _p4rt_dump(scen, tag: str):
     if not p4info:
         raise SystemExit("P4Runtime target: set P4INFO (or the scenario's P4INFO)")
     t0 = time.time()
-    records, notes = p4rt_dump.dump(addr, p4rt_dump.load_p4info(Path(p4info)),
-                                    int(os.environ.get("P4RT_DEVICE_ID", "0")))
+    certs = os.environ.get("P4RT_CERTS", getattr(scen, "P4RT_CERTS", None))
+    records, notes = p4rt_dump.dump(
+        addr, p4rt_dump.load_p4info(Path(p4info)),
+        int(os.environ.get("P4RT_DEVICE_ID", getattr(scen, "P4RT_DEVICE_ID", 0))),
+        Path(certs) if certs else None,
+        os.environ.get("P4RT_SERVER_NAME", getattr(scen, "P4RT_SERVER_NAME", None)))
     log.info("%s: %d entities in %.0fs, %d notes", tag, len(records), time.time() - t0,
              len(notes))
     return p4rt_dump.records_to_entities(records), notes

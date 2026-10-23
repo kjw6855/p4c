@@ -11,14 +11,18 @@ then captures over P4Runtime with capture.py --manual:
 
 init on an existing sequence asks once whether to delete it and quits if not (--yes: delete).
 
-The sequence goes to snapshot/seq/<NAME>.txtpb (NAME defaults to "manual"). P4RT_ADDR, P4INFO and
-P4RT_DEVICE_ID in the environment override the values below.
+The sequence goes to snapshot/seq/<NAME>.txtpb (NAME defaults to "manual"). P4RT_ADDR, P4INFO,
+P4RT_DEVICE_ID, P4RT_CERTS and P4RT_SERVER_NAME in the environment override the values below.
+They follow infrap4d's defaults, as p4rt-ctl uses them: TLS with the stratum certificates (issued
+for localhost) and device id 1.
 """
 from pathlib import Path
 
 PROGRAM = "k8s_dpdk_k8s_dp"  # the chain cache's name for k8s_dp.p4
 TARGET = "dpdk"
 DESCRIPTION = "k8s_dp.p4 rules installed and updated by hand over P4Runtime (infrap4d)"
-P4RT_ADDR = "127.0.0.1:9559"
+P4RT_ADDR = "localhost:9559"  # the name infrap4d's server certificate is issued for
+P4RT_CERTS = "/usr/share/stratum/certs"  # ca.crt, client.crt, client.key (P4RT_CERTS= : plaintext)
+P4RT_DEVICE_ID = 1
 P4INFO = str(Path(__file__).with_name("p4Info.txt"))  # top_tier_repo/k8s_dpdk/p4Info.txt
 PORTS = []  # roles for p4symbex; capture itself sends no packets
