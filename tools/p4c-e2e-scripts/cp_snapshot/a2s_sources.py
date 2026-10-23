@@ -122,9 +122,13 @@ def all_chains(chains: dict) -> Iterable[Tuple[str, dict]]:
 
 def default_chains(program: str) -> Path:
     pkg = packages.package_dir(program)
-    if pkg is None:
-        raise SystemExit(f"no package for {program}; pass --chains")
-    return CACHE / pkg.parent.parent.name / pkg.parent.name / f"{program}.chains"
+    if pkg is not None:
+        return CACHE / pkg.parent.parent.name / pkg.parent.name / f"{program}.chains"
+    # A package named apart from its program (scenario PROGRAM): find the program in the cache.
+    found = sorted(CACHE.glob(f"*/*/{program}.chains"))
+    if not found:
+        raise SystemExit(f"no package or cached chains for {program}; pass --chains")
+    return found[0]
 
 
 def main() -> int:

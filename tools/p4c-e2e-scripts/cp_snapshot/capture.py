@@ -34,6 +34,12 @@ A scenario module defines:
     `init` (what the setup changed, as above) and, per step, the updates it made. Every prefix of
     the scenario runs on a fresh target (setup, steps 1..j, then the controller is stopped and the
     target dumped), because a running BfRt controller keeps other clients from reading.
+
+    capture.py <program> --manual init|step [--sequence SCENARIO] [--step-id N] [--trigger TEXT]
+    is the same for a P4Runtime target updated by hand, without run/reset_target: `init` dumps the
+    rules installed now, each `step` (after manual updates) dumps again and appends the diff.
+    PROGRAM in the scenario names the snapshot's program when it differs from the package name;
+    CP_WORK replaces the default work root.
 """
 from __future__ import annotations
 
@@ -601,6 +607,45 @@ def capture_sequence(program: str, scenario: str, out: Path, work: Path, settle:
     return max(rcs)
 
 
+def capture_manual(program: str, scenario: str, phase: str, out: Path, work: Path,
+                   step_id: Optional[str] = None, trigger: str = "") -> int:
+    """A P4Runtime target updated by hand (no run/reset_target): `init` dumps the rules installed
+    now as the sequence's init; each `step` dumps again and appends the updates since the previous
+    dump. The last dump is kept in <work>/manual_<scenario>.pkl between the invocations."""
+    scen = load_scenario(program)
+    target = getattr(scen, "TARGET", "tofino")
+    if target not in P4RT_TARGETS:
+        raise SystemExit(f"{program}: --manual needs a P4Runtime target (TARGET is {target})")
+    work.mkdir(parents=True, exist_ok=True)
+    state = work / f"manual_{scenario}.pkl"
+    dump, notes = _p4rt_dump(scen, f"manual {phase}")
+    if phase == "init":
+        s = snap.Snapshot(program=getattr(scen, "PROGRAM", program), target=target,
+                          ports=list(getattr(scen, "PORTS", [])), entities=dump,
+                          snapshot_id="init")
+        seq = snap.Sequence(init=s, scenario=scenario, notes=[
+            f"snapshot sequence on {target} (manual): {getattr(scen, 'DESCRIPTION', '')}",
+            f"init: the {len(dump)} entities installed at the first dump"])
+    else:
+        if not state.exists():
+            raise SystemExit(f"{state} not found: run --manual init first")
+        saved = pickle.loads(state.read_bytes())
+        seq = saved["seq"]
+        ups = snap.updates(saved["last"], dump)
+        sid = step_id or f"step{len(seq.steps) + 1}"
+        seq.steps.append(snap.Step(sid, trigger, ups))
+        seq.notes.append(f"step {sid}: {len(ups)} updates")
+        log.info("step %s: %s", sid, {op: sum(1 for o, _ in ups if o == op)
+                                      for op in snap.UPDATE_TYPES})
+    seq.notes += [f"dump: {n}" for n in notes if f"dump: {n}" not in seq.notes]
+    state.write_bytes(pickle.dumps({"seq": seq, "last": dump}))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(snap.sequence_to_textproto(seq))
+    log.info("wrote %s: init %d entities, steps %s", out, len(seq.init.entities),
+             [len(st.updates) for st in seq.steps])
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("program")
@@ -612,9 +657,20 @@ def main() -> int:
                     help="seconds to wait after each step (--sequence)")
     ap.add_argument("--check-determinism", action="store_true",
                     help="run the setup twice and fail if the dumps differ (--sequence)")
+    ap.add_argument("--manual", choices=("init", "step"),
+                    help="P4Runtime target updated by hand: init dumps the installed rules, each "
+                         "step dumps again and appends the diff (scenario: --sequence, default "
+                         "manual)")
+    ap.add_argument("--step-id", help="--manual step: the step's name (default stepN)")
+    ap.add_argument("--trigger", default="", help="--manual step: what was done by hand")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    work = (a.work or WORK / a.program).resolve()
+    work = (a.work or Path(os.environ.get("CP_WORK", WORK)) / a.program).resolve()
+    if a.manual:
+        scenario = a.sequence or "manual"
+        pkg = packages.package_dir(a.program)
+        out = (a.out or (pkg or work) / "snapshot" / "seq" / f"{scenario}.txtpb").resolve()
+        return capture_manual(a.program, scenario, a.manual, out, work, a.step_id, a.trigger)
     if a.sequence:
         out = (a.out or work / "snapshot" / "seq" / f"{a.sequence}.txtpb").resolve()
         return capture_sequence(a.program, a.sequence, out, work, a.settle, a.check_determinism)
