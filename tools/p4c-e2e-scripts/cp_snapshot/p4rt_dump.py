@@ -10,7 +10,9 @@ mutual TLS, client.crt and client.key (infrap4d's are in /usr/share/stratum/cert
 host must match the server certificate's name (IPDK's: localhost), or pass --server-name.
 
 Reads, per P4Info table, its entries (wildcard read) and its default entry; every action profile's
-members and groups (an entry of a selector table refers to one by id: action "$member"/"$group");
+members and groups (an entry of a selector table refers to one by id: action "$member"/"$group";
+groups a wildcard read does not return, as on infrap4d, are read by the ids entries refer to, so a
+group no entry refers to is missed there);
 every register's cells (register_entry wildcard; targets that do not serve register reads, such as
 bmv2, give a note); and the PRE's multicast groups and clone sessions. Reads need no arbitration, so a running
 controller keeps its primary role. Needs grpc and the P4Runtime python bindings (p4.v1), which the
@@ -181,19 +183,41 @@ def dump(addr: str, p4info, device_id: int = 0, certs: Optional[Path] = None,
                                 "action": action, "data": params, "priority": 0})
         except grpc.RpcError as ex:
             notes.append(f"read members of {ap_.preamble.name}: {ex.code().name}")
+        # Groups: a wildcard read, then a read by id of every group the profile's selector entries
+        # refer to that it did not return (infrap4d serves group reads only by id).
+        users = {t.preamble.name for t in p4info.tables if t.implementation_id == ap_.preamble.id}
+        wanted = {int(r["data"][0][1]) for r in records
+                  if r["table"] in users and r["action"] == "$group"}
+        found = set()
+
+        def add_group(g):
+            members = sorted([int(x.member_id), int(x.weight)] for x in g.members)
+            records.append({"table": table, "keys": [["$GROUP_ID", "exact", int(g.group_id),
+                                                      None]],
+                            "action": "", "data": [["members", members],
+                                                   ["max_size", int(g.max_size)]],
+                            "priority": 0})
+            found.add(int(g.group_id))
         e = p4runtime_pb2.Entity()
         e.action_profile_group.action_profile_id = ap_.preamble.id
         try:
             for ent in read(e):
-                g = ent.action_profile_group
-                members = sorted([int(x.member_id), int(x.weight)] for x in g.members)
-                records.append({"table": table, "keys": [["$GROUP_ID", "exact",
-                                                          int(g.group_id), None]],
-                                "action": "", "data": [["members", members],
-                                                       ["max_size", int(g.max_size)]],
-                                "priority": 0})
+                add_group(ent.action_profile_group)
         except grpc.RpcError as ex:
-            notes.append(f"read groups of {ap_.preamble.name}: {ex.code().name}")
+            notes.append(f"read groups of {ap_.preamble.name}: {ex.code().name}"
+                         + (", read by id instead" if wanted else ""))
+        for gid in sorted(wanted - found):
+            e = p4runtime_pb2.Entity()
+            e.action_profile_group.action_profile_id = ap_.preamble.id
+            e.action_profile_group.group_id = gid
+            try:
+                for ent in read(e):
+                    add_group(ent.action_profile_group)
+            except grpc.RpcError as ex:
+                notes.append(f"read group {gid} of {ap_.preamble.name}: {ex.code().name}")
+        if wanted - found:
+            notes.append(f"{ap_.preamble.name}: groups {sorted(wanted - found)} are referred to "
+                         "but not read")
     for r in p4info.registers:
         e = p4runtime_pb2.Entity()
         e.register_entry.register_id = r.preamble.id
