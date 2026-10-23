@@ -1,0 +1,168 @@
+# proto-file: p4symbex.proto
+# proto-message: symbex.CpSnapshot
+# live capture on tofino: controller.py -m init (switch config for a requester/responder pair)
+# patch controller.py: determinism: mirror session ids come from random.sample; two captures must agree
+# patch controller.py: bug (Python 3): sendall needs bytes; raised after the event rules were installed
+program: "lumina_lumina_switch_p4src_inject_switch"
+target: "tofino"
+snapshot_id: "live"
+captured_at: "2026-10-23T06:43:36.107481+00:00"
+topology {
+  port { port: 60 role: PORT_ROLE_HOST name: "requester" ip: "10.0.0.1" }
+  port { port: 61 role: PORT_ROLE_HOST name: "responder" ip: "10.0.0.2" }
+  port { port: 62 role: PORT_ROLE_LINK name: "requester-mirror" }
+  port { port: 63 role: PORT_ROLE_LINK name: "responder-mirror" }
+  port { port: 56 role: PORT_ROLE_ATTACKER name: "attacker" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.set_mirror_ig_table"
+  action_name: "SwitchIngress.set_mirror_ig"
+  key { field_name: "ig_md.mirror_index" exact { value: "\x00" } }
+  data { field_name: "ig_mir_ses" value: "\x01\x8b" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.set_mirror_ig_table"
+  action_name: "SwitchIngress.set_mirror_ig"
+  key { field_name: "ig_md.mirror_index" exact { value: "\x01" } }
+  data { field_name: "ig_mir_ses" value: "\x03\x61" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.ingress_counter_table"
+  action_name: "SwitchIngress.ingress_counter"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x3c" } }
+  data { field_name: "ingress_counter_index" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.ingress_counter_table"
+  action_name: "SwitchIngress.ingress_counter"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x3d" } }
+  data { field_name: "ingress_counter_index" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.ingress_counter_table"
+  action_name: "SwitchIngress.ingress_counter"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x3e" } }
+  data { field_name: "ingress_counter_index" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.ingress_counter_table"
+  action_name: "SwitchIngress.ingress_counter"
+  key { field_name: "ig_intr_md.ingress_port" exact { value: "\x3f" } }
+  data { field_name: "ingress_counter_index" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.arp_table"
+  action_name: "SwitchIngress.arp_hit"
+  key { field_name: "hdr.arp.opcode" exact { value: "\x01" } }
+  key { field_name: "hdr.arp.target_ip" exact { value: "\x0a\x00\x00\x01" } }
+  data { field_name: "resp_mac" value: "\x02\x00\x00\x00\x00\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.arp_table"
+  action_name: "SwitchIngress.arp_hit"
+  key { field_name: "hdr.arp.opcode" exact { value: "\x01" } }
+  key { field_name: "hdr.arp.target_ip" exact { value: "\x0a\x00\x00\x02" } }
+  data { field_name: "resp_mac" value: "\x02\x00\x00\x00\x00\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.forward_table"
+  action_name: "SwitchIngress.l2_forward"
+  key { field_name: "hdr.ethernet.dst_addr" exact { value: "\x02\x00\x00\x00\x00\x01" } }
+  data { field_name: "dst_port" value: "\x3c" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.forward_table"
+  action_name: "SwitchIngress.l2_forward"
+  key { field_name: "hdr.ethernet.dst_addr" exact { value: "\x02\x00\x00\x00\x00\x02" } }
+  data { field_name: "dst_port" value: "\x3d" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.forward_table"
+  action_name: "SwitchIngress.l2_forward"
+  key { field_name: "hdr.ethernet.dst_addr" exact { value: "\x02\x00\x00\x00\x00\x03" } }
+  data { field_name: "dst_port" value: "\x3e" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchIngress.forward_table"
+  action_name: "SwitchIngress.l2_forward"
+  key { field_name: "hdr.ethernet.dst_addr" exact { value: "\x02\x00\x00\x00\x00\x04" } }
+  data { field_name: "dst_port" value: "\x3f" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchEgress.egress_counter_table"
+  action_name: "SwitchEgress.egress_counter"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x3c" } }
+  data { field_name: "egress_counter_index" value: "\x00" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchEgress.egress_counter_table"
+  action_name: "SwitchEgress.egress_counter"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x3d" } }
+  data { field_name: "egress_counter_index" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchEgress.egress_counter_table"
+  action_name: "SwitchEgress.egress_counter"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x3e" } }
+  data { field_name: "egress_counter_index" value: "\x02" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchEgress.egress_counter_table"
+  action_name: "SwitchEgress.egress_counter"
+  key { field_name: "eg_intr_md.egress_port" exact { value: "\x3f" } }
+  data { field_name: "egress_counter_index" value: "\x03" }
+}
+bfrt_entities {
+  table_name: "pipe.SwitchEgress.add_timestamp_table"
+  action_name: "SwitchEgress.add_timestamp"
+  data { field_name: "dst_port" value: "\x26\x0d" }
+  is_default_entry: true
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "$normal"
+  key { field_name: "$sid" exact { value: "\x01\x8b" } }
+  data { field_name: "$copy_to_cpu" value: "\x00" }
+  data { field_name: "$direction" str_val: "INGRESS" }
+  data { field_name: "$egress_port_queue" value: "\x00" }
+  data { field_name: "$icos_for_copy_to_cpu" value: "\x00" }
+  data { field_name: "$ingress_cos" value: "\x00" }
+  data { field_name: "$level1_mcast_hash" value: "\x00" }
+  data { field_name: "$level2_mcast_hash" value: "\x00" }
+  data { field_name: "$max_pkt_len" value: "\x00" }
+  data { field_name: "$mcast_grp_a" value: "\x00" }
+  data { field_name: "$mcast_grp_a_valid" value: "\x00" }
+  data { field_name: "$mcast_grp_b" value: "\x00" }
+  data { field_name: "$mcast_grp_b_valid" value: "\x00" }
+  data { field_name: "$mcast_l1_xid" value: "\x00" }
+  data { field_name: "$mcast_l2_xid" value: "\x00" }
+  data { field_name: "$mcast_rid" value: "\x00" }
+  data { field_name: "$packet_color" str_val: "GREEN" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x3e" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
+bfrt_entities {
+  table_name: "$mirror.cfg"
+  action_name: "$normal"
+  key { field_name: "$sid" exact { value: "\x03\x61" } }
+  data { field_name: "$copy_to_cpu" value: "\x00" }
+  data { field_name: "$direction" str_val: "INGRESS" }
+  data { field_name: "$egress_port_queue" value: "\x00" }
+  data { field_name: "$icos_for_copy_to_cpu" value: "\x00" }
+  data { field_name: "$ingress_cos" value: "\x00" }
+  data { field_name: "$level1_mcast_hash" value: "\x00" }
+  data { field_name: "$level2_mcast_hash" value: "\x00" }
+  data { field_name: "$max_pkt_len" value: "\x00" }
+  data { field_name: "$mcast_grp_a" value: "\x00" }
+  data { field_name: "$mcast_grp_a_valid" value: "\x00" }
+  data { field_name: "$mcast_grp_b" value: "\x00" }
+  data { field_name: "$mcast_grp_b_valid" value: "\x00" }
+  data { field_name: "$mcast_l1_xid" value: "\x00" }
+  data { field_name: "$mcast_l2_xid" value: "\x00" }
+  data { field_name: "$mcast_rid" value: "\x00" }
+  data { field_name: "$packet_color" str_val: "GREEN" }
+  data { field_name: "$session_enable" value: "\x01" }
+  data { field_name: "$ucast_egress_port" value: "\x3f" }
+  data { field_name: "$ucast_egress_port_valid" value: "\x01" }
+}
