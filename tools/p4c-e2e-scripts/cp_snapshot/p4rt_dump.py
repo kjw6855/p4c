@@ -9,9 +9,10 @@ A TLS server (infrap4d starts in secure mode) needs --certs: a directory with ca
 mutual TLS, client.crt and client.key (infrap4d's are in /usr/share/stratum/certs). The address's
 host must match the server certificate's name (IPDK's: localhost), or pass --server-name.
 
-Reads, per P4Info table, its entries (wildcard read) and its default entry; every register's cells
-(register_entry wildcard; targets that do not serve register reads, such as bmv2, give a note);
-and the PRE's multicast groups and clone sessions. Reads need no arbitration, so a running
+Reads, per P4Info table, its entries (wildcard read) and its default entry; every action profile's
+members and groups (an entry of a selector table refers to one by id: action "$member"/"$group");
+every register's cells (register_entry wildcard; targets that do not serve register reads, such as
+bmv2, give a note); and the PRE's multicast groups and clone sessions. Reads need no arbitration, so a running
 controller keeps its primary role. Needs grpc and the P4Runtime python bindings (p4.v1), which the
 importing host or container provides; capture.py turns the records into snapshot entities
 (records_to_entities) the same way bmv2 and BfRt dumps are named.
@@ -114,14 +115,24 @@ def dump(addr: str, p4info, device_id: int = 0, certs: Optional[Path] = None,
                                  f"({ex.details()}){hint}; nothing written") from None
             raise
 
-    def action_of(te):
-        if not te.action.HasField("action"):
-            return "", []
-        a = te.action.action
+    def named(a):
+        """(action name, [[param, value]]) of a p4.v1.Action."""
         info = actions.get(a.action_id)
         pnames = {p.id: p.name for p in info.params} if info else {}
         return (info.preamble.name if info else str(a.action_id),
                 [[pnames.get(p.param_id, str(p.param_id)), _int(p.value)] for p in a.params])
+
+    def action_of(te):
+        """A direct action, or a reference into the table's action profile (selector): action
+        "$member" / "$group" with the member or group id."""
+        kind = te.action.WhichOneof("type")
+        if kind == "action":
+            return named(te.action.action)
+        if kind == "action_profile_member_id":
+            return "$member", [["member_id", int(te.action.action_profile_member_id)]]
+        if kind == "action_profile_group_id":
+            return "$group", [["group_id", int(te.action.action_profile_group_id)]]
+        return kind or "", []
 
     records: List[dict] = []
     table_errors: List[str] = []  # entry reads (not defaults) that failed
@@ -137,6 +148,10 @@ def dump(addr: str, p4info, device_id: int = 0, certs: Optional[Path] = None,
                     action, params = action_of(te)
                     if default and not action:
                         continue
+                    if action == "action_profile_action_set":
+                        notes.append(f"{t.preamble.name}: an entry with a one-shot action set "
+                                     "is not captured")
+                        continue
                     records.append({"table": t.preamble.name,
                                     "keys": [_key(fm, fields) for fm in te.match],
                                     "action": action, "data": params,
@@ -151,6 +166,34 @@ def dump(addr: str, p4info, device_id: int = 0, certs: Optional[Path] = None,
         raise SystemExit(f"P4Runtime server {addr}: every table read failed, e.g. "
                          f"{table_errors[0]}; check the device id ({device_id}; P4RT_DEVICE_ID) "
                          "and the P4Info; nothing written")
+    # Action profiles (selectors): their members carry the actions entries refer to by id.
+    # Named like registers, "action_profile_id:<id>"; the member or group id is the key.
+    for ap_ in p4info.action_profiles:
+        table = f"action_profile_id:{ap_.preamble.id}"
+        e = p4runtime_pb2.Entity()
+        e.action_profile_member.action_profile_id = ap_.preamble.id
+        try:
+            for ent in read(e):
+                m = ent.action_profile_member
+                action, params = named(m.action)
+                records.append({"table": table, "keys": [["$MEMBER_ID", "exact",
+                                                          int(m.member_id), None]],
+                                "action": action, "data": params, "priority": 0})
+        except grpc.RpcError as ex:
+            notes.append(f"read members of {ap_.preamble.name}: {ex.code().name}")
+        e = p4runtime_pb2.Entity()
+        e.action_profile_group.action_profile_id = ap_.preamble.id
+        try:
+            for ent in read(e):
+                g = ent.action_profile_group
+                members = sorted([int(x.member_id), int(x.weight)] for x in g.members)
+                records.append({"table": table, "keys": [["$GROUP_ID", "exact",
+                                                          int(g.group_id), None]],
+                                "action": "", "data": [["members", members],
+                                                       ["max_size", int(g.max_size)]],
+                                "priority": 0})
+        except grpc.RpcError as ex:
+            notes.append(f"read groups of {ap_.preamble.name}: {ex.code().name}")
     for r in p4info.registers:
         e = p4runtime_pb2.Entity()
         e.register_entry.register_id = r.preamble.id
@@ -186,7 +229,8 @@ def records_to_entities(records: List[dict]):
     from cp_snapshot.snapshot import Entity, Key
     out = []
     for r in records:
-        data = tuple((n, [tuple(x) for x in v] if n == "replicas" else v) for n, v in r["data"])
+        data = tuple((n, [tuple(x) for x in v] if n in ("replicas", "members") else v)
+                     for n, v in r["data"])
         out.append(Entity(r["table"], tuple(Key(*k) for k in r["keys"]), r["action"], data,
                           r.get("priority", 0), r.get("is_default", False),
                           r.get("is_register", False)))

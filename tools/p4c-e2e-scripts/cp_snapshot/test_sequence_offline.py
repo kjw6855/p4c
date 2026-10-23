@@ -152,9 +152,48 @@ def test_a2s_sources() -> None:
           "an unrelated table -> not covered")
 
 
+def test_action_profiles() -> None:
+    """Action profile members/groups and selector entries: textproto round trip, and a member,
+    group or reference change covers a chain whose source is the selector table's action."""
+    from cp_snapshot import a2s_sources
+    prof, tbl, act = "action_profile_id:77", "I.tx_balance", "I.set_default_lb_dest"
+
+    def member(mid: int, ptr: int) -> Entity:
+        return Entity(prof, (Key("$MEMBER_ID", "exact", mid),), act, (("ptr", ptr),))
+
+    def group(gid: int, mids) -> Entity:
+        return Entity(prof, (Key("$GROUP_ID", "exact", gid),), "",
+                      (("members", [(m, 1) for m in mids]), ("max_size", 8)))
+
+    def entry(dst: int, kind: str, ref: int) -> Entity:
+        return Entity(tbl, (Key("h.eth.dst", "exact", dst),), "$" + kind, ((kind + "_id", ref),))
+    init = snap.Snapshot(program="p", target="bmv2",
+                         entities=[member(1, 1), member(2, 2), group(10, [1]),
+                                   entry(0xaa, "group", 10), entry(0xbb, "member", 2)])
+    seq = snap.Sequence(init=init, scenario="s", steps=[snap.Step("s1", "", [
+        ("MODIFY", entry(0xbb, "member", 1)), ("MODIFY", member(1, 5)), ("INSERT", member(3, 3)),
+        ("MODIFY", group(10, [1, 3]))])])
+    text = snap.sequence_to_textproto(seq)
+    check(snap.sequence_to_textproto(snap.parse_sequence(text)) == text,
+          "action profile entities round-trip")
+    p4info = {"tables": [{"preamble": {"id": 5, "name": tbl}}],
+              "actionProfiles": [{"preamble": {"id": 77, "name": "I.as"}, "tableIds": [5]}]}
+    chains = {"a2s2outk": {"I": [{"id": 0, "soName": "I.flows", "cp": {
+        "writeData": [{"tables": [tbl], "action": act, "param": "ptr"}]}}]}}
+    rows = a2s_sources.coverage(seq, chains, p4info)
+    check([r["update_index"] for r in rows] == [0, 1, 2, 3],
+          "reference, member, new member and group changes each cover the chain")
+    check(not a2s_sources.coverage(seq, chains, None), "without P4Info members match no table")
+    same = snap.Sequence(init=init, scenario="s", steps=[snap.Step("s1", "", [
+        ("MODIFY", Entity(prof, (Key("$GROUP_ID", "exact", 10),), "",
+                          (("members", [(1, 1)]), ("max_size", 16))))])])
+    check(not a2s_sources.coverage(same, chains, p4info), "a group max_size change covers nothing")
+
+
 if __name__ == "__main__":
     test_updates()
     test_round_trip()
     test_a2s_sources()
+    test_action_profiles()
     test_package_snapshots()
     print("all passed")

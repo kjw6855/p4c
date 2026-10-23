@@ -13,6 +13,11 @@ of its updates
   - writes a cell of the chain's stateful object (register; counts for every kind the chain has).
 Unless some step covers a chain, no A2S case can come out of that scenario for it. p4symbex
 --state-dep-source A2S applies the same rules (a2s_relevance.csv has the same columns).
+
+Action selectors (P4Runtime captures only; p4symbex does not model them): a member update stands for
+its action in every table using the profile, and a group membership change or a selector entry's
+member/group reference stands for the actions of the members involved. Matching them to tables
+needs the P4Info (--p4info, default the package scenario's P4INFO).
 """
 from __future__ import annotations
 
@@ -77,11 +82,92 @@ def register_name(e: Entity, p4info: Optional[dict]) -> str:
     return e.table
 
 
+def load_p4info(path: Path) -> dict:
+    """P4Info as its JSON form (tables, registers, actionProfiles with preamble id/name), from a
+    .json or a text-format file."""
+    text = path.read_text()
+    if path.suffix == ".json":
+        return json.loads(text)
+    m = snap.parse_textproto(text)
+
+    def pre(x):
+        p_ = x["preamble"][0]
+        return {"id": int(p_["id"][0]), "name": snap._str(p_["name"][0])}
+    return {"tables": [{"preamble": pre(t)} for t in m.get("tables", [])],
+            "registers": [{"preamble": pre(r)} for r in m.get("registers", [])],
+            "actionProfiles": [{"preamble": pre(a), "tableIds": [int(i) for i in a.get("table_ids", [])]}
+                               for a in m.get("action_profiles", [])]}
+
+
+def profile_tables(e: Entity, p4info: Optional[dict]) -> List[str]:
+    """The tables that use action profile `e.table` ("action_profile_id:<id>")."""
+    if not p4info or not e.table.startswith("action_profile_id:"):
+        return []
+    pid = int(e.table.split(":", 1)[1])
+    names = {t["preamble"]["id"]: t["preamble"]["name"] for t in p4info.get("tables", [])}
+    for a in p4info.get("actionProfiles", []):
+        if a["preamble"]["id"] == pid:
+            return [names[i] for i in a.get("tableIds", []) if i in names]
+    return []
+
+
+def _members(state: Dict[tuple, Entity], profile: str, e: Optional[Entity]) -> List[Entity]:
+    """The members a group entity or a selector entry ("$member"/"$group") refers to."""
+    if e is None:
+        return []
+    def member(mid):
+        return state.get((profile, False, (snap.Key("$MEMBER_ID", "exact", int(mid)),), 0))
+    if e.keys and e.keys[0].name == "$GROUP_ID":
+        ids = [m for m, _ in dict(e.data).get("members", [])]
+    elif e.action == "$member":
+        ids = [dict(e.data)["member_id"]]
+    elif e.action == "$group":
+        g = state.get((profile, False, (snap.Key("$GROUP_ID", "exact",
+                                                  int(dict(e.data)["group_id"])),), 0))
+        ids = [m for m, _ in dict(g.data).get("members", [])] if g else []
+    else:
+        return []
+    return [m for m in map(member, ids) if m is not None]
+
+
+def expand(op: str, e: Entity, old: Optional[Entity], prev: Dict[tuple, Entity],
+           cur: Dict[tuple, Entity], p4info: Optional[dict]) -> List[Tuple[Entity, Optional[Entity], str]]:
+    """An update as (new, old, context) pairs on real tables: an action profile member stands for
+    its action in every table using the profile; a group or a selector entry stands for the
+    actions of the members it refers to (before and after the step)."""
+    profile_of = {t: f"action_profile_id:{a['preamble']['id']}"
+                  for a in (p4info or {}).get("actionProfiles", [])
+                  for t in [n for n in profile_tables(snap.Entity(
+                      f"action_profile_id:{a['preamble']['id']}"), p4info)]}
+    if e.table.startswith("action_profile_id:"):
+        tables = profile_tables(e, p4info)
+        if e.keys[0].name == "$MEMBER_ID":
+            return [(Entity(t, (), e.action, e.data),
+                     Entity(t, (), old.action, old.data) if old else None,
+                     f"member {e.keys[0].value}") for t in tables]
+        if op == "MODIFY" and old and dict(old.data).get("members") == dict(e.data).get("members"):
+            return []
+        olds, news = _members(prev, e.table, old), _members(cur, e.table, e if op != "DELETE" else None)
+        return [(Entity(t, (), m.action, ()), None, f"group {e.keys[0].value} membership")
+                for t in tables for m in {x.ident(): x for x in olds + news}.values()]
+    if e.action in ("$member", "$group") or (old and old.action in ("$member", "$group")):
+        profile = profile_of.get(next((t for t in profile_of if name_match(t, e.table)), ""), "")
+        news = _members(cur, profile, e if op != "DELETE" else None)
+        olds = _members(prev, profile, old)
+        ctx = f"selector entry ({e.action} {dict(e.data)})"
+        if op != "MODIFY":
+            return [(Entity(e.table, e.keys, m.action, m.data), None, ctx) for m in news or olds]
+        return [(Entity(e.table, e.keys, m.action, ()), None, ctx + " reference changed")
+                for m in {x.ident(): x for x in olds + news}.values()]
+    return [(e, old, "")]
+
+
 def coverage(seq: snap.Sequence, chains: dict, p4info: Optional[dict] = None) -> List[dict]:
     """One row per (chain, kind, covering update); chains no step covers get no row."""
     rows: List[dict] = []
     for j, st in enumerate(seq.steps, 1):
         prev = {e.ident(): e for e in snap.materialize(seq, j - 1).entities}
+        cur = {e.ident(): e for e in snap.materialize(seq, j).entities}
         for i, (op, e) in enumerate(st.updates):
             old = prev.get(e.ident())
             for cat in CATEGORIES:
@@ -100,10 +186,14 @@ def coverage(seq: snap.Sequence, chains: dict, p4info: Optional[dict] = None) ->
                             if kind not in chain_kinds(cp):
                                 continue
                             for src in srcs:
-                                why = touches(op, e, old, src)
-                                if why:
-                                    rows.append(_row(ch, cat, kind, st, i, e, src["action"],
-                                                     src["param"], why))
+                                for new_, old_, ctx in expand(op, e, old, prev, cur, p4info):
+                                    why = touches(op if not ctx.endswith("changed") else "UPDATE",
+                                                  new_, old_, src)
+                                    if why:
+                                        rows.append(_row(ch, cat, kind, st, i, e, src["action"],
+                                                         src["param"],
+                                                         f"{ctx}: {why}" if ctx else why))
+                                        break
     return rows
 
 
@@ -135,12 +225,25 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("sequence", type=Path)
     ap.add_argument("--chains", type=Path, help="chain cache (default: the program's nightly one)")
-    ap.add_argument("--p4info", type=Path, help="P4Info JSON naming bmv2 register ids")
+    ap.add_argument("--p4info", type=Path,
+                    help="P4Info (.json or text) naming register and action profile ids (default: "
+                         "the package scenario's P4INFO, when it exists)")
     ap.add_argument("--csv", type=Path, help="write the covering updates here")
     a = ap.parse_args()
     seq = snap.parse_sequence(a.sequence.read_text())
     chains = json.loads((a.chains or default_chains(seq.init.program)).read_text())
-    p4info = json.loads(a.p4info.read_text()) if a.p4info else None
+    p4info_path = a.p4info
+    if p4info_path is None:
+        for d in [a.sequence.resolve().parent] + list(a.sequence.resolve().parents)[:3]:
+            if (d / "scenario.py").exists():
+                default = getattr(packages.load_module(d / "scenario.py", "a2s"), "P4INFO", None)
+                if default and Path(default).exists():
+                    p4info_path = Path(default)
+                break
+    p4info = load_p4info(p4info_path) if p4info_path else None
+    if any(e.table.startswith("action_profile_id:") or e.action in ("$member", "$group")
+           for e in seq.init.entities) and p4info is None:
+        print("note: action profile updates need --p4info to be matched to their tables")
     rows = coverage(seq, chains, p4info)
     covered: Dict[Tuple[str, int], List[dict]] = {}
     for r in rows:

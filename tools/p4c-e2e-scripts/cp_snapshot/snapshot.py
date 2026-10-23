@@ -25,7 +25,9 @@ class Key:
 
 @dataclass
 class Entity:
-    """One table entry, default entry, register cell or fixed-table ($pre/$mirror) entry."""
+    """One table entry, default entry, register cell, fixed-table ($pre/$mirror) entry, or action
+    profile member/group ("action_profile_id:<id>", key $MEMBER_ID/$GROUP_ID; a selector table's
+    entry refers to one with action "$member"/"$group" and data (("member_id"|"group_id", id),))."""
 
     table: str
     keys: Tuple[Key, ...] = ()
@@ -149,6 +151,22 @@ def _p4rt_entity(e: Entity, ind: str) -> List[str]:
         for port, rid in dict(e.data)["replicas"]:
             out.append(f"{i2}  replicas {{ port: {_bytes(port)} instance: {int(rid)} }}")
         return out + [f"{i2}}}", f"{ind}}}"]
+    if e.table.startswith("action_profile_id:"):
+        pid = int(e.table.split(":", 1)[1])
+        key = e.keys[0]
+        if key.name == "$MEMBER_ID":
+            params = " ".join(f"params {{ param_name: {_quote(n)} value: {_bytes(int(v))} }}"
+                              for n, v in e.data)
+            return [f"{ind}action_profile_member {{", f"{i2}action_profile_id: {pid}",
+                    f"{i2}member_id: {int(key.value)}",
+                    f"{i2}action {{ action_name: {_quote(e.action)} {params} }}", f"{ind}}}"]
+        d = dict(e.data)
+        out = [f"{ind}action_profile_group {{", f"{i2}action_profile_id: {pid}",
+               f"{i2}group_id: {int(key.value)}"]
+        out += [f"{i2}members {{ member_id: {int(m)} weight: {int(w)} }}" for m, w in d["members"]]
+        if d.get("max_size"):
+            out.append(f"{i2}max_size: {int(d['max_size'])}")
+        return out + [f"{ind}}}"]
     out = [f"{ind}table_entry {{", f"{i2}table_name: {_quote(e.table)}"]
     for k in e.keys:
         if k.kind == "exact":
@@ -162,9 +180,13 @@ def _p4rt_entity(e: Entity, ind: str) -> List[str]:
         else:
             m = f"optional {{ value: {_bytes(k.value)} }}"
         out.append(f"{i2}match {{ field_name: {_quote(k.name)} {m} }}")
-    params = " ".join(f"params {{ param_name: {_quote(n)} value: {_bytes(int(v))} }}"
-                      for n, v in e.data)
-    out.append(f"{i2}action {{ action {{ action_name: {_quote(e.action)} {params} }} }}")
+    if e.action in ("$member", "$group"):  # an entry of a selector table
+        (field, ref), = e.data
+        out.append(f"{i2}action {{ action_profile_{field}: {int(ref)} }}")
+    else:
+        params = " ".join(f"params {{ param_name: {_quote(n)} value: {_bytes(int(v))} }}"
+                          for n, v in e.data)
+        out.append(f"{i2}action {{ action {{ action_name: {_quote(e.action)} {params} }} }}")
     if e.priority:
         out.append(f"{i2}priority: {int(e.priority)}")
     if e.is_default:
@@ -436,9 +458,31 @@ def entity_from_p4rt(m: Msg) -> Entity:
         c = pre["clone_session_entry"][0]
         return Entity("$clone_session", (Key("$SID", "exact", int(_one(c, "session_id"))),), "",
                       (("replicas", _replicas(c)),), 0)
+    if "action_profile_member" in m:
+        a = m["action_profile_member"][0]
+        act = _one(a, "action", {})
+        params = tuple((_str(_one(p, "param_name")), _int(_one(p, "value")))
+                       for p in act.get("params", []))
+        return Entity(f"action_profile_id:{int(_one(a, 'action_profile_id'))}",
+                      (Key("$MEMBER_ID", "exact", int(_one(a, "member_id"))),),
+                      _str(_one(act, "action_name")), params, 0)
+    if "action_profile_group" in m:
+        g = m["action_profile_group"][0]
+        members = [(int(_one(x, "member_id")), int(_one(x, "weight", 0)))
+                   for x in g.get("members", [])]
+        return Entity(f"action_profile_id:{int(_one(g, 'action_profile_id'))}",
+                      (Key("$GROUP_ID", "exact", int(_one(g, "group_id"))),), "",
+                      (("members", members), ("max_size", int(_one(g, "max_size", 0)))), 0)
     te = m["table_entry"][0]
     keys = tuple(_key(k, _str(_one(k, "field_name"))) for k in te.get("match", []))
-    act = _one(_one(te, "action", {}), "action", {})
+    ta = _one(te, "action", {})
+    for field in ("member_id", "group_id"):  # an entry of a selector table
+        if f"action_profile_{field}" in ta:
+            ref = int(_one(ta, f"action_profile_{field}"))
+            return Entity(_str(_one(te, "table_name")), keys, "$" + field.split("_")[0],
+                          ((field, ref),), int(_one(te, "priority", 0)),
+                          _bool(_one(te, "is_default_action", "false")))
+    act = _one(ta, "action", {})
     params = tuple((_str(_one(p, "param_name")), _int(_one(p, "value")))
                    for p in act.get("params", []))
     return Entity(_str(_one(te, "table_name")), keys, _str(_one(act, "action_name")), params,
