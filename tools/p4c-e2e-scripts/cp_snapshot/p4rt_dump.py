@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import List, Tuple
 
 KINDS = ("exact", "ternary", "lpm", "range", "optional")
+# Read errors that mean the server is not there (a partial dump would read as deleted entries):
+# these abort the dump; any other error is a note (e.g. registers bmv2 does not serve).
+UNREACHABLE = ("UNAVAILABLE", "DEADLINE_EXCEEDED")
 
 
 def _int(b: bytes) -> int:
@@ -76,8 +79,14 @@ def dump(addr: str, p4info, device_id: int = 0) -> Tuple[List[dict], List[str]]:
     def read(entity):
         req = p4runtime_pb2.ReadRequest(device_id=device_id)
         req.entities.add().CopyFrom(entity)
-        for resp in stub.Read(req):
-            yield from resp.entities
+        try:
+            for resp in stub.Read(req, timeout=60):
+                yield from resp.entities
+        except grpc.RpcError as ex:
+            if ex.code().name in UNREACHABLE:
+                raise SystemExit(f"P4Runtime server {addr}: {ex.code().name} "
+                                 f"({ex.details()}); nothing written") from None
+            raise
 
     def action_of(te):
         if not te.action.HasField("action"):

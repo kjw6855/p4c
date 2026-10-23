@@ -638,9 +638,13 @@ def capture_manual(program: str, scenario: str, phase: str, out: Path, work: Pat
         log.info("step %s: %s", sid, {op: sum(1 for o, _ in ups if o == op)
                                       for op in snap.UPDATE_TYPES})
     seq.notes += [f"dump: {n}" for n in notes if f"dump: {n}" not in seq.notes]
-    state.write_bytes(pickle.dumps({"seq": seq, "last": dump}))
+    # Both files are replaced only once both are written: an interrupted step keeps the last ones.
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(snap.sequence_to_textproto(seq))
+    tmp_state, tmp_out = state.with_name(state.name + ".tmp"), out.with_name(out.name + ".tmp")
+    tmp_state.write_bytes(pickle.dumps({"seq": seq, "last": dump}))
+    tmp_out.write_text(snap.sequence_to_textproto(seq))
+    tmp_out.replace(out)
+    tmp_state.replace(state)
     log.info("wrote %s: init %d entities, steps %s", out, len(seq.init.entities),
              [len(st.updates) for st in seq.steps])
     return 0
